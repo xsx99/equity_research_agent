@@ -1,0 +1,30 @@
+name: Setup Local Database
+
+on:
+  workflow_dispatch:  # Manual trigger from GitHub UI
+
+jobs:
+  setup-postgres:
+    runs-on: self-hosted
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Start PostgreSQL
+        run: |
+          docker-compose -f docker-compose.db.yml up -d
+          echo "Waiting for PostgreSQL to be ready..."
+          sleep 5
+          
+      - name: Verify PostgreSQL is running
+        run: |
+          docker ps | grep insider_trading_db
+          echo "PostgreSQL is running on localhost:5432"
+          
+      - name: Run database migrations
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/insider_trading
+        run: |
+          pip install -r requirements.txt
+          alembic upgrade head
+          echo "Migrations complete!"
