@@ -6,6 +6,8 @@ on:
 jobs:
   setup-postgres:
     runs-on: self-hosted
+    env:
+      AGENT_TOOLSDIRECTORY: /Users/shuxinxu/actions-runner/_work/_tool
     
     steps:
       - uses: actions/checkout@v4
