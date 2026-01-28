@@ -6,6 +6,8 @@ on:
 
 jobs:
   test:
+    # GitHub-hosted runner - actions/setup-python works here because
+    # GitHub's runners have proper tool cache directories pre-configured
     runs-on: ubuntu-latest
     
     services:
@@ -48,6 +50,8 @@ jobs:
 
   deploy:
     needs: test
+    # Self-hosted macOS runner - only Docker commands here, no Python needed
+    # (Python work is done in the 'test' job on GitHub-hosted runner above)
     runs-on: self-hosted
     
     steps:

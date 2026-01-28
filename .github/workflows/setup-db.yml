@@ -5,17 +5,22 @@ on:
 
 jobs:
   setup-postgres:
+    # Self-hosted macOS runner - cannot use actions/setup-python here because
+    # self-hosted runners lack the tool cache directories that GitHub-hosted runners have.
+    # Instead, we use Homebrew Python directly (must be pre-installed on the runner machine).
     runs-on: self-hosted
-    env:
-      AGENT_TOOLSDIRECTORY: /Users/shuxinxu/actions-runner/_work/_tool
     
     steps:
       - uses: actions/checkout@v4
       
       - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
+        run: |
+          # Use Homebrew Python on macOS self-hosted runner
+          # requires homebrew to be installed
+          # requires python to be installed: brew install python
+          export PATH="/opt/homebrew/bin:$PATH"
+          python3 --version
+          python3 -m pip --version
       
       - name: Start PostgreSQL
         run: |
@@ -31,7 +36,8 @@ jobs:
       - name: Run database migrations
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/insider_trading
+          PATH: /opt/homebrew/bin:$PATH
         run: |
-          pip install -r requirements.txt
-          alembic upgrade head
+          python3 -m pip install -r requirements.txt
+          python3 -m alembic upgrade head
           echo "Migrations complete!"
