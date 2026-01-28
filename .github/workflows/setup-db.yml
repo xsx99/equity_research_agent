@@ -34,13 +34,17 @@ jobs:
           echo "Cleaned up existing containers and volumes"
           
           # Check if port 5432 is already in use (e.g., by native PostgreSQL on host)
+          DB_HOST_PORT=5432
           if lsof -i :5432 2>/dev/null | grep -q LISTEN; then
             echo "WARNING: Port 5432 is already in use!"
             echo "Processes using port 5432:"
             lsof -i :5432
             echo ""
-            echo "This may cause connection issues. Consider stopping the conflicting service."
+            DB_HOST_PORT=5433
+            echo "Using fallback port ${DB_HOST_PORT} for Docker Postgres."
           fi
+          
+          echo "POSTGRES_PORT=${DB_HOST_PORT}" >> "$GITHUB_ENV"
           
       - name: Start PostgreSQL
         run: |
@@ -72,11 +76,11 @@ jobs:
             docker logs insider_trading_db
             exit 1
           }
-          echo "PostgreSQL is running on localhost:5432 with correct credentials"
+          echo "PostgreSQL is running on localhost:${POSTGRES_PORT} with correct credentials"
           
       - name: Run database migrations
         env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/insider_trading
+          DATABASE_URL: postgresql://postgres:postgres@localhost:${{ env.POSTGRES_PORT }}/insider_trading
         run: |
           export PATH="/opt/homebrew/bin:$PATH"
           source .venv/bin/activate
