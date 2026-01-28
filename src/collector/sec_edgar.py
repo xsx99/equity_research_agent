@@ -193,7 +193,6 @@ class SECEdgarCollector:
             return None
 
     def collect_and_store(self):
-        """Fetch recent Form 4 filings and store in database."""
         print(f"[{datetime.now()}] Starting Form 4 collection...")
 
         filings = self.fetch_recent_form4_filings(count=100)
