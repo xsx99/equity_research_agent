@@ -24,6 +24,15 @@ jobs:
           source .venv/bin/activate
           python3 -m pip --version
       
+      - name: Clean up existing database (if any)
+        # Remove existing containers and volumes to ensure a clean slate.
+        # This prevents issues where the postgres_data volume was created with
+        # different credentials, causing "role does not exist" errors.
+        # The "|| true" ensures this step succeeds even if nothing exists to remove.
+        run: |
+          docker compose -f docker-compose.db.yml down -v || true
+          echo "Cleaned up existing containers and volumes"
+          
       - name: Start PostgreSQL
         run: |
           docker compose -f docker-compose.db.yml up -d
