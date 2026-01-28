@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  collector:
+    build: .
+    container_name: insider_trading_collector
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@insider_trading_db:5432/insider_trading
+    restart: unless-stopped
+    networks:
+      - insider_network
+
+networks:
+  insider_network:
+    external: true
+    name: insider_network
