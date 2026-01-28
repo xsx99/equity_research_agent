@@ -6,8 +6,6 @@ on:
 
 jobs:
   test:
-    # GitHub-hosted runner - actions/setup-python works here because
-    # GitHub's runners have proper tool cache directories pre-configured
     runs-on: ubuntu-latest
     
     services:
@@ -27,20 +25,16 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      
       - name: Install dependencies
         run: pip install -r requirements.txt
-      
       - name: Run migrations on test database
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/insider_trading_test
         run: alembic upgrade head
-      
       - name: Run tests
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/insider_trading_test
@@ -56,11 +50,8 @@ jobs:
     
     steps:
       - uses: actions/checkout@v4
-      
       - name: Deploy locally
         run: |
           docker compose -f docker-compose.db.yml up -d
-          docker compose down collector || true
-          docker compose build --no-cache collector
-          docker compose up -d collector
+          docker compose up -d --build collector
           echo "Deployment complete on local machine."

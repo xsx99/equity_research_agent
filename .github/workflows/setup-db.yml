@@ -12,78 +12,25 @@ jobs:
     
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Set up Python and virtual environment
-        run: |
-          # Use Homebrew Python on macOS self-hosted runner
-          # requires homebrew to be installed
-          # requires python to be installed: brew install python
-          export PATH="/opt/homebrew/bin:$PATH"
-          python3 --version
-          python3 -m venv .venv
-          source .venv/bin/activate
-          python3 -m pip --version
-      
-      - name: Clean up existing database (if any)
-        # Remove existing containers and volumes to ensure a clean slate.
-        # This prevents issues where the postgres_data volume was created with
-        # different credentials, causing "role does not exist" errors.
-        # The "|| true" ensures this step succeeds even if nothing exists to remove.
-        run: |
-          docker compose -f docker-compose.db.yml down -v || true
-          echo "Cleaned up existing containers and volumes"
-          
-          # Check if port 5432 is already in use (e.g., by native PostgreSQL on host)
-          DB_HOST_PORT=5432
-          if lsof -i :5432 2>/dev/null | grep -q LISTEN; then
-            echo "WARNING: Port 5432 is already in use!"
-            echo "Processes using port 5432:"
-            lsof -i :5432
-            echo ""
-            DB_HOST_PORT=5433
-            echo "Using fallback port ${DB_HOST_PORT} for Docker Postgres."
-          fi
-          
-          echo "POSTGRES_PORT=${DB_HOST_PORT}" >> "$GITHUB_ENV"
-          
       - name: Start PostgreSQL
         run: |
           docker compose -f docker-compose.db.yml up -d
           echo "Waiting for PostgreSQL to be ready..."
-          
-          # Wait for PostgreSQL to be truly ready (not just container running)
-          # This ensures the postgres user is initialized before running migrations
-          MAX_RETRIES=30
-          RETRY_COUNT=0
-          until docker exec insider_trading_db pg_isready -U postgres -d insider_trading 2>/dev/null; do
-            RETRY_COUNT=$((RETRY_COUNT + 1))
-            if [ $RETRY_COUNT -ge $MAX_RETRIES ]; then
-              echo "PostgreSQL failed to become ready in time"
-              docker logs insider_trading_db
-              exit 1
+          for _ in {1..30}; do
+            if docker exec insider_trading_db pg_isready -U postgres -d insider_trading >/dev/null 2>&1; then
+              echo "PostgreSQL is ready!"
+              exit 0
             fi
-            echo "Waiting for PostgreSQL... (attempt $RETRY_COUNT/$MAX_RETRIES)"
             sleep 2
           done
-          echo "PostgreSQL is ready!"
-          
-      - name: Verify PostgreSQL is running
-        run: |
-          docker ps | grep insider_trading_db
-          # Verify we can actually connect with the expected credentials
-          docker exec insider_trading_db psql -U postgres -d insider_trading -c "SELECT 1;" || {
-            echo "Failed to connect to PostgreSQL with expected credentials"
-            docker logs insider_trading_db
-            exit 1
-          }
-          echo "PostgreSQL is running on localhost:${POSTGRES_PORT} with correct credentials"
+          echo "PostgreSQL failed to become ready in time"
+          docker logs insider_trading_db
+          exit 1
           
       - name: Run database migrations
         env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:${{ env.POSTGRES_PORT }}/insider_trading
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/insider_trading
         run: |
-          export PATH="/opt/homebrew/bin:$PATH"
-          source .venv/bin/activate
           python3 -m pip install -r requirements.txt
           python3 -m alembic upgrade head
           echo "Migrations complete!"
