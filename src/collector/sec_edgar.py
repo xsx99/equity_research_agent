@@ -33,7 +33,7 @@ class SECEdgarCollector:
         self._rate_limit()
 
         params = {
-            "action": "getcompany",
+            "action": "getcurrent",
             "type": "4",
             "count": count,
             "output": "atom",
@@ -63,9 +63,9 @@ class SECEdgarCollector:
         response = self.session.get(filing_url)
         response.raise_for_status()
 
-        # Parse HTML to find XML link
+        # Parse HTML to find XML link (exclude styled xsl versions)
         html = etree.HTML(response.content)
-        xml_links = html.xpath("//table[@class='tableFile']//a[contains(@href, '.xml') and not(contains(@href, '-index.xml'))]/@href")
+        xml_links = html.xpath("//a[contains(@href, '.xml') and not(contains(@href, 'xsl')) and not(contains(@href, '-index'))]/@href")
 
         if xml_links:
             xml_path = xml_links[0]
@@ -113,11 +113,12 @@ class SECEdgarCollector:
         is_ten_percent_owner = self._get_text(relationship, "isTenPercentOwner") == "1" if relationship is not None else False
         insider_title = self._get_text(relationship, "officerTitle") if relationship is not None else None
 
-        # Extract filing date and accession number
+        # Extract filing date
         period_of_report = self._get_text(root, ".//periodOfReport")
         filing_date = self._parse_date(period_of_report) if period_of_report else datetime.now().date()
 
-        accession_number = self._get_text(root, ".//accessionNumber")
+        # Extract accession number from URL (format: .../0001225208-26-001015/...)
+        accession_number = self._extract_accession_from_url(filing_url)
 
         # Extract non-derivative transactions
         for transaction in root.findall(".//nonDerivativeTransaction"):
@@ -191,6 +192,16 @@ class SECEdgarCollector:
             return datetime.strptime(date_str, "%Y-%m-%d").date()
         except ValueError:
             return None
+
+    def _extract_accession_from_url(self, url: str) -> Optional[str]:
+        """Extract accession number from filing URL.
+        
+        URL format: .../Archives/edgar/data/CIK/ACCESSION/...
+        Example: .../000122520826001015/0001225208-26-001015-index.htm
+        """
+        import re
+        match = re.search(r'/(\d{10}-\d{2}-\d{6})[-/]', url)
+        return match.group(1) if match else None
 
     def collect_and_store(self):
         print(f"[{datetime.now()}] Starting Form 4 collection...")
