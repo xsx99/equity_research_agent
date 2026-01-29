@@ -1,4 +1,5 @@
 """SEC EDGAR Form 4 fetcher and parser."""
+import logging
 import time
 import requests
 from datetime import datetime
@@ -7,6 +8,8 @@ from lxml import etree
 from src.config import SEC_USER_AGENT, SEC_RATE_LIMIT
 from src.db.connection import get_session
 from src.db.models import InsiderTrade
+
+logger = logging.getLogger(__name__)
 
 
 class SECEdgarCollector:
@@ -25,11 +28,14 @@ class SECEdgarCollector:
         elapsed = time.time() - self.last_request_time
         min_interval = 1.0 / SEC_RATE_LIMIT
         if elapsed < min_interval:
-            time.sleep(min_interval - elapsed)
+            sleep_time = min_interval - elapsed
+            logger.debug(f"Rate limiting: sleeping for {sleep_time:.3f}s")
+            time.sleep(sleep_time)
         self.last_request_time = time.time()
 
     def fetch_recent_form4_filings(self, count: int = 100) -> List[Dict[str, str]]:
         """Fetch recent Form 4 filings using SEC EDGAR Atom feed."""
+        logger.info(f"Fetching recent Form 4 filings (count={count})")
         self._rate_limit()
 
         params = {
@@ -39,8 +45,10 @@ class SECEdgarCollector:
             "output": "atom",
         }
 
+        logger.debug(f"Requesting {self.API_URL} with params: {params}")
         response = self.session.get(self.API_URL, params=params)
         response.raise_for_status()
+        logger.debug(f"Received response: status={response.status_code}, size={len(response.content)} bytes")
 
         # Parse Atom feed
         root = etree.fromstring(response.content)
@@ -54,10 +62,12 @@ class SECEdgarCollector:
                 if "/Archives/edgar/data/" in url:
                     filings.append({"url": url})
 
+        logger.info(f"Found {len(filings)} Form 4 filings")
         return filings
 
     def get_xml_url_from_filing(self, filing_url: str) -> Optional[str]:
         """Extract XML file URL from filing page."""
+        logger.debug(f"Extracting XML URL from filing: {filing_url}")
         self._rate_limit()
 
         response = self.session.get(filing_url)
@@ -69,14 +79,19 @@ class SECEdgarCollector:
 
         if xml_links:
             xml_path = xml_links[0]
-            return self.BASE_URL + xml_path if xml_path.startswith("/") else xml_path
+            xml_url = self.BASE_URL + xml_path if xml_path.startswith("/") else xml_path
+            logger.debug(f"Found XML URL: {xml_url}")
+            return xml_url
 
+        logger.warning(f"No XML file found for filing: {filing_url}")
         return None
 
     def fetch_and_parse_form4_xml(self, filing_url: str) -> Optional[List[Dict]]:
         """Fetch and parse Form 4 XML file."""
+        logger.debug(f"Fetching and parsing Form 4 XML for: {filing_url}")
         xml_url = self.get_xml_url_from_filing(filing_url)
         if not xml_url:
+            logger.warning(f"Could not find XML URL for filing: {filing_url}")
             return None
 
         self._rate_limit()
@@ -85,9 +100,11 @@ class SECEdgarCollector:
 
         try:
             root = etree.fromstring(response.content)
-            return self._extract_transactions(root, filing_url)
+            transactions = self._extract_transactions(root, filing_url)
+            logger.debug(f"Extracted {len(transactions)} transactions from {filing_url}")
+            return transactions
         except Exception as e:
-            print(f"Error parsing XML from {filing_url}: {e}")
+            logger.error(f"Error parsing XML from {filing_url}: {e}", exc_info=True)
             return None
 
     def _extract_transactions(self, root: etree.Element, filing_url: str) -> List[Dict]:
@@ -191,6 +208,7 @@ class SECEdgarCollector:
         try:
             return datetime.strptime(date_str, "%Y-%m-%d").date()
         except ValueError:
+            logger.warning(f"Failed to parse date string: {date_str}")
             return None
 
     def _extract_accession_from_url(self, url: str) -> Optional[str]:
@@ -201,20 +219,25 @@ class SECEdgarCollector:
         """
         import re
         match = re.search(r'/(\d{10}-\d{2}-\d{6})[-/]', url)
-        return match.group(1) if match else None
+        if match:
+            return match.group(1)
+        logger.warning(f"Could not extract accession number from URL: {url}")
+        return None
 
     def collect_and_store(self):
-        print(f"[{datetime.now()}] Starting Form 4 collection...")
+        logger.info("Starting Form 4 collection")
 
         filings = self.fetch_recent_form4_filings(count=100)
-        print(f"Found {len(filings)} recent filings")
 
         new_count = 0
+        skipped_count = 0
         error_count = 0
 
-        for filing in filings:
+        for i, filing in enumerate(filings, 1):
+            filing_url = filing["url"]
+            logger.debug(f"Processing filing {i}/{len(filings)}: {filing_url}")
             try:
-                transactions = self.fetch_and_parse_form4_xml(filing["url"])
+                transactions = self.fetch_and_parse_form4_xml(filing_url)
                 if transactions:
                     with get_session() as session:
                         for trans_data in transactions:
@@ -227,8 +250,21 @@ class SECEdgarCollector:
                                 trade = InsiderTrade(**trans_data)
                                 session.add(trade)
                                 new_count += 1
+                                logger.debug(
+                                    f"Stored new trade: {trans_data['ticker']} - "
+                                    f"{trans_data['insider_name']} - {trans_data['transaction_type']} "
+                                    f"{trans_data['shares']} shares"
+                                )
+                            else:
+                                skipped_count += 1
+                                logger.debug(f"Skipped duplicate: accession={trans_data['accession_number']}")
+            except requests.RequestException as e:
+                logger.error(f"Network error processing {filing_url}: {e}")
+                error_count += 1
             except Exception as e:
-                print(f"Error processing {filing['url']}: {e}")
+                logger.error(f"Error processing {filing_url}: {e}", exc_info=True)
                 error_count += 1
 
-        print(f"[{datetime.now()}] Collection complete. New: {new_count}, Errors: {error_count}")
+        logger.info(
+            f"Collection complete. New: {new_count}, Skipped: {skipped_count}, Errors: {error_count}"
+        )
