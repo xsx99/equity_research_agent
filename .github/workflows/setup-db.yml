@@ -20,17 +20,17 @@ jobs:
 
       - name: Start PostgreSQL
         run: |
-          docker compose -f docker-compose.db.yml up -d
+          sudo docker compose -f docker-compose.db.yml up -d
           echo "Waiting for PostgreSQL to be ready..."
           for _ in {1..30}; do
-            if docker exec insider_trading_db pg_isready -U postgres -d insider_trading >/dev/null 2>&1; then
+            if sudo docker exec insider_trading_db pg_isready -U postgres -d insider_trading >/dev/null 2>&1; then
               echo "PostgreSQL is ready!"
               exit 0
             fi
             sleep 2
           done
           echo "PostgreSQL failed to become ready in time"
-          docker logs insider_trading_db
+          sudo docker logs insider_trading_db
           exit 1
           
       - name: Run database migrations
