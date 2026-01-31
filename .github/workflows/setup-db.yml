@@ -40,6 +40,7 @@ jobs:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/insider_trading
         run: |
           source .venv/bin/activate
+          python3 -m pip install --upgrade pip setuptools wheel
           python3 -m pip install -r requirements.txt
           python3 -m alembic upgrade head
           echo "Migrations complete!"
