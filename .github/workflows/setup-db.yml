@@ -5,9 +5,7 @@ on:
 
 jobs:
   setup-postgres:
-    # Self-hosted macOS runner - cannot use actions/setup-python here because
-    # self-hosted runners lack the tool cache directories that GitHub-hosted runners have.
-    # Instead, we use Homebrew Python directly (must be pre-installed on the runner machine).
+    # Self-hosted Linux runner on Raspberry Pi. Ensure Python 3 and venv are installed.
     runs-on: self-hosted
     
     steps:
@@ -15,10 +13,6 @@ jobs:
       
       - name: Set up Python and virtual environment
         run: |
-          # Use Homebrew Python on macOS self-hosted runner
-          # requires homebrew to be installed
-          # requires python to be installed: brew install python
-          export PATH="/opt/homebrew/bin:$PATH"
           python3 --version
           python3 -m venv .venv
           source .venv/bin/activate
@@ -43,7 +37,6 @@ jobs:
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/insider_trading
         run: |
-          export PATH="/opt/homebrew/bin:$PATH"
           source .venv/bin/activate
           python3 -m pip install -r requirements.txt
           python3 -m alembic upgrade head

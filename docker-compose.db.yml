@@ -9,13 +9,10 @@ services:
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - /data/postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
     networks:
       - insider_network
-
-volumes:
-  postgres_data:
 
 networks:
   insider_network:
