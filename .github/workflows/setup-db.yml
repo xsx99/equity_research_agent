@@ -13,6 +13,8 @@ jobs:
       
       - name: Set up Python and virtual environment
         run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential python3-dev libxml2-dev libxslt1-dev
           python3 --version
           python3 -m venv .venv
           source .venv/bin/activate
