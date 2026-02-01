@@ -7,15 +7,18 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.db.connection import init_db
 from src.collector.scheduler import start_scheduler
+from src.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 def main():
     """Initialize database and start the scheduler."""
-    print("Initializing database...")
+    logger.info("initializing_database")
     init_db()
-    print("Database ready.")
+    logger.info("database_ready")
 
-    print("Starting SEC Form 4 collector service...")
+    logger.info("collector_service_starting")
     start_scheduler()
 
 

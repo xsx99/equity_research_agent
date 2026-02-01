@@ -16,6 +16,7 @@ sudo mount -a
 
 # Ensure Postgres data directory exists on the mounted drive
 sudo mkdir -p "$MOUNTPOINT/postgres_data"
+sudo mkdir -p "$MOUNTPOINT/collector_logs"
 
 # Verify
 df -h | grep "$MOUNTPOINT" || true

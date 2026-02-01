@@ -7,6 +7,9 @@ from alembic import command
 import os
 
 from src.config import DATABASE_URL
+from src.logging import get_logger
+
+logger = get_logger(__name__)
 
 engine = create_engine(DATABASE_URL, echo=False)
 SessionLocal = sessionmaker(bind=engine)
@@ -22,9 +25,9 @@ def init_db():
     alembic_cfg.set_main_option("sqlalchemy.url", DATABASE_URL)
     alembic_cfg.set_main_option("script_location", os.path.join(project_root, "alembic"))
     
-    print("Running database migrations...")
+    logger.info("db_migrations_starting")
     command.upgrade(alembic_cfg, "head")
-    print("Migrations complete.")
+    logger.info("db_migrations_complete")
 
 
 @contextmanager
