@@ -28,10 +28,10 @@ jobs:
       - name: Stop PostgreSQL
         run: |
           if [ "${{ inputs.remove_data }}" = "true" ]; then
-            docker compose -f docker-compose.db.yml down -v
+            sudo docker compose -f docker-compose.db.yml down -v
             sudo rm -rf /data/postgres_data
             echo "PostgreSQL stopped and data removed."
           else
-            docker compose -f docker-compose.db.yml down
+            sudo docker compose -f docker-compose.db.yml down
             echo "PostgreSQL stopped. Data preserved."
           fi
