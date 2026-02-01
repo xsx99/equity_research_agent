@@ -27,6 +27,8 @@ def init_db():
     
     logger.info("db_migrations_starting")
     command.upgrade(alembic_cfg, "head")
+    # Alembic's fileConfig can override app logging; restore our handlers/level.
+    get_logger(__name__, force=True)
     logger.info("db_migrations_complete")
 
 

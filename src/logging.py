@@ -6,9 +6,9 @@ import os
 _CONFIGURED = False
 
 
-def _configure_logging():
+def _configure_logging(force: bool = False):
     global _CONFIGURED
-    if _CONFIGURED:
+    if _CONFIGURED and not force:
         return
     level_name = os.getenv("LOG_LEVEL", "INFO").upper()
     level = getattr(py_logging, level_name, py_logging.INFO)
@@ -45,7 +45,7 @@ def _configure_logging():
             )
         )
 
-    py_logging.basicConfig(level=level, format=log_format, handlers=handlers)
+    py_logging.basicConfig(level=level, format=log_format, handlers=handlers, force=force)
     _CONFIGURED = True
 
 
@@ -76,6 +76,6 @@ class _StructuredLogger:
         self._log(py_logging.ERROR, msg, **kwargs)
 
 
-def get_logger(name: str) -> _StructuredLogger:
-    _configure_logging()
+def get_logger(name: str, force: bool = False) -> _StructuredLogger:
+    _configure_logging(force=force)
     return _StructuredLogger(name)
