@@ -2,6 +2,7 @@ services:
   collector:
     build: .
     container_name: insider_trading_collector
+    command: ["sh", "-c", "python -u scripts/run_collector.py 2>&1 | tee -a /var/log/insider_trading/stdout.log"]
     environment:
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@insider_trading_db:5432/insider_trading
       LOG_DIR: /var/log/insider_trading
