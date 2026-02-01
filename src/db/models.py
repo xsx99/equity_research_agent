@@ -2,7 +2,7 @@
 from datetime import datetime
 from sqlalchemy import (
     Column, Integer, String, Boolean, Date,
-    Numeric, BigInteger, Text, DateTime, Index
+    Numeric, BigInteger, Text, DateTime, Index, UniqueConstraint
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.declarative import declarative_base
@@ -18,7 +18,8 @@ class InsiderTrade(Base):
     id = Column(Integer, primary_key=True)
 
     # SEC identifiers
-    accession_number = Column(String(25), unique=True, nullable=False)
+    accession_number = Column(String(25), nullable=False)
+    transaction_index = Column(Integer, nullable=False, default=0)
 
     # Company
     ticker = Column(String(10), nullable=False, index=True)
@@ -48,6 +49,14 @@ class InsiderTrade(Base):
     filing_url = Column(Text)
     raw_data = Column(JSONB)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "accession_number",
+            "transaction_index",
+            name="uq_insider_trades_accession_txn_index",
+        ),
+    )
 
     def __repr__(self):
         return f"<InsiderTrade {self.ticker} {self.insider_name} {self.transaction_type} {self.shares}>"
