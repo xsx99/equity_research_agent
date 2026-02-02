@@ -10,6 +10,9 @@ from typing import List, Optional
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.collector.sec_edgar import SECEdgarCollector
+from src.collector.sec_edgar_feed import fetch_recent_form4_filings
+from src.collector.sec_edgar_fetcher import fetch_and_parse_form4_xml
+from src.config import SEC_ATOM_PAGE_SIZE
 
 
 @dataclass
@@ -27,7 +30,13 @@ class ProcessingResult:
 def process_filing(collector: SECEdgarCollector, filing_url: str) -> ProcessingResult:
     """Process a single filing and return the result."""
     try:
-        transactions = collector.fetch_and_parse_form4_xml(filing_url) or []
+        transactions = fetch_and_parse_form4_xml(
+            collector.session,
+            collector._rate_limit,
+            filing_url,
+            filing_date=None,
+            timezone=collector.timezone,
+        ) or []
         return ProcessingResult(url=filing_url, transactions=transactions)
     except Exception as e:
         return ProcessingResult(url=filing_url, transactions=[], error=str(e))
@@ -74,43 +83,55 @@ def print_summary(results: List[ProcessingResult]) -> None:
 def run_test(num_filings: int) -> bool:
     """Run the collector test and return success status."""
     collector = SECEdgarCollector()
-    
+
     print(f"Fetching {num_filings} recent Form 4 filings from SEC EDGAR...\n")
-    filings = collector.fetch_recent_form4_filings(count=num_filings)
-    
+    filings = fetch_recent_form4_filings(
+        collector.session,
+        collector._rate_limit,
+        collector.API_URL,
+        count=num_filings,
+        page_size=SEC_ATOM_PAGE_SIZE,
+    )
+
     results = [process_filing(collector, f['url']) for f in filings]
-    
+
     for i, result in enumerate(results, 1):
         print_result(result, i, len(results))
-    
+
     print_summary(results)
-    
+
     return any(r.success for r in results)
 
 
 def run_detailed_test() -> bool:
     """Run detailed test on a single filing."""
     collector = SECEdgarCollector()
-    
+
     print("Fetching 1 recent filing...\n")
-    filings = collector.fetch_recent_form4_filings(count=1)
-    
+    filings = fetch_recent_form4_filings(
+        collector.session,
+        collector._rate_limit,
+        collector.API_URL,
+        count=1,
+        page_size=SEC_ATOM_PAGE_SIZE,
+    )
+
     if not filings:
         print("No filings found")
         return False
-    
+
     result = process_filing(collector, filings[0]['url'])
-    
+
     print(f"URL: {result.url}\n")
-    
+
     if result.error:
         print(f"Error: {result.error}")
         return False
-    
+
     if not result.transactions:
         print("No transactions found")
         return False
-    
+
     print(json.dumps(result.transactions, indent=2, default=str))
     return True
 

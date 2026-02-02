@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 
-from src.collector.sec_edgar import SECEdgarCollector
+from src.collector.sec_edgar import collect_and_store
 from src.config import (
     COLLECTOR_RUN_ON_STARTUP,
     COLLECTOR_SCHEDULE_HOUR,
@@ -35,10 +35,9 @@ def run_collector(target_date=None):
     """Run the SEC EDGAR collector."""
     logger.info("collector_job_started")
     try:
-        collector = SECEdgarCollector()
         if target_date is None:
             target_date = _get_target_date()
-        collector.collect_and_store(target_date=target_date)
+        collect_and_store(target_date=target_date)
         logger.info("collector_job_completed")
     except Exception as e:
         logger.error("collector_job_failed", error=str(e), exc_info=True)
