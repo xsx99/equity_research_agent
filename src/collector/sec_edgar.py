@@ -13,7 +13,7 @@ from src.collector.sec_edgar_feed import (
 from src.collector.sec_edgar_fetcher import fetch_and_parse_form4_xml
 from src.collector.sec_edgar_storage import upsert_transactions
 from src.config import (
-    COLLECTOR_TIMEZONE,
+    SCHEDULER_TIMEZONE,
     SEC_ATOM_PAGE_SIZE,
     SEC_RATE_LIMIT,
     SEC_USER_AGENT,
@@ -32,7 +32,7 @@ class SECEdgarCollector:
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": SEC_USER_AGENT})
         self.last_request_time = 0
-        self.timezone = self._resolve_timezone(timezone or COLLECTOR_TIMEZONE)
+        self.timezone = self._resolve_timezone(timezone or SCHEDULER_TIMEZONE)
 
     def _rate_limit(self):
         """Enforce SEC rate limit (10 requests per second)."""

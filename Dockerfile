@@ -14,4 +14,4 @@ COPY alembic.ini .
 COPY src/ ./src/
 COPY scripts/ ./scripts/
 
-CMD ["python", "scripts/run_collector.py"]
+CMD ["python", "scripts/run_scheduler_service.py"]

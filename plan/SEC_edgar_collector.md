@@ -70,7 +70,9 @@ insider_trading_tracker/
 │   ├── collector/
 │   │   ├── __init__.py
 │   │   ├── sec_edgar.py       # SEC Form 4 fetcher + parser
-│   │   └── scheduler.py       # APScheduler setup
+│   │   └── sec_edgar_jobs.py  # SEC EDGAR job registration
+│   │
+│   ├── scheduler.py           # Shared APScheduler service
 │   │
 │   ├── tools/
 │   │   ├── __init__.py
@@ -82,7 +84,7 @@ insider_trading_tracker/
 │       └── connection.py      # DB connection
 │
 ├── scripts/
-│   └── run_collector.py       # Entry point for data service
+│   └── run_scheduler_service.py  # Entry point for scheduler service
 │
 ├── docker-compose.yml
 ├── requirements.txt
