@@ -101,8 +101,33 @@ Research App MVP 设计文档（重构版）
    4. 完成 /research 列表与详情页。
    5. 实现 eval_runs.py 与定时任务。
    6. 编写部署文档与持久化验证收尾。
+  
+14. 演进规划 (Future Work)
+本项目的核心理念为“先构建最小可用闭环，再逐步演进”。在 MVP 阶段跑通数据流与 Rule-based 评估后，系统将向“具备自我反思能力”和“多技能协同”的复杂 Agent 架构演进。以下为核心演进方向与架构预留：
 
-14. 附录
+  1. Critic（反思/批评）机制与自我进化
+  当前系统的 eval_runs.py 提供客观的量化评估（Outcome Label），未来将引入 Critic Agent 进行主观归因与知识沉淀，实现系统的“自我进化”。
+    - 数据库模型扩展：扩展 eval_results 表或新增 reflections 表，用于存储 Critic Agent 的结构化反思结果。
+    - 核心字段预留： error_reason (错误归因), lesson_learned (经验教训)。
+    - 触发与执行流 (Workflow)：
+      当定时任务 eval_runs.py 计算出 outcome_label 为 wrong_direction 且置信度 (confidence) 较高时，异步触发 Critic Agent。
+    - 输入上下文： 历史的 input_json (当时看到的数据)、output_json (当时的判断)、以及包含期间真实走势与回撤的 market_data。
+    - 核心校验逻辑： 
+      Critic 将重点比对预设的 invalidators（证伪条件）。若亏损但触及 invalidators，说明逻辑合理但宏观/基本面生 变；若未触及 invalidators 却出现方向性错误，则提取 lesson_learned。
+    - 进化闭环 (Context Injection)：
+      当下一次 Research Agent 对同一标的或同板块发起分析时，系统将从 DB 中检索相关的 lesson_learned，作为动态 Context 注入到 Prompt 中（例如：“注意防范过往在类似技术面破位时的误判”），从而干预并优化下一次的决策生成。
+
+  2. 工具注册表 (Tool Registry) 与多技能 (Skills) 路由架构
+  随着分析维度增加，将告别单一的巨型 Agent，转向“工具按需加载”与“多专家协同”的灵活架构，以降低 Token 消耗并减少模型幻觉。
+    - Tool Registry 解耦模式：
+      弃用静态依赖注入所有 API 的方式，建立工具注册表机制。将外部数据源（如 SEC Filings, GitHub 趋势, 宏观经济指标）封装为独立的纯 Python 函数工具。在 Research 运行前，根据 input_json 的上下文（如标的 Sector、是否处于财报季 earnings_in_days < 5），动态组装并挂载 Tools 列表给 Agent。
+    - Skills 机制与 Router 节点：
+    Skill 定义： 
+      将不同场景的分析逻辑抽象为独立的 Sub-Agents（Skills），例如 Macro_Skill（关注利率与宏观数据）、Earnings_Skill（关注财报突发事件）或 Momentum_Skill（纯技术面动量突破）。
+    路由分发 (Router)： 
+      在 run_research.py 前置一个轻量级 Router（基于 Rule-based 规则或极小的 LLM 调用）。Router 根据当前标的的市场环境特征，决定激活哪一个（或组合哪几个）Skill Agent 来执行特定的 Research 任务，并将最终结果汇总落库。
+
+15. 附录
    - A. 工具注入与 Agent 示例（沿用现有片段）：
      ```
      from phi.agent import Agent
