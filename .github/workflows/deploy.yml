@@ -1,4 +1,4 @@
-name: Deploy Collector
+name: Deploy Scheduler
 
 on:
   push:
@@ -67,6 +67,6 @@ jobs:
       - name: Deploy locally
         run: |
           sudo docker compose -f docker-compose.db.yml up -d
-          sudo docker compose build --no-cache collector
-          sudo docker compose up -d --force-recreate collector
+          sudo docker compose build --no-cache scheduler
+          sudo docker compose up -d --force-recreate scheduler
           echo "Deployment complete on local machine."

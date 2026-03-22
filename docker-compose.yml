@@ -1,7 +1,7 @@
 services:
-  collector:
+  scheduler:
     build: .
-    container_name: insider_trading_collector
+    container_name: scheduler
     command: ["sh", "-c", "python -u scripts/run_scheduler_service.py 2>&1 | tee -a /var/log/insider_trading/stdout.log"]
     environment:
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@insider_trading_db:5432/insider_trading
@@ -10,9 +10,9 @@ services:
       - /data/collector_logs:/var/log/insider_trading
     restart: unless-stopped
     networks:
-      - insider_network
+      - postgres_network
 
 networks:
-  insider_network:
+  postgres_network:
     external: true
-    name: insider_network
+    name: postgres_network

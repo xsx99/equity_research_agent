@@ -12,8 +12,8 @@ services:
       - /data/postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
     networks:
-      - insider_network
+      - postgres_network
 
 networks:
-  insider_network:
-    name: insider_network
+  postgres_network:
+    name: postgres_network

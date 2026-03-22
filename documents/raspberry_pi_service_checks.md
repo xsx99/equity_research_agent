@@ -19,7 +19,7 @@ docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 Expected container names in this project:
 
 - `insider_trading_db`
-- `insider_trading_collector`
+- `scheduler`
 
 ## 2. Check health of Postgres
 
@@ -52,19 +52,19 @@ docker logs --tail 100 insider_trading_db
 Check whether the scheduler container is running:
 
 ```bash
-docker inspect --format='{{.State.Status}}' insider_trading_collector
+docker inspect --format='{{.State.Status}}' scheduler
 ```
 
 View recent scheduler logs:
 
 ```bash
-docker logs --tail 100 insider_trading_collector
+docker logs --tail 100 scheduler
 ```
 
 Follow logs live:
 
 ```bash
-docker logs -f insider_trading_collector
+docker logs -f scheduler
 ```
 
 Healthy startup should include log lines like:
@@ -77,7 +77,7 @@ Healthy startup should include log lines like:
 If the container is restarting, inspect the restart count:
 
 ```bash
-docker inspect --format='status={{.State.Status}} restart_count={{.RestartCount}}' insider_trading_collector
+docker inspect --format='status={{.State.Status}} restart_count={{.RestartCount}}' scheduler
 ```
 
 ## 4. Run checks directly from your local computer
@@ -87,5 +87,5 @@ You can run the same checks without first opening an interactive SSH session:
 ```bash
 ssh pi@10.0.0.56 'docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"'
 ssh pi@10.0.0.56 'docker exec insider_trading_db pg_isready -U postgres -d insider_trading'
-ssh pi@10.0.0.56 'docker logs --tail 100 insider_trading_collector'
+ssh pi@10.0.0.56 'docker logs --tail 100 scheduler'
 ```
