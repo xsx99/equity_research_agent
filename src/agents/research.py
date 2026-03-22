@@ -15,7 +15,7 @@ from src.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-DEFAULT_MODEL_NAME = os.getenv("RESEARCH_MODEL_NAME", "gpt-4.1-mini")
+DEFAULT_MODEL_NAME = os.getenv("RESEARCH_MODEL_NAME", "gemini-2.5-flash-lite")
 DEFAULT_PROMPT_VERSION = "v1"
 
 # Type aliases for injectable dependencies (simplifies testing)
@@ -201,21 +201,45 @@ class ResearchAgent(BaseAgent):
 
 
 # ---------------------------------------------------------------------------
-# Default LLM runner (Phidata / OpenAI)
+# Default LLM runner (Phidata / provider-backed chat model)
 # ---------------------------------------------------------------------------
 
 
-def _default_agent_runner(prompt: str, model_name: str) -> Any:
-    """Invoke a Phidata Agent with an OpenAI model."""
+def _should_use_gemini_backend(model_name: str) -> bool:
+    """Return True when *model_name* should use the Gemini backend."""
+    return model_name.strip().lower().startswith("gemini")
+
+
+def _build_phi_model(model_name: str) -> Any:
+    """Build the Phidata chat model for the configured provider."""
+    if _should_use_gemini_backend(model_name):
+        try:
+            from phi.model.google import Gemini
+        except Exception as exc:
+            raise RuntimeError(
+                "Gemini model support requires `google-generativeai` and GOOGLE_API_KEY."
+            ) from exc
+        return Gemini(id=model_name)
+
     try:
-        from phi.agent import Agent
         from phi.model.openai import OpenAIChat
     except Exception as exc:
         raise RuntimeError(
-            "Phidata/OpenAI dependencies are required for the default agent runner."
+            "OpenAI model support requires the `openai` package and OPENAI_API_KEY."
+        ) from exc
+    return OpenAIChat(id=model_name)
+
+
+def _default_agent_runner(prompt: str, model_name: str) -> Any:
+    """Invoke a Phidata Agent with the provider implied by *model_name*."""
+    try:
+        from phi.agent import Agent
+    except Exception as exc:
+        raise RuntimeError(
+            "Phidata dependencies are required for the default agent runner."
         ) from exc
 
-    agent = Agent(model=OpenAIChat(id=model_name), markdown=False)
+    agent = Agent(model=_build_phi_model(model_name), markdown=False)
     response = agent.run(prompt)
     return getattr(response, "content", response)
 

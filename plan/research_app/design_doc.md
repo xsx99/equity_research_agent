@@ -67,12 +67,16 @@ Research App MVP 设计文档（重构版）
 8. Prompt 设计与版本管理与 Agent 框架
    - 单一版本 v1，强调谨慎、允许 abstain、基于输入、明确 horizon、提供反方与 invalidators。
    - Prompt 放独立 YAML 文件（如 prompts/research_v1.yaml，包含 id/version/description/body）；升级只需改 version 标识与内容文件。
-   - Agent 框架：使用 Phidata Agent；工具函数通过对象方法注入（如 RecommendationTools 风格），集中管理上下文与外部连接（feature store、retrieval、market_data、news_data、db 连接等）；Agent 配置 show_tool_calls 便于调试；上下文控制（history truncation / selective recall）由工具层把必要摘要/快照传入，避免模型超长上下文；每个 ticker/run 建立独立上下文，避免跨标的泄漏。
+   - 默认模型：`RESEARCH_MODEL_NAME` 未设置时默认使用 `gemini-2.5-flash-lite`，优先考虑 MVP 成本效率；如需切换其他模型，保持通过环境变量覆盖，不把 provider 细节散落到 orchestration 代码里。
+   - Agent 框架（MVP 边界）：采用 hybrid 方案。custom orchestration 负责 watchlist 遍历、market/news/DB 数据获取、`input_json` 快照落库、run 状态流转、错误隔离、结果持久化与 eval；Phidata Agent 仅负责单次 LLM 调用与返回原始响应。
+   - MVP 不启用 Phidata 的动态 tool-calling。market_data、news_data、insider 查询等工具由 Python orchestration 在模型调用前直接执行，再把结果整理进 prompt/input snapshot；这样可保证 replayability、可测试性与稳定的 eval 输入。
+   - 每个 ticker/run 建立独立上下文，避免跨标的泄漏；上下文控制（history truncation / selective recall）继续由 orchestration/tool 层决定。`show_tool_calls` 仅保留给未来引入动态 tool-calling 时的调试场景，不作为 MVP 运行路径的依赖。
+   - 详细边界与取舍见 `plan/research_app/architecture_recommendation.md`。
 
 9. 运行流程
-   - research cron：读取所有 active tickers -> 现场拉取 market snapshot + news -> 调 LLM -> 直接写 runs/outputs 入 Postgres；频率建议工作日盘前或每日 1-2 次。插入 run 时 status=queued，开始处理某 ticker 时置 running+started_at，成功后置 succeeded+finished_at，失败则置 failed 并写 error_message+finished_at（不中断其他 ticker）。
+   - research cron：读取所有 active tickers -> 在 Python orchestration 中现场拉取 market snapshot + news + 必要 DB context -> 写入 `research_runs.input_json` 快照 -> 调用 Phidata 包装的单次 LLM -> 直接写 runs/outputs 入 Postgres；频率建议工作日盘前或每日 1-2 次。插入 run 时 status=queued，开始处理某 ticker 时置 running+started_at，成功后置 succeeded+finished_at，失败则置 failed 并写 error_message+finished_at（不中断其他 ticker）。
    - eval cron：仅处理具备有效 time_horizon 的 run -> 通过 market_data 按需获取 realized/benchmark return -> 按 evaluation_method 计算 outcome_label -> 写 eval_results；若缺失/无效 time_horizon 则记录错误并跳过；频率每日一次夜间。
-   - 采集复用：两条 cron 都调用同一 market_data/news_data 抽象，按需请求，无额外缓存/中间存储。
+   - 采集复用：两条 cron 都调用同一 market_data/news_data 抽象，按需请求，无额外缓存/中间存储。MVP 中 LLM 不直接调用外部 tools。
    - 手动触发：POST /admin/run-now 或等效脚本，仅限本机/内网，便于调试。
 
 10. UI 与路由
@@ -120,7 +124,7 @@ Research App MVP 设计文档（重构版）
   2. 工具注册表 (Tool Registry) 与多技能 (Skills) 路由架构
   随着分析维度增加，将告别单一的巨型 Agent，转向“工具按需加载”与“多专家协同”的灵活架构，以降低 Token 消耗并减少模型幻觉。
     - Tool Registry 解耦模式：
-      弃用静态依赖注入所有 API 的方式，建立工具注册表机制。将外部数据源（如 SEC Filings, GitHub 趋势, 宏观经济指标）封装为独立的纯 Python 函数工具。在 Research 运行前，根据 input_json 的上下文（如标的 Sector、是否处于财报季 earnings_in_days < 5），动态组装并挂载 Tools 列表给 Agent。
+      MVP 阶段先保持 orchestration 直连工具并在模型调用前完成数据采集；未来若需要动态 tool selection，再建立工具注册表机制。届时将外部数据源（如 SEC Filings, GitHub 趋势, 宏观经济指标）封装为独立的纯 Python 函数工具，并在补齐 tool-call audit log / replay 规则后，再按 input_json 上下文动态组装并挂载 Tools 列表给 Agent。
     - Skills 机制与 Router 节点：
     Skill 定义： 
       将不同场景的分析逻辑抽象为独立的 Sub-Agents（Skills），例如 Macro_Skill（关注利率与宏观数据）、Earnings_Skill（关注财报突发事件）或 Momentum_Skill（纯技术面动量突破）。

@@ -9,6 +9,8 @@ httpx==0.28.1
 pydantic==2.12.5
 PyYAML==6.0.2
 phidata==2.7.10
+openai==1.52.0
+google-generativeai==0.8.5
 alpaca-py==0.43.2
 finnhub-python==2.4.27
 # Marketaux is used via direct HTTP API (no official PyPI SDK).

@@ -7,7 +7,9 @@ import pytest
 
 from src.prompts.registry import Prompt, PromptRegistry
 from src.agents.research import (
+    DEFAULT_MODEL_NAME,
     _coerce_json_object,
+    _should_use_gemini_backend,
     ResearchInputPayload,
     StructuredResearchOutput,
 )
@@ -40,6 +42,18 @@ def test_prompt_is_frozen():
     p = Prompt(id="research", version="v1", template="text")
     with pytest.raises(Exception):
         p.id = "changed"  # type: ignore[misc]
+
+
+def test_default_model_name_is_gemini_flash_lite():
+    assert DEFAULT_MODEL_NAME == "gemini-2.5-flash-lite"
+
+
+def test_should_use_gemini_backend_for_gemini_models():
+    assert _should_use_gemini_backend("gemini-2.5-flash-lite") is True
+
+
+def test_should_not_use_gemini_backend_for_non_gemini_models():
+    assert _should_use_gemini_backend("gpt-4.1-mini") is False
 
 
 # ---------------------------------------------------------------------------
