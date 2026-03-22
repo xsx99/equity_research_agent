@@ -2,12 +2,12 @@ services:
   scheduler:
     build: .
     container_name: scheduler
-    command: ["sh", "-c", "python -u scripts/run_scheduler_service.py 2>&1 | tee -a /var/log/insider_trading/stdout.log"]
+    command: ["sh", "-c", "python -u scripts/run_scheduler_service.py 2>&1 | tee -a /var/log/mono_db/stdout.log"]
     environment:
-      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@insider_trading_db:5432/insider_trading
-      LOG_DIR: /var/log/insider_trading
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres_db:5432/mono_db
+      LOG_DIR: /var/log/mono_db
     volumes:
-      - /data/collector_logs:/var/log/insider_trading
+      - /data/mono_db_logs:/var/log/mono_db
     restart: unless-stopped
     networks:
       - postgres_network

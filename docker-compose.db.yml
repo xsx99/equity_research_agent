@@ -1,11 +1,11 @@
 services:
   postgres:
     image: postgres:15-alpine
-    container_name: insider_trading_db
+    container_name: postgres_db
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      POSTGRES_DB: insider_trading
+      POSTGRES_DB: mono_db
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
