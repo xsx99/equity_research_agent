@@ -25,16 +25,14 @@ class ResearchDecision(ChoiceEnum):
 class ResearchTimeHorizon(ChoiceEnum):
     ONE_DAY = "1d"
     THREE_DAYS = "3d"
-    SEVEN_DAYS = "7d"
-    THIRTY_DAYS = "30d"
+    FIVE_DAYS = "5d"
 
     @classmethod
     def days_mapping(cls) -> dict[str, int]:
         return {
             cls.ONE_DAY.value: 1,
             cls.THREE_DAYS.value: 3,
-            cls.SEVEN_DAYS.value: 7,
-            cls.THIRTY_DAYS.value: 30,
+            cls.FIVE_DAYS.value: 5,
         }
 
 
