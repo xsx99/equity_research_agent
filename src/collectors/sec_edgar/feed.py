@@ -6,6 +6,8 @@ from lxml import etree
 
 from src.core.config import SEC_ATOM_PAGE_SIZE
 
+VALID_OWNERSHIP_FORM_TYPES = frozenset({"4", "4/A"})
+
 
 def parse_atom_datetime(value: Optional[str]) -> Optional[datetime]:
     if not value:
@@ -24,6 +26,22 @@ def entry_date(entry_dt: datetime, timezone) -> date:
     return entry_dt.date()
 
 
+def extract_form_type(entry: etree._Element, ns: dict[str, str]) -> Optional[str]:
+    """Extract the filing form type from an Atom entry."""
+    for category in entry.findall("atom:category", ns):
+        term = category.get("term")
+        if term:
+            return term.strip().upper()
+
+    title = entry.findtext("atom:title", namespaces=ns)
+    if not title:
+        return None
+
+    form_type, _, _ = title.partition(" - ")
+    form_type = form_type.strip().upper()
+    return form_type or None
+
+
 def fetch_atom_page(
     session,
     rate_limit: Callable[[], None],
@@ -31,7 +49,7 @@ def fetch_atom_page(
     start: int,
     count: int,
 ) -> List[Dict[str, Optional[datetime]]]:
-    """Fetch a single page of Form 4 filings from the SEC EDGAR Atom feed."""
+    """Fetch a single page of exact Form 4 filings from the SEC EDGAR Atom feed."""
     rate_limit()
 
     params = {
@@ -50,6 +68,12 @@ def fetch_atom_page(
 
     filings = []
     for entry in root.findall(".//atom:entry", ns):
+        # SEC's current-filings feed broad-matches ``type=4`` to other ``4*`` forms
+        # such as 424B2, so we filter entries down to exact ownership filings here.
+        form_type = extract_form_type(entry, ns)
+        if form_type not in VALID_OWNERSHIP_FORM_TYPES:
+            continue
+
         link = entry.find("atom:link[@rel='alternate']", ns)
         if link is None:
             continue

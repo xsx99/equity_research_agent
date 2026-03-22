@@ -10,7 +10,7 @@ DATABASE_URL = os.getenv(
 )
 
 # SEC EDGAR settings
-SEC_USER_AGENT = os.getenv("SEC_USER_AGENT", "YourCompany contact@yourcompany.com")
+SEC_USER_AGENT = os.getenv("SEC_USER_AGENT", "lillian@synchronicity.com")
 SEC_RATE_LIMIT = 10  # requests per second (SEC allows 10)
 
 # Scheduler settings

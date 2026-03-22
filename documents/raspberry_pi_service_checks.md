@@ -97,7 +97,29 @@ If the container is restarting, inspect the restart count:
 docker inspect --format='status={{.State.Status}} restart_count={{.RestartCount}}' scheduler
 ```
 
-## 4. Run checks directly from your local computer
+## 4. Trigger the SEC collector manually
+
+Run the SEC collector job once inside the live scheduler container:
+
+```bash
+docker exec -w /app scheduler python -c "from datetime import date; from src.scheduler.jobs.sec_edgar_job import SECEdgarJob; SECEdgarJob().run(target_date=date(2026, 3, 20))"
+```
+
+Replace `2026, 3, 20` with the filing date you want to test. Use a business day if you want a predictable smoke test; weekends and market holidays may legitimately return few or no filings.
+
+Watch the result in scheduler logs:
+
+```bash
+docker logs --tail 200 scheduler | grep -E 'sec_edgar_job_(started|completed|failed)|Collection complete'
+```
+
+You can also trigger the same run directly from your local computer without opening an interactive SSH session:
+
+```bash
+ssh pi@10.0.0.56 'docker exec -w /app scheduler python -c "from datetime import date; from src.scheduler.jobs.sec_edgar_job import SECEdgarJob; SECEdgarJob().run(target_date=date(2026, 3, 20))"'
+```
+
+## 5. Run checks directly from your local computer
 
 You can run the same checks without first opening an interactive SSH session:
 
