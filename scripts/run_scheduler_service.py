@@ -6,7 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.db.connection import init_db
-from src.logging import get_logger
+from src.core.logging import get_logger
 from src.scheduler.service import SchedulerService
 from src.scheduler.jobs.sec_edgar_job import SECEdgarJob
 
