@@ -19,8 +19,8 @@
 - Tests: migration upgrade/downgrade smoke; model round-trip using a temp Postgres.
 
 ## PR2 – Data Sources & LLM Skeleton
-- Implement `src/research/tool/get_market_data.py` (Alpaca-based snapshot + returns; optional sector/earnings distance) and `src/research/tool/get_news_data.py` (Finnhub/Marketaux NewsAPI if key present else Alpaca/news fallback).
-- Add prompt file `prompts/research_v1.txt`; implement `src/research/llm_client.py` using Phidata Agent + OpenAI model with structured output validation (Pydantic) and pluggable `prompt_version`/`model_name`.
+- Implement `src/tools/market_data.py` (Alpaca-based snapshot + returns; optional sector/earnings distance) and `src/tools/news_data.py` (Finnhub/Marketaux NewsAPI if key present else Alpaca/news fallback).
+- Add prompt file `prompts/templates/research_v1.txt`; implement `src/agents/research.py` using Phidata Agent + Gemini model with structured output validation (Pydantic) and pluggable `prompt_version`/`model_name`.
 - Extend `requirements.txt` with `Finnhub`, `Marketaux`, `Alpaca`, `phidata`, `pydantic`, `httpx` (if needed by phidata).
 - Tests: unit tests with stubbed providers ensuring schema compliance and failure logging.
 

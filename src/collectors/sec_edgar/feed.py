@@ -1,10 +1,10 @@
 """SEC EDGAR Atom feed helpers."""
-from datetime import datetime, date
-from typing import List, Dict, Optional, Callable
+from datetime import date, datetime
+from typing import Callable, Dict, List, Optional
 
 from lxml import etree
 
-from src.config import SEC_ATOM_PAGE_SIZE
+from src.core.config import SEC_ATOM_PAGE_SIZE
 
 
 def parse_atom_datetime(value: Optional[str]) -> Optional[datetime]:
@@ -31,7 +31,7 @@ def fetch_atom_page(
     start: int,
     count: int,
 ) -> List[Dict[str, Optional[datetime]]]:
-    """Fetch a single page of Form 4 filings from SEC EDGAR Atom feed."""
+    """Fetch a single page of Form 4 filings from the SEC EDGAR Atom feed."""
     rate_limit()
 
     params = {
@@ -72,12 +72,12 @@ def fetch_recent_form4_filings(
     count: int = 100,
     page_size: int = SEC_ATOM_PAGE_SIZE,
 ) -> List[Dict[str, str]]:
-    """Fetch recent Form 4 filings using SEC EDGAR Atom feed."""
+    """Fetch recent Form 4 filings using the SEC EDGAR Atom feed."""
     if count <= 0:
         return []
 
     filings: List[Dict[str, str]] = []
-    seen_urls = set()
+    seen_urls: set = set()
     start = 0
 
     while len(filings) < count:
@@ -111,7 +111,7 @@ def fetch_form4_filings_for_date(
     """Fetch all Form 4 filings for a specific date."""
     page_size = max(1, min(page_size, SEC_ATOM_PAGE_SIZE, 100))
     filings: List[Dict[str, str]] = []
-    seen_urls = set()
+    seen_urls: set = set()
     start = 0
 
     while True:

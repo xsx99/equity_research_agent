@@ -1,6 +1,6 @@
 """SEC Form 4 storage helpers."""
 from datetime import datetime
-from typing import List, Dict
+from typing import Dict, List
 
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -8,10 +8,15 @@ from src.db.models import InsiderTrade
 
 
 def upsert_transactions(session, transactions: List[Dict]) -> int:
+    """Upsert a list of transaction dicts into the database.
+
+    Returns the number of rows affected.
+    """
     if not transactions:
         return 0
 
-    unique_rows = {}
+    # De-duplicate by (accession_number, transaction_index)
+    unique_rows: Dict[tuple, Dict] = {}
     for transaction in transactions:
         accession_number = transaction.get("accession_number")
         transaction_index = transaction.get("transaction_index")

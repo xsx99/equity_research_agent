@@ -1,15 +1,17 @@
 """SEC Form 4 XML parsing helpers."""
-import logging
-from datetime import datetime, date
-from typing import List, Dict, Optional
+import re
+from datetime import date, datetime
+from typing import Dict, List, Optional
 
 from lxml import etree
+
+from src.core.logging import get_logger
 
 logger = logging.getLogger(__name__)
 
 
 def get_text(element, xpath: str) -> Optional[str]:
-    """Safely extract text from XML element."""
+    """Safely extract text from an XML element."""
     if element is None:
         return None
     found = element.find(xpath)
@@ -17,7 +19,7 @@ def get_text(element, xpath: str) -> Optional[str]:
 
 
 def parse_date(date_str: str) -> Optional[date]:
-    """Parse date string to date object."""
+    """Parse a date string to a :class:`date` object."""
     if not date_str:
         return None
     try:
@@ -28,10 +30,8 @@ def parse_date(date_str: str) -> Optional[date]:
 
 
 def extract_accession_from_url(url: str) -> Optional[str]:
-    """Extract accession number from filing URL."""
-    import re
-
-    match = re.search(r'/(\d{10}-\d{2}-\d{6})[-/]', url)
+    """Extract the accession number from a filing URL."""
+    match = re.search(r"/(\d{10}-\d{2}-\d{6})[-/]", url)
     if match:
         return match.group(1)
     logger.warning("Could not extract accession number from URL: %s", url)
@@ -49,27 +49,24 @@ def parse_form4_xml(
 
 
 def extract_transactions(
-    root: etree.Element,
+    root: etree._Element,
     filing_url: str,
     filing_date: Optional[date],
     timezone,
 ) -> List[Dict]:
-    """Extract transaction data from Form 4 XML."""
+    """Extract transaction data from a Form 4 XML element tree."""
     transactions = []
 
-    # Extract company info
     issuer = root.find(".//issuer")
     ticker = get_text(issuer, "issuerTradingSymbol")
     company_name = get_text(issuer, "issuerName")
     company_cik = get_text(issuer, "issuerCik")
 
-    # Extract insider info
     reporting_owner = root.find(".//reportingOwner")
     owner_id = reporting_owner.find(".//reportingOwnerId") if reporting_owner is not None else None
     insider_name = get_text(owner_id, "rptOwnerName")
     insider_cik = get_text(owner_id, "rptOwnerCik")
 
-    # Get relationship info
     relationship = (
         reporting_owner.find(".//reportingOwnerRelationship")
         if reporting_owner is not None
@@ -82,16 +79,12 @@ def extract_transactions(
     )
     insider_title = get_text(relationship, "officerTitle") if relationship is not None else None
 
-    # Extract filing date
     period_of_report = get_text(root, ".//periodOfReport")
     period_of_report_date = parse_date(period_of_report) if period_of_report else None
     effective_filing_date = (
-        filing_date
-        or period_of_report_date
-        or datetime.now(timezone).date()
+        filing_date or period_of_report_date or datetime.now(timezone).date()
     )
 
-    # Extract accession number from URL
     accession_number = extract_accession_from_url(filing_url)
     if not accession_number:
         logger.warning("Missing accession number for filing: %s", filing_url)
@@ -136,7 +129,7 @@ def parse_transaction(
     filing_url,
     transaction_index: int,
 ) -> Optional[Dict]:
-    """Parse individual transaction element."""
+    """Parse a single nonDerivativeTransaction element."""
     trans_date_str = get_text(transaction, ".//transactionDate/value")
     trans_date = parse_date(trans_date_str)
 
@@ -154,7 +147,6 @@ def parse_transaction(
     shares = int(float(shares_str)) if shares_str else None
     price = float(price_str) if price_str else None
     shares_owned = int(float(shares_owned_str)) if shares_owned_str else None
-
     total_value = (shares * price) if shares and price else None
 
     return {

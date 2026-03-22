@@ -6,8 +6,8 @@ from alembic.config import Config
 from alembic import command
 import os
 
-from src.config import DATABASE_URL
-from src.logging import get_logger
+from src.core.config import DATABASE_URL
+from src.core.logging import get_logger
 
 logger = get_logger(__name__)
 

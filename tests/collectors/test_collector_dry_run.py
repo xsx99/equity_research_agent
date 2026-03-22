@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Dry-run test for SEC collector - fetches and displays data without database storage."""
+"""Dry-run test for SEC collector — fetches and displays data without database storage."""
 import argparse
 import json
 import sys
@@ -7,17 +7,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from src.collector.sec_edgar import SECEdgarCollector
-from src.collector.sec_edgar_feed import fetch_recent_form4_filings
-from src.collector.sec_edgar_fetcher import fetch_and_parse_form4_xml
-from src.config import SEC_ATOM_PAGE_SIZE
+from src.collectors.sec_edgar.collector import SECEdgarCollector
+from src.collectors.sec_edgar.feed import fetch_recent_form4_filings
+from src.collectors.sec_edgar.fetcher import fetch_and_parse_form4_xml
+from src.core.config import SEC_ATOM_PAGE_SIZE
 
 
 @dataclass
 class ProcessingResult:
     """Result of processing a single filing."""
+
     url: str
     transactions: List[dict]
     error: Optional[str] = None
@@ -43,37 +42,29 @@ def process_filing(collector: SECEdgarCollector, filing_url: str) -> ProcessingR
 
 
 def format_transaction(t: dict) -> str:
-    """Format a single transaction as a readable string."""
-    ticker = t.get('ticker') or 'N/A'
-    name = (t.get('insider_name') or 'Unknown')[:30]
-    tx_type = t.get('transaction_type') or '?'
-    shares = f"{t['shares']:,}" if t.get('shares') else 'N/A'
-    value = f"${t['total_value']:,.2f}" if t.get('total_value') else 'N/A'
-    
+    ticker = t.get("ticker") or "N/A"
+    name = (t.get("insider_name") or "Unknown")[:30]
+    tx_type = t.get("transaction_type") or "?"
+    shares = f"{t['shares']:,}" if t.get("shares") else "N/A"
+    value = f"${t['total_value']:,.2f}" if t.get("total_value") else "N/A"
     return f"{ticker:6} | {name:30} | {tx_type:3} | {shares:>12} shares | {value:>16}"
 
 
 def print_result(result: ProcessingResult, index: int, total: int) -> None:
-    """Print the result of processing a single filing."""
     print(f"[{index}/{total}] {result.url}")
-    
     if result.error:
         print(f"  Error: {result.error}")
         return
-    
     if not result.transactions:
         print("  No transactions found")
         return
-    
     for t in result.transactions:
         print(f"  -> {format_transaction(t)}")
 
 
 def print_summary(results: List[ProcessingResult]) -> None:
-    """Print summary statistics."""
     successful = sum(1 for r in results if r.success)
     total_tx = sum(len(r.transactions) for r in results)
-    
     print()
     print(f"{'='*70}")
     print(f"Filings: {len(results)} ({successful} with transactions)")
@@ -81,9 +72,7 @@ def print_summary(results: List[ProcessingResult]) -> None:
 
 
 def run_test(num_filings: int) -> bool:
-    """Run the collector test and return success status."""
     collector = SECEdgarCollector()
-
     print(f"Fetching {num_filings} recent Form 4 filings from SEC EDGAR...\n")
     filings = fetch_recent_form4_filings(
         collector.session,
@@ -92,21 +81,15 @@ def run_test(num_filings: int) -> bool:
         count=num_filings,
         page_size=SEC_ATOM_PAGE_SIZE,
     )
-
-    results = [process_filing(collector, f['url']) for f in filings]
-
+    results = [process_filing(collector, f["url"]) for f in filings]
     for i, result in enumerate(results, 1):
         print_result(result, i, len(results))
-
     print_summary(results)
-
     return any(r.success for r in results)
 
 
 def run_detailed_test() -> bool:
-    """Run detailed test on a single filing."""
     collector = SECEdgarCollector()
-
     print("Fetching 1 recent filing...\n")
     filings = fetch_recent_form4_filings(
         collector.session,
@@ -115,19 +98,15 @@ def run_detailed_test() -> bool:
         count=1,
         page_size=SEC_ATOM_PAGE_SIZE,
     )
-
     if not filings:
         print("No filings found")
         return False
 
-    result = process_filing(collector, filings[0]['url'])
-
+    result = process_filing(collector, filings[0]["url"])
     print(f"URL: {result.url}\n")
-
     if result.error:
         print(f"Error: {result.error}")
         return False
-
     if not result.transactions:
         print("No transactions found")
         return False
@@ -137,24 +116,12 @@ def run_detailed_test() -> bool:
 
 
 def main() -> int:
-    """Entry point."""
     parser = argparse.ArgumentParser(
         description="Test SEC collector without database storage"
     )
-    parser.add_argument(
-        "-n", "--num", 
-        type=int, 
-        default=5,
-        help="Number of filings to fetch (default: 5)"
-    )
-    parser.add_argument(
-        "-d", "--detailed",
-        action="store_true",
-        help="Show detailed JSON output for a single filing"
-    )
-    
+    parser.add_argument("-n", "--num", type=int, default=5, help="Number of filings to fetch")
+    parser.add_argument("-d", "--detailed", action="store_true", help="Show detailed JSON output")
     args = parser.parse_args()
-    
     success = run_detailed_test() if args.detailed else run_test(args.num)
     return 0 if success else 1
 

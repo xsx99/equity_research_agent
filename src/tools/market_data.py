@@ -1,25 +1,32 @@
-"""Market data snapshot providers used by research runs."""
+"""Market data providers and tool for the research pipeline."""
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import os
-from typing import Any, Protocol, TypedDict
+from typing import Any, Optional, Protocol, TypedDict
 
 import httpx
 
-from src.logging import get_logger
+from src.core.logging import get_logger
+from src.tools.base import BaseTool, ToolError
+from src.tools.context import ToolContext
 
 logger = get_logger(__name__)
 
 
-class MarketSnapshot(TypedDict):
-    """Research input shape for market snapshot data."""
+# ---------------------------------------------------------------------------
+# Shared types
+# ---------------------------------------------------------------------------
 
-    last_price: float | None
-    return_1d: float | None
-    return_5d: float | None
-    sector: str | None
-    earnings_in_days: int | None
+
+class MarketSnapshot(TypedDict):
+    """Market data passed as part of a research input payload."""
+
+    last_price: Optional[float]
+    return_1d: Optional[float]
+    return_5d: Optional[float]
+    sector: Optional[str]
+    earnings_in_days: Optional[int]
 
 
 class MarketDataProvider(Protocol):
@@ -32,6 +39,11 @@ class MarketDataProvider(Protocol):
         """Return optional context fields such as sector and earnings distance."""
 
 
+# ---------------------------------------------------------------------------
+# Helper functions
+# ---------------------------------------------------------------------------
+
+
 def _empty_snapshot() -> MarketSnapshot:
     return {
         "last_price": None,
@@ -42,13 +54,15 @@ def _empty_snapshot() -> MarketSnapshot:
     }
 
 
-def _compute_return(last_price: float | None, anchor_price: float | None) -> float | None:
+def _compute_return(
+    last_price: Optional[float], anchor_price: Optional[float]
+) -> Optional[float]:
     if last_price is None or anchor_price in (None, 0):
         return None
     return (last_price / anchor_price) - 1
 
 
-def _to_int_or_none(value: Any) -> int | None:
+def _to_int_or_none(value: Any) -> Optional[int]:
     if value is None:
         return None
     try:
@@ -57,24 +71,29 @@ def _to_int_or_none(value: Any) -> int | None:
         return None
 
 
+# ---------------------------------------------------------------------------
+# Alpaca + Finnhub provider
+# ---------------------------------------------------------------------------
+
+
 class AlpacaMarketDataProvider:
-    """Market data provider backed by Alpaca (with optional Finnhub enrichments)."""
+    """Market data provider backed by Alpaca (with optional Finnhub enrichment)."""
 
     def __init__(
         self,
         *,
-        api_key: str | None = None,
-        secret_key: str | None = None,
-        data_base_url: str | None = None,
-        finnhub_api_key: str | None = None,
-        client: httpx.Client | None = None,
+        api_key: Optional[str] = None,
+        secret_key: Optional[str] = None,
+        data_base_url: Optional[str] = None,
+        finnhub_api_key: Optional[str] = None,
+        client: Optional[httpx.Client] = None,
         timeout: float = 10.0,
     ) -> None:
         self.api_key = api_key or os.getenv("ALPACA_API_KEY")
         self.secret_key = secret_key or os.getenv("ALPACA_SECRET_KEY")
-        self.data_base_url = (data_base_url or os.getenv("ALPACA_DATA_BASE_URL") or "https://data.alpaca.markets").rstrip(
-            "/"
-        )
+        self.data_base_url = (
+            data_base_url or os.getenv("ALPACA_DATA_BASE_URL") or "https://data.alpaca.markets"
+        ).rstrip("/")
         self.finnhub_api_key = finnhub_api_key or os.getenv("FINNHUB_API_KEY")
         self._client = client or httpx.Client(timeout=timeout)
         self._owns_client = client is None
@@ -104,7 +123,6 @@ class AlpacaMarketDataProvider:
         payload = response.json()
 
         bars_payload = payload.get("bars", {})
-        bars: list[dict[str, Any]]
         if isinstance(bars_payload, dict):
             bars = bars_payload.get(symbol, [])
         elif isinstance(bars_payload, list):
@@ -127,10 +145,9 @@ class AlpacaMarketDataProvider:
             "earnings_in_days": self._fetch_earnings_in_days_from_finnhub(ticker),
         }
 
-    def _fetch_sector_from_finnhub(self, ticker: str) -> str | None:
+    def _fetch_sector_from_finnhub(self, ticker: str) -> Optional[str]:
         if not self.finnhub_api_key:
             return None
-
         response = self._client.get(
             "https://finnhub.io/api/v1/stock/profile2",
             params={"symbol": ticker.upper(), "token": self.finnhub_api_key},
@@ -142,10 +159,9 @@ class AlpacaMarketDataProvider:
             return sector.strip()
         return None
 
-    def _fetch_earnings_in_days_from_finnhub(self, ticker: str) -> int | None:
+    def _fetch_earnings_in_days_from_finnhub(self, ticker: str) -> Optional[int]:
         if not self.finnhub_api_key:
             return None
-
         today = datetime.now(timezone.utc).date()
         response = self._client.get(
             "https://finnhub.io/api/v1/calendar/earnings",
@@ -162,7 +178,7 @@ class AlpacaMarketDataProvider:
         if not isinstance(events, list):
             return None
 
-        nearest_delta: int | None = None
+        nearest_delta: Optional[int] = None
         for event in events:
             if not isinstance(event, dict):
                 continue
@@ -185,9 +201,16 @@ class AlpacaMarketDataProvider:
             self._client.close()
 
 
-def get_market_snapshot(ticker: str, provider: MarketDataProvider | None = None) -> MarketSnapshot:
-    """Fetch market snapshot for a ticker with resilient fallback behavior."""
-    created_default_provider = provider is None
+# ---------------------------------------------------------------------------
+# get_market_snapshot helper
+# ---------------------------------------------------------------------------
+
+
+def get_market_snapshot(
+    ticker: str, provider: Optional[MarketDataProvider] = None
+) -> MarketSnapshot:
+    """Fetch a market snapshot with resilient fallback on provider errors."""
+    created_default = provider is None
     provider_instance = provider or AlpacaMarketDataProvider()
     snapshot = _empty_snapshot()
 
@@ -203,12 +226,8 @@ def get_market_snapshot(ticker: str, provider: MarketDataProvider | None = None)
 
         try:
             context = provider_instance.fetch_context(ticker)
-        except Exception as exc:  # pragma: no cover - defensive
-            logger.warning(
-                "market_context_fetch_failed",
-                ticker=ticker,
-                error=str(exc),
-            )
+        except Exception as exc:
+            logger.warning("market_context_fetch_failed", ticker=ticker, error=str(exc))
             context = {}
         if not isinstance(context, dict):
             context = {}
@@ -217,16 +236,54 @@ def get_market_snapshot(ticker: str, provider: MarketDataProvider | None = None)
         snapshot["earnings_in_days"] = _to_int_or_none(context.get("earnings_in_days"))
         return snapshot
     except Exception as exc:
-        logger.error(
-            "market_snapshot_failed",
-            ticker=ticker,
-            error=str(exc),
-            exc_info=True,
-        )
+        logger.error("market_snapshot_failed", ticker=ticker, error=str(exc), exc_info=True)
         return snapshot
     finally:
-        if created_default_provider and hasattr(provider_instance, "close"):
+        if created_default and hasattr(provider_instance, "close"):
             try:
                 provider_instance.close()  # type: ignore[attr-defined]
             except Exception:
                 logger.warning("market_provider_close_failed", ticker=ticker)
+
+
+# ---------------------------------------------------------------------------
+# BaseTool implementation
+# ---------------------------------------------------------------------------
+
+
+class MarketDataTool(BaseTool):
+    """
+    Fetches the latest price snapshot for a stock ticker.
+
+    Uses :class:`AlpacaMarketDataProvider` for price bars and Finnhub for
+    sector / earnings context.
+    """
+
+    name = "get_market_snapshot"
+
+    @property
+    def anthropic_schema(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "description": (
+                "Fetch the latest market data snapshot for a stock ticker. "
+                "Returns last_price, 1-day return, 5-day return, sector, "
+                "and days until the next earnings announcement."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "ticker": {
+                        "type": "string",
+                        "description": "Stock ticker symbol, e.g. 'AAPL'",
+                    }
+                },
+                "required": ["ticker"],
+            },
+        }
+
+    def run(self, input: dict[str, Any], context: ToolContext) -> dict[str, Any]:
+        ticker = input.get("ticker")
+        if not ticker:
+            raise ToolError("ticker is required", tool_name=self.name)
+        return dict(get_market_snapshot(str(ticker).upper()))

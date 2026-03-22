@@ -1,13 +1,13 @@
 """SEC EDGAR HTTP fetching utilities."""
-import logging
 from datetime import date
-from typing import Optional, List, Dict, Callable
+from typing import Callable, Dict, List, Optional
 
 from lxml import etree
 
-from src.collector.sec_edgar_parser import parse_form4_xml
+from src.collectors.sec_edgar.parser import parse_form4_xml
+from src.core.logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = getLogger(__name__)
 
 BASE_URL = "https://www.sec.gov"
 
@@ -17,14 +17,13 @@ def get_xml_url_from_filing(
     rate_limit: Callable[[], None],
     filing_url: str,
 ) -> Optional[str]:
-    """Extract XML file URL from filing page."""
+    """Extract the XML file URL from a filing index page."""
     logger.debug(f"Extracting XML URL from filing: {filing_url}")
     rate_limit()
 
     response = session.get(filing_url)
     response.raise_for_status()
 
-    # Parse HTML to find XML link (exclude styled xsl versions)
     html = etree.HTML(response.content)
     xml_links = html.xpath(
         "//a[contains(@href, '.xml') and not(contains(@href, 'xsl')) "
@@ -48,7 +47,7 @@ def fetch_and_parse_form4_xml(
     filing_date: Optional[date],
     timezone,
 ) -> Optional[List[Dict]]:
-    """Fetch and parse Form 4 XML file."""
+    """Fetch and parse a Form 4 XML file."""
     logger.debug(f"Fetching and parsing Form 4 XML for: {filing_url}")
     xml_url = get_xml_url_from_filing(session, rate_limit, filing_url)
     if not xml_url:
