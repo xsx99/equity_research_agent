@@ -1,6 +1,8 @@
 """Unit tests for PromptRegistry, Prompt, and _coerce_json_object."""
 from __future__ import annotations
 
+import textwrap
+
 import pytest
 
 from src.prompts.registry import Prompt, PromptRegistry
@@ -59,8 +61,54 @@ def test_register_and_get():
 
 def test_get_missing_raises_file_not_found():
     reg = _fresh_registry()
-    with pytest.raises(FileNotFoundError, match="Prompt template not found"):
+    with pytest.raises(FileNotFoundError, match="Prompt definition not found"):
         reg.get("nonexistent", "v99")
+
+
+def test_get_loads_yaml_prompt_definition(tmp_path):
+    prompt_file = tmp_path / "research_v1.yaml"
+    prompt_file.write_text(
+        textwrap.dedent(
+            """
+            id: research
+            version: v1
+            description: Research prompt for equity analysis
+            body: |
+              Hello $ticker
+              Stay cautious.
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    reg = PromptRegistry(templates_dir=tmp_path)
+    prompt = reg.get("research", "v1")
+
+    assert prompt.id == "research"
+    assert prompt.version == "v1"
+    assert prompt.description == "Research prompt for equity analysis"
+    assert prompt.template == "Hello $ticker\nStay cautious.\n"
+
+
+def test_get_raises_for_yaml_metadata_mismatch(tmp_path):
+    prompt_file = tmp_path / "research_v1.yaml"
+    prompt_file.write_text(
+        textwrap.dedent(
+            """
+            id: risk
+            version: v1
+            body: |
+              Hello
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    reg = PromptRegistry(templates_dir=tmp_path)
+    with pytest.raises(ValueError, match="Prompt id mismatch"):
+        reg.get("research", "v1")
 
 
 def test_register_overwrites_existing():

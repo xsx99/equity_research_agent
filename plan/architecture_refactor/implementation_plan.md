@@ -4,16 +4,18 @@ description: Refactored architecture for insider_trading_tracker — packages, a
 type: project
 ---
 
-The codebase was refactored into these top-level packages under `src/`:
+The codebase is currently organised into these top-level packages under `src/`:
 
-- **collectors/** — `BaseCollector` ABC + `CollectionResult` dataclass. `SECEdgarCollector` extends `BaseCollector`, implements `collect(target_date) -> CollectionResult`. Helper modules (feed, fetcher, parser, storage) live in `collectors/sec_edgar/`.
-- **tools/** — `ToolContext` (holds `session`, `config`), `BaseTool` ABC, `ToolRegistry`. Concrete tools: `MarketDataTool`, `NewsDataTool`, and 6 insider query tools in `insider_queries.py`. `build_research_tool_registry()` factory in `__init__.py`.
-- **prompts/** — `Prompt` (frozen dataclass with `id`, `version`, `template`), `PromptRegistry` (singleton via `get_default()`). Templates in `prompts/templates/*.txt` named `{id}_{version}.txt`. Current template: `research_v1.txt`.
-- **agents/** — `BaseAgent` ABC (holds `tool_registry`, `prompt_registry`, `model_name`), `AgentResult` dataclass. `ResearchAgent` extends `BaseAgent`, uses Phidata/OpenAI runner, validates with `StructuredResearchOutput` Pydantic model.
-- **scheduler/** — `BaseJob` ABC with `config -> JobConfig` + `run()`. `SchedulerService(jobs=[...]).start()` wraps APScheduler. `SECEdgarJob` lives in `scheduler/jobs/`.
-- **db/**, **config.py**, **logging.py** — unchanged.
+- **collectors/** — `BaseCollector` ABC + `CollectionResult` dataclass. `SECEdgarCollector` extends `BaseCollector`, implements `collect(target_date) -> CollectionResult`, and delegates SEC-specific feed/fetch/parse/storage helpers to `collectors/sec_edgar/`.
+- **tools/** — `ToolContext` (optional `session`, runtime `config`), `BaseTool` ABC, and `ToolRegistry`. `build_research_tool_registry()` explicitly registers 8 tools: market snapshot, recent news, and 6 insider-trade query tools.
+- **prompts/** — `Prompt` (frozen dataclass with `id`, `version`, `template`, `description`) plus `PromptRegistry`. Prompt definitions are YAML files in `src/prompts/templates/`, loaded lazily and cached on first access.
+- **agents/** — `BaseAgent` + `AgentResult`, with `ResearchAgent` providing structured research generation. The default runner uses Phidata, and the default model name is `RESEARCH_MODEL_NAME` or `gemini-2.5-flash-lite`.
+- **db/** — `connection.py` owns engine/session/Alembic bootstrap. Models are split across `models/base.py`, `insider_trades.py`, `watch_list.py`, `research.py`, and `evaluation.py`; the research app tables are backed by Alembic revision `004_research_app_tables.py`.
+- **scheduler/** — `BaseJob`, `JobConfig`, and `SchedulerService` wrap APScheduler. `scheduler/jobs/` currently contains only `SECEdgarJob`.
+- **core/** — `src/core/config.py` and `src/core/logging.py` replace the old flat `config.py` / `logging.py` layout.
 
-**Old files kept for backward compat:** `src/collector/` (old location), `src/tools/queries.py`, `src/research/` (providers still imported by tool wrappers).
-**Entry point:** `scripts/run_scheduler_service.py` → `SchedulerService(jobs=[SECEdgarJob()]).start()`
+**Compatibility status:** There are no legacy compatibility packages in the current tree; `src/collector/`, `src/tools/queries.py`, and `src/research/` do not exist.
+**Runtime entrypoint:** `scripts/run_scheduler_service.py` is the checked-in bootstrap script and is intended to initialise migrations, then start `SchedulerService(jobs=[SECEdgarJob()])`.
+**Runtime scope today:** The SEC collector is fully wired into the scheduler. Research DB models, prompt loading, tool scaffolding, and `ResearchAgent` exist, but there is still no research pipeline module, evaluation runner, web UI, or research/eval scheduled jobs.
 
-**Why:** ToolContext injected into `run()` not constructor (tool lifetime ≠ session lifetime). Tools registered explicitly (not auto-discovered). PromptRegistry uses singleton + lazy file load.
+**Why:** Tool context is injected per invocation instead of at construction time, tool registration is explicit rather than auto-discovered, and prompt loading stays lazy and file-backed.

@@ -7,7 +7,7 @@ from lxml import etree
 from src.collectors.sec_edgar.parser import parse_form4_xml
 from src.core.logging import get_logger
 
-logger = getLogger(__name__)
+logger = get_logger(__name__)
 
 BASE_URL = "https://www.sec.gov"
 

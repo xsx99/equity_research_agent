@@ -1,8 +1,10 @@
-- **collectors/** — `BaseCollector` ABC + `CollectionResult` dataclass. `SECEdgarCollector` extends `BaseCollector`, implements `collect(target_date) -> CollectionResult`. Helper modules (feed, fetcher, parser, storage) live in `collectors/sec_edgar/`.
-- **tools/** — `ToolContext` (holds `session`, `config`), `BaseTool` ABC, `ToolRegistry`. Concrete tools: `MarketDataTool`, `NewsDataTool`, and 6 insider query tools in `insider_queries.py`. `build_research_tool_registry()` factory in `__init__.py`.
-- **prompts/** — `Prompt` (frozen dataclass with `id`, `version`, `template`), `PromptRegistry` (singleton via `get_default()`). Templates in `prompts/templates/*.txt` named `{id}_{version}.txt`. Current template: `research_v1.txt`.
-- **agents/** — `BaseAgent` ABC (holds `tool_registry`, `prompt_registry`, `model_name`), `AgentResult` dataclass. `ResearchAgent` extends `BaseAgent`, uses Phidata/OpenAI runner, validates with `StructuredResearchOutput` Pydantic model.
-- **scheduler/** — `BaseJob` ABC with `config -> JobConfig` + `run()`. `SchedulerService(jobs=[...]).start()` wraps APScheduler. `SECEdgarJob` lives in `scheduler/jobs/`.
+- **collectors/** — `BaseCollector` ABC + `CollectionResult` dataclass. `SECEdgarCollector` extends `BaseCollector`, implements `collect(target_date) -> CollectionResult`, and delegates SEC feed parsing/storage to `src/collectors/sec_edgar/`.
+- **tools/** — `ToolContext` (holds optional `session` + runtime `config`), `BaseTool` ABC, and `ToolRegistry`. `build_research_tool_registry()` wires 8 tools: `MarketDataTool`, `NewsDataTool`, and 6 database-backed insider query tools.
+- **prompts/** — `Prompt` is a frozen dataclass with `id`, `version`, `template`, and `description`. `PromptRegistry` lazily loads YAML prompt definitions from `src/prompts/templates/`; the bundled prompt is `research_v1.yaml`.
+- **agents/** — `BaseAgent` carries the tool registry, prompt registry, and `model_name`. `ResearchAgent` validates `ResearchInputPayload`, renders the YAML prompt, calls a Phidata/OpenAI runner, coerces JSON, and validates `StructuredResearchOutput`. The default model is `RESEARCH_MODEL_NAME` or `gpt-4.1-mini`.
+- **db/** — SQLAlchemy models live under `src/db/models/` and include `InsiderTrade`, `Watchlist`, `ResearchRun`, `ResearchOutput`, and `EvalResult`. Alembic revision `004_research_app_tables.py` creates the research tables and constraints.
+- **scheduler/** — `BaseJob` + `JobConfig` define APScheduler jobs, and `SchedulerService` registers them on a blocking scheduler. Only `SECEdgarJob` exists today; research/eval jobs are not implemented yet.
+- **core/** — `src/core/config.py` currently exposes database, SEC EDGAR, and scheduler settings. `src/core/logging.py` configures stream logging plus optional rotating-file output.
+- **scripts/** — `scripts/run_scheduler_service.py` is the only checked-in entrypoint and is intended to init migrations, then start `SchedulerService(jobs=[SECEdgarJob()])`.
 
-
-**Why:** ToolContext injected into `run()` not constructor (tool lifetime ≠ session lifetime). Tools registered explicitly (not auto-discovered). PromptRegistry uses singleton + lazy file load.
+**Why:** Tool context is passed per invocation instead of living on long-lived tool instances. Tools are registered explicitly, prompt loading is lazy and file-backed, and the research schema/agent scaffolding landed before the research pipeline/UI/runtime wiring.

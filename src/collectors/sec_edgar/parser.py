@@ -7,7 +7,7 @@ from lxml import etree
 
 from src.core.logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def get_text(element, xpath: str) -> Optional[str]:
@@ -25,7 +25,7 @@ def parse_date(date_str: str) -> Optional[date]:
     try:
         return datetime.strptime(date_str, "%Y-%m-%d").date()
     except ValueError:
-        logger.warning("Failed to parse date string: %s", date_str)
+        logger.warning("failed_to_parse_date_string", date_str=date_str)
         return None
 
 
@@ -34,7 +34,7 @@ def extract_accession_from_url(url: str) -> Optional[str]:
     match = re.search(r"/(\d{10}-\d{2}-\d{6})[-/]", url)
     if match:
         return match.group(1)
-    logger.warning("Could not extract accession number from URL: %s", url)
+    logger.warning("could_not_extract_accession_number", url=url)
     return None
 
 
@@ -87,7 +87,7 @@ def extract_transactions(
 
     accession_number = extract_accession_from_url(filing_url)
     if not accession_number:
-        logger.warning("Missing accession number for filing: %s", filing_url)
+        logger.warning("missing_accession_number_for_filing", filing_url=filing_url)
         return transactions
 
     for idx, transaction in enumerate(root.findall(".//nonDerivativeTransaction")):

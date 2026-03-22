@@ -21,7 +21,7 @@ from src.core.config import (
 from src.db.connection import get_session
 from src.core.logging import get_logger
 
-logger = getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class SECEdgarCollector(BaseCollector):

@@ -66,7 +66,7 @@ Research App MVP 设计文档（重构版）
 
 8. Prompt 设计与版本管理与 Agent 框架
    - 单一版本 v1，强调谨慎、允许 abstain、基于输入、明确 horizon、提供反方与 invalidators。
-   - Prompt 放独立文件（如 prompts/research_v1.txt 或 prompts.py 常量）；升级只需改 version 标识与内容文件。
+   - Prompt 放独立 YAML 文件（如 prompts/research_v1.yaml，包含 id/version/description/body）；升级只需改 version 标识与内容文件。
    - Agent 框架：使用 Phidata Agent；工具函数通过对象方法注入（如 RecommendationTools 风格），集中管理上下文与外部连接（feature store、retrieval、market_data、news_data、db 连接等）；Agent 配置 show_tool_calls 便于调试；上下文控制（history truncation / selective recall）由工具层把必要摘要/快照传入，避免模型超长上下文；每个 ticker/run 建立独立上下文，避免跨标的泄漏。
 
 9. 运行流程

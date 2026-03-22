@@ -7,6 +7,7 @@ lxml>=4.9,<6
 alembic==1.14.0
 httpx==0.28.1
 pydantic==2.12.5
+PyYAML==6.0.2
 phidata==2.7.10
 alpaca-py==0.43.2
 finnhub-python==2.4.27

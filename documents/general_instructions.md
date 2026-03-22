@@ -16,3 +16,6 @@ coding agent 在实现时，必须显式检查 Postgres data directory 配置，
 
 ## Environment setup
 run `source ~/.venv/bin/activate` before using Python
+
+## unit tests
+always run unit tests after implementation, fix if there are any errors.
