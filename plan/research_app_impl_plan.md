@@ -11,9 +11,9 @@
 - Tests: migration upgrade/downgrade smoke; model round-trip using a temp Postgres.
 
 ## PR2 – Data Sources & LLM Skeleton
-- Implement `src/research/collector/market_data.py` (yfinance-based snapshot + returns; optional sector/earnings distance) and `src/research/collector/news_data.py` (NewsAPI if key present else yfinance/news fallback).
+- Implement `src/research/tool/get_market_data.py` (Alpaca-based snapshot + returns; optional sector/earnings distance) and `src/research/tool/get_news_data.py` (Finnhub/Marketaux NewsAPI if key present else Alpaca/news fallback).
 - Add prompt file `prompts/research_v1.txt`; implement `src/research/llm_client.py` using Phidata Agent + OpenAI model with structured output validation (Pydantic) and pluggable `prompt_version`/`model_name`.
-- Extend `requirements.txt` with `yfinance`, `phidata`, `openai`, `pydantic`, `httpx` (if needed by phidata).
+- Extend `requirements.txt` with `Finnhub`, `Marketaux`, `Alpaca`, `phidata`, `pydantic`, `httpx` (if needed by phidata).
 - Tests: unit tests with stubbed providers ensuring schema compliance and failure logging.
 
 ## PR3 – Research Pipeline Implementation
@@ -53,7 +53,8 @@
 - Manual: run `scripts/run_research_once.py` and `scripts/run_eval_once.py` against dev DB; verify UI pages load; confirm Postgres `SHOW data_directory;` matches mounted disk.
 
 ## Assumptions
-- OpenAI API key available; default model `gpt-4o` unless specified otherwise.
-- yfinance and (optionally) NewsAPI access are acceptable; network egress allowed.
+- Gemini API key: AIzaSyDmIeAH5u6BzlYpgNnqtmvbplZWuTUSZc
+- Marketaux, Finnhub or Alpaca NewsAPI access are acceptable; network egress allowed.
+- Alpaca for real time market data.
 - Single-user, single-tenant app; no auth required per design doc.
 - Running on same Postgres instance as existing insider data; coexistence is acceptable.
