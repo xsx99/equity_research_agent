@@ -1,4 +1,4 @@
-# Research App Deploy Notes
+# Research App Manual Deployment Notes
 
 ## Secrets
 - Keep `GOOGLE_API_KEY` out of tracked source files.

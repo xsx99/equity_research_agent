@@ -20,18 +20,18 @@ def _build_sample_payload(ticker: str) -> dict:
         "ticker": ticker.upper(),
         "as_of": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
         "price_snapshot": {
-            "last_price": 215.0,
-            "return_1d": 0.01,
+            "last_price": 712.0,
+            "return_1d": 0.07,
             "return_5d": 0.03,
         },
         "context": {
             "sector": "Technology",
-            "earnings_in_days": 14,
+            "earnings_in_days": 50,
         },
         "news": [
             {
-                "title": f"{ticker.upper()} supplier commentary remains stable",
-                "summary": "Channel checks indicate no major near-term demand shock.",
+                "title": f"Samsung has doubled NAND price in Q2.",
+                "summary": "Samsung has doubled NAND price in Q2.",
             }
         ],
     }
@@ -46,7 +46,7 @@ def _load_payload(payload_file: Path | None, ticker: str) -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--payload-file", type=Path, help="Path to a JSON payload file.")
-    parser.add_argument("--ticker", default="AAPL", help="Ticker for the built-in sample payload.")
+    parser.add_argument("--ticker", default="SNDK", help="Ticker for the built-in sample payload.")
     parser.add_argument("--model-name", default=DEFAULT_MODEL_NAME, help="Override the model name.")
     args = parser.parse_args()
 
