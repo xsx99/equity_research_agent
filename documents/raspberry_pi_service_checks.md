@@ -18,34 +18,49 @@ docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 
 Expected container names in this project:
 
-- `insider_trading_db`
+- `postgres_db`
 - `scheduler`
+
+If you need to run `docker compose ...` commands, first go to the project directory (or pass `-f` explicitly), otherwise you may see `no configuration file provided: not found`:
+
+```bash
+cd /path/to/insider_trading_tracker
+docker compose -f docker-compose.yml ps
+```
 
 ## 2. Check health of Postgres
 
 Check whether the Postgres container is running:
 
 ```bash
-docker inspect --format='{{.State.Status}}' insider_trading_db
+docker inspect --format='{{.State.Status}}' postgres_db
 ```
 
 Check whether Postgres inside the container is accepting connections:
 
 ```bash
-docker exec insider_trading_db pg_isready -U postgres -d insider_trading
+docker exec postgres_db pg_isready -U postgres -d mono_db
 ```
 
 Optional: connect and run a simple query:
 
 ```bash
-docker exec -it insider_trading_db psql -U postgres -d insider_trading -c "SELECT now();"
+docker exec -it postgres_db psql -U postgres -d mono_db -c "SELECT now();"
 ```
 
 View recent Postgres logs:
 
 ```bash
-docker logs --tail 100 insider_trading_db
+docker logs --tail 100 postgres_db
 ```
+
+Verify Postgres data directory is on disk (not tmpfs):
+
+```bash
+docker exec -it postgres_db psql -U postgres -d postgres -c "SHOW data_directory;"
+```
+
+The value should map to the host volume path `/data/postgres_data`.
 
 ## 3. Check health of the scheduler service
 
@@ -67,6 +82,8 @@ Follow logs live:
 docker logs -f scheduler
 ```
 
+Scheduler log files are mounted to host path `/data/mono_db_logs`.
+
 Healthy startup should include log lines like:
 
 - `initializing_database`
@@ -86,6 +103,6 @@ You can run the same checks without first opening an interactive SSH session:
 
 ```bash
 ssh pi@10.0.0.56 'docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"'
-ssh pi@10.0.0.56 'docker exec insider_trading_db pg_isready -U postgres -d insider_trading'
+ssh pi@10.0.0.56 'docker exec postgres_db pg_isready -U postgres -d mono_db'
 ssh pi@10.0.0.56 'docker logs --tail 100 scheduler'
 ```
