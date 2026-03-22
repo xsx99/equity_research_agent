@@ -22,23 +22,26 @@ jobs:
 
       - name: Start PostgreSQL
         run: |
-          sudo docker compose -f docker-compose.db.yml up -d
+          ENV_FILE=/home/pi/secrets/trading_agent.env
+          sudo docker compose --env-file "$ENV_FILE" -f docker-compose.db.yml up -d
           echo "Waiting for PostgreSQL to be ready..."
           for _ in {1..30}; do
-            if sudo docker exec insider_trading_db pg_isready -U postgres -d insider_trading >/dev/null 2>&1; then
+            if sudo docker exec postgres_db pg_isready -U postgres -d mono_db >/dev/null 2>&1; then
               echo "PostgreSQL is ready!"
               exit 0
             fi
             sleep 2
           done
           echo "PostgreSQL failed to become ready in time"
-          sudo docker logs insider_trading_db
+          sudo docker logs postgres_db
           exit 1
           
       - name: Run database migrations
-        env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/insider_trading
         run: |
+          set -a
+          source /home/pi/secrets/trading_agent.env
+          set +a
+          export DATABASE_URL="postgresql://postgres:${POSTGRES_PASSWORD}@localhost:5432/mono_db"
           source .venv/bin/activate
           python3 -m pip install --upgrade pip setuptools wheel
           python3 -m pip install -r requirements.txt

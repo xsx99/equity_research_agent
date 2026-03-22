@@ -17,6 +17,7 @@ jobs:
     runs-on: self-hosted
     
     steps:
+      - uses: actions/checkout@v4
       - name: Set up Python and virtual environment
         run: |
           sudo apt-get update
@@ -27,11 +28,12 @@ jobs:
           python3 -m pip --version
       - name: Stop PostgreSQL
         run: |
+          ENV_FILE=/home/pi/secrets/trading_agent.env
           if [ "${{ inputs.remove_data }}" = "true" ]; then
-            sudo docker compose -f docker-compose.db.yml down -v
+            sudo docker compose --env-file "$ENV_FILE" -f docker-compose.db.yml down -v
             sudo rm -rf /data/postgres_data
             echo "PostgreSQL stopped and data removed."
           else
-            sudo docker compose -f docker-compose.db.yml down
+            sudo docker compose --env-file "$ENV_FILE" -f docker-compose.db.yml down
             echo "PostgreSQL stopped. Data preserved."
           fi

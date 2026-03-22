@@ -3,6 +3,8 @@ services:
     build: .
     container_name: scheduler
     command: ["sh", "-c", "python -u scripts/run_scheduler_service.py 2>&1 | tee -a /var/log/mono_db/stdout.log"]
+    env_file:
+      - /home/pi/secrets/trading_agent.env
     environment:
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres_db:5432/mono_db
       GOOGLE_API_KEY: ${GOOGLE_API_KEY}

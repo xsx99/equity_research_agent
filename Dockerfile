@@ -2,6 +2,9 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# Runtime secrets are injected by Docker Compose from
+# /home/pi/secrets/trading_agent.env on the Raspberry Pi runner.
+
 # uses the official python:3.11-slim base image 
 # which has Python and pip already properly installed and in the PATH.
 # it is a good practice to use the official base image 

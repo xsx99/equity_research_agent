@@ -58,15 +58,16 @@ jobs:
 
   deploy:
     needs: test
-    # Self-hosted macOS runner - only Docker commands here, no Python needed
-    # (Python work is done in the 'test' job on GitHub-hosted runner above)
+    # Self-hosted Raspberry Pi runner. Python work is done in the
+    # test job on GitHub-hosted runner above.
     runs-on: self-hosted
     
     steps:
       - uses: actions/checkout@v4
       - name: Deploy locally
         run: |
-          sudo docker compose -f docker-compose.db.yml up -d
-          sudo docker compose build --no-cache scheduler
-          sudo docker compose up -d --force-recreate scheduler
+          ENV_FILE=/home/pi/secrets/trading_agent.env
+          sudo docker compose --env-file "$ENV_FILE" -f docker-compose.db.yml up -d
+          sudo docker compose --env-file "$ENV_FILE" build --no-cache scheduler
+          sudo docker compose --env-file "$ENV_FILE" up -d --force-recreate scheduler
           echo "Deployment complete on local machine."
