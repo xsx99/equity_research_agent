@@ -31,14 +31,14 @@
 - `src/tools/market_data.py` is implemented with Alpaca daily bars plus optional Finnhub sector / earnings enrichment. It returns `last_price`, `return_1d`, `return_5d`, `sector`, and `earnings_in_days`.
 - `src/tools/news_data.py` is implemented with provider fallback in this order: Finnhub -> Marketaux -> Alpaca. It returns up to 5 `{title, summary}` items.
 - The prompt now lives at `src/prompts/templates/research_v1.yaml`. `src/prompts/registry.py` lazily loads YAML definitions into `Prompt` objects with `id`, `version`, `template`, and `description`.
-- `src/agents/research.py` is implemented. The default runner uses `Phidata` as a thin provider-aware model wrapper; `gemini*` model IDs use the Gemini-backed path and other model IDs fall back to `OpenAIChat`. It does not currently expose the repo `ToolRegistry` into `phi.agent.Agent` for model-driven tool-calling. The default model name is `RESEARCH_MODEL_NAME` or `gemini-2.5-flash-lite`.
+- `src/agents/research.py` is implemented. The default runner uses `Phidata` as a thin provider-aware model wrapper; `gemini*` model IDs use the Gemini-backed path and other model IDs fall back to `OpenAIChat`. It does not currently expose the repo `ToolRegistry` into `phi.agent.Agent` for model-driven tool-calling. The default model name is `RESEARCH_MODEL_NAME` or `gemini-2.5-flash-lite`, and Google auth is sourced from `GOOGLE_API_KEY`.
 - `requirements.txt` includes `httpx`, `pydantic`, `PyYAML`, `phidata`, `openai`, `google-generativeai`, `alpaca-py`, and `finnhub-python`. Marketaux is used through direct HTTP calls instead of a separate SDK dependency.
 - Current test coverage includes prompt loading/rendering, JSON coercion, Pydantic schema validation, `ToolRegistry`, and insider query tools. Provider-specific tests for `market_data.py` and `news_data.py` are still missing.
 
 ## PR3 – Research Pipeline Implementation
 - Not started. There is no `src/research/` package or `run_research.py` stub in the repo today, so this PR needs to create the orchestration layer from scratch.
 - Build the pipeline to load active `Watchlist` rows, create/update `ResearchRun` status timestamps, fetch market/news/DB inputs in Python, persist the replayable `input_json`, call `ResearchAgent`, validate outputs, and persist `ResearchOutput`.
-- Add a manual entrypoint such as `scripts/run_research_once.py`; no research CLI exists today.
+- A direct agent smoke entrypoint now exists at `scripts/run_research_agent_once.py`; the full batch research pipeline CLI (`run_research.py` / `scripts/run_research_once.py`) still does not exist today.
 - Add repository/helpers for watchlist CRUD and run persistence to keep orchestration code out of route handlers / scripts.
 - Tests still needed: pipeline happy path with mocked providers/LLM plus failure-state transitions that end in `failed` + `error_message` without breaking the batch.
 
@@ -62,7 +62,7 @@
 - `src/core/config.py` currently contains only database, SEC EDGAR, and scheduler settings. Research/eval env vars, prompt defaults, and API-key documentation still need to be added there.
 - `src/scheduler/` currently registers only `SECEdgarJob`; there are no research/eval job classes or job registration hooks yet.
 - Docker Compose / deploy docs for the research app are not in the repository yet. When added, Postgres must remain on a persistent disk-backed path such as `/data/postgres_data:/var/lib/postgresql/data`.
-- `documents/research_app_deploy.md` and `documents/research_app_runbook.md` are still to be written, including the Postgres `SHOW data_directory;` verification and Raspberry Pi notes from the project-wide instructions.
+- `documents/research_app_deploy.md` and `documents/research_app_runbook.md` now cover env-based key management and manual agent triggering. Postgres `SHOW data_directory;` verification and Raspberry Pi-specific persistence checks still need to be expanded there.
 - Tests still needed: research/eval scheduler registration smoke plus any deploy-config linting that gets introduced.
 
 ## Parallelization Guide

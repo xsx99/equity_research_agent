@@ -8,6 +8,7 @@ from typing import Any, Callable, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from src.agents.base import AgentResult, BaseAgent
+from src.core import config as app_config
 from src.prompts.registry import PromptRegistry
 from src.tools.context import ToolContext
 from src.tools.registry import ToolRegistry
@@ -15,7 +16,7 @@ from src.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-DEFAULT_MODEL_NAME = os.getenv("RESEARCH_MODEL_NAME", "gemini-2.5-flash-lite")
+DEFAULT_MODEL_NAME = app_config.RESEARCH_MODEL_NAME
 DEFAULT_PROMPT_VERSION = "v1"
 
 # Type aliases for injectable dependencies (simplifies testing)
@@ -210,6 +211,11 @@ def _should_use_gemini_backend(model_name: str) -> bool:
     return model_name.strip().lower().startswith("gemini")
 
 
+def _get_google_api_key() -> Optional[str]:
+    """Resolve the Google API key from env first, then app config."""
+    return getattr(app_config, "GOOGLE_API_KEY", None)
+
+
 def _build_phi_model(model_name: str) -> Any:
     """Build the Phidata chat model for the configured provider."""
     if _should_use_gemini_backend(model_name):
@@ -219,7 +225,7 @@ def _build_phi_model(model_name: str) -> Any:
             raise RuntimeError(
                 "Gemini model support requires `google-generativeai` and GOOGLE_API_KEY."
             ) from exc
-        return Gemini(id=model_name)
+        return Gemini(id=model_name, api_key=_get_google_api_key())
 
     try:
         from phi.model.openai import OpenAIChat

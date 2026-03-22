@@ -1,8 +1,12 @@
 """Configuration settings."""
+from pathlib import Path
 import os
+
 from dotenv import load_dotenv
 
-load_dotenv()
+REPO_ROOT = Path(__file__).resolve().parents[2]
+ENV_FILE = REPO_ROOT / ".env"
+load_dotenv(ENV_FILE)
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
@@ -34,3 +38,6 @@ SEC_EDGAR_RUN_ON_STARTUP = os.getenv(
 
 # SEC feed pagination settings
 SEC_ATOM_PAGE_SIZE = int(os.getenv("SEC_ATOM_PAGE_SIZE", "100"))
+
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+RESEARCH_MODEL_NAME = os.getenv("RESEARCH_MODEL_NAME", "gemini-2.5-flash-lite")

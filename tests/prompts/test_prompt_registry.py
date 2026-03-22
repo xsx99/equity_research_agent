@@ -9,10 +9,12 @@ from src.prompts.registry import Prompt, PromptRegistry
 from src.agents.research import (
     DEFAULT_MODEL_NAME,
     _coerce_json_object,
+    _get_google_api_key,
     _should_use_gemini_backend,
     ResearchInputPayload,
     StructuredResearchOutput,
 )
+from src.core import config as app_config
 
 
 # ---------------------------------------------------------------------------
@@ -54,6 +56,18 @@ def test_should_use_gemini_backend_for_gemini_models():
 
 def test_should_not_use_gemini_backend_for_non_gemini_models():
     assert _should_use_gemini_backend("gpt-4.1-mini") is False
+
+
+def test_get_google_api_key_prefers_google_env(monkeypatch):
+    monkeypatch.setenv("GOOGLE_API_KEY", "google-key")
+    monkeypatch.setattr(app_config, "GOOGLE_API_KEY", "config-key")
+    assert _get_google_api_key() == "google-key"
+
+
+def test_get_google_api_key_falls_back_to_config(monkeypatch):
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    monkeypatch.setattr(app_config, "GOOGLE_API_KEY", "config-key")
+    assert _get_google_api_key() == "config-key"
 
 
 # ---------------------------------------------------------------------------

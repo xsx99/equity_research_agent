@@ -5,6 +5,8 @@ services:
     command: ["sh", "-c", "python -u scripts/run_scheduler_service.py 2>&1 | tee -a /var/log/mono_db/stdout.log"]
     environment:
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres_db:5432/mono_db
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY}
+      RESEARCH_MODEL_NAME: ${RESEARCH_MODEL_NAME:-gemini-2.5-flash-lite}
       LOG_DIR: /var/log/mono_db
     volumes:
       - /data/mono_db_logs:/var/log/mono_db
