@@ -4,6 +4,14 @@
 - Implement the research app per `plan/research_app.md`, reusing existing logging, config, Alembic, and scheduler scaffolding.
 - Deliver work as 6 PRs, each independently reviewable; only PR1 is a hard prerequisite for the rest. Parallelization guidance is noted per PR.
 
+## PR Checklist
+- [x] PR1 – Schema & ORM Foundation
+- [ ] PR2 – Data Sources & LLM Skeleton
+- [ ] PR3 – Research Pipeline Implementation
+- [ ] PR4 – Evaluation Pipeline
+- [ ] PR5 – Web UI (Server-Rendered FastAPI)
+- [ ] PR6 – Scheduler & Ops/Deploy
+
 ## PR1 – Schema & ORM Foundation
 - Add SQLAlchemy models for `watchlists`, `research_runs`, `research_outputs`, `eval_results` into `src/db/models.py`, keeping existing `InsiderTrade`.
 - Create Alembic revision `004_research_app_tables` matching the design doc (enums, defaults, indexes, FK constraints, created_at, status fields).
