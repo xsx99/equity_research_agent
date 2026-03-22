@@ -12,3 +12,7 @@ coding agent 在实现时，必须显式检查 Postgres data directory 配置，
 ## 代码要求
 保持代码简单清晰
 每次写完major refactor，把整体的改动加进`/documents/repo_overview.md`
+
+
+## Environment setup
+run `source ~/.venv/bin/activate` before using Python

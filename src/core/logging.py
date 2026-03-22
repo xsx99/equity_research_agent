@@ -11,6 +11,7 @@ def _configure_logging(force: bool = False):
     if _CONFIGURED and not force:
         return
     level_name = os.getenv("LOG_LEVEL", "INFO").upper()
+    log_filename = os.getenv("LOG_FILENAME", "app.log").strip() or "app.log"
     level = getattr(py_logging, level_name, py_logging.INFO)
     log_format = "%(asctime)s %(levelname)s %(name)s %(message)s"
 
@@ -21,7 +22,7 @@ def _configure_logging(force: bool = False):
     if log_file:
         file_path = os.path.expanduser(log_file)
     elif log_dir:
-        file_path = os.path.join(os.path.expanduser(log_dir), "collector.log")
+        file_path = os.path.join(os.path.expanduser(log_dir), log_filename)
     else:
         file_path = None
 

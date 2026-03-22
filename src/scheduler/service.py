@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 
-from src.config import SCHEDULER_TIMEZONE
+from src.core.config import SCHEDULER_TIMEZONE
 from src.core.logging import get_logger
 from src.scheduler.base import BaseJob
 
