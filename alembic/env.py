@@ -9,7 +9,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from src.db.models import Base
-from src.config import DATABASE_URL
+from src.core.config import DATABASE_URL
 
 config = context.config
 
