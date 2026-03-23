@@ -29,6 +29,38 @@ from src.tools import ToolContext, ToolRegistry, build_research_tool_registry
 
 logger = get_logger(__name__)
 
+_CORP_SUFFIXES = frozenset(
+    {"corp", "inc", "ltd", "llc", "co", "corporation", "incorporated",
+     "limited", "holdings", "group", "technologies", "technology", "systems"}
+)
+
+
+def _core_company_name(company_name: str) -> str:
+    """Strip trailing corporate suffixes and return the meaningful part lowercased.
+
+    E.g. "SanDisk Corp" → "sandisk", "Western Digital Corp" → "western digital".
+    """
+    words = company_name.lower().split()
+    while words and words[-1].rstrip(".,") in _CORP_SUFFIXES:
+        words.pop()
+    return " ".join(words)
+
+
+def _filter_relevant_news(
+    news: list[dict[str, Any]],
+    ticker: str,
+    company_name: Optional[str],
+) -> list[dict[str, Any]]:
+    """Keep only articles whose title mentions the ticker or company name."""
+    needle_ticker = ticker.lower()
+    needle_company = _core_company_name(company_name) if company_name else ""
+    result = []
+    for item in news:
+        title = (item.get("title") or "").lower()
+        if needle_ticker in title or (needle_company and needle_company in title):
+            result.append(item)
+    return result
+
 
 # ---------------------------------------------------------------------------
 # Result types
@@ -198,6 +230,7 @@ class ResearchPipeline:
 
         market = self._fetch_market_data(ticker, tool_context)
         news = self._fetch_news(ticker, tool_context)
+        news = _filter_relevant_news(news, ticker, market.get("company_name"))
 
         return {
             "ticker": ticker,

@@ -27,6 +27,7 @@ class MarketSnapshot(TypedDict):
     return_1d: Optional[float]
     return_5d: Optional[float]
     sector: Optional[str]
+    company_name: Optional[str]
     earnings_in_days: Optional[int]
 
 
@@ -51,6 +52,7 @@ def _empty_snapshot() -> MarketSnapshot:
         "return_1d": None,
         "return_5d": None,
         "sector": None,
+        "company_name": None,
         "earnings_in_days": None,
     }
 
@@ -159,24 +161,32 @@ class AlpacaMarketDataProvider:
         return closes
 
     def fetch_context(self, ticker: str) -> dict[str, Any]:
+        sector: Optional[str] = None
+        company_name: Optional[str] = None
+        if self.finnhub_api_key:
+            profile = self._fetch_profile_from_finnhub(ticker)
+            raw_sector = profile.get("finnhubIndustry")
+            if isinstance(raw_sector, str) and raw_sector.strip():
+                sector = raw_sector.strip()
+            raw_name = profile.get("name")
+            if isinstance(raw_name, str) and raw_name.strip():
+                company_name = raw_name.strip()
         return {
-            "sector": self._fetch_sector_from_finnhub(ticker),
+            "sector": sector,
+            "company_name": company_name,
             "earnings_in_days": self._fetch_earnings_in_days_from_finnhub(ticker),
         }
 
-    def _fetch_sector_from_finnhub(self, ticker: str) -> Optional[str]:
+    def _fetch_profile_from_finnhub(self, ticker: str) -> dict[str, Any]:
         if not self.finnhub_api_key:
-            return None
+            return {}
         response = self._client.get(
             "https://finnhub.io/api/v1/stock/profile2",
             params={"symbol": ticker.upper(), "token": self.finnhub_api_key},
         )
         response.raise_for_status()
         payload = response.json()
-        sector = payload.get("finnhubIndustry")
-        if isinstance(sector, str) and sector.strip():
-            return sector.strip()
-        return None
+        return payload if isinstance(payload, dict) else {}
 
     def _fetch_earnings_in_days_from_finnhub(self, ticker: str) -> Optional[int]:
         if not self.finnhub_api_key:
@@ -252,6 +262,7 @@ def get_market_snapshot(
             context = {}
 
         snapshot["sector"] = context.get("sector")
+        snapshot["company_name"] = context.get("company_name")
         snapshot["earnings_in_days"] = _to_int_or_none(context.get("earnings_in_days"))
         return snapshot
     except Exception as exc:
