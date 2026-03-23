@@ -105,7 +105,7 @@ class AlpacaMarketDataProvider:
     ) -> None:
         self.api_key = api_key or os.getenv("ALPACA_API_KEY")
         self.secret_key = (
-            secret_key or os.getenv("ALPACA_SECRET_KEY") or os.getenv("ALPACA_API_SECRET")
+            secret_key or os.getenv("ALPACA_SECRET_KEY")
         )
         self.data_base_url = _resolve_alpaca_data_base_url(data_base_url)
         self.finnhub_api_key = finnhub_api_key or os.getenv("FINNHUB_API_KEY")

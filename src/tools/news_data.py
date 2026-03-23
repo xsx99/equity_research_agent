@@ -160,7 +160,7 @@ class AlpacaNewsProvider:
         timeout: float = 10.0,
     ) -> None:
         self.api_key = api_key or os.getenv("ALPACA_API_KEY")
-        self.secret_key = secret_key or os.getenv("ALPACA_SECRET_KEY")
+        self.secret_key = secret_key or os.getenv("ALPACA_SECRET_KEY") or os.getenv("ALPACA_API_SECRET")
         self.data_base_url = (
             data_base_url or os.getenv("ALPACA_DATA_BASE_URL") or "https://data.alpaca.markets"
         ).rstrip("/")
