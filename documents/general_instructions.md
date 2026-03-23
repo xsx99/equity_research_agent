@@ -19,3 +19,6 @@ run `source ~/.venv/bin/activate` before using Python
 
 ## unit tests
 always run unit tests after implementation, fix if there are any errors.
+
+## Smoke tests
+If the implementation involves hitting external API, or querying/upserting into DB, make a smoke test as well. Make sure the smoke test can be run stand alone to save API rate limits.
