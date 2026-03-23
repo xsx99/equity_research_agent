@@ -47,14 +47,14 @@ class RecentTradesTool(BaseTool):
     name = "query_recent_trades"
 
     @property
-    def anthropic_schema(self) -> dict[str, Any]:
+    def schema(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "description": (
                 "Query recent insider trades from the database. "
                 "Optionally filter by transaction type (P=purchase, S=sale) and minimum value."
             ),
-            "input_schema": {
+            "parameters": {
                 "type": "object",
                 "properties": {
                     "days": {
@@ -101,11 +101,11 @@ class TradesByTickerTool(BaseTool):
     name = "query_trades_by_ticker"
 
     @property
-    def anthropic_schema(self) -> dict[str, Any]:
+    def schema(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "description": "Query all insider trades for a specific stock ticker.",
-            "input_schema": {
+            "parameters": {
                 "type": "object",
                 "properties": {
                     "ticker": {
@@ -151,11 +151,11 @@ class TradesByInsiderTool(BaseTool):
     name = "query_trades_by_insider"
 
     @property
-    def anthropic_schema(self) -> dict[str, Any]:
+    def schema(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "description": "Query the trading history for a specific insider (partial name match).",
-            "input_schema": {
+            "parameters": {
                 "type": "object",
                 "properties": {
                     "name": {
@@ -197,11 +197,11 @@ class LargeTransactionsTool(BaseTool):
     name = "query_large_transactions"
 
     @property
-    def anthropic_schema(self) -> dict[str, Any]:
+    def schema(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "description": "Query insider transactions above a minimum dollar value.",
-            "input_schema": {
+            "parameters": {
                 "type": "object",
                 "properties": {
                     "min_value": {
@@ -247,14 +247,14 @@ class ClusterActivityTool(BaseTool):
     name = "query_cluster_activity"
 
     @property
-    def anthropic_schema(self) -> dict[str, Any]:
+    def schema(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "description": (
                 "Detect stocks where multiple insiders traded within a time window. "
                 "Returns tickers with their insider count and individual trades."
             ),
-            "input_schema": {
+            "parameters": {
                 "type": "object",
                 "properties": {
                     "days": {
@@ -315,14 +315,14 @@ class SearchFilingsTool(BaseTool):
     name = "search_filings"
 
     @property
-    def anthropic_schema(self) -> dict[str, Any]:
+    def schema(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "description": (
                 "Search insider trading filings by ticker symbol, company name, "
                 "or insider name (partial match)."
             ),
-            "input_schema": {
+            "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {

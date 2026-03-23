@@ -213,7 +213,7 @@ def _should_use_gemini_backend(model_name: str) -> bool:
 
 def _get_google_api_key() -> Optional[str]:
     """Resolve the Google API key from env first, then app config."""
-    return getattr(app_config, "GOOGLE_API_KEY", None)
+    return os.getenv("GOOGLE_API_KEY") or getattr(app_config, "GOOGLE_API_KEY", None)
 
 
 def _build_phi_model(model_name: str) -> Any:

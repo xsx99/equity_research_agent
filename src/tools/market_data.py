@@ -12,6 +12,7 @@ from src.tools.base import BaseTool, ToolError
 from src.tools.context import ToolContext
 
 logger = get_logger(__name__)
+DEFAULT_ALPACA_DATA_BASE_URL = "https://data.alpaca.markets"
 
 
 # ---------------------------------------------------------------------------
@@ -71,6 +72,19 @@ def _to_int_or_none(value: Any) -> Optional[int]:
         return None
 
 
+def _resolve_alpaca_data_base_url(data_base_url: Optional[str]) -> str:
+    raw_url = (
+        data_base_url or os.getenv("ALPACA_DATA_BASE_URL") or DEFAULT_ALPACA_DATA_BASE_URL
+    ).rstrip("/")
+    normalized_url = raw_url.removesuffix("/v2")
+    if normalized_url in {
+        "https://api.alpaca.markets",
+        "https://paper-api.alpaca.markets",
+    }:
+        return DEFAULT_ALPACA_DATA_BASE_URL
+    return normalized_url
+
+
 # ---------------------------------------------------------------------------
 # Alpaca + Finnhub provider
 # ---------------------------------------------------------------------------
@@ -90,10 +104,10 @@ class AlpacaMarketDataProvider:
         timeout: float = 10.0,
     ) -> None:
         self.api_key = api_key or os.getenv("ALPACA_API_KEY")
-        self.secret_key = secret_key or os.getenv("ALPACA_SECRET_KEY")
-        self.data_base_url = (
-            data_base_url or os.getenv("ALPACA_DATA_BASE_URL") or "https://data.alpaca.markets"
-        ).rstrip("/")
+        self.secret_key = (
+            secret_key or os.getenv("ALPACA_SECRET_KEY") or os.getenv("ALPACA_API_SECRET")
+        )
+        self.data_base_url = _resolve_alpaca_data_base_url(data_base_url)
         self.finnhub_api_key = finnhub_api_key or os.getenv("FINNHUB_API_KEY")
         self._client = client or httpx.Client(timeout=timeout)
         self._owns_client = client is None
@@ -108,11 +122,15 @@ class AlpacaMarketDataProvider:
 
     def fetch_daily_closes(self, ticker: str, lookback_days: int) -> list[float]:
         symbol = ticker.upper()
+        end = datetime.now(timezone.utc).replace(microsecond=0)
+        start = end - timedelta(days=max(lookback_days * 3, 10))
         response = self._client.get(
             f"{self.data_base_url}/v2/stocks/bars",
             params={
                 "symbols": symbol,
                 "timeframe": "1Day",
+                "start": start.isoformat(),
+                "end": end.isoformat(),
                 "limit": max(lookback_days, 2),
                 "adjustment": "split",
                 "feed": "iex",
@@ -262,7 +280,7 @@ class MarketDataTool(BaseTool):
     name = "get_market_snapshot"
 
     @property
-    def anthropic_schema(self) -> dict[str, Any]:
+    def schema(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "description": (
@@ -270,7 +288,7 @@ class MarketDataTool(BaseTool):
                 "Returns last_price, 1-day return, 5-day return, sector, "
                 "and days until the next earnings announcement."
             ),
-            "input_schema": {
+            "parameters": {
                 "type": "object",
                 "properties": {
                     "ticker": {

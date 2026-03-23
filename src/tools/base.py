@@ -22,8 +22,8 @@ class BaseTool(abc.ABC):
     Each concrete tool must:
 
     1. Declare a unique :attr:`name` class attribute.
-    2. Implement :attr:`anthropic_schema` returning the Anthropic tool-use
-       schema dict (name, description, input_schema).
+    2. Implement :attr:`schema` returning a provider-neutral tool schema
+       dict (name, description, parameters).
     3. Implement :meth:`run` to execute the tool logic given parsed input
        and a per-request :class:`~src.tools.context.ToolContext`.
     """
@@ -32,14 +32,14 @@ class BaseTool(abc.ABC):
 
     @property
     @abc.abstractmethod
-    def anthropic_schema(self) -> dict[str, Any]:
+    def schema(self) -> dict[str, Any]:
         """
-        Return the Anthropic tool-use schema dict::
+        Return the provider-neutral tool schema dict::
 
             {
                 "name": "tool_name",
                 "description": "...",
-                "input_schema": {
+                "parameters": {
                     "type": "object",
                     "properties": {...},
                     "required": [...],
@@ -47,6 +47,35 @@ class BaseTool(abc.ABC):
             }
         """
         ...
+
+    @property
+    def anthropic_schema(self) -> dict[str, Any]:
+        """Return the Anthropic tool-use schema derived from :attr:`schema`."""
+        schema = self.schema
+        return {
+            "name": schema["name"],
+            "description": schema["description"],
+            "input_schema": schema["parameters"],
+        }
+
+    @property
+    def openai_schema(self) -> dict[str, Any]:
+        """Return the OpenAI function schema derived from :attr:`schema`."""
+        return {
+            "type": "function",
+            "function": self.schema,
+        }
+
+    def schema_for(self, provider: str) -> dict[str, Any]:
+        """Return the tool schema adapted for the requested provider."""
+        normalized_provider = provider.strip().lower()
+        if normalized_provider in {"generic", "default", "gemini", "google"}:
+            return self.schema
+        if normalized_provider == "anthropic":
+            return self.anthropic_schema
+        if normalized_provider == "openai":
+            return self.openai_schema
+        raise ValueError(f"Unsupported tool schema provider '{provider}'.")
 
     @abc.abstractmethod
     def run(self, input: dict[str, Any], context: ToolContext) -> Any:

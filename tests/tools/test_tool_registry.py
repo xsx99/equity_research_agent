@@ -19,11 +19,11 @@ class _EchoTool(BaseTool):
     name = "echo"
 
     @property
-    def anthropic_schema(self) -> dict[str, Any]:
+    def schema(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "description": "Echoes input.",
-            "input_schema": {"type": "object", "properties": {}, "required": []},
+            "parameters": {"type": "object", "properties": {}, "required": []},
         }
 
     def run(self, input: dict[str, Any], context: ToolContext) -> Any:
@@ -34,11 +34,11 @@ class _FailTool(BaseTool):
     name = "fail"
 
     @property
-    def anthropic_schema(self) -> dict[str, Any]:
+    def schema(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "description": "Always raises ToolError.",
-            "input_schema": {"type": "object", "properties": {}, "required": []},
+            "parameters": {"type": "object", "properties": {}, "required": []},
         }
 
     def run(self, input: dict[str, Any], context: ToolContext) -> Any:
@@ -97,13 +97,44 @@ def test_contains():
     assert "missing" not in reg
 
 
-def test_schemas_returns_anthropic_schemas():
+def test_schemas_returns_generic_schemas():
     reg = ToolRegistry()
     reg.register(_EchoTool())
     schemas = reg.schemas()
     assert len(schemas) == 1
     assert schemas[0]["name"] == "echo"
+    assert "parameters" in schemas[0]
+
+
+def test_schemas_returns_anthropic_schemas_when_requested():
+    reg = ToolRegistry()
+    reg.register(_EchoTool())
+
+    schemas = reg.schemas(provider="anthropic")
+
+    assert len(schemas) == 1
+    assert schemas[0]["name"] == "echo"
     assert "input_schema" in schemas[0]
+
+
+def test_schemas_returns_openai_schemas_when_requested():
+    reg = ToolRegistry()
+    reg.register(_EchoTool())
+
+    schemas = reg.schemas(provider="openai")
+
+    assert len(schemas) == 1
+    assert schemas[0]["type"] == "function"
+    assert schemas[0]["function"]["name"] == "echo"
+    assert "parameters" in schemas[0]["function"]
+
+
+def test_schemas_unknown_provider_raises():
+    reg = ToolRegistry()
+    reg.register(_EchoTool())
+
+    with pytest.raises(ValueError, match="Unsupported tool schema provider"):
+        reg.schemas(provider="unknown")
 
 
 def test_dispatch_calls_run():

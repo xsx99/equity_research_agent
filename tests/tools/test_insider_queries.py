@@ -227,7 +227,7 @@ def test_search_filings_returns_list():
 
 
 # ---------------------------------------------------------------------------
-# Anthropic schema shape
+# Tool schema shape
 # ---------------------------------------------------------------------------
 
 
@@ -242,10 +242,28 @@ def test_search_filings_returns_list():
         SearchFilingsTool,
     ],
 )
-def test_anthropic_schema_has_required_keys(tool_cls):
+def test_schema_has_required_keys(tool_cls):
     tool = tool_cls()
-    schema = tool.anthropic_schema
+    schema = tool.schema
     assert schema["name"] == tool.name
     assert "description" in schema
-    assert "input_schema" in schema
-    assert schema["input_schema"]["type"] == "object"
+    assert "parameters" in schema
+    assert schema["parameters"]["type"] == "object"
+
+
+@pytest.mark.parametrize(
+    "tool_cls",
+    [
+        RecentTradesTool,
+        TradesByTickerTool,
+        TradesByInsiderTool,
+        LargeTransactionsTool,
+        ClusterActivityTool,
+        SearchFilingsTool,
+    ],
+)
+def test_anthropic_schema_is_derived_from_generic_schema(tool_cls):
+    tool = tool_cls()
+    assert tool.anthropic_schema["name"] == tool.schema["name"]
+    assert tool.anthropic_schema["description"] == tool.schema["description"]
+    assert tool.anthropic_schema["input_schema"] == tool.schema["parameters"]

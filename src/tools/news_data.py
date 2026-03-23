@@ -273,14 +273,14 @@ class NewsDataTool(BaseTool):
     name = "get_recent_news"
 
     @property
-    def anthropic_schema(self) -> dict[str, Any]:
+    def schema(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "description": (
                 "Fetch recent news headlines and summaries for a stock ticker. "
                 "Returns up to 5 news items, each with a title and summary."
             ),
-            "input_schema": {
+            "parameters": {
                 "type": "object",
                 "properties": {
                     "ticker": {

@@ -41,9 +41,9 @@ class ToolRegistry:
             raise KeyError(f"No tool named '{name}' is registered.")
         return self._tools[name]
 
-    def schemas(self) -> list[dict[str, Any]]:
-        """Return all Anthropic tool-use schemas for passing to the API."""
-        return [tool.anthropic_schema for tool in self._tools.values()]
+    def schemas(self, provider: str = "generic") -> list[dict[str, Any]]:
+        """Return all tool schemas in the requested provider format."""
+        return [tool.schema_for(provider) for tool in self._tools.values()]
 
     def dispatch(
         self,
