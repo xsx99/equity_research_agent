@@ -19,6 +19,7 @@ from src.core import config as app_config  # noqa: F401  # loads repo-root .env
 from src.db.connection import get_session
 from src.db.models import InsiderTrade
 from src.tools import ToolContext, build_research_tool_registry
+from src.tools.news_data import MarketauxNewsProvider
 
 SmokeStatus = Literal["passed", "failed", "skipped"]
 
@@ -131,6 +132,38 @@ def _smoke_market_tool(registry, ticker: str) -> SmokeCheckResult:
     )
 
 
+def _news_items_result(
+    name: str,
+    *,
+    ticker: str,
+    items: Any,
+    source_label: str,
+) -> SmokeCheckResult:
+    if not items:
+        return _failed(
+            name,
+            f"No news items returned for {ticker} from {source_label}.",
+            preview=items,
+        )
+    if not isinstance(items, list):
+        return _failed(
+            name,
+            f"News payload from {source_label} is invalid; expected a list of items.",
+            preview=items,
+        )
+    if not all(isinstance(item, dict) and item.get("title") for item in items):
+        return _failed(
+            name,
+            f"News payload from {source_label} is invalid; expected non-empty titles.",
+            preview=items,
+        )
+    return _passed(
+        name,
+        f"Fetched {len(items)} live news item(s) for {ticker} from {source_label}.",
+        preview=items[:2],
+    )
+
+
 def _smoke_news_tool(registry, ticker: str, limit: int) -> SmokeCheckResult:
     if not _configured_news_providers():
         return _failed(
@@ -145,24 +178,40 @@ def _smoke_news_tool(registry, ticker: str, limit: int) -> SmokeCheckResult:
         {"ticker": ticker, "limit": limit},
         ToolContext(),
     )
-    if not items:
-        providers = _configured_news_providers()
-        provider_hint = ", ".join(providers) if providers else "none"
-        return _failed(
-            "get_recent_news",
-            f"No news items returned for {ticker}. Configured providers: {provider_hint}.",
-            preview=items,
-        )
-    if not all(isinstance(item, dict) and item.get("title") for item in items):
-        return _failed(
-            "get_recent_news",
-            "News payload shape is invalid; expected non-empty titles.",
-            preview=items,
-        )
-    return _passed(
+    providers = _configured_news_providers()
+    provider_hint = ", ".join(providers) if providers else "none"
+    return _news_items_result(
         "get_recent_news",
-        f"Fetched {len(items)} live news item(s) for {ticker}.",
-        preview=items[:2],
+        ticker=ticker,
+        items=items,
+        source_label=f"configured providers ({provider_hint})",
+    )
+
+
+def _smoke_marketaux_news_tool(ticker: str, limit: int) -> SmokeCheckResult:
+    if not os.getenv("MARKETAUX_API_KEY"):
+        return _skipped(
+            "marketaux_recent_news",
+            "Skipped because MARKETAUX_API_KEY is not configured.",
+        )
+
+    bounded_limit = max(1, min(limit, 5))
+    provider = MarketauxNewsProvider(timeout=20.0)
+    try:
+        items = provider.fetch_recent(ticker=ticker, limit=bounded_limit)
+    except Exception as exc:
+        return _failed(
+            "marketaux_recent_news",
+            f"Marketaux news check failed for {ticker}: {exc}",
+        )
+    finally:
+        provider.close()
+
+    return _news_items_result(
+        "marketaux_recent_news",
+        ticker=ticker,
+        items=items,
+        source_label="Marketaux",
     )
 
 
@@ -294,6 +343,7 @@ def main() -> int:
     results = [
         _smoke_market_tool(registry, args.ticker.upper()),
         _smoke_news_tool(registry, args.ticker.upper(), args.news_limit),
+        _smoke_marketaux_news_tool(args.ticker.upper(), args.news_limit),
     ]
 
     if args.skip_db:

@@ -47,6 +47,7 @@ python scripts/run_tool_smoke_test.py --ticker AAPL
 This runs the real tool registry against live dependencies:
 - `get_market_snapshot` against Alpaca market data
 - `get_recent_news` against the configured news providers
+- `marketaux_recent_news` as a dedicated direct Marketaux provider check when `MARKETAUX_API_KEY` is set
 - all database-backed insider query tools against the live `insider_trades` table
 
 ### External Tools Only
@@ -63,4 +64,5 @@ docker compose exec scheduler python scripts/run_tool_smoke_test.py --ticker AAP
 ### Failure Semantics
 - Missing Alpaca credentials or unreachable market data will fail `get_market_snapshot`.
 - Missing news provider credentials or zero returned headlines will fail `get_recent_news`.
+- Missing `MARKETAUX_API_KEY` will skip `marketaux_recent_news`; a configured but failing/empty Marketaux response will fail it.
 - Unreachable Postgres or an empty `insider_trades` table will fail the DB-backed tool checks unless `--skip-db` is set.
