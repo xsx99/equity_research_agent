@@ -27,9 +27,11 @@ Implement the evaluation pipeline (`eval_runs.py` equivalent) that closes the re
 | File | What is added |
 |------|---------------|
 | `src/research/repository.py` | `get_eligible_runs()`, `upsert_eval_result()` |
-| `src/tools/market_data.py` | `fetch_return_over_range(ticker, start_date, end_date, provider=None)` helper |
+| `src/tools/market_data.py` | `fetch_daily_closes_range` method on protocol + `AlpacaMarketDataProvider`; `fetch_return_over_range(ticker, start_date, end_date, provider=None)` helper |
 
 No new packages, no new ORM models — all reuse existing `EvalResult`, `ResearchRun`, `ResearchOutput`, `ResearchTimeHorizon`, `EvalOutcomeLabel`.
+
+The `MarketDataProvider` protocol and `AlpacaMarketDataProvider` are extended with a new method `fetch_daily_closes_range(ticker, start_date, end_date)` to support historical date-range queries (the existing `fetch_daily_closes` only accepts `lookback_days` anchored to now and cannot be used for historical ranges).
 
 ---
 
@@ -41,6 +43,8 @@ No new packages, no new ORM models — all reuse existing `EvalResult`, `Researc
 - `research_runs.as_of + horizon_days <= as_of_cutoff` (window has fully elapsed)
 
 Returns a list of `(ResearchRun, ResearchOutput)` tuples. Runs without a valid output or horizon are silently skipped with a warning log — no exception raised.
+
+`get_eligible_runs` returns **all** eligible runs including those that already have an `EvalResult` row — re-evaluation is valid given upsert semantics. There is no filter to skip already-evaluated runs.
 
 ---
 
@@ -61,7 +65,17 @@ The pipeline does **not** commit; callers own transaction boundaries (same patte
 
 ## `fetch_return_over_range`
 
-New helper in `src/tools/market_data.py`:
+### New protocol method
+
+```python
+class MarketDataProvider(Protocol):
+    def fetch_daily_closes_range(self, ticker: str, start_date: date, end_date: date) -> list[float]:
+        """Return close prices in ascending time order for bars within [start_date, end_date]."""
+```
+
+`AlpacaMarketDataProvider` implements this by calling the Alpaca `/v2/stocks/bars` endpoint with explicit `start`/`end` ISO date params (same endpoint as `fetch_daily_closes`, different parameterization).
+
+### New module-level helper
 
 ```python
 def fetch_return_over_range(
@@ -72,12 +86,14 @@ def fetch_return_over_range(
 ) -> Optional[float]:
     """Return (end_close / start_close) - 1 using daily close prices.
 
-    Returns None if prices cannot be fetched or fewer than 2 bars are available.
+    - start_close: close of the first available trading day on or after start_date
+    - end_close:   close of the last available trading day on or before end_date
+    - Returns None if fewer than 2 bars are available in the range, or on any provider error.
     Uses AlpacaMarketDataProvider by default.
     """
 ```
 
-Reuses the existing `AlpacaMarketDataProvider.fetch_daily_closes` under the hood with `start`/`end` date params. Returns `None` gracefully on any provider error.
+**Weekend/holiday handling (MVP):** Horizon elapse is measured in calendar days (e.g., `as_of + 1 day` for `1d`). `fetch_return_over_range` uses the first available bar on/after `start_date` and the last available bar on/before `end_date`. If the range yields fewer than 2 bars (e.g., `as_of` is a Friday and `end_date` is Saturday with no Saturday bar), the function returns `None` and logs a warning — the eval is still written with `NULL` returns and `NULL` outcome_label. This is an accepted MVP limitation.
 
 ---
 
@@ -97,7 +113,26 @@ class EvalPipeline:
     def run_single(self, run_id: uuid.UUID) -> EvalTickerResult: ...
 ```
 
-`EvalPipelineResult` and `EvalTickerResult` are dataclasses (mirrors `PipelineResult` / `TickerResult`).
+`run_single` bypasses the eligibility window check — it force-evaluates the run regardless of whether the horizon has elapsed. This is useful for manual testing and debugging. `ticker` is read from `ResearchRun.ticker`. If the run has no output row, it returns `EvalTickerResult(success=False, error="no_output_row")`.
+
+### Dataclass fields
+
+```python
+@dataclass
+class EvalTickerResult:
+    run_id: uuid.UUID
+    ticker: str
+    success: bool
+    outcome_label: Optional[str] = None
+    error: Optional[str] = None
+
+@dataclass
+class EvalPipelineResult:
+    evaluated: int = 0
+    failed: int = 0
+    skipped: int = 0
+    ticker_results: list[EvalTickerResult] = field(default_factory=list)
+```
 
 ---
 
@@ -110,7 +145,7 @@ Pure function `apply_rule_v1(decision, realized_return, benchmark_return, neutra
 | `bullish` | `realized_return > 0` AND `≥ benchmark_return` | `correct` |
 | `bullish` | `realized_return < 0` | `wrong_direction` |
 | `bullish` | otherwise | `partially_correct` |
-| `bearish` | `realized_return < 0` AND `≤ benchmark_return` | `correct` |
+| `bearish` | `realized_return < 0` AND `≤ benchmark_return` | `correct` | (intentional: if benchmark also fell further, bearish was correct even in a down market) |
 | `bearish` | `realized_return > 0` | `wrong_direction` |
 | `bearish` | otherwise | `partially_correct` |
 | `neutral`/`abstain` | `abs(realized_return) > neutral_threshold` | `wrong_direction` |
