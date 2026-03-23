@@ -8,7 +8,7 @@
 
 ## Status Snapshot
 - Done: PR1 – Schema & ORM Foundation
-- Mostly done: PR2 – Data Sources & LLM Skeleton
+- Done: PR2 – Data Sources & LLM Skeleton
 - Planned: PR3 – Research Pipeline Implementation
 - Planned: PR4 – Evaluation Pipeline
 - Planned: PR5 – Web UI (Server-Rendered FastAPI)
@@ -33,7 +33,7 @@
 - The prompt now lives at `src/prompts/templates/research_v1.yaml`. `src/prompts/registry.py` lazily loads YAML definitions into `Prompt` objects with `id`, `version`, `template`, and `description`.
 - `src/agents/research.py` is implemented. The default runner uses `Phidata` as a thin provider-aware model wrapper; `gemini*` model IDs use the Gemini-backed path and other model IDs fall back to `OpenAIChat`. It does not currently expose the repo `ToolRegistry` into `phi.agent.Agent` for model-driven tool-calling. The default model name is `RESEARCH_MODEL_NAME` or `gemini-2.5-flash-lite`, and Google auth is sourced from `GOOGLE_API_KEY`.
 - `requirements.txt` includes `httpx`, `pydantic`, `PyYAML`, `phidata`, `openai`, `google-generativeai`, `alpaca-py`, and `finnhub-python`. Marketaux is used through direct HTTP calls instead of a separate SDK dependency.
-- Current test coverage includes prompt loading/rendering, JSON coercion, Pydantic schema validation, `ToolRegistry`, and insider query tools. Provider-specific tests for `market_data.py` and `news_data.py` are still missing.
+- Current test coverage includes prompt loading/rendering, JSON coercion, Pydantic schema validation, `ToolRegistry`, and insider query tools. Added smoke tests for `market_data.py`, `news_data.py` and `insider_queries.py`.
 
 ## PR3 – Research Pipeline Implementation
 - Not started. There is no `src/research/` package or `run_research.py` stub in the repo today, so this PR needs to create the orchestration layer from scratch.
