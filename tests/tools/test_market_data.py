@@ -30,10 +30,9 @@ class _CapturingClient:
         return _StubResponse(self.payload)
 
 
-def test_alpaca_provider_accepts_api_secret_env_alias(monkeypatch):
+def test_alpaca_provider_reads_secret_key_from_env(monkeypatch):
     monkeypatch.setenv("ALPACA_API_KEY", "test-key")
-    monkeypatch.delenv("ALPACA_SECRET_KEY", raising=False)
-    monkeypatch.setenv("ALPACA_API_SECRET", "test-secret")
+    monkeypatch.setenv("ALPACA_SECRET_KEY", "test-secret")
 
     provider = AlpacaMarketDataProvider(client=_CapturingClient({"bars": {"AAPL": []}}))
 
