@@ -26,7 +26,7 @@ from src.agents.research import DEFAULT_MODEL_NAME, ResearchAgent
 from src.core.logging import get_logger
 from src.db.connection import get_session
 from src.prompts.registry import PromptRegistry
-from src.research.pipeline import ResearchPipeline
+from src.research.pipeline import PipelineResult, ResearchPipeline
 from src.tools import build_research_tool_registry
 
 logger = get_logger(__name__)
@@ -59,15 +59,11 @@ def main() -> int:
             ticker = args.ticker.upper()
             logger.info("run_research_once_single_ticker", ticker=ticker)
             result = pipeline.run_ticker(ticker)
-            pipeline_result = type(
-                "PipelineResult",
-                (),
-                {
-                    "succeeded": 1 if result.success else 0,
-                    "failed": 0 if result.success else 1,
-                    "ticker_results": [result],
-                },
-            )()
+            pipeline_result = PipelineResult(
+                succeeded=1 if result.success else 0,
+                failed=0 if result.success else 1,
+                ticker_results=[result],
+            )
         else:
             logger.info("run_research_once_all_tickers")
             pipeline_result = pipeline.run_all()

@@ -24,6 +24,7 @@ class NewsItem(TypedDict):
 
     title: str
     summary: str
+    published_at: Optional[str]  # ISO-8601 date string, e.g. "2026-03-21"
 
 
 class NewsProvider(Protocol):
@@ -38,11 +39,15 @@ class NewsProvider(Protocol):
 # ---------------------------------------------------------------------------
 
 
-def _normalized_news_item(title: Optional[str], summary: Optional[str]) -> Optional[NewsItem]:
+def _normalized_news_item(
+    title: Optional[str],
+    summary: Optional[str],
+    published_at: Optional[str] = None,
+) -> Optional[NewsItem]:
     clean_title = (title or "").strip()
     if not clean_title:
         return None
-    return {"title": clean_title, "summary": (summary or "").strip()}
+    return {"title": clean_title, "summary": (summary or "").strip(), "published_at": published_at}
 
 
 # ---------------------------------------------------------------------------
@@ -86,7 +91,11 @@ class FinnhubNewsProvider:
         for row in payload:
             if not isinstance(row, dict):
                 continue
-            item = _normalized_news_item(row.get("headline"), row.get("summary"))
+            published_at: Optional[str] = None
+            ts = row.get("datetime")
+            if isinstance(ts, (int, float)) and ts > 0:
+                published_at = datetime.fromtimestamp(ts, tz=timezone.utc).date().isoformat()
+            item = _normalized_news_item(row.get("headline"), row.get("summary"), published_at)
             if item:
                 items.append(item)
             if len(items) >= limit:
@@ -115,6 +124,7 @@ class MarketauxNewsProvider:
     def fetch_recent(self, ticker: str, limit: int) -> list[NewsItem]:
         if not self.api_key:
             raise RuntimeError("missing_marketaux_api_key")
+        today = datetime.now(timezone.utc).date()
         response = self._client.get(
             "https://api.marketaux.com/v1/news/all",
             params={
@@ -122,6 +132,7 @@ class MarketauxNewsProvider:
                 "symbols": ticker.upper(),
                 "language": "en",
                 "filter_entities": "true",
+                "published_after": (today - timedelta(days=7)).isoformat(),
                 "limit": limit,
             },
         )
@@ -135,7 +146,11 @@ class MarketauxNewsProvider:
         for row in rows:
             if not isinstance(row, dict):
                 continue
-            item = _normalized_news_item(row.get("title"), row.get("description"))
+            published_at: Optional[str] = None
+            raw_date = row.get("published_at")
+            if isinstance(raw_date, str) and raw_date:
+                published_at = raw_date[:10]  # keep YYYY-MM-DD portion
+            item = _normalized_news_item(row.get("title"), row.get("description"), published_at)
             if item:
                 items.append(item)
             if len(items) >= limit:
@@ -176,9 +191,16 @@ class AlpacaNewsProvider:
         }
 
     def fetch_recent(self, ticker: str, limit: int) -> list[NewsItem]:
+        today = datetime.now(timezone.utc).date()
         response = self._client.get(
             f"{self.data_base_url}/v1beta1/news",
-            params={"symbols": ticker.upper(), "limit": limit},
+            params={
+                "symbols": ticker.upper(),
+                "limit": limit,
+                "start": (today - timedelta(days=7)).isoformat(),
+                "end": today.isoformat(),
+                "sort": "desc",
+            },
             headers=self._auth_headers(),
         )
         response.raise_for_status()
@@ -191,7 +213,11 @@ class AlpacaNewsProvider:
         for row in rows:
             if not isinstance(row, dict):
                 continue
-            item = _normalized_news_item(row.get("headline"), row.get("summary"))
+            published_at: Optional[str] = None
+            raw_date = row.get("created_at")
+            if isinstance(raw_date, str) and raw_date:
+                published_at = raw_date[:10]
+            item = _normalized_news_item(row.get("headline"), row.get("summary"), published_at)
             if item:
                 items.append(item)
             if len(items) >= limit:

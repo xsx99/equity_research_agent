@@ -54,6 +54,7 @@ class ResearchNewsItem(BaseModel):
 
     title: str
     summary: str = ""
+    published_at: Optional[str] = None  # ISO date string, e.g. "2026-03-21"
 
 
 class ResearchInputPayload(BaseModel):

@@ -24,10 +24,8 @@ from sqlalchemy.orm import Session
 from src.agents.research import ResearchAgent
 from src.core.logging import get_logger
 from src.db.models.research import ResearchRun
-from src.prompts.registry import PromptRegistry
 from src.research import repository
 from src.tools import ToolContext, ToolRegistry, build_research_tool_registry
-from src.tools.base import ToolError
 
 logger = get_logger(__name__)
 
@@ -155,7 +153,6 @@ class ResearchPipeline:
 
             # 3. Mark running.
             repository.mark_run_running(self.session, run)
-            self.session.flush()
 
             # 4. Call the LLM agent.
             tool_context = ToolContext(session=self.session)
@@ -223,7 +220,7 @@ class ResearchPipeline:
             return self.tool_registry.dispatch(
                 "get_market_snapshot", {"ticker": ticker}, context
             )
-        except (ToolError, Exception) as exc:
+        except Exception as exc:
             logger.warning(
                 "research_pipeline_market_data_failed",
                 ticker=ticker,
@@ -237,7 +234,7 @@ class ResearchPipeline:
             return self.tool_registry.dispatch(
                 "get_recent_news", {"ticker": ticker, "limit": 5}, context
             )
-        except (ToolError, Exception) as exc:
+        except Exception as exc:
             logger.warning(
                 "research_pipeline_news_failed",
                 ticker=ticker,

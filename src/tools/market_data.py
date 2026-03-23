@@ -132,6 +132,7 @@ class AlpacaMarketDataProvider:
                 "start": start.isoformat(),
                 "end": end.isoformat(),
                 "limit": max(lookback_days, 2),
+                "sort": "desc",
                 "adjustment": "split",
                 "feed": "iex",
             },
