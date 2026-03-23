@@ -1,319 +1,46 @@
 #!/usr/bin/env python3
-"""Run live smoke checks against the research tool registry."""
+"""Run live smoke checks against the research tool registry.
+
+Use --only to target a specific group instead of running all checks:
+  python scripts/run_tool_smoke_test.py --only market
+  python scripts/run_tool_smoke_test.py --only news
+
+Or run individual smoke modules directly (supports their own --only flag):
+  python scripts/smoke/market.py --only alpaca_bars
+  python scripts/smoke/news.py --only finnhub_news marketaux_news
+  python scripts/smoke/db.py
+"""
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
-from datetime import date, timedelta
-import json
-import os
-from pathlib import Path
 import sys
-from typing import Any, Literal
+from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from sqlalchemy import desc, func, text
+from src.core import config as app_config  # noqa: F401
+from src.tools import build_research_tool_registry
 
-from src.core import config as app_config  # noqa: F401  # loads repo-root .env
-from src.db.connection import get_session
-from src.db.models import InsiderTrade
-from src.tools import ToolContext, build_research_tool_registry
-from src.tools.news_data import MarketauxNewsProvider
+from scripts.smoke import SmokeCheckResult, _failed, _print_results
+from scripts.smoke.db import _build_db_smoke_inputs, _smoke_db_tools
+from scripts.smoke.market import (
+    _smoke_alpaca_bars,
+    _smoke_finnhub_earnings,
+    _smoke_finnhub_sector,
+    _smoke_market_snapshot,
+)
+from scripts.smoke.news import (
+    _smoke_alpaca_news,
+    _smoke_finnhub_news,
+    _smoke_marketaux_news,
+    _smoke_news_chain,
+)
 
-SmokeStatus = Literal["passed", "failed", "skipped"]
-
-
-@dataclass
-class SmokeCheckResult:
-    name: str
-    status: SmokeStatus
-    details: str
-    preview: Any | None = None
-
-
-@dataclass
-class DbSmokeInputs:
-    ticker: str
-    insider_query: str
-    search_query: str
-    min_value: float
-    days: int
-    min_insiders: int
-
-
-def _passed(name: str, details: str, preview: Any | None = None) -> SmokeCheckResult:
-    return SmokeCheckResult(name=name, status="passed", details=details, preview=preview)
-
-
-def _failed(name: str, details: str, preview: Any | None = None) -> SmokeCheckResult:
-    return SmokeCheckResult(name=name, status="failed", details=details, preview=preview)
-
-
-def _skipped(name: str, details: str) -> SmokeCheckResult:
-    return SmokeCheckResult(name=name, status="skipped", details=details)
-
-
-def _configured_news_providers() -> list[str]:
-    providers: list[str] = []
-    if os.getenv("FINNHUB_API_KEY"):
-        providers.append("Finnhub")
-    if os.getenv("MARKETAUX_API_KEY"):
-        providers.append("Marketaux")
-    if os.getenv("ALPACA_API_KEY") and (
-        os.getenv("ALPACA_SECRET_KEY") or os.getenv("ALPACA_API_SECRET")
-    ):
-        providers.append("Alpaca")
-    return providers
-
-
-def _preview(value: Any, max_chars: int = 280) -> str:
-    rendered = json.dumps(value, ensure_ascii=False, default=str)
-    if len(rendered) <= max_chars:
-        return rendered
-    return f"{rendered[: max_chars - 3]}..."
-
-
-def _print_results(results: list[SmokeCheckResult], *, as_json: bool) -> None:
-    if as_json:
-        print(
-            json.dumps(
-                [
-                    {
-                        "name": result.name,
-                        "status": result.status,
-                        "details": result.details,
-                        "preview": result.preview,
-                    }
-                    for result in results
-                ],
-                indent=2,
-                ensure_ascii=False,
-                default=str,
-            )
-        )
-        return
-
-    for result in results:
-        print(f"[{result.status.upper():7}] {result.name}: {result.details}")
-        if result.preview is not None:
-            print(f"          preview={_preview(result.preview)}")
-
-    passed = sum(result.status == "passed" for result in results)
-    failed = sum(result.status == "failed" for result in results)
-    skipped = sum(result.status == "skipped" for result in results)
-    print()
-    print(f"Summary: {passed} passed, {failed} failed, {skipped} skipped")
-
-
-def _smoke_market_tool(registry, ticker: str) -> SmokeCheckResult:
-    if not (
-        os.getenv("ALPACA_API_KEY")
-        and (os.getenv("ALPACA_SECRET_KEY") or os.getenv("ALPACA_API_SECRET"))
-    ):
-        return _failed(
-            "get_market_snapshot",
-            (
-                "Alpaca credentials are not configured. "
-                "Set ALPACA_API_KEY and ALPACA_SECRET_KEY or ALPACA_API_SECRET first."
-            ),
-        )
-    snapshot = registry.dispatch("get_market_snapshot", {"ticker": ticker}, ToolContext())
-    if snapshot.get("last_price") is None:
-        return _failed(
-            "get_market_snapshot",
-            "No live price returned. Check Alpaca credentials, network reachability, and market-data permissions.",
-            preview=snapshot,
-        )
-    return _passed(
-        "get_market_snapshot",
-        f"Fetched live market snapshot for {ticker}.",
-        preview=snapshot,
-    )
-
-
-def _news_items_result(
-    name: str,
-    *,
-    ticker: str,
-    items: Any,
-    source_label: str,
-) -> SmokeCheckResult:
-    if not items:
-        return _failed(
-            name,
-            f"No news items returned for {ticker} from {source_label}.",
-            preview=items,
-        )
-    if not isinstance(items, list):
-        return _failed(
-            name,
-            f"News payload from {source_label} is invalid; expected a list of items.",
-            preview=items,
-        )
-    if not all(isinstance(item, dict) and item.get("title") for item in items):
-        return _failed(
-            name,
-            f"News payload from {source_label} is invalid; expected non-empty titles.",
-            preview=items,
-        )
-    return _passed(
-        name,
-        f"Fetched {len(items)} live news item(s) for {ticker} from {source_label}.",
-        preview=items[:2],
-    )
-
-
-def _smoke_news_tool(registry, ticker: str, limit: int) -> SmokeCheckResult:
-    if not _configured_news_providers():
-        return _failed(
-            "get_recent_news",
-            (
-                "No news providers are configured. "
-                "Set FINNHUB_API_KEY, MARKETAUX_API_KEY, or Alpaca credentials first."
-            ),
-        )
-    items = registry.dispatch(
-        "get_recent_news",
-        {"ticker": ticker, "limit": limit},
-        ToolContext(),
-    )
-    providers = _configured_news_providers()
-    provider_hint = ", ".join(providers) if providers else "none"
-    return _news_items_result(
-        "get_recent_news",
-        ticker=ticker,
-        items=items,
-        source_label=f"configured providers ({provider_hint})",
-    )
-
-
-def _smoke_marketaux_news_tool(ticker: str, limit: int) -> SmokeCheckResult:
-    if not os.getenv("MARKETAUX_API_KEY"):
-        return _skipped(
-            "marketaux_recent_news",
-            "Skipped because MARKETAUX_API_KEY is not configured.",
-        )
-
-    bounded_limit = max(1, min(limit, 5))
-    provider = MarketauxNewsProvider(timeout=20.0)
-    try:
-        items = provider.fetch_recent(ticker=ticker, limit=bounded_limit)
-    except Exception as exc:
-        return _failed(
-            "marketaux_recent_news",
-            f"Marketaux news check failed for {ticker}: {exc}",
-        )
-    finally:
-        provider.close()
-
-    return _news_items_result(
-        "marketaux_recent_news",
-        ticker=ticker,
-        items=items,
-        source_label="Marketaux",
-    )
-
-
-def _build_db_smoke_inputs(base_days: int) -> DbSmokeInputs:
-    with get_session() as session:
-        session.execute(text("SELECT 1"))
-        trade = (
-            session.query(InsiderTrade)
-            .order_by(desc(InsiderTrade.filing_date), desc(InsiderTrade.id))
-            .first()
-        )
-        if trade is None:
-            raise RuntimeError("No rows found in insider_trades.")
-        filing_date = trade.filing_date or date.today()
-        days = max(base_days, (date.today() - filing_date).days + 1)
-        cutoff = date.today() - timedelta(days=days)
-        insider_count = (
-            session.query(func.count(func.distinct(InsiderTrade.insider_name)))
-            .filter(
-                InsiderTrade.ticker == trade.ticker,
-                InsiderTrade.filing_date >= cutoff,
-            )
-            .scalar()
-        ) or 1
-
-        insider_name = (trade.insider_name or trade.ticker or "").strip()
-        insider_query = insider_name.split()[0] if insider_name else trade.ticker
-        search_query = (trade.ticker or insider_query or "").strip()
-        min_value = float(trade.total_value) if trade.total_value is not None else 0.0
-
-        return DbSmokeInputs(
-            ticker=trade.ticker,
-            insider_query=insider_query,
-            search_query=search_query,
-            min_value=min_value,
-            days=days,
-            min_insiders=max(1, min(3, int(insider_count))),
-        )
-
-
-def _smoke_db_tools(registry, db_inputs: DbSmokeInputs) -> list[SmokeCheckResult]:
-    results: list[SmokeCheckResult] = []
-    with get_session() as session:
-        context = ToolContext(session=session)
-        checks = [
-            (
-                "query_recent_trades",
-                {"days": db_inputs.days},
-                f"Fetched recent insider trades within {db_inputs.days} day(s).",
-            ),
-            (
-                "query_trades_by_ticker",
-                {"ticker": db_inputs.ticker, "days": db_inputs.days},
-                f"Fetched insider trades for ticker {db_inputs.ticker}.",
-            ),
-            (
-                "query_trades_by_insider",
-                {"name": db_inputs.insider_query, "limit": 10},
-                f"Fetched insider trades for name fragment {db_inputs.insider_query!r}.",
-            ),
-            (
-                "query_large_transactions",
-                {"min_value": db_inputs.min_value, "days": db_inputs.days},
-                f"Fetched large transactions at or above ${db_inputs.min_value:,.2f}.",
-            ),
-            (
-                "query_cluster_activity",
-                {"days": db_inputs.days, "min_insiders": db_inputs.min_insiders},
-                (
-                    "Fetched cluster activity "
-                    f"with min_insiders={db_inputs.min_insiders} for the sampled window."
-                ),
-            ),
-            (
-                "search_filings",
-                {"query": db_inputs.search_query, "limit": 10},
-                f"Searched filings for {db_inputs.search_query!r}.",
-            ),
-        ]
-
-        for tool_name, payload, success_details in checks:
-            try:
-                result = registry.dispatch(tool_name, payload, context)
-            except Exception as exc:
-                results.append(_failed(tool_name, f"Execution failed: {exc}"))
-                continue
-            if not result:
-                results.append(
-                    _failed(
-                        tool_name,
-                        f"Tool returned no rows for payload {payload!r}.",
-                        preview=result,
-                    )
-                )
-                continue
-            preview = result[0] if isinstance(result, list) else result
-            results.append(_passed(tool_name, success_details, preview=preview))
-    return results
+_ALL_GROUPS = ("market", "news", "db")
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--ticker", default="AAPL", help="Ticker used for live market/news smoke checks.")
     parser.add_argument(
         "--news-limit",
@@ -328,9 +55,11 @@ def main() -> int:
         help="Minimum lookback window used when deriving DB-backed smoke inputs.",
     )
     parser.add_argument(
-        "--skip-db",
-        action="store_true",
-        help="Skip DB-backed insider query smoke checks.",
+        "--only",
+        nargs="+",
+        choices=_ALL_GROUPS,
+        metavar="GROUP",
+        help=f"Run only the specified group(s): {', '.join(_ALL_GROUPS)}. Defaults to all.",
     )
     parser.add_argument(
         "--json",
@@ -339,16 +68,24 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    groups: set[str] = set(args.only) if args.only else set(_ALL_GROUPS)
+    ticker = args.ticker.upper()
     registry = build_research_tool_registry()
-    results = [
-        _smoke_market_tool(registry, args.ticker.upper()),
-        _smoke_news_tool(registry, args.ticker.upper(), args.news_limit),
-        _smoke_marketaux_news_tool(args.ticker.upper(), args.news_limit),
-    ]
+    results: list[SmokeCheckResult] = []
 
-    if args.skip_db:
-        results.append(_skipped("database_tools", "Skipped by --skip-db."))
-    else:
+    if "market" in groups:
+        results.append(_smoke_alpaca_bars(ticker))
+        results.append(_smoke_finnhub_sector(ticker))
+        results.append(_smoke_finnhub_earnings(ticker))
+        results.append(_smoke_market_snapshot(registry, ticker))
+    if "news" in groups:
+        limit = max(1, min(args.news_limit, 5))
+        results.append(_smoke_finnhub_news(ticker, limit))
+        results.append(_smoke_marketaux_news(ticker, limit))
+        results.append(_smoke_alpaca_news(ticker, limit))
+        results.append(_smoke_news_chain(registry, ticker, limit))
+
+    if "db" in groups:
         try:
             db_inputs = _build_db_smoke_inputs(args.db_base_days)
         except Exception as exc:
