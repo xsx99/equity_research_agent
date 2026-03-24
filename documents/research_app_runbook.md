@@ -1,5 +1,14 @@
 # Research App Runbook
 
+## Same-Day Iteration Semantics
+
+- Scheduled research runs once per weekday at `9:20 ET`.
+- Scheduled eval runs once per weekday at `16:10 ET`.
+- Runtime `time_horizon` is fixed to `1d`; this is a same-day feedback window, not a required holding period.
+- Pre-open runs use formal `open_to_close` eval.
+- Post-open manual runs use quick `run_time_price_to_close` eval.
+- Quick eval uses the persisted `research_runs.input_json.price_snapshot.last_price` as the ticker entry price. It is not reconstructed after the close.
+
 ## Manual Agent Run
 
 ### Local Smoke Test
@@ -35,6 +44,20 @@ docker compose run --rm scheduler python scripts/run_research_agent_once.py
 - The script uses `GOOGLE_API_KEY` from the environment or repo-root `.env`.
 - Override the model with `--model-name` if needed.
 - This is only a direct agent smoke path. The full batch research pipeline and DB persistence flow are still separate future work.
+
+## Manual Pipeline Run Order
+
+To test the same-day workflow manually:
+
+```bash
+source ~/.venv/bin/activate
+python scripts/run_research_once.py --ticker AAPL
+python scripts/run_eval_once.py
+```
+
+- If the research run happened before `9:30 ET`, eval uses `open_to_close`.
+- If the research run happened after `9:30 ET`, eval uses `run_time_price_to_close`.
+- For post-open manual runs, confirm `price_snapshot.last_price` is present in the stored input JSON before trusting the quick-eval result.
 
 ## Tool Smoke Test
 

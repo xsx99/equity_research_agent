@@ -89,11 +89,15 @@ The certificate is generated automatically on first nginx startup and stored in 
 | Job                    | Schedule (ET, weekdays) | Config env vars                                          |
 |------------------------|------------------------|----------------------------------------------------------|
 | SEC EDGAR collection   | 2:00 AM daily          | `SEC_EDGAR_SCHEDULE_HOUR`, `SEC_EDGAR_SCHEDULE_MINUTE`   |
-| Research (pre-open)    | 9:20 AM Mon–Fri        | `RESEARCH_SCHEDULE_HOUR_OPEN`, `RESEARCH_SCHEDULE_MINUTE_OPEN` |
-| Research (pre-close)   | 3:50 PM Mon–Fri        | `RESEARCH_SCHEDULE_HOUR_CLOSE`, `RESEARCH_SCHEDULE_MINUTE_CLOSE` |
-| Eval                   | 6:00 PM daily          | `EVAL_SCHEDULE_HOUR`, `EVAL_SCHEDULE_MINUTE`             |
+| Research (pre-open)    | 9:20 AM Mon–Fri        | `RESEARCH_SCHEDULE_HOUR`, `RESEARCH_SCHEDULE_MINUTE` |
+| Eval                   | 4:10 PM Mon–Fri        | `EVAL_SCHEDULE_HOUR`, `EVAL_SCHEDULE_MINUTE`             |
 
 Set `RESEARCH_RUN_ON_STARTUP=true` or `EVAL_RUN_ON_STARTUP=true` in the env file to trigger a run immediately when the scheduler container starts.
+
+Evaluation semantics:
+- pre-open scheduled or manual runs: `open_to_close`
+- post-open manual runs: `run_time_price_to_close`
+- post-open quick eval depends on the persisted run-time ticker snapshot price in `research_runs.input_json.price_snapshot.last_price`
 
 ## Checking Service Health
 
@@ -127,6 +131,8 @@ docker exec -w /app scheduler python scripts/run_eval_once.py
 # Research agent smoke test (no DB write)
 docker exec -w /app scheduler python scripts/run_research_agent_once.py
 ```
+
+For same-day manual iteration, run research first, then eval after the close. If the manual run happened after `9:30 ET`, the resulting eval row should store `evaluation_params.price_window=run_time_price_to_close`.
 
 ## Redeploying After a Code Change
 
