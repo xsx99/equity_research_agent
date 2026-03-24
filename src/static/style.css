@@ -167,8 +167,10 @@ button:hover, .btn:hover { opacity: 0.85; }
   grid-template-columns: 1fr 1fr;
   gap: 1rem;
 }
+.detail-span-2 { grid-column: 1 / -1; }
 @media (max-width: 700px) {
   .detail-grid { grid-template-columns: 1fr; }
+  .detail-span-2 { grid-column: auto; }
 }
 .kv-table td:first-child { font-weight: 600; width: 40%; color: #444; }
 pre {
@@ -186,7 +188,95 @@ pre {
 .thesis { font-style: italic; color: #444; line-height: 1.5; }
 .output-list { margin: 0; padding-left: 1.2rem; }
 .output-list li { margin-bottom: 0.3rem; line-height: 1.45; color: #333; font-size: 13px; }
+.section-label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #666;
+  margin: 1rem 0 0.5rem;
+}
+.detail-muted { color: #666; }
+.input-overview {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+.input-pill {
+  background: #f7f7fb;
+  border: 1px solid #e3e5ef;
+  border-radius: 999px;
+  padding: 0.5rem 0.85rem;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+.input-pill-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #666;
+}
+.input-pill-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1f2430;
+}
+.input-section-grid {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 1rem;
+}
+.input-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.75rem;
+}
+.metric-tile {
+  background: #fafbff;
+  border: 1px solid #e2e7f3;
+  border-radius: 8px;
+  padding: 0.85rem 0.95rem;
+  min-height: 78px;
+}
+.metric-label {
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #667085;
+  margin-bottom: 0.35rem;
+}
+.metric-value {
+  display: block;
+  font-size: 18px;
+  font-weight: 700;
+  color: #1f2937;
+  line-height: 1.25;
+}
+.news-list {
+  display: grid;
+  gap: 0.75rem;
+}
+.news-item {
+  border: 1px solid #e6e8f0;
+  background: linear-gradient(180deg, #fff 0%, #f8f9fc 100%);
+  border-radius: 8px;
+  padding: 0.9rem 1rem;
+}
+.news-item h4 {
+  font-size: 14px;
+  margin-bottom: 0.35rem;
+  color: #1f2430;
+}
+.news-item p {
+  color: #4a5565;
+  line-height: 1.5;
+}
 .truncate { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 700px) {
+  .input-section-grid { grid-template-columns: 1fr; }
+}
 
 /* Per-ticker scrollable table wrapper — shows ~3 rows before scrolling */
 .ticker-scroll {

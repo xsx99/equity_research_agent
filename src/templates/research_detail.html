@@ -53,21 +53,21 @@
     {% endif %}
 
     {% if detail.key_drivers %}
-    <h3 style="font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:#666; margin:1rem 0 0.4rem;">Key Drivers</h3>
+    <h3 class="section-label">Key Drivers</h3>
     <ul class="output-list">
       {% for item in detail.key_drivers %}<li>{{ item }}</li>{% endfor %}
     </ul>
     {% endif %}
 
     {% if detail.counterarguments %}
-    <h3 style="font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:#666; margin:1rem 0 0.4rem;">Counterarguments</h3>
+    <h3 class="section-label">Counterarguments</h3>
     <ul class="output-list">
       {% for item in detail.counterarguments %}<li>{{ item }}</li>{% endfor %}
     </ul>
     {% endif %}
 
     {% if detail.invalidators %}
-    <h3 style="font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:#666; margin:1rem 0 0.4rem;">Invalidators</h3>
+    <h3 class="section-label">Invalidators</h3>
     <ul class="output-list">
       {% for item in detail.invalidators %}<li>{{ item }}</li>{% endfor %}
     </ul>
@@ -75,6 +75,77 @@
 
     {% else %}
     <p style="color:#666;">No output available.</p>
+    {% endif %}
+  </div>
+
+  <!-- Research input -->
+  <div class="card detail-span-2">
+    <h2>Research Input</h2>
+    {% if detail.has_input %}
+    <div class="input-overview">
+      <div class="input-pill">
+        <span class="input-pill-label">Ticker</span>
+        <span class="input-pill-value">{{ detail.input_ticker or '—' }}</span>
+      </div>
+      <div class="input-pill">
+        <span class="input-pill-label">Snapshot</span>
+        <span class="input-pill-value">{{ detail.input_as_of or '—' }}</span>
+      </div>
+    </div>
+
+    <div class="input-section-grid">
+      <div>
+        <h3 class="section-label">Price Snapshot</h3>
+        <div class="input-metric-grid">
+          <div class="metric-tile">
+            <span class="metric-label">Last Price</span>
+            <span class="metric-value">{{ fmt_currency(detail.input_last_price) }}</span>
+          </div>
+          <div class="metric-tile">
+            <span class="metric-label">1D Return</span>
+            <span class="metric-value">{{ pct(detail.input_return_1d) }}</span>
+          </div>
+          <div class="metric-tile">
+            <span class="metric-label">5D Return</span>
+            <span class="metric-value">{{ pct(detail.input_return_5d) }}</span>
+          </div>
+          <div class="metric-tile">
+            <span class="metric-label">Since Open</span>
+            <span class="metric-value">{{ pct(detail.input_return_since_market_open) }}</span>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <h3 class="section-label">Context</h3>
+        <div class="input-metric-grid">
+          <div class="metric-tile">
+            <span class="metric-label">Sector</span>
+            <span class="metric-value">{{ detail.input_sector or '—' }}</span>
+          </div>
+          <div class="metric-tile">
+            <span class="metric-label">Earnings In</span>
+            <span class="metric-value">{% if detail.input_earnings_in_days is not none %}{{ detail.input_earnings_in_days }} days{% else %}—{% endif %}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <h3 class="section-label">Recent News</h3>
+    {% if detail.input_news %}
+    <div class="news-list">
+      {% for item in detail.input_news %}
+      <article class="news-item">
+        <h4>{{ item.title or 'Untitled news item' }}</h4>
+        <p>{{ item.summary or 'No summary captured.' }}</p>
+      </article>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="detail-muted">No news data captured for this run.</p>
+    {% endif %}
+    {% else %}
+    <p class="detail-muted">No input data available.</p>
     {% endif %}
   </div>
 
@@ -101,7 +172,7 @@
 
   <!-- Ticker history -->
   {% if history %}
-  <div class="card">
+  <div class="card detail-span-2">
     <h2>{{ detail.ticker }} Eval History</h2>
     <table style="border:none;">
       <thead>
@@ -136,18 +207,6 @@
   </div>
   {% endif %}
 
-</div>
-
-<!-- JSON panels -->
-<div style="display:grid; grid-template-columns: 1fr 1fr; gap:1rem; margin-top:0.5rem;">
-  <div>
-    <h2>Input JSON</h2>
-    <pre>{{ detail.input_json or 'No input data.' }}</pre>
-  </div>
-  <div>
-    <h2>Output JSON</h2>
-    <pre>{{ detail.output_json or 'No output data.' }}</pre>
-  </div>
 </div>
 
 <div style="margin-top:1rem;">

@@ -39,7 +39,30 @@ def _make_run(status=RunStatus.SUCCEEDED.value):
     run.status = status
     run.prompt_version = "v1"
     run.model_name = "gemini-2.5-flash-lite"
-    run.input_json = {"ticker": _TICKER}
+    run.input_json = {
+        "ticker": _TICKER,
+        "as_of": _AS_OF.isoformat(),
+        "price_snapshot": {
+            "last_price": 187.42,
+            "return_1d": 0.012,
+            "return_5d": 0.041,
+            "return_since_market_open": 0.006,
+        },
+        "context": {
+            "sector": "Technology",
+            "earnings_in_days": 12,
+        },
+        "news": [
+            {
+                "title": "Apple expands AI tooling",
+                "summary": "Management highlighted broader rollout plans.",
+            },
+            {
+                "title": "iPhone demand remains resilient",
+                "summary": "Channel checks pointed to steady upgrade activity.",
+            },
+        ],
+    }
     run.error_message = None
     run.started_at = _AS_OF
     run.finished_at = _AS_OF
@@ -221,6 +244,13 @@ class TestResearchDetail:
         assert resp.status_code == 200
         assert _TICKER in resp.text
         assert "bullish" in resp.text.lower()
+        assert "Research Input" in resp.text
+        assert "Price Snapshot" in resp.text
+        assert "$187.42" in resp.text
+        assert "Technology" in resp.text
+        assert "Apple expands AI tooling" in resp.text
+        assert "Input JSON" not in resp.text
+        assert "Output JSON" not in resp.text
 
     def test_get_invalid_uuid_returns_404(self, client):
         resp = client.get("/research/not-a-uuid")

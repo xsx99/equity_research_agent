@@ -11,7 +11,6 @@ Routes:
 """
 from __future__ import annotations
 
-import json
 import uuid
 from collections import Counter
 from datetime import datetime, timezone
@@ -78,9 +77,16 @@ def _fmt_conf(value: Optional[float]) -> str:
     return f"{value:.0%}"
 
 
+def _fmt_currency(value: Optional[float]) -> str:
+    if value is None:
+        return "—"
+    return f"${value:,.2f}"
+
+
 # Register template globals/filters
 templates.env.globals["pct"] = _pct
 templates.env.globals["fmt_conf"] = _fmt_conf
+templates.env.globals["fmt_currency"] = _fmt_currency
 
 
 # ---------------------------------------------------------------------------
@@ -211,6 +217,21 @@ def research_detail(run_id: str, request: Request):
 
         out = run.output
         ev = run.eval_result
+        input_data = run.input_json or {}
+        price_snapshot = input_data.get("price_snapshot") or {}
+        research_context = input_data.get("context") or {}
+        news_items = input_data.get("news") or []
+        normalized_news = []
+        for item in news_items:
+            if isinstance(item, dict):
+                normalized_news.append(
+                    {
+                        "title": item.get("title"),
+                        "summary": item.get("summary"),
+                    }
+                )
+            else:
+                normalized_news.append({"title": str(item), "summary": None})
 
         # Ticker history: last 10 eval results for same ticker
         ticker_history = (
@@ -245,8 +266,16 @@ def research_detail(run_id: str, request: Request):
             "started_at": run.started_at,
             "finished_at": run.finished_at,
             "created_at": run.created_at,
-            "input_json": json.dumps(run.input_json, indent=2, default=str) if run.input_json else None,
-            "output_json": json.dumps(out.output_json, indent=2, default=str) if out else None,
+            "has_input": bool(input_data),
+            "input_ticker": input_data.get("ticker") or run.ticker,
+            "input_as_of": input_data.get("as_of"),
+            "input_last_price": price_snapshot.get("last_price"),
+            "input_return_1d": price_snapshot.get("return_1d"),
+            "input_return_5d": price_snapshot.get("return_5d"),
+            "input_return_since_market_open": price_snapshot.get("return_since_market_open"),
+            "input_sector": research_context.get("sector"),
+            "input_earnings_in_days": research_context.get("earnings_in_days"),
+            "input_news": normalized_news,
             "decision": out.decision if out else None,
             "confidence": out.confidence if out else None,
             "time_horizon": out.time_horizon if out else None,
