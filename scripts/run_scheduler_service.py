@@ -24,8 +24,7 @@ def main():
     logger.info("scheduler_service_starting")
     SchedulerService(jobs=[
         SECEdgarJob(),
-        ResearchJob("open"),
-        ResearchJob("close"),
+        ResearchJob(),
         EvalJob(),
     ]).start()
 
