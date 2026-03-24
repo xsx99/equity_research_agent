@@ -32,7 +32,11 @@
           <span class="badge badge-queued">Inactive</span>
         {% endif %}
       </td>
-      <td>{{ row.created_at.strftime('%Y-%m-%d') if row.created_at else '—' }}</td>
+      <td>
+        {% if row.created_at %}
+        <time datetime="{{ row.created_at | iso_datetime }}" data-local-time-format="date">{{ row.created_at | local_time('date') }}</time>
+        {% else %}—{% endif %}
+      </td>
       <td>
         {% if row.is_active %}
         <form method="post" action="/watchlist/{{ row.ticker }}/delete" style="display:inline">

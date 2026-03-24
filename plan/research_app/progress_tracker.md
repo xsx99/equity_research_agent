@@ -2,6 +2,7 @@
 
 ## 2026-03-24
 
+- Replaced hardcoded UTC/`strftime` timestamp rendering across the watchlist, research list, and research detail pages with shared app-level datetime filters plus browser-local `<time>` rendering, so timestamps now display in the viewer's local timezone while preserving ISO UTC values in markup; added regression coverage for the normalized timestamp markup and re-verified the full unit suite.
 - Reworked the research run detail page to render `research_runs.input_json` as a first-class `Research Input` UI with price snapshot, context, and captured news cards, removed the duplicate raw `Output JSON` panel, and added route coverage to lock in the new presentation.
 - Extended the market snapshot contract with `return_since_market_open`, computed from the current session's daily open only during regular US market hours, propagated it into `research_runs.input_json.price_snapshot`, updated the direct agent/sample payload, and tightened the standalone market smoke check plus regression coverage around the new field.
 

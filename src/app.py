@@ -83,10 +83,57 @@ def _fmt_currency(value: Optional[float]) -> str:
     return f"${value:,.2f}"
 
 
+def _coerce_datetime(value: Any) -> Optional[datetime]:
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        dt = value
+    elif isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return None
+        if raw.endswith("Z"):
+            raw = f"{raw[:-1]}+00:00"
+        try:
+            dt = datetime.fromisoformat(raw)
+        except ValueError:
+            return None
+    else:
+        return None
+
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def _iso_datetime(value: Any) -> str:
+    dt = _coerce_datetime(value)
+    if dt is None:
+        return ""
+    return dt.astimezone(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _local_time(value: Any, display: str = "datetime") -> str:
+    dt = _coerce_datetime(value)
+    if dt is None:
+        return "—"
+
+    local_dt = dt.astimezone()
+    if display == "date":
+        return local_dt.strftime("%Y-%m-%d")
+    if display == "month_day":
+        return local_dt.strftime("%m-%d")
+    if display == "datetime_seconds":
+        return local_dt.strftime("%Y-%m-%d %H:%M:%S %Z")
+    return local_dt.strftime("%Y-%m-%d %H:%M %Z")
+
+
 # Register template globals/filters
 templates.env.globals["pct"] = _pct
 templates.env.globals["fmt_conf"] = _fmt_conf
 templates.env.globals["fmt_currency"] = _fmt_currency
+templates.env.filters["iso_datetime"] = _iso_datetime
+templates.env.filters["local_time"] = _local_time
 
 
 # ---------------------------------------------------------------------------

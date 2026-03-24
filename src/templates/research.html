@@ -60,7 +60,9 @@
         {% for row in rows %}
         <tr>
           <td><a href="/research/{{ row.run_id }}" class="mono" style="font-size:12px; white-space:nowrap;">
-            {{ row.as_of.strftime('%Y-%m-%d %H:%M') if row.as_of else '—' }}
+            {% if row.as_of %}
+            <time datetime="{{ row.as_of | iso_datetime }}" data-local-time-format="datetime">{{ row.as_of | local_time('datetime') }}</time>
+            {% else %}—{% endif %}
           </a></td>
           <td>
             {% if row.decision %}

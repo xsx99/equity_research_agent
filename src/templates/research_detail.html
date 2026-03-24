@@ -14,11 +14,32 @@
     <h2>Run Info</h2>
     <table class="kv-table" style="border:none;">
       <tr><td>Run ID</td><td class="mono" style="font-size:11px;">{{ detail.run_id }}</td></tr>
-      <tr><td>As Of</td><td>{{ detail.as_of.strftime('%Y-%m-%d %H:%M UTC') if detail.as_of else '—' }}</td></tr>
+      <tr>
+        <td>As Of</td>
+        <td>
+          {% if detail.as_of %}
+          <time datetime="{{ detail.as_of | iso_datetime }}" data-local-time-format="datetime">{{ detail.as_of | local_time('datetime') }}</time>
+          {% else %}—{% endif %}
+        </td>
+      </tr>
       <tr><td>Model</td><td>{{ detail.model_name or '—' }}</td></tr>
       <tr><td>Prompt Version</td><td>{{ detail.prompt_version or '—' }}</td></tr>
-      <tr><td>Started</td><td>{{ detail.started_at.strftime('%H:%M:%S') if detail.started_at else '—' }}</td></tr>
-      <tr><td>Finished</td><td>{{ detail.finished_at.strftime('%H:%M:%S') if detail.finished_at else '—' }}</td></tr>
+      <tr>
+        <td>Started</td>
+        <td>
+          {% if detail.started_at %}
+          <time datetime="{{ detail.started_at | iso_datetime }}" data-local-time-format="datetime_seconds">{{ detail.started_at | local_time('datetime_seconds') }}</time>
+          {% else %}—{% endif %}
+        </td>
+      </tr>
+      <tr>
+        <td>Finished</td>
+        <td>
+          {% if detail.finished_at %}
+          <time datetime="{{ detail.finished_at | iso_datetime }}" data-local-time-format="datetime_seconds">{{ detail.finished_at | local_time('datetime_seconds') }}</time>
+          {% else %}—{% endif %}
+        </td>
+      </tr>
       {% if detail.error_message %}
       <tr><td>Error</td><td style="color:#721c24;">{{ detail.error_message }}</td></tr>
       {% endif %}
@@ -89,7 +110,11 @@
       </div>
       <div class="input-pill">
         <span class="input-pill-label">Snapshot</span>
-        <span class="input-pill-value">{{ detail.input_as_of or '—' }}</span>
+        <span class="input-pill-value">
+          {% if detail.input_as_of %}
+          <time datetime="{{ detail.input_as_of | iso_datetime }}" data-local-time-format="datetime">{{ detail.input_as_of | local_time('datetime') }}</time>
+          {% else %}—{% endif %}
+        </span>
       </div>
     </div>
 
@@ -188,7 +213,11 @@
         {% for h in history %}
         <tr>
           <td style="padding:4px 8px;" class="mono">
-            <a href="/research/{{ h.run_id }}">{{ h.as_of.strftime('%m-%d') if h.as_of else '—' }}</a>
+            <a href="/research/{{ h.run_id }}">
+              {% if h.as_of %}
+              <time datetime="{{ h.as_of | iso_datetime }}" data-local-time-format="month_day">{{ h.as_of | local_time('month_day') }}</time>
+              {% else %}—{% endif %}
+            </a>
           </td>
           <td style="padding:4px 8px;">
             <span class="badge badge-{{ h.decision }}">{{ h.decision }}</span>

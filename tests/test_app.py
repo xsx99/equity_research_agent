@@ -98,6 +98,18 @@ def client():
             yield c
 
 
+class TestTimestampFilters:
+    def test_iso_datetime_normalizes_aware_datetime(self):
+        from src.app import _iso_datetime
+
+        assert _iso_datetime(_AS_OF) == "2026-03-22T09:00:00Z"
+
+    def test_iso_datetime_parses_iso_string(self):
+        from src.app import _iso_datetime
+
+        assert _iso_datetime("2026-03-22T09:00:00+00:00") == "2026-03-22T09:00:00Z"
+
+
 # ---------------------------------------------------------------------------
 # Watchlist routes
 # ---------------------------------------------------------------------------
@@ -122,6 +134,8 @@ class TestWatchlistPage:
         assert resp.status_code == 200
         assert "AAPL" in resp.text
         assert "MSFT" in resp.text
+        assert 'data-local-time-format="date"' in resp.text
+        assert 'datetime="2026-03-22T09:00:00Z"' in resp.text
 
     def test_get_empty_watchlist(self, client):
         with patch("src.app.get_session") as gs:
@@ -197,6 +211,8 @@ class TestResearchList:
         assert resp.status_code == 200
         assert _TICKER in resp.text
         assert "bullish" in resp.text.lower()
+        assert 'data-local-time-format="datetime"' in resp.text
+        assert 'datetime="2026-03-22T09:00:00Z"' in resp.text
 
     def test_get_empty_shows_placeholder(self, client):
         with patch("src.app.get_session") as gs:
@@ -251,6 +267,9 @@ class TestResearchDetail:
         assert "Apple expands AI tooling" in resp.text
         assert "Input JSON" not in resp.text
         assert "Output JSON" not in resp.text
+        assert 'data-local-time-format="datetime"' in resp.text
+        assert 'data-local-time-format="datetime_seconds"' in resp.text
+        assert 'datetime="2026-03-22T09:00:00Z"' in resp.text
 
     def test_get_invalid_uuid_returns_404(self, client):
         resp = client.get("/research/not-a-uuid")

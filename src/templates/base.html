@@ -20,5 +20,63 @@
 
     {% block content %}{% endblock %}
   </div>
+  <script>
+    (() => {
+      const formatterOptions = {
+        date: { year: "numeric", month: "2-digit", day: "2-digit" },
+        datetime: {
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: undefined,
+          hour12: false,
+          timeZoneName: "short",
+        },
+        datetime_seconds: {
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+          hour12: false,
+          timeZoneName: "short",
+        },
+        month_day: { month: "2-digit", day: "2-digit" },
+      };
+
+      const getFormatter = (formatName) =>
+        new Intl.DateTimeFormat(undefined, formatterOptions[formatName] || formatterOptions.datetime);
+
+      const applyLocalTime = () => {
+        document.querySelectorAll("time[data-local-time-format]").forEach((node) => {
+          const rawValue = node.getAttribute("datetime");
+          if (!rawValue) {
+            return;
+          }
+
+          const parsed = new Date(rawValue);
+          if (Number.isNaN(parsed.getTime())) {
+            return;
+          }
+
+          const formatName = node.dataset.localTimeFormat || "datetime";
+          node.textContent = getFormatter(formatName).format(parsed);
+          node.title = parsed.toLocaleString(undefined, {
+            dateStyle: "full",
+            timeStyle: "long",
+          });
+        });
+      };
+
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", applyLocalTime);
+      } else {
+        applyLocalTime();
+      }
+    })();
+  </script>
 </body>
 </html>
