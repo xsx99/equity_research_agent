@@ -187,6 +187,9 @@
       <tr><td>Realized Return</td><td>{{ pct(detail.realized_return) }}</td></tr>
       <tr><td>Benchmark Return</td><td>{{ pct(detail.benchmark_return) }} ({{ detail.benchmark_symbol }})</td></tr>
       <tr><td>Method</td><td>{{ detail.evaluation_method }}</td></tr>
+      <tr><td>Eval Window</td><td>{{ detail.evaluation_price_window or '—' }}</td></tr>
+      <tr><td>Entry Source</td><td>{{ detail.evaluation_entry_price_source or '—' }}</td></tr>
+      <tr><td>Exit Source</td><td>{{ detail.evaluation_exit_price_source or '—' }}</td></tr>
     </table>
     {% elif detail.status == 'succeeded' %}
     <p style="color:#666;">Evaluation window has not elapsed yet.</p>

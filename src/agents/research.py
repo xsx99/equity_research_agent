@@ -77,7 +77,7 @@ class StructuredResearchOutput(BaseModel):
 
     decision: Literal["bullish", "bearish", "neutral", "abstain"]
     confidence: float = Field(ge=0, le=1)
-    time_horizon: Literal["1d", "3d", "5d"]
+    time_horizon: Literal["1d"]
     time_horizon_rationale: Optional[str] = None
     actionability: Literal["abstain", "watch", "actionable"]
     thesis_summary: str = Field(min_length=1)

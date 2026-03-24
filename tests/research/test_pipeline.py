@@ -31,7 +31,7 @@ _AS_OF = datetime(2026, 3, 22, 9, 0, 0, tzinfo=timezone.utc)
 _GOOD_OUTPUT = {
     "decision": "bullish",
     "confidence": 0.8,
-    "time_horizon": "3d",
+    "time_horizon": "1d",
     "actionability": "actionable",
     "thesis_summary": "Strong insider buying cluster.",
     "key_drivers": ["insider buying"],

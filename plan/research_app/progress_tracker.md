@@ -2,6 +2,8 @@
 
 ## 2026-03-24
 
+- Implemented the same-day iteration workflow end-to-end: `ResearchAgent` now only accepts `time_horizon=1d`, the scheduler runs one pre-open research batch plus one `16:10 ET` eval batch, eval uses `open_to_close` for pre-open runs and `run_time_price_to_close` for post-open manual runs, and the web UI now separates formal aggregate stats from manual quick-eval detail metadata.
+- Finalized the same-day iteration plan and implementation breakdown: the research app is now scoped as a signal engine with runtime `time_horizon=1d`, one `9:20 ET` scheduled research batch, one `16:10 ET` eval batch, formal same-day `open_to_close` scoring for pre-open runs, and `run_time_price_to_close` quick eval for post-open manual runs.
 - Replaced hardcoded UTC/`strftime` timestamp rendering across the watchlist, research list, and research detail pages with shared app-level datetime filters plus browser-local `<time>` rendering, so timestamps now display in the viewer's local timezone while preserving ISO UTC values in markup; added regression coverage for the normalized timestamp markup and re-verified the full unit suite.
 - Reworked the research run detail page to render `research_runs.input_json` as a first-class `Research Input` UI with price snapshot, context, and captured news cards, removed the duplicate raw `Output JSON` panel, and added route coverage to lock in the new presentation.
 - Extended the market snapshot contract with `return_since_market_open`, computed from the current session's daily open only during regular US market hours, propagated it into `research_runs.input_json.price_snapshot`, updated the direct agent/sample payload, and tightened the standalone market smoke check plus regression coverage around the new field.

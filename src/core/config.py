@@ -47,18 +47,16 @@ SEC_ATOM_PAGE_SIZE = int(os.getenv("SEC_ATOM_PAGE_SIZE", "100"))
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 RESEARCH_MODEL_NAME = os.getenv("RESEARCH_MODEL_NAME", "gemini-2.5-flash-lite")
 
-# Research scheduler settings (weekdays only; two runs per day)
-RESEARCH_SCHEDULE_HOUR_OPEN = int(os.getenv("RESEARCH_SCHEDULE_HOUR_OPEN", "9"))
-RESEARCH_SCHEDULE_MINUTE_OPEN = int(os.getenv("RESEARCH_SCHEDULE_MINUTE_OPEN", "20"))
-RESEARCH_SCHEDULE_HOUR_CLOSE = int(os.getenv("RESEARCH_SCHEDULE_HOUR_CLOSE", "15"))
-RESEARCH_SCHEDULE_MINUTE_CLOSE = int(os.getenv("RESEARCH_SCHEDULE_MINUTE_CLOSE", "50"))
+# Research scheduler settings (weekdays only; pre-open batch)
+RESEARCH_SCHEDULE_HOUR = int(os.getenv("RESEARCH_SCHEDULE_HOUR", "9"))
+RESEARCH_SCHEDULE_MINUTE = int(os.getenv("RESEARCH_SCHEDULE_MINUTE", "20"))
 RESEARCH_RUN_ON_STARTUP = os.getenv("RESEARCH_RUN_ON_STARTUP", "false").lower() in (
     "1", "true", "yes", "y"
 )
 
-# Eval scheduler settings (once daily)
-EVAL_SCHEDULE_HOUR = int(os.getenv("EVAL_SCHEDULE_HOUR", "18"))
-EVAL_SCHEDULE_MINUTE = int(os.getenv("EVAL_SCHEDULE_MINUTE", "0"))
+# Eval scheduler settings (once daily, shortly after close)
+EVAL_SCHEDULE_HOUR = int(os.getenv("EVAL_SCHEDULE_HOUR", "16"))
+EVAL_SCHEDULE_MINUTE = int(os.getenv("EVAL_SCHEDULE_MINUTE", "10"))
 EVAL_RUN_ON_STARTUP = os.getenv("EVAL_RUN_ON_STARTUP", "false").lower() in (
     "1", "true", "yes", "y"
 )

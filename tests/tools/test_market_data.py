@@ -9,6 +9,9 @@ import pytest
 from src.tools.market_data import (
     AlpacaMarketDataProvider,
     DEFAULT_ALPACA_DATA_BASE_URL,
+    fetch_close_price_on_date,
+    fetch_open_to_close_return,
+    fetch_price_at_or_before,
     fetch_return_over_range,
     get_market_snapshot,
 )
@@ -178,6 +181,48 @@ def test_fetch_return_over_range_returns_none_when_start_close_is_zero():
             return [0.0, 105.0]
     result = fetch_return_over_range("AAPL", date(2026, 3, 1), date(2026, 3, 4), provider=_StubProvider())
     assert result is None
+
+
+def test_fetch_open_to_close_return_computes_same_day_return():
+    class _StubProvider:
+        def fetch_daily_bar_on_date(self, ticker, trading_date):
+            return {"date": trading_date, "open": 100.0, "close": 105.0}
+
+    result = fetch_open_to_close_return(
+        "AAPL",
+        date(2026, 3, 24),
+        provider=_StubProvider(),
+    )
+
+    assert result == pytest.approx(0.05)
+
+
+def test_fetch_close_price_on_date_returns_daily_close():
+    class _StubProvider:
+        def fetch_daily_bar_on_date(self, ticker, trading_date):
+            return {"date": trading_date, "open": 100.0, "close": 105.0}
+
+    result = fetch_close_price_on_date(
+        "AAPL",
+        date(2026, 3, 24),
+        provider=_StubProvider(),
+    )
+
+    assert result == pytest.approx(105.0)
+
+
+def test_fetch_price_at_or_before_returns_provider_price():
+    class _StubProvider:
+        def fetch_price_at_or_before(self, ticker, as_of):
+            return 512.25
+
+    result = fetch_price_at_or_before(
+        "SPY",
+        datetime(2026, 3, 24, 14, 37, tzinfo=timezone.utc),
+        provider=_StubProvider(),
+    )
+
+    assert result == pytest.approx(512.25)
 
 
 def test_get_market_snapshot_includes_return_since_market_open_during_session():
