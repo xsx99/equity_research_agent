@@ -229,3 +229,104 @@ class TestPersistOutput:
         assert output.actionability == "watch"
         assert output.thesis_summary == "Strong insider buying."
         assert output.output_json == _SAMPLE_OUTPUT
+
+
+from src.db.models.evaluation import EvalResult, EvaluationMethod
+from src.db.models.research import ResearchOutput
+
+_EVAL_AS_OF = datetime(2026, 3, 1, 9, 0, 0, tzinfo=timezone.utc)
+_EVAL_CUTOFF = datetime(2026, 3, 10, 9, 0, 0, tzinfo=timezone.utc)  # well past all horizons
+
+
+def _make_run_and_output(
+    time_horizon="3d",
+    status=RunStatus.SUCCEEDED.value,
+    as_of=_EVAL_AS_OF,
+):
+    run_id = uuid.uuid4()
+    run = MagicMock(spec=ResearchRun)
+    run.run_id = run_id
+    run.ticker = "AAPL"
+    run.as_of = as_of
+    run.status = status
+
+    output = MagicMock(spec=ResearchOutput)
+    output.run_id = run_id
+    output.decision = "bullish"
+    output.time_horizon = time_horizon
+    return run, output
+
+
+class TestGetEligibleRuns:
+    def test_returns_eligible_run(self):
+        run, output = _make_run_and_output()
+        session = MagicMock()
+        session.query.return_value.join.return_value.filter.return_value.all.return_value = [
+            (run, output)
+        ]
+        results = repository.get_eligible_runs(session, as_of_cutoff=_EVAL_CUTOFF)
+        assert len(results) == 1
+        assert results[0] == (run, output)
+
+    def test_filters_out_run_whose_window_has_not_elapsed(self):
+        # as_of + 3 days = 2026-03-04, cutoff = 2026-03-03 → not elapsed
+        run, output = _make_run_and_output(
+            time_horizon="3d",
+            as_of=datetime(2026, 3, 1, 9, 0, 0, tzinfo=timezone.utc),
+        )
+        early_cutoff = datetime(2026, 3, 3, 9, 0, 0, tzinfo=timezone.utc)
+        session = MagicMock()
+        session.query.return_value.join.return_value.filter.return_value.all.return_value = [
+            (run, output)
+        ]
+        results = repository.get_eligible_runs(session, as_of_cutoff=early_cutoff)
+        assert results == []
+
+    def test_returns_empty_when_no_rows(self):
+        session = MagicMock()
+        session.query.return_value.join.return_value.filter.return_value.all.return_value = []
+        results = repository.get_eligible_runs(session, as_of_cutoff=_EVAL_CUTOFF)
+        assert results == []
+
+
+class TestUpsertEvalResult:
+    def _call(self, session, existing=None, run_id=None):
+        run_id = run_id or uuid.uuid4()
+        session.query.return_value.filter.return_value.first.return_value = existing
+        return repository.upsert_eval_result(
+            session,
+            run_id=run_id,
+            horizon_days=3,
+            realized_return=0.05,
+            benchmark_return=0.02,
+            benchmark_symbol="SPY",
+            evaluation_method=EvaluationMethod.RULE_V1.value,
+            evaluation_params=None,
+            outcome_label="correct",
+        )
+
+    def test_inserts_when_no_existing_row(self):
+        session = MagicMock()
+        result = self._call(session, existing=None)
+        session.add.assert_called_once_with(result)
+        assert result.outcome_label == "correct"
+        assert result.horizon_days == 3
+
+    def test_updates_when_existing_row(self):
+        existing = MagicMock(spec=EvalResult)
+        session = MagicMock()
+        result = self._call(session, existing=existing)
+        assert result is existing
+        session.add.assert_not_called()
+        assert existing.outcome_label == "correct"
+        assert existing.realized_return == 0.05
+
+    def test_upsert_overwrites_outcome_label(self):
+        existing = MagicMock(spec=EvalResult)
+        existing.outcome_label = "partially_correct"
+        session = MagicMock()
+        run_id = uuid.uuid4()
+        self._call(session, existing=existing, run_id=run_id)
+        existing.outcome_label = "correct"
+        self._call(session, existing=existing, run_id=run_id)
+        assert existing.outcome_label == "correct"
