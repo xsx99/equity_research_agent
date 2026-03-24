@@ -31,16 +31,22 @@ def _make_watchlist_row(ticker=_TICKER, is_active=True):
     return row
 
 
-def _make_run(status=RunStatus.SUCCEEDED.value):
+def _make_run(
+    status=RunStatus.SUCCEEDED.value,
+    *,
+    ticker=_TICKER,
+    outcome_label="correct",
+    price_window="open_to_close",
+):
     run = MagicMock()
     run.run_id = _RUN_ID
-    run.ticker = _TICKER
+    run.ticker = ticker
     run.as_of = _AS_OF
     run.status = status
     run.prompt_version = "v1"
     run.model_name = "gemini-2.5-flash-lite"
     run.input_json = {
-        "ticker": _TICKER,
+        "ticker": ticker,
         "as_of": _AS_OF.isoformat(),
         "price_snapshot": {
             "last_price": 187.42,
@@ -71,19 +77,23 @@ def _make_run(status=RunStatus.SUCCEEDED.value):
     out = MagicMock()
     out.decision = "bullish"
     out.confidence = 0.8
-    out.time_horizon = "3d"
+    out.time_horizon = "1d"
     out.actionability = "actionable"
     out.thesis_summary = "Strong momentum"
     out.output_json = {"decision": "bullish"}
     run.output = out
 
     ev = MagicMock()
-    ev.outcome_label = "correct"
+    ev.outcome_label = outcome_label
     ev.realized_return = 0.03
     ev.benchmark_return = 0.01
     ev.benchmark_symbol = "SPY"
     ev.evaluation_method = "rule_v1"
-    ev.horizon_days = 3
+    ev.evaluation_params = {
+        "price_window": price_window,
+        "entry_price_source": "session_open" if price_window == "open_to_close" else "research_input_last_price",
+    }
+    ev.horizon_days = 1
     run.eval_result = ev
 
     return run
@@ -214,6 +224,26 @@ class TestResearchList:
         assert 'data-local-time-format="datetime"' in resp.text
         assert 'datetime="2026-03-22T09:00:00Z"' in resp.text
 
+    def test_aggregate_ignores_manual_quick_eval(self, client):
+        formal_run = _make_run(ticker="AAPL", outcome_label="correct", price_window="open_to_close")
+        manual_run = _make_run(ticker="AAPL", outcome_label="wrong_direction", price_window="run_time_price_to_close")
+        manual_run.run_id = uuid.uuid4()
+        with patch("src.app.get_session") as gs:
+            session = MagicMock()
+            gs.return_value.__enter__ = MagicMock(return_value=session)
+            gs.return_value.__exit__ = MagicMock(return_value=False)
+            q = MagicMock()
+            q.outerjoin.return_value = q
+            q.order_by.return_value = q
+            q.all.return_value = [formal_run, manual_run]
+            session.query.return_value = q
+
+            resp = client.get("/research")
+
+        assert resp.status_code == 200
+        assert "wrong direction" in resp.text
+        assert "Wrong Direction" not in resp.text
+
     def test_get_empty_shows_placeholder(self, client):
         with patch("src.app.get_session") as gs:
             session = MagicMock()
@@ -270,6 +300,28 @@ class TestResearchDetail:
         assert 'data-local-time-format="datetime"' in resp.text
         assert 'data-local-time-format="datetime_seconds"' in resp.text
         assert 'datetime="2026-03-22T09:00:00Z"' in resp.text
+
+    def test_get_shows_eval_window_metadata(self, client):
+        run = _make_run(price_window="run_time_price_to_close")
+        with patch("src.app.get_session") as gs:
+            session = MagicMock()
+            gs.return_value.__enter__ = MagicMock(return_value=session)
+            gs.return_value.__exit__ = MagicMock(return_value=False)
+            q = MagicMock()
+            q.filter.return_value = q
+            q.first.return_value = run
+            q2 = MagicMock()
+            q2.join.return_value = q2
+            q2.filter.return_value = q2
+            q2.order_by.return_value = q2
+            q2.limit.return_value = q2
+            q2.all.return_value = []
+            session.query.side_effect = [q, q2]
+
+            resp = client.get(f"/research/{_RUN_ID}")
+
+        assert resp.status_code == 200
+        assert "run_time_price_to_close" in resp.text
 
     def test_get_invalid_uuid_returns_404(self, client):
         resp = client.get("/research/not-a-uuid")

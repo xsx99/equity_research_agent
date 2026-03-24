@@ -83,6 +83,13 @@ def _fmt_currency(value: Optional[float]) -> str:
     return f"${value:,.2f}"
 
 
+def _eval_params(eval_result: Any) -> dict[str, Any]:
+    if eval_result is None:
+        return {}
+    params = getattr(eval_result, "evaluation_params", None)
+    return params if isinstance(params, dict) else {}
+
+
 def _coerce_datetime(value: Any) -> Optional[datetime]:
     if value is None or value == "":
         return None
@@ -210,7 +217,8 @@ def research_list(request: Request):
                 continue
             out = run.output
             ev = run.eval_result
-            if ev and ev.outcome_label:
+            eval_params = _eval_params(ev)
+            if ev and ev.outcome_label and eval_params.get("price_window") == "open_to_close":
                 outcome_counts[ev.outcome_label] += 1
             row = {
                 "run_id": str(run.run_id),
@@ -223,6 +231,7 @@ def research_list(request: Request):
                 "time_horizon": out.time_horizon if out else None,
                 "thesis_summary": out.thesis_summary if out else None,
                 "outcome_label": ev.outcome_label if ev else None,
+                "evaluation_price_window": eval_params.get("price_window"),
                 "created_at": run.created_at,
             }
             if run.ticker not in groups:
@@ -264,6 +273,7 @@ def research_detail(run_id: str, request: Request):
 
         out = run.output
         ev = run.eval_result
+        eval_params = _eval_params(ev)
         input_data = run.input_json or {}
         price_snapshot = input_data.get("price_snapshot") or {}
         research_context = input_data.get("context") or {}
@@ -338,6 +348,11 @@ def research_detail(run_id: str, request: Request):
             "benchmark_symbol": ev.benchmark_symbol if ev else None,
             "evaluation_method": ev.evaluation_method if ev else None,
             "horizon_days": ev.horizon_days if ev else None,
+            "evaluation_price_window": eval_params.get("price_window"),
+            "evaluation_entry_price_source": eval_params.get("entry_price_source"),
+            "evaluation_exit_price_source": eval_params.get("exit_price_source"),
+            "evaluation_benchmark_entry_price_source": eval_params.get("benchmark_entry_price_source"),
+            "evaluation_benchmark_exit_price_source": eval_params.get("benchmark_exit_price_source"),
         }
 
     return templates.TemplateResponse(
