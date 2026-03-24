@@ -2,6 +2,8 @@ Research App MVP 设计文档（重构版）
 
 1. 概览与目标
    - 单用户 research app，提供 watchlist 维护、定时模型研究、结构化结果展示与最小闭环评估。
+   - 当前 MVP 先把系统定义为 signal engine：核心输出是 `decision + actionability + confidence + invalidators`，用于回答“现在是否值得 take action”。
+   - `time_horizon` 参数保留，但当前固定为 `1d`，其含义是 quick feedback 的评估窗口，不等同于真实持仓周期。
    - 不做用户体系、复杂前端、多 agent、自动/纸上交易、复杂回测或调度。
 
 2. 范围与非目标
@@ -12,13 +14,13 @@ Research App MVP 设计文档（重构版）
    - FastAPI Web：/watchlist、/research 列表与详情、手动触发入口。
    - Postgres：存储 watchlist、research_runs、research_outputs、eval_results。
    - run_research.py：读取 watchlist，抓取最小数据，调用 LLM，写入输出。
-   - eval_runs.py：为过期 run 计算基于有效评估窗口的回测结果并写入 eval。
+   - eval_runs.py：为当日成功 run 计算 same-day eval 并写入 eval；盘前 run 走 open-to-close，盘中 manual run 走 run-time-price-to-close。
    - scheduler：定时触发 research 与 eval（串行即可，后续可扩展）。
 
 4. 核心模块说明
    - Web/UI（app.py，templates/*，static/style.css）：展示与表单处理；仅服务器渲染。
    - agent/LLM（run_research.py，llm_client.py，tool/get_market_data.py，tool/get_news_data.py）：分层封装数据源与模型调用；串行处理全部 active tickers；LLM 层使用 Phidata Agent，工具通过依赖注入集中管理上下文与外部连接。
-   - Eval（eval_runs.py）：扫描未评估且超过**有效评估窗口**的 run，写 realized_return、benchmark_return、outcome_label 等；有效窗口=research_outputs.time_horizon（1d/3d/5d），若缺失/无效直接报错并标记 run 需人工处理；evaluation_method 可配置。
+   - Eval（eval_runs.py）：每日 16:10 ET 扫描当日未评估且成功的 `1d` run，写 realized_return、benchmark_return、outcome_label 等；`9:30 ET` 前的 run 使用同日 open-to-close，`9:30 ET` 后的 manual run 使用持久化的 run-time price 到 close；两种窗口都沿用同一 `rule_v1` label matrix，并在 `evaluation_params` 中记录 price window / entry source。
    - DB 访问（db.py，models.py）：连接管理与基础 CRUD；输入/输出 JSON 全量存储便于回放。
    - Config（config.py）：环境变量、路径（含 Postgres 数据目录）统一管理。
 
@@ -30,7 +32,7 @@ Research App MVP 设计文档（重构版）
      | watchlists | id uuid pk; ticker text unique; is_active bool default true; created_at timestamptz | tracked tickers |
      | research_runs | run_id uuid pk; ticker text; as_of timestamptz; prompt_version text; model_name text; input_json jsonb; status text default 'queued'; error_message text; started_at timestamptz; finished_at timestamptz; created_at timestamptz | run metadata + input snapshot + 运行状态/错误 |
      | research_outputs | run_id uuid pk fk runs; output_json jsonb; decision text; confidence numeric; time_horizon text; actionability text; thesis_summary text; created_at timestamptz | structured model output |
-     | eval_results | run_id uuid pk fk runs; horizon_days int not null; realized_return numeric; benchmark_return numeric; benchmark_symbol text default 'SPY'; evaluation_method text default 'rule_v1'; evaluation_params jsonb 包括eval时抓取的market_data; outcome_label text; created_at timestamptz | eval closure（horizon/method aware；horizon_days=输出的有效评估窗口） |
+     | eval_results | run_id uuid pk fk runs; horizon_days int not null; realized_return numeric; benchmark_return numeric; benchmark_symbol text default 'SPY'; evaluation_method text default 'rule_v1'; evaluation_params jsonb 包括 price_window / entry_price_source / exit_price_source / eval时抓取的market_data; outcome_label text; created_at timestamptz | eval closure（当前 iteration 模式下 `horizon_days=1`；formal 与 quick eval 通过 evaluation_params 区分） |
 
    - Enumerations:
 
@@ -39,7 +41,7 @@ Research App MVP 设计文档（重构版）
      | status | queued, running, succeeded, failed |
      | decision | bullish, bearish, neutral, abstain |
      | confidence | numeric 0–1 |
-     | time_horizon | 1d, 3d, 5d |
+     | time_horizon | 1d（当前固定；3d/5d 留作未来扩展） |
      | actionability | abstain, watch, actionable |
      | outcome_label | correct, partially_correct, wrong_direction, uninformative |
      | evaluation_method | rule_v1 (default), future methods allowed |
@@ -48,12 +50,12 @@ Research App MVP 设计文档（重构版）
 
 6. Structured Output JSON Schema (summary)
    - Required: decision, confidence, time_horizon, actionability, thesis_summary, key_drivers[], counterarguments[], invalidators[].
-   - Constraints: enums per table above; confidence 0–1; arrays are string arrays.
-   - Full schema in Appendix C.
+   - Constraints: `time_horizon` 当前必须为 `1d`；confidence 0–1；arrays are string arrays。
 
 7. Research 输入 schema 与数据源抽象
    - 输入字段：ticker, as_of, price_snapshot{last_price, return_1d, return_5d, return_since_market_open}, context{sector, earnings_in_days，可为 null}, news[title, summary] 3-5 条。
    - 目标：保证可回放同一 case；input_json 存于 research_runs。
+   - `price_snapshot.last_price` 必须是 run 创建当下抓到的价格。对盘中 manual run，它同时作为 same-day quick eval 的 entry price，不能在收盘后再回推估算。
    - 数据源接口契约：
      - market_data.get_snapshot(ticker) -> {last_price, return_1d, return_5d, return_since_market_open?, sector?, earnings_in_days?}
      - news_data.get_recent(ticker, limit=5) -> [{title, summary}]
@@ -65,7 +67,7 @@ Research App MVP 设计文档（重构版）
    - 采集方式：按需拉取、直接落库。run_research 调用 market_data/news_data 获取实时快照后写入 research_runs.input_json；eval_runs 仅在需要回测时调用 market_data 获取价格，news 可选备注；不再做额外预取/缓存或独立采集进程。
 
 8. Prompt 设计与版本管理与 Agent 框架
-   - 单一版本 v1，强调谨慎、允许 abstain、基于输入、明确 horizon、提供反方与 invalidators。
+   - 单一版本 v1，强调谨慎、允许 abstain、基于输入、固定 `time_horizon=1d`、提供反方与 invalidators。
    - Prompt 放独立 YAML 文件（如 prompts/research_v1.yaml，包含 id/version/description/body）；升级只需改 version 标识与内容文件。
    - 默认模型：`RESEARCH_MODEL_NAME` 未设置时默认使用 `gemini-2.5-flash-lite`，优先考虑 MVP 成本效率；如需切换其他模型，保持通过环境变量覆盖，不把 provider 细节散落到 orchestration 代码里。
    - Agent 框架（MVP 边界）：采用 hybrid 方案。custom orchestration 负责 watchlist 遍历、market/news/DB 数据获取、`input_json` 快照落库、run 状态流转、错误隔离、结果持久化与 eval；Phidata Agent 仅负责单次 LLM 调用与返回原始响应。
@@ -74,16 +76,16 @@ Research App MVP 设计文档（重构版）
    - 详细边界与取舍见 `plan/research_app/architecture_recommendation.md`。
 
 9. 运行流程
-   - research cron：读取所有 active tickers -> 在 Python orchestration 中现场拉取 market snapshot + news + 必要 DB context -> 写入 `research_runs.input_json` 快照 -> 调用 Phidata 包装的单次 LLM -> 直接写 runs/outputs 入 Postgres；频率建议工作日盘前或每日 1-2 次。插入 run 时 status=queued，开始处理某 ticker 时置 running+started_at，成功后置 succeeded+finished_at，失败则置 failed 并写 error_message+finished_at（不中断其他 ticker）。
-   - eval cron：仅处理具备有效 time_horizon 的 run -> 通过 market_data 按需获取 realized/benchmark return -> 按 evaluation_method 计算 outcome_label -> 写 eval_results；若缺失/无效 time_horizon 则记录错误并跳过；频率每日一次夜间。
+   - research cron：工作日 `9:20 ET` 读取所有 active tickers -> 在 Python orchestration 中现场拉取 market snapshot + news + 必要 DB context -> 写入 `research_runs.input_json` 快照 -> 调用 Phidata 包装的单次 LLM -> 直接写 runs/outputs 入 Postgres。插入 run 时 status=queued，开始处理某 ticker 时置 running+started_at，成功后置 succeeded+finished_at，失败则置 failed 并写 error_message+finished_at（不中断其他 ticker）。
+   - eval cron：工作日 `16:10 ET` 仅处理当日成功且 `time_horizon=1d` 的 run。`9:30 ET` 前的 run 使用同日 open-to-close；`9:30 ET` 后的 manual run 使用 `research_runs.input_json.price_snapshot.last_price` 到同日 close；benchmark 统一对比 `SPY` 同窗口收益；`evaluation_params` 记录 `price_window` 与 entry/exit 价格来源。
    - 采集复用：两条 cron 都调用同一 market_data/news_data 抽象，按需请求，无额外缓存/中间存储。MVP 中 LLM 不直接调用外部 tools。
-   - 手动触发：POST /admin/run-now 或等效脚本，仅限本机/内网，便于调试。
+   - 手动触发：POST /admin/run-now 或等效脚本，仅限本机/内网，便于调试。manual run 也进入当日 eval 候选，但盘中 run 使用 run-time-price-to-close quick eval，避免 look-ahead bias。
 
 10. UI 与路由
    - GET /watchlist：表格列 ticker、状态；输入框添加；行级删除或停用。
    - POST /watchlist/add；POST /watchlist/{id}/delete 或 /watchlist/delete。
-   - GET /research：表格列 ticker、分析时间、decision、confidence、actionability、time_horizon、thesis_summary；顶部展示聚合 eval 结果（可按 outcome_label、horizon_days、evaluation_method 汇总；最近 N 天正确率）。
-   - GET /research/{run_id}：展示 input_json、output_json、eval outcome_label（可用 <pre>）；可附上该 ticker 的历史 eval 小结。
+   - GET /research：表格列 ticker、分析时间、decision、confidence、actionability、time_horizon、thesis_summary；顶部展示聚合 eval 结果。默认聚合只统计 formal same-day open-to-close eval，不把盘中 manual quick eval 混入主指标。
+   - GET /research/{run_id}：展示 input_json、output_json、eval outcome_label（可用 <pre>）；详情中展示当前 run 的 eval window 说明（formal open-to-close 或 manual run-time-price-to-close）；可附上该 ticker 的历史 eval 小结。
 
 11. 部署与运维要点
    - 单机部署，Postgres 数据目录固定在持久化磁盘（非 tmpfs）；树莓派需确认磁盘挂载。
@@ -130,7 +132,7 @@ Research App MVP 设计文档（重构版）
       将不同场景的分析逻辑抽象为独立的 Sub-Agents（Skills），例如 Macro_Skill（关注利率与宏观数据）、Earnings_Skill（关注财报突发事件）或 Momentum_Skill（纯技术面动量突破）。
     路由分发 (Router)： 
       在 run_research.py 前置一个轻量级 Router（基于 Rule-based 规则或极小的 LLM 调用）。Router 根据当前标的的市场环境特征，决定激活哪一个（或组合哪几个）Skill Agent 来执行特定的 Research 任务，并将最终结果汇总落库。
-  
+
   3. More tools
    - market news tools from Finnhub 
 
@@ -146,19 +148,19 @@ Research App MVP 设计文档（重构版）
              self.retrieval_client = retrieval_client
          def get_user_features(self, user_id: str) -> str:
              features = self.fs_client.get(f"user_features:{user_id}")
-             return f\"User {user_id} features: {features}\"
+             return f"User {user_id} features: {features}"
          def get_restaurant_embedding(self, restaurant_id: str) -> str:
              embedding = self.retrieval_client.fetch(restaurant_id)
-             return f\"Restaurant {restaurant_id} embedding loaded.\"
+             return f"Restaurant {restaurant_id} embedding loaded."
      global_fs_client = MockFeatureStorePool()
      global_retrieval_client = MockRetrievalClient()
      recsys_tools = RecommendationTools(global_fs_client, global_retrieval_client)
      agent = Agent(
-         model=OpenAIChat(id=\"gpt-4o\"),
+         model=OpenAIChat(id="gpt-4o"),
          tools=[recsys_tools.get_user_features, recsys_tools.get_restaurant_embedding],
          show_tool_calls=True,
      )
-     agent.print_response(\"帮我查一下 user_123 的特征，以及 restaurant_456 的 embedding。\")
+     agent.print_response("帮我查一下 user_123 的特征，以及 restaurant_456 的 embedding。")
      ```
    - B. SQL schema (reference):
      ```
@@ -196,7 +198,7 @@ Research App MVP 设计文档（重构版）
 
      create table if not exists eval_results (
        run_id uuid primary key references research_runs(run_id),
-       horizon_days int not null default 3,
+       horizon_days int not null default 1,
        realized_return numeric,
        benchmark_return numeric,
        benchmark_symbol text not null default 'SPY',
@@ -214,7 +216,7 @@ Research App MVP 设计文档（重构版）
        "properties": {
          "decision": { "type": "string", "enum": ["bullish", "bearish", "neutral", "abstain"] },
          "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
-         "time_horizon": { "type": "string", "enum": ["1d", "3d", "5d"] },
+         "time_horizon": { "type": "string", "enum": ["1d"] },
          "actionability": { "type": "string", "enum": ["abstain", "watch", "actionable"] },
          "thesis_summary": { "type": "string" },
          "key_drivers": { "type": "array", "items": { "type": "string" } },
