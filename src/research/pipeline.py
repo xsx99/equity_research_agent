@@ -239,6 +239,7 @@ class ResearchPipeline:
                 "last_price": market.get("last_price"),
                 "return_1d": market.get("return_1d"),
                 "return_5d": market.get("return_5d"),
+                "return_since_market_open": market.get("return_since_market_open"),
             },
             "context": {
                 "sector": market.get("sector"),

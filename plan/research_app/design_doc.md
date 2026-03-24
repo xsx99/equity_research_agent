@@ -52,14 +52,14 @@ Research App MVP 设计文档（重构版）
    - Full schema in Appendix C.
 
 7. Research 输入 schema 与数据源抽象
-   - 输入字段：ticker, as_of, price_snapshot{last_price, return_1d, return_5d}, context{sector, earnings_in_days，可为 null}, news[title, summary] 3-5 条。
+   - 输入字段：ticker, as_of, price_snapshot{last_price, return_1d, return_5d, return_since_market_open}, context{sector, earnings_in_days，可为 null}, news[title, summary] 3-5 条。
    - 目标：保证可回放同一 case；input_json 存于 research_runs。
    - 数据源接口契约：
-     - market_data.get_snapshot(ticker) -> {last_price, return_1d, return_5d, sector?, earnings_in_days?}
+     - market_data.get_snapshot(ticker) -> {last_price, return_1d, return_5d, return_since_market_open?, sector?, earnings_in_days?}
      - news_data.get_recent(ticker, limit=5) -> [{title, summary}]
    - 模块可替换；调用层不依赖具体提供商，只依赖接口结果格式。
    - 最小实现建议：
-     - collector/market_data.py：使用 yfinance 拉取最新价格与过去 1d/5d 收盘价计算 return；可选 sector、earnings 距离从 yfinance 基本信息获取；对缺失字段返回 None。
+     - collector/market_data.py：使用 yfinance 拉取最新价格与过去 1d/5d 收盘价计算 return；若处于美股常规交易时段，再补充相对当日开盘价的 `return_since_market_open`；可选 sector、earnings 距离从 yfinance 基本信息获取；对缺失字段返回 None。
      - collector/news_data.py：若有 NewsAPI key，优先调用；否则使用 yfinance.Ticker.news 或简单占位返回最近标题与摘要列表；限制 3–5 条；对无新闻返回空列表。
      - 错误处理：数据源失败时记录日志并在 output 中标记无法获取，但不中断其他 ticker；保持接口返回格式。
    - 采集方式：按需拉取、直接落库。run_research 调用 market_data/news_data 获取实时快照后写入 research_runs.input_json；eval_runs 仅在需要回测时调用 market_data 获取价格，news 可选备注；不再做额外预取/缓存或独立采集进程。

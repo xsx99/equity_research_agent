@@ -1,7 +1,7 @@
 """Unit tests for Alpaca-backed market data helpers."""
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Any
 
 import pytest
@@ -10,6 +10,7 @@ from src.tools.market_data import (
     AlpacaMarketDataProvider,
     DEFAULT_ALPACA_DATA_BASE_URL,
     fetch_return_over_range,
+    get_market_snapshot,
 )
 
 
@@ -85,6 +86,31 @@ def test_fetch_daily_closes_requests_date_range_and_parses_bars():
     assert "end" in call["params"]
 
 
+def test_fetch_daily_bars_parses_open_close_and_bar_date():
+    client = _CapturingClient(
+        {
+            "bars": {
+                "AAPL": [
+                    {"t": "2026-03-23T04:00:00Z", "o": 198.0, "c": 200.5},
+                    {"t": "2026-03-24T04:00:00Z", "o": 201.0, "c": 201.25},
+                ]
+            }
+        }
+    )
+    provider = AlpacaMarketDataProvider(
+        api_key="test-key",
+        secret_key="test-secret",
+        client=client,
+    )
+
+    bars = provider.fetch_daily_bars("AAPL", lookback_days=6)
+
+    assert bars == [
+        {"date": date(2026, 3, 23), "open": 198.0, "close": 200.5},
+        {"date": date(2026, 3, 24), "open": 201.0, "close": 201.25},
+    ]
+
+
 def test_fetch_daily_closes_range_returns_chronological_closes():
     client = _CapturingClient(
         {
@@ -152,3 +178,57 @@ def test_fetch_return_over_range_returns_none_when_start_close_is_zero():
             return [0.0, 105.0]
     result = fetch_return_over_range("AAPL", date(2026, 3, 1), date(2026, 3, 4), provider=_StubProvider())
     assert result is None
+
+
+def test_get_market_snapshot_includes_return_since_market_open_during_session():
+    class _StubProvider:
+        def fetch_daily_bars(self, ticker, lookback_days):
+            return [
+                {"date": date(2026, 3, 17), "open": 90.0, "close": 91.0},
+                {"date": date(2026, 3, 18), "open": 91.0, "close": 92.0},
+                {"date": date(2026, 3, 19), "open": 92.0, "close": 93.0},
+                {"date": date(2026, 3, 20), "open": 93.0, "close": 94.0},
+                {"date": date(2026, 3, 23), "open": 94.0, "close": 95.0},
+                {"date": date(2026, 3, 24), "open": 100.0, "close": 105.0},
+            ]
+
+        def fetch_daily_closes(self, ticker, lookback_days):
+            return [91.0, 92.0, 93.0, 94.0, 95.0, 105.0]
+
+        def fetch_context(self, ticker):
+            return {}
+
+    snapshot = get_market_snapshot(
+        "AAPL",
+        provider=_StubProvider(),
+        now=datetime(2026, 3, 24, 15, 0, tzinfo=timezone.utc),
+    )
+
+    assert snapshot["return_since_market_open"] == pytest.approx(0.05)
+
+
+def test_get_market_snapshot_omits_return_since_market_open_outside_session():
+    class _StubProvider:
+        def fetch_daily_bars(self, ticker, lookback_days):
+            return [
+                {"date": date(2026, 3, 17), "open": 90.0, "close": 91.0},
+                {"date": date(2026, 3, 18), "open": 91.0, "close": 92.0},
+                {"date": date(2026, 3, 19), "open": 92.0, "close": 93.0},
+                {"date": date(2026, 3, 20), "open": 93.0, "close": 94.0},
+                {"date": date(2026, 3, 23), "open": 94.0, "close": 95.0},
+                {"date": date(2026, 3, 24), "open": 100.0, "close": 105.0},
+            ]
+
+        def fetch_daily_closes(self, ticker, lookback_days):
+            return [91.0, 92.0, 93.0, 94.0, 95.0, 105.0]
+
+        def fetch_context(self, ticker):
+            return {}
+
+    snapshot = get_market_snapshot(
+        "AAPL",
+        provider=_StubProvider(),
+        now=datetime(2026, 3, 24, 22, 0, tzinfo=timezone.utc),
+    )
+
+    assert snapshot["return_since_market_open"] is None

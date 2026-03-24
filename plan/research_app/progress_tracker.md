@@ -1,5 +1,9 @@
 # Research App Progress Tracker
 
+## 2026-03-24
+
+- Extended the market snapshot contract with `return_since_market_open`, computed from the current session's daily open only during regular US market hours, propagated it into `research_runs.input_json.price_snapshot`, updated the direct agent/sample payload, and tightened the standalone market smoke check plus regression coverage around the new field.
+
 ## 2026-03-23
 
 - Extended the research output contract with an optional `time_horizon_rationale` field, updated the research prompt to ask for a brief horizon explanation, kept the field stored only inside `research_outputs.output_json`, and added regression coverage to confirm both presence and absence of the field validate correctly.

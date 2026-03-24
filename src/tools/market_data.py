@@ -1,9 +1,10 @@
 """Market data providers and tool for the research pipeline."""
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 import os
 from typing import Any, Optional, Protocol, TypedDict
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -13,6 +14,9 @@ from src.tools.context import ToolContext
 
 logger = get_logger(__name__)
 DEFAULT_ALPACA_DATA_BASE_URL = "https://data.alpaca.markets"
+MARKET_TIMEZONE = ZoneInfo("America/New_York")
+REGULAR_MARKET_OPEN = time(9, 30)
+REGULAR_MARKET_CLOSE = time(16, 0)
 
 
 # ---------------------------------------------------------------------------
@@ -26,13 +30,25 @@ class MarketSnapshot(TypedDict):
     last_price: Optional[float]
     return_1d: Optional[float]
     return_5d: Optional[float]
+    return_since_market_open: Optional[float]
     sector: Optional[str]
     company_name: Optional[str]
     earnings_in_days: Optional[int]
 
 
+class DailyBar(TypedDict):
+    """Normalized daily OHLC subset used by the market snapshot helper."""
+
+    date: date
+    open: Optional[float]
+    close: float
+
+
 class MarketDataProvider(Protocol):
     """Contract for pluggable market data providers."""
+
+    def fetch_daily_bars(self, ticker: str, lookback_days: int) -> list[DailyBar]:
+        """Return daily bars in ascending time order."""
 
     def fetch_daily_closes(self, ticker: str, lookback_days: int) -> list[float]:
         """Return close prices in ascending time order."""
@@ -54,6 +70,7 @@ def _empty_snapshot() -> MarketSnapshot:
         "last_price": None,
         "return_1d": None,
         "return_5d": None,
+        "return_since_market_open": None,
         "sector": None,
         "company_name": None,
         "earnings_in_days": None,
@@ -88,6 +105,43 @@ def _resolve_alpaca_data_base_url(data_base_url: Optional[str]) -> str:
     }:
         return DEFAULT_ALPACA_DATA_BASE_URL
     return normalized_url
+
+
+def _parse_bar_date(value: Any) -> Optional[date]:
+    if not isinstance(value, str) or not value:
+        return None
+    normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
+    try:
+        return datetime.fromisoformat(normalized).date()
+    except ValueError:
+        return None
+
+
+def _normalized_now(now: Optional[datetime]) -> datetime:
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        return current.replace(tzinfo=timezone.utc)
+    return current.astimezone(timezone.utc)
+
+
+def _is_regular_market_session(now: datetime) -> bool:
+    eastern_now = now.astimezone(MARKET_TIMEZONE)
+    current_time = eastern_now.time()
+    return (
+        eastern_now.weekday() < 5
+        and REGULAR_MARKET_OPEN <= current_time < REGULAR_MARKET_CLOSE
+    )
+
+
+def _compute_return_since_market_open(
+    last_bar: Optional[DailyBar],
+    now: datetime,
+) -> Optional[float]:
+    if last_bar is None or not _is_regular_market_session(now):
+        return None
+    if last_bar["date"] != now.astimezone(MARKET_TIMEZONE).date():
+        return None
+    return _compute_return(last_bar.get("close"), last_bar.get("open"))
 
 
 # ---------------------------------------------------------------------------
@@ -125,7 +179,7 @@ class AlpacaMarketDataProvider:
             "APCA-API-SECRET-KEY": self.secret_key,
         }
 
-    def fetch_daily_closes(self, ticker: str, lookback_days: int) -> list[float]:
+    def fetch_daily_bars(self, ticker: str, lookback_days: int) -> list[DailyBar]:
         symbol = ticker.upper()
         end = datetime.now(timezone.utc).replace(microsecond=0)
         start = end - timedelta(days=max(lookback_days * 3, 10))
@@ -158,10 +212,27 @@ class AlpacaMarketDataProvider:
             raise ValueError(f"no_daily_bars_for_{symbol}")
 
         bars = sorted(bars, key=lambda item: str(item.get("t", "")))
-        closes = [float(item["c"]) for item in bars if item.get("c") is not None]
-        if not closes:
+        daily_bars: list[DailyBar] = []
+        for item in bars:
+            close_raw = item.get("c")
+            bar_date = _parse_bar_date(item.get("t"))
+            if close_raw is None or bar_date is None:
+                continue
+            open_raw = item.get("o")
+            daily_bars.append(
+                {
+                    "date": bar_date,
+                    "open": float(open_raw) if open_raw is not None else None,
+                    "close": float(close_raw),
+                }
+            )
+
+        if not daily_bars:
             raise ValueError(f"no_close_prices_for_{symbol}")
-        return closes
+        return daily_bars
+
+    def fetch_daily_closes(self, ticker: str, lookback_days: int) -> list[float]:
+        return [bar["close"] for bar in self.fetch_daily_bars(ticker, lookback_days)]
 
     def fetch_daily_closes_range(self, ticker: str, start_date: date, end_date: date) -> list[float]:
         """Return close prices in ascending time order for bars within [start_date, end_date].
@@ -271,15 +342,28 @@ class AlpacaMarketDataProvider:
 
 
 def get_market_snapshot(
-    ticker: str, provider: Optional[MarketDataProvider] = None
+    ticker: str,
+    provider: Optional[MarketDataProvider] = None,
+    now: Optional[datetime] = None,
 ) -> MarketSnapshot:
     """Fetch a market snapshot with resilient fallback on provider errors."""
     created_default = provider is None
     provider_instance = provider or AlpacaMarketDataProvider()
     snapshot = _empty_snapshot()
+    current_time = _normalized_now(now)
 
     try:
-        closes = provider_instance.fetch_daily_closes(ticker, lookback_days=6)
+        if hasattr(provider_instance, "fetch_daily_bars"):
+            daily_bars = provider_instance.fetch_daily_bars(ticker, lookback_days=6)
+            closes = [bar["close"] for bar in daily_bars]
+        else:
+            closes = provider_instance.fetch_daily_closes(ticker, lookback_days=6)
+            daily_bars = [
+                {"date": date.min, "open": None, "close": close}
+                for close in closes
+            ]
+
+        last_bar = daily_bars[-1] if daily_bars else None
         last_price = closes[-1] if closes else None
         one_day_anchor = closes[-2] if len(closes) >= 2 else None
         five_day_anchor = closes[-6] if len(closes) >= 6 else None
@@ -287,6 +371,9 @@ def get_market_snapshot(
         snapshot["last_price"] = last_price
         snapshot["return_1d"] = _compute_return(last_price, one_day_anchor)
         snapshot["return_5d"] = _compute_return(last_price, five_day_anchor)
+        snapshot["return_since_market_open"] = _compute_return_since_market_open(
+            last_bar, current_time
+        )
 
         try:
             context = provider_instance.fetch_context(ticker)
@@ -380,8 +467,9 @@ class MarketDataTool(BaseTool):
             "name": self.name,
             "description": (
                 "Fetch the latest market data snapshot for a stock ticker. "
-                "Returns last_price, 1-day return, 5-day return, sector, "
-                "and days until the next earnings announcement."
+                "Returns last_price, 1-day return, 5-day return, return since "
+                "market open during the current regular session, sector, and "
+                "days until the next earnings announcement."
             ),
             "parameters": {
                 "type": "object",

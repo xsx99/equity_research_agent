@@ -137,9 +137,19 @@ def _smoke_market_snapshot(registry, ticker: str) -> SmokeCheckResult:
             f"No last_price returned for {ticker}. Check Alpaca credentials and market-data permissions.",
             preview=snapshot,
         )
+    if "return_since_market_open" not in snapshot:
+        return _failed(
+            name,
+            f"Snapshot for {ticker} is missing return_since_market_open.",
+            preview=snapshot,
+        )
+    since_open = snapshot.get("return_since_market_open")
     return _passed(
         name,
-        f"Composite snapshot for {ticker}: last_price={snapshot['last_price']:.2f}",
+        (
+            f"Composite snapshot for {ticker}: last_price={snapshot['last_price']:.2f}, "
+            f"return_since_market_open={since_open if since_open is not None else 'n/a'}"
+        ),
         preview=snapshot,
     )
 

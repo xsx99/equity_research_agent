@@ -36,6 +36,7 @@ class ResearchPriceSnapshot(BaseModel):
     last_price: Optional[float] = None
     return_1d: Optional[float] = None
     return_5d: Optional[float] = None
+    return_since_market_open: Optional[float] = None
 
 
 class ResearchContext(BaseModel):

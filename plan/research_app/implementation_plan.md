@@ -28,7 +28,7 @@
 - Current gap: there are no migration smoke tests or temp-Postgres model round-trip tests under `tests/` yet.
 
 ## PR2 – Data Sources & LLM Skeleton
-- `src/tools/market_data.py` is implemented with Alpaca daily bars plus optional Finnhub sector / earnings enrichment. It returns `last_price`, `return_1d`, `return_5d`, `sector`, and `earnings_in_days`.
+- `src/tools/market_data.py` is implemented with Alpaca daily bars plus optional Finnhub sector / earnings enrichment. It returns `last_price`, `return_1d`, `return_5d`, intraday `return_since_market_open` during the regular US session, `sector`, and `earnings_in_days`.
 - `src/tools/news_data.py` is implemented with provider fallback in this order: Finnhub -> Marketaux -> Alpaca. It returns up to 5 `{title, summary}` items.
 - The prompt now lives at `src/prompts/templates/research_v1.yaml`. `src/prompts/registry.py` lazily loads YAML definitions into `Prompt` objects with `id`, `version`, `template`, and `description`.
 - `src/agents/research.py` is implemented. The default runner uses `Phidata` as a thin provider-aware model wrapper; `gemini*` model IDs use the Gemini-backed path and other model IDs fall back to `OpenAIChat`. It does not currently expose the repo `ToolRegistry` into `phi.agent.Agent` for model-driven tool-calling. The default model name is `RESEARCH_MODEL_NAME` or `gemini-2.5-flash-lite`, and Google auth is sourced from `GOOGLE_API_KEY`.

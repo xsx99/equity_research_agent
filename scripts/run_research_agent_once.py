@@ -23,6 +23,7 @@ def _build_sample_payload(ticker: str) -> dict:
             "last_price": 712.0,
             "return_1d": 0.07,
             "return_5d": 0.03,
+            "return_since_market_open": 0.012,
         },
         "context": {
             "sector": "Technology",

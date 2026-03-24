@@ -66,7 +66,14 @@ def _make_stub_tool_registry() -> ToolRegistry:
             return {"name": self.name, "description": "", "parameters": {"type": "object", "properties": {}, "required": []}}
 
         def run(self, input: dict[str, Any], context: ToolContext) -> dict[str, Any]:
-            return {"last_price": 150.0, "return_1d": 0.01, "return_5d": 0.03, "sector": "Technology", "earnings_in_days": 30}
+            return {
+                "last_price": 150.0,
+                "return_1d": 0.01,
+                "return_5d": 0.03,
+                "return_since_market_open": 0.02,
+                "sector": "Technology",
+                "earnings_in_days": 30,
+            }
 
     class _StubNewsTool(BaseTool):
         name = "get_recent_news"
@@ -151,6 +158,7 @@ class TestRunTickerHappyPath:
         input_json = kwargs["input_json"]
         assert input_json["ticker"] == "AAPL"
         assert input_json["price_snapshot"]["last_price"] == 150.0
+        assert input_json["price_snapshot"]["return_since_market_open"] == 0.02
         assert len(input_json["news"]) >= 1
 
 

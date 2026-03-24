@@ -239,7 +239,12 @@ def _valid_input() -> dict:
     return {
         "ticker": "AAPL",
         "as_of": "2026-03-21T12:00:00Z",
-        "price_snapshot": {"last_price": 210.0, "return_1d": 0.01, "return_5d": 0.03},
+        "price_snapshot": {
+            "last_price": 210.0,
+            "return_1d": 0.01,
+            "return_5d": 0.03,
+            "return_since_market_open": 0.015,
+        },
         "context": {"sector": "Technology", "earnings_in_days": 9},
         "news": [{"title": "Sample headline", "summary": "A summary."}],
     }
@@ -249,6 +254,7 @@ def test_research_input_payload_valid():
     payload = ResearchInputPayload.model_validate(_valid_input())
     assert payload.ticker == "AAPL"
     assert payload.price_snapshot.last_price == pytest.approx(210.0)
+    assert payload.price_snapshot.return_since_market_open == pytest.approx(0.015)
     assert len(payload.news) == 1
 
 
