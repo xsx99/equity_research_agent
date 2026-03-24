@@ -12,7 +12,7 @@
 - Done: PR3 – Research Pipeline Implementation
 - Done: PR4 – Evaluation Pipeline
 - Done: PR5 – Web UI (Server-Rendered FastAPI)
-- Planned: PR6 – Scheduler & Ops/Deploy
+- Done: PR6 – Scheduler & Ops/Deploy
 
 ## Architecture Decision
 - `run_research.py` should assemble the full replayable `input_json` in normal Python code before calling the model. That includes market snapshot, news, and any DB-backed research context.
