@@ -310,3 +310,19 @@ class TestEvalPipelineEdgeCases:
         pipeline.run_all(as_of=_CUTOFF)
 
         assert mock_repo.upsert_eval_result.call_count == 2
+
+    @patch("src.research.eval_pipeline.repository")
+    def test_invalid_horizon_increments_skipped(self, mock_repo):
+        from src.research.eval_pipeline import EvalPipeline
+
+        run = _make_run()
+        output = _make_output(time_horizon="invalid_horizon")  # not in days_mapping
+        mock_repo.get_eligible_runs.return_value = [(run, output)]
+
+        pipeline = EvalPipeline(session=MagicMock(), provider=_StubProvider())
+        result = pipeline.run_all(as_of=_CUTOFF)
+
+        assert result.skipped == 1
+        assert result.failed == 0
+        assert result.evaluated == 0
+        mock_repo.upsert_eval_result.assert_not_called()

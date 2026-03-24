@@ -154,6 +154,8 @@ class EvalPipeline:
             result.ticker_results.append(ticker_result)
             if ticker_result.success:
                 result.evaluated += 1
+            elif ticker_result.error and ticker_result.error.startswith("invalid_time_horizon"):
+                result.skipped += 1
             else:
                 result.failed += 1
 
