@@ -1,7 +1,7 @@
 """Market data providers and tool for the research pipeline."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 import os
 from typing import Any, Optional, Protocol, TypedDict
 
@@ -36,6 +36,9 @@ class MarketDataProvider(Protocol):
 
     def fetch_daily_closes(self, ticker: str, lookback_days: int) -> list[float]:
         """Return close prices in ascending time order."""
+
+    def fetch_daily_closes_range(self, ticker: str, start_date: date, end_date: date) -> list[float]:
+        """Return close prices in ascending time order for bars within [start_date, end_date]."""
 
     def fetch_context(self, ticker: str) -> dict[str, Any]:
         """Return optional context fields such as sector and earnings distance."""
@@ -160,6 +163,32 @@ class AlpacaMarketDataProvider:
             raise ValueError(f"no_close_prices_for_{symbol}")
         return closes
 
+    def fetch_daily_closes_range(self, ticker: str, start_date: date, end_date: date) -> list[float]:
+        symbol = ticker.upper()
+        response = self._client.get(
+            f"{self.data_base_url}/v2/stocks/bars",
+            params={
+                "symbols": symbol,
+                "timeframe": "1Day",
+                "start": start_date.isoformat(),
+                "end": end_date.isoformat(),
+                "sort": "asc",
+                "adjustment": "split",
+                "feed": "iex",
+            },
+            headers=self._auth_headers(),
+        )
+        response.raise_for_status()
+        payload = response.json()
+        bars_payload = payload.get("bars", {})
+        if isinstance(bars_payload, dict):
+            bars = bars_payload.get(symbol, [])
+        elif isinstance(bars_payload, list):
+            bars = bars_payload
+        else:
+            bars = []
+        return [float(item["c"]) for item in bars if item.get("c") is not None]
+
     def fetch_context(self, ticker: str) -> dict[str, Any]:
         sector: Optional[str] = None
         company_name: Optional[str] = None
@@ -268,6 +297,54 @@ def get_market_snapshot(
     except Exception as exc:
         logger.error("market_snapshot_failed", ticker=ticker, error=str(exc), exc_info=True)
         return snapshot
+    finally:
+        if created_default and hasattr(provider_instance, "close"):
+            try:
+                provider_instance.close()  # type: ignore[attr-defined]
+            except Exception:
+                logger.warning("market_provider_close_failed", ticker=ticker)
+
+
+def fetch_return_over_range(
+    ticker: str,
+    start_date: date,
+    end_date: date,
+    provider: Optional[MarketDataProvider] = None,
+) -> Optional[float]:
+    """Return (end_close / start_close) - 1 using daily close prices.
+
+    - start_close: close of the first available trading day on or after start_date
+    - end_close:   close of the last available trading day on or before end_date
+    - Returns None if fewer than 2 bars are available or on any provider error.
+    - Weekend/holiday MVP: if end_date falls on a non-trading day, the last
+      available bar before it is used; returns None if fewer than 2 bars result.
+    """
+    created_default = provider is None
+    provider_instance = provider or AlpacaMarketDataProvider()
+    try:
+        closes = provider_instance.fetch_daily_closes_range(ticker, start_date, end_date)
+        if len(closes) < 2:
+            logger.warning(
+                "fetch_return_over_range_insufficient_bars",
+                ticker=ticker,
+                start_date=start_date.isoformat(),
+                end_date=end_date.isoformat(),
+                bar_count=len(closes),
+            )
+            return None
+        start_close = closes[0]
+        end_close = closes[-1]
+        if start_close == 0:
+            return None
+        return (end_close / start_close) - 1
+    except Exception as exc:
+        logger.error(
+            "fetch_return_over_range_failed",
+            ticker=ticker,
+            error=str(exc),
+            exc_info=True,
+        )
+        return None
     finally:
         if created_default and hasattr(provider_instance, "close"):
             try:
