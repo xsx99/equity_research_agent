@@ -10,7 +10,7 @@
 - Done: PR1 – Schema & ORM Foundation
 - Done: PR2 – Data Sources & LLM Skeleton
 - Done: PR3 – Research Pipeline Implementation
-- Planned: PR4 – Evaluation Pipeline
+- Done: PR4 – Evaluation Pipeline
 - Planned: PR5 – Web UI (Server-Rendered FastAPI)
 - Planned: PR6 – Scheduler & Ops/Deploy
 

@@ -1,5 +1,9 @@
 # Research App Progress Tracker
 
+## 2026-03-23
+
+- Extended the research output contract with an optional `time_horizon_rationale` field, updated the research prompt to ask for a brief horizon explanation, kept the field stored only inside `research_outputs.output_json`, and added regression coverage to confirm both presence and absence of the field validate correctly.
+
 ## 2026-03-22
 
 - Added `plan/research_app/architecture_recommendation.md` to make the MVP agent boundary explicit: custom orchestration owns batch lifecycle, data collection, persistence, and eval; `Phidata` is kept as a thin single-turn LLM adapter.

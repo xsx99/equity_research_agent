@@ -278,6 +278,7 @@ def test_structured_output_valid():
         "decision": "bullish",
         "confidence": 0.75,
         "time_horizon": "3d",
+        "time_horizon_rationale": "The thesis depends on short-term follow-through after recent insider buying.",
         "actionability": "watch",
         "thesis_summary": "Strong insider buying.",
         "key_drivers": ["Momentum"],
@@ -286,6 +287,23 @@ def test_structured_output_valid():
     })
     assert out.decision == "bullish"
     assert out.confidence == pytest.approx(0.75)
+    assert out.time_horizon_rationale == (
+        "The thesis depends on short-term follow-through after recent insider buying."
+    )
+
+
+def test_structured_output_allows_missing_optional_time_horizon_rationale():
+    out = StructuredResearchOutput.model_validate({
+        "decision": "bullish",
+        "confidence": 0.75,
+        "time_horizon": "3d",
+        "actionability": "watch",
+        "thesis_summary": "Strong insider buying.",
+        "key_drivers": ["Momentum"],
+        "counterarguments": ["Valuation"],
+        "invalidators": ["Break below support"],
+    })
+    assert out.time_horizon_rationale is None
 
 
 def test_structured_output_confidence_above_one_raises():

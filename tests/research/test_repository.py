@@ -211,6 +211,7 @@ _SAMPLE_OUTPUT = {
     "decision": "bullish",
     "confidence": 0.75,
     "time_horizon": "3d",
+    "time_horizon_rationale": "Recent insider buying should matter over the next few trading sessions.",
     "actionability": "watch",
     "thesis_summary": "Strong insider buying.",
     "key_drivers": ["insider buying"],
