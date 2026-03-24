@@ -187,6 +187,7 @@ class AlpacaMarketDataProvider:
             bars = bars_payload
         else:
             bars = []
+        bars = sorted(bars, key=lambda item: str(item.get("t", "")))
         return [float(item["c"]) for item in bars if item.get("c") is not None]
 
     def fetch_context(self, ticker: str) -> dict[str, Any]:

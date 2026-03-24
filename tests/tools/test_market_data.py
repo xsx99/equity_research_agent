@@ -144,3 +144,11 @@ def test_fetch_return_over_range_returns_none_on_provider_error():
             return []
     result = fetch_return_over_range("AAPL", date(2026, 3, 1), date(2026, 3, 4), provider=_RaisingProvider())
     assert result is None
+
+
+def test_fetch_return_over_range_returns_none_when_start_close_is_zero():
+    class _StubProvider:
+        def fetch_daily_closes_range(self, ticker, start_date, end_date):
+            return [0.0, 105.0]
+    result = fetch_return_over_range("AAPL", date(2026, 3, 1), date(2026, 3, 4), provider=_StubProvider())
+    assert result is None
