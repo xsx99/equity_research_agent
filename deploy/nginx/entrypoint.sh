@@ -7,6 +7,7 @@ CRT="$CERT_DIR/server.crt"
 
 if [ ! -f "$CRT" ] || [ ! -f "$KEY" ]; then
     echo "Generating self-signed TLS certificate..."
+    apk add --no-cache openssl >/dev/null 2>&1
     openssl req -x509 -nodes -newkey rsa:2048 -days 3650 \
         -keyout "$KEY" \
         -out "$CRT" \
