@@ -6,12 +6,13 @@ boundaries.  None of these helpers commit; that is the caller's responsibility.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
-from src.db.models.research import ResearchOutput, ResearchRun, RunStatus
+from src.db.models.evaluation import EvalResult
+from src.db.models.research import ResearchOutput, ResearchRun, ResearchTimeHorizon, RunStatus
 from src.db.models.watch_list import Watchlist
 from src.core.logging import get_logger
 
@@ -152,3 +153,87 @@ def persist_output(
         confidence=output_data["confidence"],
     )
     return output
+
+
+# ---------------------------------------------------------------------------
+# EvalResult helpers
+# ---------------------------------------------------------------------------
+
+
+def get_eligible_runs(
+    session: Session,
+    as_of_cutoff: datetime,
+) -> list[tuple[ResearchRun, ResearchOutput]]:
+    """Return (run, output) pairs eligible for evaluation.
+
+    Eligibility: succeeded status, valid time_horizon, and
+    as_of + horizon_days <= as_of_cutoff (window has fully elapsed).
+    Includes runs that already have an EvalResult (upsert semantics).
+    """
+    horizon_map = ResearchTimeHorizon.days_mapping()
+    valid_horizons = list(horizon_map.keys())
+
+    rows = (
+        session.query(ResearchRun, ResearchOutput)
+        .join(ResearchOutput, ResearchRun.run_id == ResearchOutput.run_id)
+        .filter(
+            ResearchRun.status == RunStatus.SUCCEEDED.value,
+            ResearchOutput.time_horizon.in_(valid_horizons),
+        )
+        .all()
+    )
+
+    eligible = []
+    for run, output in rows:
+        horizon_days = horizon_map.get(output.time_horizon)
+        if horizon_days is None:
+            # Defensive: the SQL query already filters to valid_horizons,
+            # so this branch is unreachable in practice.
+            logger.warning(
+                "get_eligible_runs_unknown_horizon",
+                run_id=str(run.run_id),
+                time_horizon=output.time_horizon,
+            )
+            continue
+        if run.as_of + timedelta(days=horizon_days) <= as_of_cutoff:
+            eligible.append((run, output))
+    return eligible
+
+
+def upsert_eval_result(
+    session: Session,
+    *,
+    run_id: uuid.UUID,
+    horizon_days: int,
+    realized_return: Optional[float],
+    benchmark_return: Optional[float],
+    benchmark_symbol: str,
+    evaluation_method: str,
+    evaluation_params: Optional[dict[str, Any]],
+    outcome_label: Optional[str],
+) -> EvalResult:
+    """Insert or overwrite an EvalResult row for the given run_id."""
+    existing = session.query(EvalResult).filter(EvalResult.run_id == run_id).first()
+    if existing is not None:
+        existing.horizon_days = horizon_days
+        existing.realized_return = realized_return
+        existing.benchmark_return = benchmark_return
+        existing.benchmark_symbol = benchmark_symbol
+        existing.evaluation_method = evaluation_method
+        existing.evaluation_params = evaluation_params
+        existing.outcome_label = outcome_label
+        logger.info("eval_result_updated", run_id=str(run_id), outcome_label=outcome_label)
+        return existing
+    result = EvalResult(
+        run_id=run_id,
+        horizon_days=horizon_days,
+        realized_return=realized_return,
+        benchmark_return=benchmark_return,
+        benchmark_symbol=benchmark_symbol,
+        evaluation_method=evaluation_method,
+        evaluation_params=evaluation_params,
+        outcome_label=outcome_label,
+    )
+    session.add(result)
+    logger.info("eval_result_created", run_id=str(run_id), outcome_label=outcome_label)
+    return result
