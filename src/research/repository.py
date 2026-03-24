@@ -11,7 +11,7 @@ from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
-from src.db.models.evaluation import EvalResult, EvaluationMethod
+from src.db.models.evaluation import EvalResult
 from src.db.models.research import ResearchOutput, ResearchRun, ResearchTimeHorizon, RunStatus
 from src.db.models.watch_list import Watchlist
 from src.core.logging import get_logger

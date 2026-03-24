@@ -11,12 +11,15 @@ from unittest.mock import MagicMock, call, patch
 
 import pytest
 
-from src.db.models.research import ResearchRun, RunStatus
+from src.db.models.evaluation import EvalResult, EvaluationMethod
+from src.db.models.research import ResearchOutput, ResearchRun, RunStatus
 from src.db.models.watch_list import Watchlist
 from src.research import repository
 
 
 _AS_OF = datetime(2026, 3, 22, 9, 0, 0, tzinfo=timezone.utc)
+_EVAL_AS_OF = datetime(2026, 3, 1, 9, 0, 0, tzinfo=timezone.utc)
+_EVAL_CUTOFF = datetime(2026, 3, 10, 9, 0, 0, tzinfo=timezone.utc)  # well past all horizons
 
 
 # ---------------------------------------------------------------------------
@@ -229,13 +232,6 @@ class TestPersistOutput:
         assert output.actionability == "watch"
         assert output.thesis_summary == "Strong insider buying."
         assert output.output_json == _SAMPLE_OUTPUT
-
-
-from src.db.models.evaluation import EvalResult, EvaluationMethod
-from src.db.models.research import ResearchOutput
-
-_EVAL_AS_OF = datetime(2026, 3, 1, 9, 0, 0, tzinfo=timezone.utc)
-_EVAL_CUTOFF = datetime(2026, 3, 10, 9, 0, 0, tzinfo=timezone.utc)  # well past all horizons
 
 
 def _make_run_and_output(
