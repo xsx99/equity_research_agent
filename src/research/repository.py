@@ -6,7 +6,7 @@ boundaries.  None of these helpers commit; that is the caller's responsibility.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 
 from sqlalchemy.orm import Session
@@ -196,6 +196,35 @@ def get_eligible_runs(
             )
             continue
         if run.as_of + timedelta(days=horizon_days) <= as_of_cutoff:
+            eligible.append((run, output))
+    return eligible
+
+
+def get_same_day_eval_candidates(
+    session: Session,
+    trade_date: date,
+) -> list[tuple[ResearchRun, ResearchOutput]]:
+    """Return succeeded `1d` runs created on *trade_date*."""
+    rows = (
+        session.query(ResearchRun, ResearchOutput)
+        .join(ResearchOutput, ResearchRun.run_id == ResearchOutput.run_id)
+        .filter(
+            ResearchRun.status == RunStatus.SUCCEEDED.value,
+            ResearchOutput.time_horizon == ResearchTimeHorizon.ONE_DAY.value,
+        )
+        .all()
+    )
+
+    eligible: list[tuple[ResearchRun, ResearchOutput]] = []
+    for run, output in rows:
+        if output.time_horizon != ResearchTimeHorizon.ONE_DAY.value:
+            continue
+        run_as_of = run.as_of
+        if run_as_of.tzinfo is None:
+            run_as_of = run_as_of.replace(tzinfo=timezone.utc)
+        else:
+            run_as_of = run_as_of.astimezone(timezone.utc)
+        if run_as_of.date() == trade_date:
             eligible.append((run, output))
     return eligible
 

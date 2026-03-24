@@ -56,6 +56,12 @@ class MarketDataProvider(Protocol):
     def fetch_daily_closes_range(self, ticker: str, start_date: date, end_date: date) -> list[float]:
         """Return close prices in ascending time order for bars within [start_date, end_date]."""
 
+    def fetch_daily_bar_on_date(self, ticker: str, trading_date: date) -> Optional[DailyBar]:
+        """Return the daily OHLC bar for *trading_date* if available."""
+
+    def fetch_price_at_or_before(self, ticker: str, as_of: datetime) -> Optional[float]:
+        """Return the latest observed price at or before *as_of*."""
+
     def fetch_context(self, ticker: str) -> dict[str, Any]:
         """Return optional context fields such as sector and earnings distance."""
 
@@ -115,6 +121,19 @@ def _parse_bar_date(value: Any) -> Optional[date]:
         return datetime.fromisoformat(normalized).date()
     except ValueError:
         return None
+
+
+def _parse_bar_timestamp(value: Any) -> Optional[datetime]:
+    if not isinstance(value, str) or not value:
+        return None
+    normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 def _normalized_now(now: Optional[datetime]) -> datetime:
@@ -265,6 +284,83 @@ class AlpacaMarketDataProvider:
             bars = []
         bars = sorted(bars, key=lambda item: str(item.get("t", "")))
         return [float(item["c"]) for item in bars if item.get("c") is not None]
+
+    def fetch_daily_bar_on_date(self, ticker: str, trading_date: date) -> Optional[DailyBar]:
+        symbol = ticker.upper()
+        response = self._client.get(
+            f"{self.data_base_url}/v2/stocks/bars",
+            params={
+                "symbols": symbol,
+                "timeframe": "1Day",
+                "start": trading_date.isoformat(),
+                "end": trading_date.isoformat(),
+                "sort": "asc",
+                "adjustment": "split",
+                "feed": "iex",
+            },
+            headers=self._auth_headers(),
+        )
+        response.raise_for_status()
+        payload = response.json()
+        bars_payload = payload.get("bars", {})
+        if isinstance(bars_payload, dict):
+            bars = bars_payload.get(symbol, [])
+        elif isinstance(bars_payload, list):
+            bars = bars_payload
+        else:
+            bars = []
+        for item in sorted(bars, key=lambda bar: str(bar.get("t", ""))):
+            close_raw = item.get("c")
+            bar_date = _parse_bar_date(item.get("t"))
+            if close_raw is None or bar_date != trading_date:
+                continue
+            open_raw = item.get("o")
+            return {
+                "date": bar_date,
+                "open": float(open_raw) if open_raw is not None else None,
+                "close": float(close_raw),
+            }
+        return None
+
+    def fetch_price_at_or_before(self, ticker: str, as_of: datetime) -> Optional[float]:
+        symbol = ticker.upper()
+        cutoff = _normalized_now(as_of)
+        session_open = datetime.combine(
+            cutoff.astimezone(MARKET_TIMEZONE).date(),
+            REGULAR_MARKET_OPEN,
+            tzinfo=MARKET_TIMEZONE,
+        ).astimezone(timezone.utc)
+        response = self._client.get(
+            f"{self.data_base_url}/v2/stocks/bars",
+            params={
+                "symbols": symbol,
+                "timeframe": "1Min",
+                "start": session_open.isoformat(),
+                "end": cutoff.isoformat(),
+                "sort": "asc",
+                "adjustment": "split",
+                "feed": "iex",
+            },
+            headers=self._auth_headers(),
+        )
+        response.raise_for_status()
+        payload = response.json()
+        bars_payload = payload.get("bars", {})
+        if isinstance(bars_payload, dict):
+            bars = bars_payload.get(symbol, [])
+        elif isinstance(bars_payload, list):
+            bars = bars_payload
+        else:
+            bars = []
+
+        latest_price: Optional[float] = None
+        for item in sorted(bars, key=lambda bar: str(bar.get("t", ""))):
+            bar_time = _parse_bar_timestamp(item.get("t"))
+            close_raw = item.get("c")
+            if bar_time is None or close_raw is None or bar_time > cutoff:
+                continue
+            latest_price = float(close_raw)
+        return latest_price
 
     def fetch_context(self, ticker: str) -> dict[str, Any]:
         sector: Optional[str] = None
@@ -434,6 +530,90 @@ def fetch_return_over_range(
         logger.error(
             "fetch_return_over_range_failed",
             ticker=ticker,
+            error=str(exc),
+            exc_info=True,
+        )
+        return None
+    finally:
+        if created_default and hasattr(provider_instance, "close"):
+            try:
+                provider_instance.close()  # type: ignore[attr-defined]
+            except Exception:
+                logger.warning("market_provider_close_failed", ticker=ticker)
+
+
+def fetch_close_price_on_date(
+    ticker: str,
+    trading_date: date,
+    provider: Optional[MarketDataProvider] = None,
+) -> Optional[float]:
+    created_default = provider is None
+    provider_instance = provider or AlpacaMarketDataProvider()
+    try:
+        bar = provider_instance.fetch_daily_bar_on_date(ticker, trading_date)
+        if not bar:
+            return None
+        return bar.get("close")
+    except Exception as exc:
+        logger.error(
+            "fetch_close_price_on_date_failed",
+            ticker=ticker,
+            trading_date=trading_date.isoformat(),
+            error=str(exc),
+            exc_info=True,
+        )
+        return None
+    finally:
+        if created_default and hasattr(provider_instance, "close"):
+            try:
+                provider_instance.close()  # type: ignore[attr-defined]
+            except Exception:
+                logger.warning("market_provider_close_failed", ticker=ticker)
+
+
+def fetch_open_to_close_return(
+    ticker: str,
+    trading_date: date,
+    provider: Optional[MarketDataProvider] = None,
+) -> Optional[float]:
+    created_default = provider is None
+    provider_instance = provider or AlpacaMarketDataProvider()
+    try:
+        bar = provider_instance.fetch_daily_bar_on_date(ticker, trading_date)
+        if not bar:
+            return None
+        return _compute_return(bar.get("close"), bar.get("open"))
+    except Exception as exc:
+        logger.error(
+            "fetch_open_to_close_return_failed",
+            ticker=ticker,
+            trading_date=trading_date.isoformat(),
+            error=str(exc),
+            exc_info=True,
+        )
+        return None
+    finally:
+        if created_default and hasattr(provider_instance, "close"):
+            try:
+                provider_instance.close()  # type: ignore[attr-defined]
+            except Exception:
+                logger.warning("market_provider_close_failed", ticker=ticker)
+
+
+def fetch_price_at_or_before(
+    ticker: str,
+    as_of: datetime,
+    provider: Optional[MarketDataProvider] = None,
+) -> Optional[float]:
+    created_default = provider is None
+    provider_instance = provider or AlpacaMarketDataProvider()
+    try:
+        return provider_instance.fetch_price_at_or_before(ticker, as_of)
+    except Exception as exc:
+        logger.error(
+            "fetch_price_at_or_before_failed",
+            ticker=ticker,
+            as_of=_normalized_now(as_of).isoformat(),
             error=str(exc),
             exc_info=True,
         )

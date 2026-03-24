@@ -6,7 +6,7 @@ don't work with SQLite.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from unittest.mock import MagicMock, call, patch
 
 import pytest
@@ -18,8 +18,7 @@ from src.research import repository
 
 
 _AS_OF = datetime(2026, 3, 22, 9, 0, 0, tzinfo=timezone.utc)
-_EVAL_AS_OF = datetime(2026, 3, 1, 9, 0, 0, tzinfo=timezone.utc)
-_EVAL_CUTOFF = datetime(2026, 3, 10, 9, 0, 0, tzinfo=timezone.utc)  # well past all horizons
+_EVAL_AS_OF = datetime(2026, 3, 24, 9, 0, 0, tzinfo=timezone.utc)
 
 
 # ---------------------------------------------------------------------------
@@ -236,7 +235,7 @@ class TestPersistOutput:
 
 
 def _make_run_and_output(
-    time_horizon="3d",
+    time_horizon="1d",
     status=RunStatus.SUCCEEDED.value,
     as_of=_EVAL_AS_OF,
 ):
@@ -255,34 +254,52 @@ def _make_run_and_output(
 
 
 class TestGetEligibleRuns:
-    def test_returns_eligible_run(self):
+    def test_returns_same_day_succeeded_1d_run(self):
         run, output = _make_run_and_output()
         session = MagicMock()
         session.query.return_value.join.return_value.filter.return_value.all.return_value = [
             (run, output)
         ]
-        results = repository.get_eligible_runs(session, as_of_cutoff=_EVAL_CUTOFF)
+        results = repository.get_same_day_eval_candidates(
+            session,
+            trade_date=date(2026, 3, 24),
+        )
         assert len(results) == 1
         assert results[0] == (run, output)
 
-    def test_filters_out_run_whose_window_has_not_elapsed(self):
-        # as_of + 3 days = 2026-03-04, cutoff = 2026-03-03 → not elapsed
+    def test_filters_out_run_from_another_trade_date(self):
         run, output = _make_run_and_output(
-            time_horizon="3d",
-            as_of=datetime(2026, 3, 1, 9, 0, 0, tzinfo=timezone.utc),
+            as_of=datetime(2026, 3, 23, 9, 0, 0, tzinfo=timezone.utc),
         )
-        early_cutoff = datetime(2026, 3, 3, 9, 0, 0, tzinfo=timezone.utc)
         session = MagicMock()
         session.query.return_value.join.return_value.filter.return_value.all.return_value = [
             (run, output)
         ]
-        results = repository.get_eligible_runs(session, as_of_cutoff=early_cutoff)
+        results = repository.get_same_day_eval_candidates(
+            session,
+            trade_date=date(2026, 3, 24),
+        )
+        assert results == []
+
+    def test_filters_out_non_1d_output_rows(self):
+        run, output = _make_run_and_output(time_horizon="3d")
+        session = MagicMock()
+        session.query.return_value.join.return_value.filter.return_value.all.return_value = [
+            (run, output)
+        ]
+        results = repository.get_same_day_eval_candidates(
+            session,
+            trade_date=date(2026, 3, 24),
+        )
         assert results == []
 
     def test_returns_empty_when_no_rows(self):
         session = MagicMock()
         session.query.return_value.join.return_value.filter.return_value.all.return_value = []
-        results = repository.get_eligible_runs(session, as_of_cutoff=_EVAL_CUTOFF)
+        results = repository.get_same_day_eval_candidates(
+            session,
+            trade_date=date(2026, 3, 24),
+        )
         assert results == []
 
 
