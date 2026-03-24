@@ -9,6 +9,8 @@ from src.db.connection import init_db
 from src.core.logging import get_logger
 from src.scheduler.service import SchedulerService
 from src.scheduler.jobs.sec_edgar_job import SECEdgarJob
+from src.scheduler.jobs.research_job import ResearchJob
+from src.scheduler.jobs.eval_job import EvalJob
 
 logger = get_logger(__name__)
 
@@ -20,7 +22,12 @@ def main():
     logger.info("database_ready")
 
     logger.info("scheduler_service_starting")
-    SchedulerService(jobs=[SECEdgarJob()]).start()
+    SchedulerService(jobs=[
+        SECEdgarJob(),
+        ResearchJob("open"),
+        ResearchJob("close"),
+        EvalJob(),
+    ]).start()
 
 
 if __name__ == "__main__":

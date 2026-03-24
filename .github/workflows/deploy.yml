@@ -1,4 +1,4 @@
-name: Deploy Scheduler
+name: Deploy
 
 on:
   push:
@@ -68,6 +68,6 @@ jobs:
         run: |
           ENV_FILE=/home/pi/secrets/trading_agent.env
           sudo docker compose --env-file "$ENV_FILE" -f docker-compose.db.yml up -d
-          sudo docker compose --env-file "$ENV_FILE" build --no-cache scheduler
-          sudo docker compose --env-file "$ENV_FILE" up -d --force-recreate scheduler
+          sudo docker compose --env-file "$ENV_FILE" build --no-cache scheduler web
+          sudo docker compose --env-file "$ENV_FILE" up -d --force-recreate scheduler web nginx
           echo "Deployment complete on local machine."
