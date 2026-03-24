@@ -187,6 +187,8 @@ def get_eligible_runs(
     for run, output in rows:
         horizon_days = horizon_map.get(output.time_horizon)
         if horizon_days is None:
+            # Defensive: the SQL query already filters to valid_horizons,
+            # so this branch is unreachable in practice.
             logger.warning(
                 "get_eligible_runs_unknown_horizon",
                 run_id=str(run.run_id),

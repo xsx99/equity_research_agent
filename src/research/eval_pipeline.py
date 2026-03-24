@@ -131,7 +131,7 @@ class EvalPipeline:
         self.provider = provider or AlpacaMarketDataProvider()
         self.benchmark_symbol = benchmark_symbol
         self.neutral_threshold = neutral_threshold
-        self._benchmark_cache: dict[tuple[str, date, int], Optional[float]] = {}
+        self._benchmark_cache: dict[tuple[str, date, date, int], Optional[float]] = {}
 
     # ------------------------------------------------------------------
     # Public interface
@@ -181,58 +181,75 @@ class EvalPipeline:
     # ------------------------------------------------------------------
 
     def _eval_run(self, run: ResearchRun, output: ResearchOutput) -> EvalTickerResult:
-        horizon_map = ResearchTimeHorizon.days_mapping()
-        horizon_days = horizon_map.get(output.time_horizon)
-        if horizon_days is None:
-            logger.warning(
-                "eval_pipeline_invalid_horizon",
+        try:
+            horizon_map = ResearchTimeHorizon.days_mapping()
+            horizon_days = horizon_map.get(output.time_horizon)
+            if horizon_days is None:
+                logger.warning(
+                    "eval_pipeline_invalid_horizon",
+                    run_id=str(run.run_id),
+                    time_horizon=output.time_horizon,
+                )
+                return EvalTickerResult(
+                    run_id=run.run_id,
+                    ticker=run.ticker,
+                    success=False,
+                    error=f"invalid_time_horizon:{output.time_horizon}",
+                )
+
+            start_date = run.as_of.date()
+            end_date = start_date + timedelta(days=horizon_days)
+
+            realized_return = self._fetch_return(run.ticker, start_date, end_date)
+            benchmark_return = self._fetch_benchmark(start_date, end_date, horizon_days)
+
+            outcome_label = apply_rule_v1(
+                decision=output.decision,
+                realized_return=realized_return,
+                benchmark_return=benchmark_return,
+                neutral_threshold=self.neutral_threshold,
+            )
+
+            repository.upsert_eval_result(
+                self.session,
+                run_id=run.run_id,
+                horizon_days=horizon_days,
+                realized_return=realized_return,
+                benchmark_return=benchmark_return,
+                benchmark_symbol=self.benchmark_symbol,
+                evaluation_method=EvaluationMethod.RULE_V1.value,
+                evaluation_params=None,
+                outcome_label=outcome_label,
+            )
+
+            logger.info(
+                "eval_pipeline_run_evaluated",
                 run_id=str(run.run_id),
-                time_horizon=output.time_horizon,
+                ticker=run.ticker,
+                outcome_label=outcome_label,
+            )
+            return EvalTickerResult(
+                run_id=run.run_id,
+                ticker=run.ticker,
+                success=True,
+                outcome_label=outcome_label,
+            )
+
+        except Exception as exc:
+            error_msg = str(exc)
+            logger.error(
+                "eval_pipeline_run_failed",
+                run_id=str(run.run_id),
+                ticker=run.ticker,
+                error=error_msg,
+                exc_info=True,
             )
             return EvalTickerResult(
                 run_id=run.run_id,
                 ticker=run.ticker,
                 success=False,
-                error=f"invalid_time_horizon:{output.time_horizon}",
+                error=error_msg,
             )
-
-        start_date = run.as_of.date()
-        end_date = start_date + timedelta(days=horizon_days)
-
-        realized_return = self._fetch_return(run.ticker, start_date, end_date)
-        benchmark_return = self._fetch_benchmark(start_date, end_date, horizon_days)
-
-        outcome_label = apply_rule_v1(
-            decision=output.decision,
-            realized_return=realized_return,
-            benchmark_return=benchmark_return,
-            neutral_threshold=self.neutral_threshold,
-        )
-
-        repository.upsert_eval_result(
-            self.session,
-            run_id=run.run_id,
-            horizon_days=horizon_days,
-            realized_return=realized_return,
-            benchmark_return=benchmark_return,
-            benchmark_symbol=self.benchmark_symbol,
-            evaluation_method=EvaluationMethod.RULE_V1.value,
-            evaluation_params=None,
-            outcome_label=outcome_label,
-        )
-
-        logger.info(
-            "eval_pipeline_run_evaluated",
-            run_id=str(run.run_id),
-            ticker=run.ticker,
-            outcome_label=outcome_label,
-        )
-        return EvalTickerResult(
-            run_id=run.run_id,
-            ticker=run.ticker,
-            success=True,
-            outcome_label=outcome_label,
-        )
 
     def _fetch_return(self, ticker: str, start_date: date, end_date: date) -> Optional[float]:
         try:
@@ -246,7 +263,7 @@ class EvalPipeline:
             return None
 
     def _fetch_benchmark(self, start_date: date, end_date: date, horizon_days: int) -> Optional[float]:
-        cache_key = (self.benchmark_symbol, start_date, horizon_days)
+        cache_key = (self.benchmark_symbol, start_date, end_date, horizon_days)
         if cache_key in self._benchmark_cache:
             return self._benchmark_cache[cache_key]
         value = self._fetch_return(self.benchmark_symbol, start_date, end_date)

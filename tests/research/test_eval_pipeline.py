@@ -169,7 +169,9 @@ class TestEvalPipelineHappyPath:
         call_kwargs = mock_repo.upsert_eval_result.call_args.kwargs
         assert call_kwargs["run_id"] == run.run_id
         assert call_kwargs["horizon_days"] == 3
-        assert call_kwargs["outcome_label"] is not None
+        # _StubProvider returns 5% for all tickers including SPY (same key),
+        # so realized == benchmark → bullish + realized > 0 + realized >= benchmark → CORRECT
+        assert call_kwargs["outcome_label"] == EvalOutcomeLabel.CORRECT.value
         assert result.evaluated == 1
         assert result.failed == 0
 
@@ -310,6 +312,31 @@ class TestEvalPipelineEdgeCases:
         pipeline.run_all(as_of=_CUTOFF)
 
         assert mock_repo.upsert_eval_result.call_count == 2
+
+    @patch("src.research.eval_pipeline.repository")
+    def test_upsert_exception_does_not_abort_batch(self, mock_repo):
+        from src.research.eval_pipeline import EvalPipeline
+
+        run1 = _make_run("AAPL")
+        run2 = _make_run("MSFT")
+        output1 = _make_output()
+        output2 = _make_output()
+        mock_repo.get_eligible_runs.return_value = [(run1, output1), (run2, output2)]
+
+        call_count = {"n": 0}
+        def upsert_side_effect(*args, **kwargs):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise RuntimeError("db_constraint_error")
+        mock_repo.upsert_eval_result.side_effect = upsert_side_effect
+
+        pipeline = EvalPipeline(session=MagicMock(), provider=_StubProvider())
+        result = pipeline.run_all(as_of=_CUTOFF)
+
+        # First run failed, second should still be evaluated
+        assert result.failed == 1
+        assert result.evaluated == 1
+        assert len(result.ticker_results) == 2
 
     @patch("src.research.eval_pipeline.repository")
     def test_invalid_horizon_increments_skipped(self, mock_repo):

@@ -47,9 +47,15 @@ def main() -> int:
 
             logger.info("run_eval_once_single_run", run_id=str(run_id))
             ticker_result = pipeline.run_single(run_id)
+            is_skipped = (
+                not ticker_result.success
+                and ticker_result.error is not None
+                and ticker_result.error.startswith("invalid_time_horizon")
+            )
             pipeline_result = EvalPipelineResult(
                 evaluated=1 if ticker_result.success else 0,
-                failed=0 if ticker_result.success else 1,
+                skipped=1 if is_skipped else 0,
+                failed=0 if (ticker_result.success or is_skipped) else 1,
                 ticker_results=[ticker_result],
             )
         else:

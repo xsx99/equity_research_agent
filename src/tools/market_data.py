@@ -164,6 +164,11 @@ class AlpacaMarketDataProvider:
         return closes
 
     def fetch_daily_closes_range(self, ticker: str, start_date: date, end_date: date) -> list[float]:
+        """Return close prices in ascending time order for bars within [start_date, end_date].
+
+        Returns an empty list if no bars are available in the range (not an error).
+        Callers should handle the empty case explicitly.
+        """
         symbol = ticker.upper()
         response = self._client.get(
             f"{self.data_base_url}/v2/stocks/bars",
