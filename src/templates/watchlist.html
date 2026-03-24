@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Watchlist{% endblock %}
+
+{% block content %}
+<h1>Watchlist</h1>
+
+<div class="card">
+  <form class="form-row" method="post" action="/watchlist/add">
+    <input type="text" name="ticker" placeholder="Ticker (e.g. AAPL)" required autofocus>
+    <button type="submit" class="btn btn-primary">Add Ticker</button>
+  </form>
+</div>
+
+{% if rows %}
+<table>
+  <thead>
+    <tr>
+      <th>Ticker</th>
+      <th>Status</th>
+      <th>Added</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in rows %}
+    <tr>
+      <td><strong>{{ row.ticker }}</strong></td>
+      <td>
+        {% if row.is_active %}
+          <span class="badge badge-succeeded">Active</span>
+        {% else %}
+          <span class="badge badge-queued">Inactive</span>
+        {% endif %}
+      </td>
+      <td>{{ row.created_at.strftime('%Y-%m-%d') if row.created_at else '—' }}</td>
+      <td>
+        {% if row.is_active %}
+        <form method="post" action="/watchlist/{{ row.ticker }}/delete" style="display:inline">
+          <button type="submit" class="btn btn-danger btn-sm"
+                  onclick="return confirm('Deactivate {{ row.ticker }}?')">Remove</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p style="color:#666; margin-top:1rem;">No tickers yet. Add one above.</p>
+{% endif %}
+{% endblock %}

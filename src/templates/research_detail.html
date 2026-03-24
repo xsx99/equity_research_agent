@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+{% block title %}{{ detail.ticker }} — Run Detail{% endblock %}
+
+{% block content %}
+<h1>
+  {{ detail.ticker }}
+  <span class="badge badge-{{ detail.status }}" style="font-size:14px; vertical-align:middle;">{{ detail.status }}</span>
+</h1>
+
+<div class="detail-grid">
+
+  <!-- Run metadata -->
+  <div class="card">
+    <h2>Run Info</h2>
+    <table class="kv-table" style="border:none;">
+      <tr><td>Run ID</td><td class="mono" style="font-size:11px;">{{ detail.run_id }}</td></tr>
+      <tr><td>As Of</td><td>{{ detail.as_of.strftime('%Y-%m-%d %H:%M UTC') if detail.as_of else '—' }}</td></tr>
+      <tr><td>Model</td><td>{{ detail.model_name or '—' }}</td></tr>
+      <tr><td>Prompt Version</td><td>{{ detail.prompt_version or '—' }}</td></tr>
+      <tr><td>Started</td><td>{{ detail.started_at.strftime('%H:%M:%S') if detail.started_at else '—' }}</td></tr>
+      <tr><td>Finished</td><td>{{ detail.finished_at.strftime('%H:%M:%S') if detail.finished_at else '—' }}</td></tr>
+      {% if detail.error_message %}
+      <tr><td>Error</td><td style="color:#721c24;">{{ detail.error_message }}</td></tr>
+      {% endif %}
+    </table>
+  </div>
+
+  <!-- Research output -->
+  <div class="card">
+    <h2>Research Output</h2>
+    {% if detail.decision %}
+    <table class="kv-table" style="border:none;">
+      <tr>
+        <td>Decision</td>
+        <td><span class="badge badge-{{ detail.decision }}">{{ detail.decision }}</span></td>
+      </tr>
+      <tr>
+        <td>Confidence</td>
+        <td>{{ fmt_conf(detail.confidence) }}</td>
+      </tr>
+      <tr>
+        <td>Time Horizon</td>
+        <td>{{ detail.time_horizon or '—' }}{% if detail.time_horizon_rationale %} — <span style="color:#555; font-weight:normal;">{{ detail.time_horizon_rationale }}</span>{% endif %}</td>
+      </tr>
+      <tr>
+        <td>Actionability</td>
+        <td><span class="badge badge-{{ detail.actionability }}">{{ detail.actionability }}</span></td>
+      </tr>
+    </table>
+
+    {% if detail.thesis_summary %}
+    <p class="thesis" style="margin-top:0.75rem;">{{ detail.thesis_summary }}</p>
+    {% endif %}
+
+    {% if detail.key_drivers %}
+    <h3 style="font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:#666; margin:1rem 0 0.4rem;">Key Drivers</h3>
+    <ul class="output-list">
+      {% for item in detail.key_drivers %}<li>{{ item }}</li>{% endfor %}
+    </ul>
+    {% endif %}
+
+    {% if detail.counterarguments %}
+    <h3 style="font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:#666; margin:1rem 0 0.4rem;">Counterarguments</h3>
+    <ul class="output-list">
+      {% for item in detail.counterarguments %}<li>{{ item }}</li>{% endfor %}
+    </ul>
+    {% endif %}
+
+    {% if detail.invalidators %}
+    <h3 style="font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:#666; margin:1rem 0 0.4rem;">Invalidators</h3>
+    <ul class="output-list">
+      {% for item in detail.invalidators %}<li>{{ item }}</li>{% endfor %}
+    </ul>
+    {% endif %}
+
+    {% else %}
+    <p style="color:#666;">No output available.</p>
+    {% endif %}
+  </div>
+
+  <!-- Eval result -->
+  <div class="card">
+    <h2>Eval Result</h2>
+    {% if detail.outcome_label %}
+    <table class="kv-table" style="border:none;">
+      <tr>
+        <td>Outcome</td>
+        <td><span class="badge badge-{{ detail.outcome_label }}">{{ detail.outcome_label | replace('_', ' ') }}</span></td>
+      </tr>
+      <tr><td>Horizon Days</td><td>{{ detail.horizon_days }}</td></tr>
+      <tr><td>Realized Return</td><td>{{ pct(detail.realized_return) }}</td></tr>
+      <tr><td>Benchmark Return</td><td>{{ pct(detail.benchmark_return) }} ({{ detail.benchmark_symbol }})</td></tr>
+      <tr><td>Method</td><td>{{ detail.evaluation_method }}</td></tr>
+    </table>
+    {% elif detail.status == 'succeeded' %}
+    <p style="color:#666;">Evaluation window has not elapsed yet.</p>
+    {% else %}
+    <p style="color:#666;">No eval result.</p>
+    {% endif %}
+  </div>
+
+  <!-- Ticker history -->
+  {% if history %}
+  <div class="card">
+    <h2>{{ detail.ticker }} Eval History</h2>
+    <table style="border:none;">
+      <thead>
+        <tr>
+          <th style="padding:4px 8px;">Date</th>
+          <th style="padding:4px 8px;">Decision</th>
+          <th style="padding:4px 8px;">Conf</th>
+          <th style="padding:4px 8px;">Outcome</th>
+          <th style="padding:4px 8px;">Return</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for h in history %}
+        <tr>
+          <td style="padding:4px 8px;" class="mono">
+            <a href="/research/{{ h.run_id }}">{{ h.as_of.strftime('%m-%d') if h.as_of else '—' }}</a>
+          </td>
+          <td style="padding:4px 8px;">
+            <span class="badge badge-{{ h.decision }}">{{ h.decision }}</span>
+          </td>
+          <td style="padding:4px 8px;">{{ fmt_conf(h.confidence) }}</td>
+          <td style="padding:4px 8px;">
+            {% if h.outcome_label %}
+            <span class="badge badge-{{ h.outcome_label }}">{{ h.outcome_label | replace('_', ' ') }}</span>
+            {% else %}—{% endif %}
+          </td>
+          <td style="padding:4px 8px;">{{ pct(h.realized_return) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+</div>
+
+<!-- JSON panels -->
+<div style="display:grid; grid-template-columns: 1fr 1fr; gap:1rem; margin-top:0.5rem;">
+  <div>
+    <h2>Input JSON</h2>
+    <pre>{{ detail.input_json or 'No input data.' }}</pre>
+  </div>
+  <div>
+    <h2>Output JSON</h2>
+    <pre>{{ detail.output_json or 'No output data.' }}</pre>
+  </div>
+</div>
+
+<div style="margin-top:1rem;">
+  <a href="/research" class="btn btn-primary btn-sm">← Back to Research</a>
+</div>
+{% endblock %}

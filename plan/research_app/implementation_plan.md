@@ -11,7 +11,7 @@
 - Done: PR2 – Data Sources & LLM Skeleton
 - Done: PR3 – Research Pipeline Implementation
 - Done: PR4 – Evaluation Pipeline
-- Planned: PR5 – Web UI (Server-Rendered FastAPI)
+- Done: PR5 – Web UI (Server-Rendered FastAPI)
 - Planned: PR6 – Scheduler & Ops/Deploy
 
 ## Architecture Decision
@@ -53,10 +53,11 @@
 - Tests still needed: horizon eligibility logic, the `rule_v1` label matrix, and idempotent writes.
 
 ## PR5 – Web UI (Server-Rendered FastAPI)
-- Not started. There is no `src/app.py`, `templates/`, or `static/` directory in the current repo.
-- Planned routes remain `GET/POST /watchlist`, `GET /research`, `GET /research/{run_id}`, and internal `POST /admin/run-now` / `POST /admin/eval-now`.
-- Reuse the existing DB session helpers and the repository layer introduced in PR3; keep it server-rendered HTML rather than a SPA.
-- Tests still needed: FastAPI `TestClient` coverage for watchlist CRUD, list/detail pages, and admin triggers.
+- Implemented in `src/app.py` (FastAPI app with lifespan), `src/templates/` (base, watchlist, research, research_detail), and `src/static/style.css`.
+- Routes: `GET /watchlist`, `POST /watchlist/add`, `POST /watchlist/{ticker}/delete`, `GET /research`, `GET /research/{run_id}`, `POST /admin/run-now`, `POST /admin/eval-now`, `GET /` (redirect).
+- Reuses `get_session()`, `repository.*`, `ResearchPipeline`, and `EvalPipeline` from prior PRs; server-rendered Jinja2, no SPA.
+- Added `fastapi==0.115.12`, `uvicorn[standard]==0.34.0`, `jinja2==3.1.6`, `python-multipart==0.0.20` to `requirements.txt`.
+- Tests in `tests/test_app.py`: 16 TestClient tests covering watchlist CRUD, research list/detail, admin triggers, and root redirect — all passing.
 
 ## PR6 – Scheduler & Ops/Deploy
 - `src/core/config.py` currently contains only database, SEC EDGAR, and scheduler settings. Research/eval env vars, prompt defaults, and API-key documentation still need to be added there.

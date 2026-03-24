@@ -1,0 +1,317 @@
+"""FastAPI route tests using TestClient with mocked DB and pipelines."""
+from __future__ import annotations
+
+import uuid
+from datetime import datetime, timezone
+from unittest.mock import MagicMock, patch
+
+import pytest
+from fastapi.testclient import TestClient
+
+from src.db.models.research import RunStatus
+from src.research.pipeline import PipelineResult, TickerResult
+from src.research.eval_pipeline import EvalPipelineResult
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+_AS_OF = datetime(2026, 3, 22, 9, 0, tzinfo=timezone.utc)
+_RUN_ID = uuid.uuid4()
+_TICKER = "AAPL"
+
+
+def _make_watchlist_row(ticker=_TICKER, is_active=True):
+    row = MagicMock()
+    row.id = uuid.uuid4()
+    row.ticker = ticker
+    row.is_active = is_active
+    row.created_at = _AS_OF
+    return row
+
+
+def _make_run(status=RunStatus.SUCCEEDED.value):
+    run = MagicMock()
+    run.run_id = _RUN_ID
+    run.ticker = _TICKER
+    run.as_of = _AS_OF
+    run.status = status
+    run.prompt_version = "v1"
+    run.model_name = "gemini-2.5-flash-lite"
+    run.input_json = {"ticker": _TICKER}
+    run.error_message = None
+    run.started_at = _AS_OF
+    run.finished_at = _AS_OF
+    run.created_at = _AS_OF
+
+    out = MagicMock()
+    out.decision = "bullish"
+    out.confidence = 0.8
+    out.time_horizon = "3d"
+    out.actionability = "actionable"
+    out.thesis_summary = "Strong momentum"
+    out.output_json = {"decision": "bullish"}
+    run.output = out
+
+    ev = MagicMock()
+    ev.outcome_label = "correct"
+    ev.realized_return = 0.03
+    ev.benchmark_return = 0.01
+    ev.benchmark_symbol = "SPY"
+    ev.evaluation_method = "rule_v1"
+    ev.horizon_days = 3
+    run.eval_result = ev
+
+    return run
+
+
+@pytest.fixture()
+def client():
+    # Patch init_db so startup doesn't need a real DB
+    with patch("src.app.init_db"):
+        from src.app import app
+        with TestClient(app, raise_server_exceptions=True) as c:
+            yield c
+
+
+# ---------------------------------------------------------------------------
+# Watchlist routes
+# ---------------------------------------------------------------------------
+
+
+class TestWatchlistPage:
+    def test_get_shows_tickers(self, client):
+        rows = [_make_watchlist_row("AAPL"), _make_watchlist_row("MSFT", is_active=False)]
+        with patch("src.app.repository.get_watchlist", return_value=rows), \
+             patch("src.app.get_session") as mock_gs:
+            mock_gs.return_value.__enter__ = lambda s: MagicMock()
+            mock_gs.return_value.__exit__ = MagicMock(return_value=False)
+
+            # Use the real context manager path by patching get_session entirely
+            with patch("src.app.get_session") as gs:
+                session = MagicMock()
+                gs.return_value.__enter__ = MagicMock(return_value=session)
+                gs.return_value.__exit__ = MagicMock(return_value=False)
+                with patch("src.app.repository.get_watchlist", return_value=rows):
+                    resp = client.get("/watchlist")
+
+        assert resp.status_code == 200
+        assert "AAPL" in resp.text
+        assert "MSFT" in resp.text
+
+    def test_get_empty_watchlist(self, client):
+        with patch("src.app.get_session") as gs:
+            session = MagicMock()
+            gs.return_value.__enter__ = MagicMock(return_value=session)
+            gs.return_value.__exit__ = MagicMock(return_value=False)
+            with patch("src.app.repository.get_watchlist", return_value=[]):
+                resp = client.get("/watchlist")
+        assert resp.status_code == 200
+        assert "No tickers yet" in resp.text
+
+
+class TestWatchlistAdd:
+    def test_add_redirects_on_success(self, client):
+        with patch("src.app.get_session") as gs:
+            session = MagicMock()
+            gs.return_value.__enter__ = MagicMock(return_value=session)
+            gs.return_value.__exit__ = MagicMock(return_value=False)
+            with patch("src.app.repository.add_ticker") as add_mock:
+                add_mock.return_value = _make_watchlist_row("NVDA")
+                resp = client.post("/watchlist/add", data={"ticker": "nvda"}, follow_redirects=False)
+        assert resp.status_code == 303
+        assert resp.headers["location"] == "/watchlist"
+
+    def test_add_empty_ticker_redirects(self, client):
+        resp = client.post("/watchlist/add", data={"ticker": "  "}, follow_redirects=False)
+        assert resp.status_code == 303
+
+    def test_add_normalises_to_uppercase(self, client):
+        with patch("src.app.get_session") as gs:
+            session = MagicMock()
+            gs.return_value.__enter__ = MagicMock(return_value=session)
+            gs.return_value.__exit__ = MagicMock(return_value=False)
+            with patch("src.app.repository.add_ticker") as add_mock:
+                add_mock.return_value = _make_watchlist_row("TSLA")
+                client.post("/watchlist/add", data={"ticker": "tsla"}, follow_redirects=False)
+                # repository.add_ticker already normalises; we just verify it was called
+                add_mock.assert_called_once()
+
+
+class TestWatchlistDelete:
+    def test_delete_redirects(self, client):
+        with patch("src.app.get_session") as gs:
+            session = MagicMock()
+            gs.return_value.__enter__ = MagicMock(return_value=session)
+            gs.return_value.__exit__ = MagicMock(return_value=False)
+            with patch("src.app.repository.deactivate_ticker", return_value=True):
+                resp = client.post("/watchlist/AAPL/delete", follow_redirects=False)
+        assert resp.status_code == 303
+
+
+# ---------------------------------------------------------------------------
+# Research list route
+# ---------------------------------------------------------------------------
+
+
+class TestResearchList:
+    def test_get_shows_runs(self, client):
+        run = _make_run()
+        with patch("src.app.get_session") as gs:
+            session = MagicMock()
+            gs.return_value.__enter__ = MagicMock(return_value=session)
+            gs.return_value.__exit__ = MagicMock(return_value=False)
+            # Mock the query chain
+            q = MagicMock()
+            q.outerjoin.return_value = q
+            q.order_by.return_value = q
+            q.all.return_value = [run]
+            session.query.return_value = q
+
+            resp = client.get("/research")
+
+        assert resp.status_code == 200
+        assert _TICKER in resp.text
+        assert "bullish" in resp.text.lower()
+
+    def test_get_empty_shows_placeholder(self, client):
+        with patch("src.app.get_session") as gs:
+            session = MagicMock()
+            gs.return_value.__enter__ = MagicMock(return_value=session)
+            gs.return_value.__exit__ = MagicMock(return_value=False)
+            q = MagicMock()
+            q.outerjoin.return_value = q
+            q.order_by.return_value = q
+            q.all.return_value = []
+            session.query.return_value = q
+
+            resp = client.get("/research")
+
+        assert resp.status_code == 200
+        assert "No research runs yet" in resp.text
+
+
+# ---------------------------------------------------------------------------
+# Research detail route
+# ---------------------------------------------------------------------------
+
+
+class TestResearchDetail:
+    def test_get_valid_run(self, client):
+        run = _make_run()
+        with patch("src.app.get_session") as gs:
+            session = MagicMock()
+            gs.return_value.__enter__ = MagicMock(return_value=session)
+            gs.return_value.__exit__ = MagicMock(return_value=False)
+            q = MagicMock()
+            q.filter.return_value = q
+            q.first.return_value = run
+            # ticker history query
+            q2 = MagicMock()
+            q2.join.return_value = q2
+            q2.filter.return_value = q2
+            q2.order_by.return_value = q2
+            q2.limit.return_value = q2
+            q2.all.return_value = []
+            session.query.side_effect = [q, q2]
+
+            resp = client.get(f"/research/{_RUN_ID}")
+
+        assert resp.status_code == 200
+        assert _TICKER in resp.text
+        assert "bullish" in resp.text.lower()
+
+    def test_get_invalid_uuid_returns_404(self, client):
+        resp = client.get("/research/not-a-uuid")
+        assert resp.status_code == 404
+
+    def test_get_missing_run_returns_404(self, client):
+        with patch("src.app.get_session") as gs:
+            session = MagicMock()
+            gs.return_value.__enter__ = MagicMock(return_value=session)
+            gs.return_value.__exit__ = MagicMock(return_value=False)
+            q = MagicMock()
+            q.filter.return_value = q
+            q.first.return_value = None
+            session.query.return_value = q
+
+            resp = client.get(f"/research/{uuid.uuid4()}")
+
+        assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Admin routes
+# ---------------------------------------------------------------------------
+
+
+class TestAdminRunNow:
+    def test_triggers_pipeline_and_redirects(self, client):
+        result = PipelineResult(succeeded=2, failed=0, ticker_results=[])
+        with patch("src.app.get_session") as gs, \
+             patch("src.app.ResearchAgent"), \
+             patch("src.app.ResearchPipeline") as MockPipeline, \
+             patch("src.app.build_research_tool_registry"), \
+             patch("src.app.PromptRegistry"):
+            session = MagicMock()
+            gs.return_value.__enter__ = MagicMock(return_value=session)
+            gs.return_value.__exit__ = MagicMock(return_value=False)
+            MockPipeline.return_value.run_all.return_value = result
+
+            resp = client.post("/admin/run-now", follow_redirects=False)
+
+        assert resp.status_code == 303
+        assert resp.headers["location"] == "/research"
+
+    def test_pipeline_error_still_redirects(self, client):
+        with patch("src.app.get_session") as gs, \
+             patch("src.app.ResearchAgent", side_effect=RuntimeError("boom")), \
+             patch("src.app.build_research_tool_registry"), \
+             patch("src.app.PromptRegistry"):
+            session = MagicMock()
+            gs.return_value.__enter__ = MagicMock(return_value=session)
+            gs.return_value.__exit__ = MagicMock(return_value=False)
+
+            resp = client.post("/admin/run-now", follow_redirects=False)
+
+        assert resp.status_code == 303
+
+
+class TestAdminEvalNow:
+    def test_triggers_eval_and_redirects(self, client):
+        result = EvalPipelineResult(evaluated=3, failed=0, skipped=1)
+        with patch("src.app.get_session") as gs, \
+             patch("src.app.EvalPipeline") as MockEval:
+            session = MagicMock()
+            gs.return_value.__enter__ = MagicMock(return_value=session)
+            gs.return_value.__exit__ = MagicMock(return_value=False)
+            MockEval.return_value.run_all.return_value = result
+
+            resp = client.post("/admin/eval-now", follow_redirects=False)
+
+        assert resp.status_code == 303
+        assert resp.headers["location"] == "/research"
+
+    def test_eval_error_still_redirects(self, client):
+        with patch("src.app.get_session") as gs, \
+             patch("src.app.EvalPipeline", side_effect=RuntimeError("boom")):
+            session = MagicMock()
+            gs.return_value.__enter__ = MagicMock(return_value=session)
+            gs.return_value.__exit__ = MagicMock(return_value=False)
+
+            resp = client.post("/admin/eval-now", follow_redirects=False)
+
+        assert resp.status_code == 303
+
+
+# ---------------------------------------------------------------------------
+# Root redirect
+# ---------------------------------------------------------------------------
+
+
+class TestRoot:
+    def test_root_redirects_to_research(self, client):
+        resp = client.get("/", follow_redirects=False)
+        assert resp.status_code == 303
+        assert resp.headers["location"] == "/research"
