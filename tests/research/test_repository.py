@@ -210,8 +210,8 @@ class TestMarkRunFailed:
 _SAMPLE_OUTPUT = {
     "decision": "bullish",
     "confidence": 0.75,
-    "time_horizon": "3d",
-    "time_horizon_rationale": "Recent insider buying should matter over the next few trading sessions.",
+    "time_horizon": "1d",
+    "time_horizon_rationale": "Recent insider buying should matter for the same trading day.",
     "actionability": "watch",
     "thesis_summary": "Strong insider buying.",
     "key_drivers": ["insider buying"],
@@ -229,7 +229,7 @@ class TestPersistOutput:
         assert output.run_id == run_id
         assert output.decision == "bullish"
         assert output.confidence == 0.75
-        assert output.time_horizon == "3d"
+        assert output.time_horizon == "1d"
         assert output.actionability == "watch"
         assert output.thesis_summary == "Strong insider buying."
         assert output.output_json == _SAMPLE_OUTPUT
