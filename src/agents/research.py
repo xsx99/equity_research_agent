@@ -3,231 +3,48 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Callable, Literal, Optional
+from typing import Any, Callable, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import ValidationError
 
 from src.agents.base import AgentResult, BaseAgent
+from src.agents.research_schemas import ResearchInputPayload, StructuredResearchOutput
 from src.core import config as app_config
+from src.core.logging import get_logger
 from src.prompts.registry import PromptRegistry
 from src.tools.context import ToolContext
 from src.tools.registry import ToolRegistry
-from src.core.logging import get_logger
+
+# Re-export schemas so existing imports keep working
+__all__ = [
+    "DEFAULT_MODEL_NAME",
+    "DEFAULT_PROMPT_VERSION",
+    "ResearchAgent",
+    "ResearchInputPayload",
+    "StructuredResearchOutput",
+    "_coerce_json_object",
+    "_get_google_api_key",
+    "_should_use_gemini_backend",
+]
 
 logger = get_logger(__name__)
 
 DEFAULT_MODEL_NAME = app_config.RESEARCH_MODEL_NAME
 DEFAULT_PROMPT_VERSION = "v1"
 
-# Type aliases for injectable dependencies (simplifies testing)
 AgentRunner = Callable[[str, str], Any]
-
-
-# ---------------------------------------------------------------------------
-# Pydantic input / output schemas
-# ---------------------------------------------------------------------------
-
-
-class ResearchPriceSnapshot(BaseModel):
-    """Price snapshot passed as part of the research input."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    last_price: Optional[float] = None
-    return_1d: Optional[float] = None
-    return_5d: Optional[float] = None
-    return_since_market_open: Optional[float] = None
-
-
-class ResearchContext(BaseModel):
-    """Optional contextual fields for the research input."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    sector: Optional[str] = None
-    company_name: Optional[str] = None
-    earnings_in_days: Optional[int] = None
-
-
-class ResearchFundamentals(BaseModel):
-    """Basic valuation and positioning metrics for the current run."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    pe_ratio: Optional[float] = None
-    ps_ratio: Optional[float] = None
-    short_interest_pct_float: Optional[float] = None
-
-
-class ResearchVolumeSnapshot(BaseModel):
-    """Volume context used to judge whether a move is supported by participation."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    session_volume: Optional[int] = None
-    avg_volume_20d: Optional[float] = None
-    relative_volume: Optional[float] = None
-
-
-class ResearchMomentumSignals(BaseModel):
-    """Momentum-oriented technical signals."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    rsi_14: Optional[float] = None
-    rsi_3: Optional[float] = None
-
-
-class ResearchVolatilitySignals(BaseModel):
-    """Volatility-oriented technical signals."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    atr_14: Optional[float] = None
-    yesterday_range: Optional[float] = None
-    atr_multiple: Optional[float] = None
-
-
-class ResearchTechnicalSignals(BaseModel):
-    """Replayable technical signals computed from existing market data."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    momentum: ResearchMomentumSignals = Field(default_factory=ResearchMomentumSignals)
-    volatility: ResearchVolatilitySignals = Field(default_factory=ResearchVolatilitySignals)
-
-
-class ResearchNewsItem(BaseModel):
-    """A single news item in the research input."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    title: str
-    summary: str = ""
-    published_at: Optional[str] = None  # ISO date string, e.g. "2026-03-21"
-    source: Optional[str] = None
-    url: Optional[str] = None
-    signal_type: Optional[str] = None
-
-
-class ResearchInsiderTradeItem(BaseModel):
-    """A recent insider trade captured from the SEC Form 4 collector."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    insider_name: str
-    insider_title: Optional[str] = None
-    transaction_type: Optional[str] = None
-    transaction_date: Optional[str] = None
-    filing_date: Optional[str] = None
-    shares: Optional[int] = None
-    price_per_share: Optional[float] = None
-    total_value: Optional[float] = None
-    filing_url: Optional[str] = None
-
-
-class ResearchInsiderActivity(BaseModel):
-    """Summary of recent insider activity reused from the scheduled SEC collector."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    window_days: Optional[int] = None
-    purchase_count: int = 0
-    sale_count: int = 0
-    net_shares: Optional[float] = None
-    net_value: Optional[float] = None
-    recent_trades: list[ResearchInsiderTradeItem] = Field(default_factory=list, max_length=5)
-
-
-class ResearchGlobalIndicator(BaseModel):
-    """A single normalized macro indicator value."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    label: str
-    source: str
-    unit: str
-    value: Optional[float] = None
-    observed_on: Optional[str] = None
-
-
-class ResearchGlobalEventItem(BaseModel):
-    """A single official/geopolitical event in the global context block."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    source: str
-    title: str
-    summary: str = ""
-    published_at: Optional[str] = None
-    url: Optional[str] = None
-
-
-class ResearchGlobalContext(BaseModel):
-    """Global macro/news context shared across a research batch."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    as_of: Any = None
-    indicators: dict[str, ResearchGlobalIndicator] = Field(default_factory=dict)
-    official_updates: list[ResearchGlobalEventItem] = Field(default_factory=list, max_length=5)
-    trump_updates: list[ResearchGlobalEventItem] = Field(default_factory=list, max_length=5)
-    geopolitical_news: list[ResearchGlobalEventItem] = Field(default_factory=list, max_length=5)
-
-
-class ResearchInputPayload(BaseModel):
-    """Full input payload validated before it is passed to the LLM."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    ticker: str
-    as_of: Any  # datetime — kept as Any to accept both datetime and ISO string
-    price_snapshot: ResearchPriceSnapshot
-    context: ResearchContext = Field(default_factory=ResearchContext)
-    fundamentals: ResearchFundamentals = Field(default_factory=ResearchFundamentals)
-    volume_snapshot: ResearchVolumeSnapshot = Field(default_factory=ResearchVolumeSnapshot)
-    technical_signals: ResearchTechnicalSignals = Field(default_factory=ResearchTechnicalSignals)
-    news: list[ResearchNewsItem] = Field(default_factory=list, max_length=5)
-    insider_activity: ResearchInsiderActivity = Field(default_factory=ResearchInsiderActivity)
-    global_context: ResearchGlobalContext = Field(default_factory=ResearchGlobalContext)
-
-
-class StructuredResearchOutput(BaseModel):
-    """Structured output schema stored in ``research_outputs``."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    decision: Literal["bullish", "bearish", "neutral", "abstain"]
-    confidence: float = Field(ge=0, le=1)
-    time_horizon: Literal["1d"]
-    time_horizon_rationale: Optional[str] = None
-    actionability: Literal["abstain", "watch", "actionable"]
-    thesis_summary: str = Field(min_length=1)
-    key_drivers: list[str]
-    counterarguments: list[str]
-    invalidators: list[str]
-
-
-# ---------------------------------------------------------------------------
-# Research agent
-# ---------------------------------------------------------------------------
 
 
 class ResearchAgent(BaseAgent):
     """
     LLM agent that generates structured equity research from insider trading data.
 
-    **Workflow**
-
-    1. Validate *input_payload* against :class:`ResearchInputPayload`.
-    2. Optionally enrich with live market data and news via the tool registry.
-    3. Load the versioned prompt from the prompt registry.
-    4. Build the final prompt and call the LLM.
-    5. Parse and validate the response against :class:`StructuredResearchOutput`.
-    6. Return an :class:`~src.agents.base.AgentResult`.
-
-    The ``agent_runner`` parameter can be replaced in tests with a stub that
-    returns canned JSON without making real API calls.
+    Workflow:
+    1. Validate *input_payload* against ResearchInputPayload.
+    2. Load the versioned prompt from the prompt registry.
+    3. Build the final prompt and call the LLM.
+    4. Parse and validate the response against StructuredResearchOutput.
+    5. Return an AgentResult.
     """
 
     def __init__(
@@ -242,10 +59,6 @@ class ResearchAgent(BaseAgent):
         super().__init__(tool_registry, prompt_registry, model_name=model_name)
         self.prompt_version = prompt_version
         self._agent_runner: AgentRunner = agent_runner or _default_agent_runner
-
-    # ------------------------------------------------------------------
-    # Public interface
-    # ------------------------------------------------------------------
 
     def run(self, input_payload: dict[str, Any], context: ToolContext) -> AgentResult:
         """Generate one structured research output for the given payload."""
@@ -284,40 +97,17 @@ class ResearchAgent(BaseAgent):
                 success=False,
             )
 
-    # ------------------------------------------------------------------
-    # Tool-based data helpers
-    # ------------------------------------------------------------------
-
     def fetch_market_data(self, ticker: str, context: ToolContext) -> dict[str, Any]:
-        """Fetch a market snapshot via the registered ``get_market_snapshot`` tool."""
-        return self.tool_registry.dispatch(
-            "get_market_snapshot", {"ticker": ticker}, context
-        )
+        return self.tool_registry.dispatch("get_market_snapshot", {"ticker": ticker}, context)
 
-    def fetch_news(
-        self, ticker: str, context: ToolContext, limit: int = 5
-    ) -> list[dict[str, str]]:
-        """Fetch recent news via the registered ``get_recent_news`` tool."""
-        return self.tool_registry.dispatch(
-            "get_recent_news", {"ticker": ticker, "limit": limit}, context
-        )
+    def fetch_news(self, ticker: str, context: ToolContext, limit: int = 5) -> list[dict[str, str]]:
+        return self.tool_registry.dispatch("get_recent_news", {"ticker": ticker, "limit": limit}, context)
 
-    def fetch_insider_trades(
-        self, ticker: str, context: ToolContext, days: int = 30
-    ) -> list[dict[str, Any]]:
-        """Fetch insider trades via the registered ``query_trades_by_ticker`` tool."""
-        return self.tool_registry.dispatch(
-            "query_trades_by_ticker", {"ticker": ticker, "days": days}, context
-        )
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
+    def fetch_insider_trades(self, ticker: str, context: ToolContext, days: int = 30) -> list[dict[str, Any]]:
+        return self.tool_registry.dispatch("query_trades_by_ticker", {"ticker": ticker, "days": days}, context)
 
     def _build_prompt(self, payload: ResearchInputPayload, template: str) -> str:
-        payload_json = json.dumps(
-            payload.model_dump(mode="json"), ensure_ascii=False, indent=2
-        )
+        payload_json = json.dumps(payload.model_dump(mode="json"), ensure_ascii=False, indent=2)
         return (
             f"{template.strip()}\n\n"
             "Input JSON:\n"
@@ -327,22 +117,19 @@ class ResearchAgent(BaseAgent):
 
 
 # ---------------------------------------------------------------------------
-# Default LLM runner (Phidata / provider-backed chat model)
+# LLM runner
 # ---------------------------------------------------------------------------
 
 
 def _should_use_gemini_backend(model_name: str) -> bool:
-    """Return True when *model_name* should use the Gemini backend."""
     return model_name.strip().lower().startswith("gemini")
 
 
 def _get_google_api_key() -> Optional[str]:
-    """Resolve the Google API key from env first, then app config."""
     return os.getenv("GOOGLE_API_KEY") or getattr(app_config, "GOOGLE_API_KEY", None)
 
 
 def _build_phi_model(model_name: str) -> Any:
-    """Build the Phidata chat model for the configured provider."""
     if _should_use_gemini_backend(model_name):
         try:
             from phi.model.google import Gemini
@@ -362,14 +149,12 @@ def _build_phi_model(model_name: str) -> Any:
 
 
 def _default_agent_runner(prompt: str, model_name: str) -> Any:
-    """Invoke a Phidata Agent with the provider implied by *model_name*."""
     try:
         from phi.agent import Agent
     except Exception as exc:
         raise RuntimeError(
             "Phidata dependencies are required for the default agent runner."
         ) from exc
-
     agent = Agent(model=_build_phi_model(model_name), markdown=False)
     response = agent.run(prompt)
     return getattr(response, "content", response)
@@ -388,10 +173,8 @@ def _coerce_json_object(raw_response: Any) -> dict[str, Any]:
     candidate = raw_response
     if hasattr(candidate, "content"):
         candidate = candidate.content
-
     if isinstance(candidate, bytes):
         candidate = candidate.decode("utf-8")
-
     if not isinstance(candidate, str):
         raise TypeError(f"unsupported_llm_response_type: {type(candidate)!r}")
 
