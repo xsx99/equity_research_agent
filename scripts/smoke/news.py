@@ -73,6 +73,12 @@ def _validate_news_items(
         return _failed(name, f"{source_label} returned non-list payload.", preview=items)
     if not all(isinstance(i, dict) and i.get("title") for i in items):
         return _failed(name, f"{source_label} items missing titles.", preview=items)
+    if not all(isinstance(i, dict) and "source" in i and "signal_type" in i for i in items):
+        return _failed(
+            name,
+            f"{source_label} items are missing source/signal_type metadata.",
+            preview=items,
+        )
     return _passed(
         name,
         f"Fetched {len(items)} item(s) for {ticker} from {source_label}.",

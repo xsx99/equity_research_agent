@@ -145,6 +145,10 @@
         <h3 class="section-label">Context</h3>
         <div class="input-metric-grid">
           <div class="metric-tile">
+            <span class="metric-label">Company</span>
+            <span class="metric-value">{{ detail.input_company_name or '—' }}</span>
+          </div>
+          <div class="metric-tile">
             <span class="metric-label">Sector</span>
             <span class="metric-value">{{ detail.input_sector or '—' }}</span>
           </div>
@@ -156,18 +160,139 @@
       </div>
     </div>
 
+    <div class="input-section-grid" style="margin-top:1rem;">
+      <div>
+        <h3 class="section-label">Fundamentals</h3>
+        <div class="input-metric-grid">
+          <div class="metric-tile">
+            <span class="metric-label">P/E</span>
+            <span class="metric-value">{{ detail.input_pe_ratio if detail.input_pe_ratio is not none else '—' }}</span>
+          </div>
+          <div class="metric-tile">
+            <span class="metric-label">P/S</span>
+            <span class="metric-value">{{ detail.input_ps_ratio if detail.input_ps_ratio is not none else '—' }}</span>
+          </div>
+          <div class="metric-tile">
+            <span class="metric-label">Short Interest % Float</span>
+            <span class="metric-value">{% if detail.input_short_interest_pct_float is not none %}{{ '%.2f%%' % detail.input_short_interest_pct_float }}{% else %}—{% endif %}</span>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <h3 class="section-label">Volume</h3>
+        <div class="input-metric-grid">
+          <div class="metric-tile">
+            <span class="metric-label">Session Volume</span>
+            <span class="metric-value">{% if detail.input_session_volume is not none %}{{ "{:,.0f}".format(detail.input_session_volume) }}{% else %}—{% endif %}</span>
+          </div>
+          <div class="metric-tile">
+            <span class="metric-label">20D Avg Volume</span>
+            <span class="metric-value">{% if detail.input_avg_volume_20d is not none %}{{ "{:,.0f}".format(detail.input_avg_volume_20d) }}{% else %}—{% endif %}</span>
+          </div>
+          <div class="metric-tile">
+            <span class="metric-label">Relative Volume</span>
+            <span class="metric-value">{% if detail.input_relative_volume is not none %}{{ '%.2fx' % detail.input_relative_volume }}{% else %}—{% endif %}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <h3 class="section-label">Technical Signals</h3>
+    <div class="input-section-grid">
+      <div>
+        <div class="input-metric-grid">
+          <div class="metric-tile">
+            <span class="metric-label">RSI 14</span>
+            <span class="metric-value">{% if detail.input_rsi_14 is not none %}{{ '%.1f' % detail.input_rsi_14 }}{% else %}—{% endif %}</span>
+          </div>
+          <div class="metric-tile">
+            <span class="metric-label">RSI 3</span>
+            <span class="metric-value">{% if detail.input_rsi_3 is not none %}{{ '%.1f' % detail.input_rsi_3 }}{% else %}—{% endif %}</span>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="input-metric-grid">
+          <div class="metric-tile">
+            <span class="metric-label">ATR 14</span>
+            <span class="metric-value">{% if detail.input_atr_14 is not none %}{{ '%.2f' % detail.input_atr_14 }}{% else %}—{% endif %}</span>
+          </div>
+          <div class="metric-tile">
+            <span class="metric-label">Yesterday Range</span>
+            <span class="metric-value">{% if detail.input_yesterday_range is not none %}{{ '%.2f' % detail.input_yesterday_range }}{% else %}—{% endif %}</span>
+          </div>
+          <div class="metric-tile">
+            <span class="metric-label">ATR Multiple</span>
+            <span class="metric-value">{% if detail.input_atr_multiple is not none %}{{ '%.2fx' % detail.input_atr_multiple }}{% else %}—{% endif %}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <h3 class="section-label">Recent News</h3>
     {% if detail.input_news %}
     <div class="news-list">
       {% for item in detail.input_news %}
       <article class="news-item">
         <h4>{{ item.title or 'Untitled news item' }}</h4>
+        <p class="detail-muted">
+          {% if item.source %}{{ item.source }}{% else %}Unknown source{% endif %}
+          {% if item.signal_type %} · {{ item.signal_type }}{% endif %}
+          {% if item.published_at %} · {{ item.published_at }}{% endif %}
+        </p>
         <p>{{ item.summary or 'No summary captured.' }}</p>
       </article>
       {% endfor %}
     </div>
     {% else %}
     <p class="detail-muted">No news data captured for this run.</p>
+    {% endif %}
+
+    <h3 class="section-label">Insider Activity</h3>
+    <div class="input-metric-grid">
+      <div class="metric-tile">
+        <span class="metric-label">Window</span>
+        <span class="metric-value">{% if detail.input_insider_window_days is not none %}{{ detail.input_insider_window_days }} days{% else %}—{% endif %}</span>
+      </div>
+      <div class="metric-tile">
+        <span class="metric-label">Purchases</span>
+        <span class="metric-value">{{ detail.input_insider_purchase_count if detail.input_insider_purchase_count is not none else '—' }}</span>
+      </div>
+      <div class="metric-tile">
+        <span class="metric-label">Sales</span>
+        <span class="metric-value">{{ detail.input_insider_sale_count if detail.input_insider_sale_count is not none else '—' }}</span>
+      </div>
+      <div class="metric-tile">
+        <span class="metric-label">Net Shares</span>
+        <span class="metric-value">{% if detail.input_insider_net_shares is not none %}{{ "{:,.0f}".format(detail.input_insider_net_shares) }}{% else %}—{% endif %}</span>
+      </div>
+      <div class="metric-tile">
+        <span class="metric-label">Net Value</span>
+        <span class="metric-value">{% if detail.input_insider_net_value is not none %}{{ fmt_currency(detail.input_insider_net_value) }}{% else %}—{% endif %}</span>
+      </div>
+    </div>
+
+    {% if detail.input_insider_recent_trades %}
+    <div class="news-list" style="margin-top:0.75rem;">
+      {% for item in detail.input_insider_recent_trades %}
+      <article class="news-item">
+        <h4>{{ item.insider_name or 'Unknown insider' }}{% if item.insider_title %} · {{ item.insider_title }}{% endif %}</h4>
+        <p>
+          {{ item.transaction_type or '—' }}
+          {% if item.transaction_date %} · Trade {{ item.transaction_date }}{% endif %}
+          {% if item.filing_date %} · Filed {{ item.filing_date }}{% endif %}
+        </p>
+        <p>
+          {% if item.shares is not none %}{{ "{:,.0f}".format(item.shares) }} shares{% else %}Shares unavailable{% endif %}
+          {% if item.total_value is not none %} · {{ fmt_currency(item.total_value) }}{% endif %}
+        </p>
+      </article>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="detail-muted">No insider activity captured for this run.</p>
     {% endif %}
 
     <h3 class="section-label">Global Context</h3>

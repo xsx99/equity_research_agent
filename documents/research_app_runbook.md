@@ -44,7 +44,7 @@ docker compose run --rm scheduler python scripts/run_research_agent_once.py
 - The script uses `GOOGLE_API_KEY` from the environment or repo-root `.env`.
 - Override the model with `--model-name` if needed.
 - This is only a direct agent smoke path. The full batch research pipeline and DB persistence flow are still separate future work.
-- The built-in sample payload now includes a representative `global_context` block that matches the current production default: macro indicators, filtered Trump updates, and filtered geopolitical news. `official_updates` remains in schema but is omitted by default until better relevance filters are in place.
+- The built-in sample payload now includes the richer research input shape used in production: fundamentals, volume context, `technical_signals`, filtered high-signal news metadata, insider-activity summary from the SEC Form 4 collector, plus the representative `global_context` block. `official_updates` remains in schema but is omitted by default until better relevance filters are in place.
 
 ## Manual Pipeline Run Order
 
@@ -70,11 +70,12 @@ python scripts/run_tool_smoke_test.py --ticker AAPL
 ```
 
 This runs the real tool registry against live dependencies:
-- `get_market_snapshot` against Alpaca market data
-- `get_recent_news` against the configured news providers
+- `get_market_snapshot` against Alpaca/Finnhub market data, including volume, valuation, and technical-signal fields
+- `get_recent_news` against the configured news providers, including source/signal metadata after filtering
 - `get_global_context` against the macro/global-context providers
 - `marketaux_recent_news` as a dedicated direct Marketaux provider check when `MARKETAUX_API_KEY` is set
 - all database-backed insider query tools against the live `insider_trades` table
+- the repository-level `insider_activity` summary builder that powers research-run input snapshots
 
 ### External Tools Only
 ```bash

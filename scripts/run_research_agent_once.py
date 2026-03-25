@@ -27,14 +27,66 @@ def _build_sample_payload(ticker: str) -> dict:
         },
         "context": {
             "sector": "Technology",
+            "company_name": "SanDisk",
             "earnings_in_days": 50,
+        },
+        "fundamentals": {
+            "pe_ratio": 31.2,
+            "ps_ratio": 4.8,
+            "short_interest_pct_float": 6.4,
+        },
+        "volume_snapshot": {
+            "session_volume": 18400000,
+            "avg_volume_20d": 9700000.0,
+            "relative_volume": 1.9,
+        },
+        "technical_signals": {
+            "momentum": {
+                "rsi_14": 58.2,
+                "rsi_3": 96.5,
+            },
+            "volatility": {
+                "atr_14": 15.2,
+                "yesterday_range": 45.0,
+                "atr_multiple": 2.96,
+            },
         },
         "news": [
             {
-                "title": f"Samsung has doubled NAND price in Q2.",
-                "summary": "Samsung has doubled NAND price in Q2.",
+                "title": "Morgan Stanley upgrades SanDisk after NAND pricing inflects",
+                "summary": "The analyst cited stronger NAND pricing and improving margin expectations.",
+                "source": "Dow Jones",
+                "url": "https://example.com/sndk-upgrade",
+                "signal_type": "analyst_rating",
+            },
+            {
+                "title": "SanDisk raises quarterly revenue guidance on enterprise SSD demand",
+                "summary": "Management lifted guidance after stronger-than-expected enterprise demand.",
+                "source": "Business Wire",
+                "url": "https://example.com/sndk-guidance",
+                "signal_type": "earnings_guidance",
             }
         ],
+        "insider_activity": {
+            "window_days": 30,
+            "purchase_count": 2,
+            "sale_count": 0,
+            "net_shares": 85000,
+            "net_value": 5100000.0,
+            "recent_trades": [
+                {
+                    "insider_name": "Jane Doe",
+                    "insider_title": "Director",
+                    "transaction_type": "P",
+                    "transaction_date": datetime.now(timezone.utc).date().isoformat(),
+                    "filing_date": datetime.now(timezone.utc).date().isoformat(),
+                    "shares": 25000,
+                    "price_per_share": 60.0,
+                    "total_value": 1500000.0,
+                    "filing_url": "https://www.sec.gov/Archives/example",
+                }
+            ],
+        },
         "global_context": {
             "as_of": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
             "indicators": {

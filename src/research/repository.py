@@ -12,6 +12,7 @@ from typing import Any, Optional
 from sqlalchemy.orm import Session
 
 from src.db.models.evaluation import EvalResult
+from src.db.models.insider_trades import InsiderTrade
 from src.db.models.research import ResearchOutput, ResearchRun, ResearchTimeHorizon, RunStatus
 from src.db.models.watch_list import Watchlist
 from src.core.logging import get_logger
@@ -252,6 +253,94 @@ def get_latest_global_context_for_trade_date(
         if isinstance(global_context, dict):
             return global_context
     return None
+
+
+def _normalize_as_of(as_of: datetime) -> datetime:
+    if as_of.tzinfo is None:
+        return as_of.replace(tzinfo=timezone.utc)
+    return as_of.astimezone(timezone.utc)
+
+
+def _trade_to_research_input_dict(trade: InsiderTrade) -> dict[str, Any]:
+    return {
+        "insider_name": trade.insider_name,
+        "insider_title": trade.insider_title,
+        "transaction_type": trade.transaction_type,
+        "transaction_date": trade.transaction_date.isoformat() if trade.transaction_date else None,
+        "filing_date": trade.filing_date.isoformat() if trade.filing_date else None,
+        "shares": trade.shares,
+        "price_per_share": float(trade.price_per_share) if trade.price_per_share is not None else None,
+        "total_value": float(trade.total_value) if trade.total_value is not None else None,
+        "filing_url": trade.filing_url,
+    }
+
+
+def get_recent_insider_activity(
+    session: Session,
+    *,
+    ticker: str,
+    as_of: datetime,
+    days: int = 30,
+    limit: int = 5,
+) -> dict[str, Any]:
+    """Return a structured insider-activity summary for the research input."""
+    normalized_as_of = _normalize_as_of(as_of)
+    trade_date = normalized_as_of.date()
+    cutoff = trade_date - timedelta(days=days)
+    trades = (
+        session.query(InsiderTrade)
+        .filter(
+            InsiderTrade.ticker == ticker.upper(),
+            InsiderTrade.filing_date >= cutoff,
+            InsiderTrade.filing_date <= trade_date,
+        )
+        .order_by(InsiderTrade.filing_date.desc(), InsiderTrade.transaction_date.desc())
+        .all()
+    )
+    if not isinstance(trades, list):
+        trades = []
+
+    purchase_count = 0
+    sale_count = 0
+    net_shares = 0.0
+    net_value = 0.0
+    has_net_activity = False
+
+    for trade in trades:
+        tx_type = (trade.transaction_type or "").upper()
+        shares = float(trade.shares) if trade.shares is not None else None
+        total_value = (
+            float(trade.total_value)
+            if trade.total_value is not None
+            else (
+                float(trade.shares) * float(trade.price_per_share)
+                if trade.shares is not None and trade.price_per_share is not None
+                else None
+            )
+        )
+        if tx_type == "P":
+            purchase_count += 1
+            has_net_activity = True
+            if shares is not None:
+                net_shares += shares
+            if total_value is not None:
+                net_value += total_value
+        elif tx_type == "S":
+            sale_count += 1
+            has_net_activity = True
+            if shares is not None:
+                net_shares -= shares
+            if total_value is not None:
+                net_value -= total_value
+
+    return {
+        "window_days": days,
+        "purchase_count": purchase_count,
+        "sale_count": sale_count,
+        "net_shares": net_shares if has_net_activity else None,
+        "net_value": net_value if has_net_activity else None,
+        "recent_trades": [_trade_to_research_input_dict(trade) for trade in trades[:limit]],
+    }
 
 
 def upsert_eval_result(

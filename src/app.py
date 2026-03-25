@@ -277,7 +277,13 @@ def research_detail(run_id: str, request: Request):
         input_data = run.input_json or {}
         price_snapshot = input_data.get("price_snapshot") or {}
         research_context = input_data.get("context") or {}
+        fundamentals = input_data.get("fundamentals") or {}
+        volume_snapshot = input_data.get("volume_snapshot") or {}
+        technical_signals = input_data.get("technical_signals") or {}
+        momentum_signals = technical_signals.get("momentum") or {}
+        volatility_signals = technical_signals.get("volatility") or {}
         news_items = input_data.get("news") or []
+        insider_activity = input_data.get("insider_activity") or {}
         global_context = input_data.get("global_context") or {}
         global_indicators = global_context.get("indicators") or {}
         official_updates = global_context.get("official_updates") or []
@@ -290,10 +296,23 @@ def research_detail(run_id: str, request: Request):
                     {
                         "title": item.get("title"),
                         "summary": item.get("summary"),
+                        "source": item.get("source"),
+                        "url": item.get("url"),
+                        "signal_type": item.get("signal_type"),
+                        "published_at": item.get("published_at"),
                     }
                 )
             else:
-                normalized_news.append({"title": str(item), "summary": None})
+                normalized_news.append(
+                    {
+                        "title": str(item),
+                        "summary": None,
+                        "source": None,
+                        "url": None,
+                        "signal_type": None,
+                        "published_at": None,
+                    }
+                )
         normalized_indicators = []
         for key, item in global_indicators.items():
             if not isinstance(item, dict):
@@ -331,7 +350,27 @@ def research_detail(run_id: str, request: Request):
                             "published_at": None,
                             "url": None,
                         }
-                    )
+                        )
+            return normalized
+
+        def _normalize_insider_trades(items: list[Any]) -> list[dict[str, Any]]:
+            normalized: list[dict[str, Any]] = []
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                normalized.append(
+                    {
+                        "insider_name": item.get("insider_name"),
+                        "insider_title": item.get("insider_title"),
+                        "transaction_type": item.get("transaction_type"),
+                        "transaction_date": item.get("transaction_date"),
+                        "filing_date": item.get("filing_date"),
+                        "shares": item.get("shares"),
+                        "price_per_share": item.get("price_per_share"),
+                        "total_value": item.get("total_value"),
+                        "filing_url": item.get("filing_url"),
+                    }
+                )
             return normalized
 
         # Ticker history: last 10 eval results for same ticker
@@ -375,8 +414,28 @@ def research_detail(run_id: str, request: Request):
             "input_return_5d": price_snapshot.get("return_5d"),
             "input_return_since_market_open": price_snapshot.get("return_since_market_open"),
             "input_sector": research_context.get("sector"),
+            "input_company_name": research_context.get("company_name"),
             "input_earnings_in_days": research_context.get("earnings_in_days"),
+            "input_pe_ratio": fundamentals.get("pe_ratio"),
+            "input_ps_ratio": fundamentals.get("ps_ratio"),
+            "input_short_interest_pct_float": fundamentals.get("short_interest_pct_float"),
+            "input_session_volume": volume_snapshot.get("session_volume"),
+            "input_avg_volume_20d": volume_snapshot.get("avg_volume_20d"),
+            "input_relative_volume": volume_snapshot.get("relative_volume"),
+            "input_rsi_14": momentum_signals.get("rsi_14"),
+            "input_rsi_3": momentum_signals.get("rsi_3"),
+            "input_atr_14": volatility_signals.get("atr_14"),
+            "input_yesterday_range": volatility_signals.get("yesterday_range"),
+            "input_atr_multiple": volatility_signals.get("atr_multiple"),
             "input_news": normalized_news,
+            "input_insider_window_days": insider_activity.get("window_days"),
+            "input_insider_purchase_count": insider_activity.get("purchase_count"),
+            "input_insider_sale_count": insider_activity.get("sale_count"),
+            "input_insider_net_shares": insider_activity.get("net_shares"),
+            "input_insider_net_value": insider_activity.get("net_value"),
+            "input_insider_recent_trades": _normalize_insider_trades(
+                insider_activity.get("recent_trades") or []
+            ),
             "input_global_context_as_of": global_context.get("as_of"),
             "input_global_indicators": normalized_indicators,
             "input_official_updates": _normalize_global_events(official_updates),

@@ -56,18 +56,64 @@ def _make_run(
         },
         "context": {
             "sector": "Technology",
+            "company_name": "Apple Inc.",
             "earnings_in_days": 12,
+        },
+        "fundamentals": {
+            "pe_ratio": 28.4,
+            "ps_ratio": 7.2,
+            "short_interest_pct_float": 1.1,
+        },
+        "volume_snapshot": {
+            "session_volume": 18000000,
+            "avg_volume_20d": 9100000.0,
+            "relative_volume": 1.98,
+        },
+        "technical_signals": {
+            "momentum": {
+                "rsi_14": 58.2,
+                "rsi_3": 96.5,
+            },
+            "volatility": {
+                "atr_14": 15.2,
+                "yesterday_range": 45.0,
+                "atr_multiple": 2.96,
+            },
         },
         "news": [
             {
                 "title": "Apple expands AI tooling",
                 "summary": "Management highlighted broader rollout plans.",
+                "source": "Dow Jones",
+                "signal_type": "analyst_rating",
             },
             {
                 "title": "iPhone demand remains resilient",
                 "summary": "Channel checks pointed to steady upgrade activity.",
+                "source": "Business Wire",
+                "signal_type": "earnings_guidance",
             },
         ],
+        "insider_activity": {
+            "window_days": 30,
+            "purchase_count": 1,
+            "sale_count": 0,
+            "net_shares": 25000,
+            "net_value": 4200000.0,
+            "recent_trades": [
+                {
+                    "insider_name": "Jane Doe",
+                    "insider_title": "Director",
+                    "transaction_type": "P",
+                    "transaction_date": "2026-03-20",
+                    "filing_date": "2026-03-21",
+                    "shares": 25000,
+                    "price_per_share": 168.0,
+                    "total_value": 4200000.0,
+                    "filing_url": "https://www.sec.gov/Archives/example",
+                }
+            ],
+        },
         "global_context": {
             "as_of": _AS_OF.isoformat(),
             "indicators": {
@@ -340,7 +386,20 @@ class TestResearchDetail:
         assert "Price Snapshot" in resp.text
         assert "$187.42" in resp.text
         assert "Technology" in resp.text
+        assert "Apple Inc." in resp.text
+        assert "P/E" in resp.text
+        assert "28.4" in resp.text
+        assert "Relative Volume" in resp.text
+        assert "1.98x" in resp.text
+        assert "Technical Signals" in resp.text
+        assert "RSI 3" in resp.text
+        assert "96.5" in resp.text
+        assert "ATR Multiple" in resp.text
+        assert "2.96x" in resp.text
         assert "Apple expands AI tooling" in resp.text
+        assert "analyst_rating" in resp.text
+        assert "Insider Activity" in resp.text
+        assert "Jane Doe" in resp.text
         assert "Global Context" in resp.text
         assert "CBOE Volatility Index" in resp.text
         assert "Official White House statement" in resp.text

@@ -53,17 +53,19 @@ Research App MVP 设计文档（重构版）
    - Constraints: `time_horizon` 当前必须为 `1d`；confidence 0–1；arrays are string arrays。
 
 7. Research 输入 schema 与数据源抽象
-   - 输入字段：ticker, as_of, price_snapshot{last_price, return_1d, return_5d, return_since_market_open}, context{sector, earnings_in_days，可为 null}, news[title, summary] 3-5 条, global_context{as_of, indicators{oil_price, gold_price, us_treasury_2y, us_treasury_10y, us_treasury_20y, credit_spread, vix}, official_updates[], trump_updates[], geopolitical_news[]}。
+   - 输入字段：ticker, as_of, price_snapshot{last_price, return_1d, return_5d, return_since_market_open}, context{sector, company_name, earnings_in_days，可为 null}, fundamentals{pe_ratio, ps_ratio, short_interest_pct_float，可为 null}, volume_snapshot{session_volume, avg_volume_20d, relative_volume，可为 null}, technical_signals{momentum{rsi_14, rsi_3}, volatility{atr_14, yesterday_range, atr_multiple}}, news[title, summary, source, url, signal_type] 3-5 条, insider_activity{window_days, purchase_count, sale_count, net_shares, net_value, recent_trades[]}, global_context{as_of, indicators{oil_price, gold_price, us_treasury_2y, us_treasury_10y, us_treasury_20y, credit_spread, vix}, official_updates[], trump_updates[], geopolitical_news[]}。
    - 目标：保证可回放同一 case；input_json 存于 research_runs。
    - `price_snapshot.last_price` 必须是 run 创建当下抓到的价格。对盘中 manual run，它同时作为 same-day quick eval 的 entry price，不能在收盘后再回推估算。
    - 数据源接口契约：
-     - market_data.get_snapshot(ticker) -> {last_price, return_1d, return_5d, return_since_market_open?, sector?, earnings_in_days?}
-     - news_data.get_recent(ticker, limit=5) -> [{title, summary}]
+     - market_data.get_snapshot(ticker) -> {last_price, return_1d, return_5d, return_since_market_open?, session_volume?, avg_volume_20d?, relative_volume?, technical_signals{momentum{rsi_14?, rsi_3?}, volatility{atr_14?, yesterday_range?, atr_multiple?}}, sector?, company_name?, earnings_in_days?, pe_ratio?, ps_ratio?, short_interest_pct_float?}
+     - news_data.get_recent(ticker, limit=5) -> [{title, summary, published_at?, source?, url?, signal_type?}]
      - global_context.get_snapshot(as_of, limit=5) -> {as_of, indicators{}, official_updates[], trump_updates[], geopolitical_news[]}
+     - insider_activity summary comes from the scheduled SEC Form 4 collector data already stored in Postgres and is injected per ticker before the model call.
    - 模块可替换；调用层不依赖具体提供商，只依赖接口结果格式。
    - 最小实现建议：
-     - collector/market_data.py：使用 yfinance 拉取最新价格与过去 1d/5d 收盘价计算 return；若处于美股常规交易时段，再补充相对当日开盘价的 `return_since_market_open`；可选 sector、earnings 距离从 yfinance 基本信息获取；对缺失字段返回 None。
-     - collector/news_data.py：若有 NewsAPI key，优先调用；否则使用 yfinance.Ticker.news 或简单占位返回最近标题与摘要列表；限制 3–5 条；对无新闻返回空列表。
+     - collector/market_data.py：使用 Alpaca 拉取最新价格、过去 1d/5d 收盘价、当日/最近一个 session 成交量，以及 20 日平均成交量；若处于美股常规交易时段，再补充相对当日开盘价的 `return_since_market_open`；同一组日线数据额外计算 `technical_signals`（如 `rsi_14`、`rsi_3`、`atr_14`、`yesterday_range`、`atr_multiple`），其中 ATR 系指标基于已完成日线 bar，避免盘中半根 bar 污染；Finnhub 提供 sector、company_name、earnings 距离，以及 P/E、P/S、short interest 等基本面字段；对缺失字段返回 None。
+     - collector/news_data.py：聚合现有公司新闻 provider（如 Finnhub / Marketaux / Alpaca），过滤 `"Is It Too Late To Consider..."` 这类低信号散户情绪标题，并优先保留 `earnings_guidance`、`analyst_rating`、`sec_filing` 等更硬核的 `signal_type` 条目；对无新闻返回空列表。
+     - SEC insider activity：不新建外部 provider，直接复用 scheduled SEC Form 4 collector 已落库的 `insider_trades`，为每次 research run 注入最近 30 天的 insider summary 与最近若干笔交易明细。
      - collector/global_context.py：宏观指标优先通过 FRED 获取；`official_updates` schema 仍保留，但默认不注入 prompt，避免低相关度 White House 页面污染研究输入；Trump 更新只保留近期且直接相关、且具市场影响含义的官方条目；地缘政治新闻限制为 Reuters/AP 等一级来源，并要求近期且主题相关。
      - 错误处理：数据源失败时记录日志并在 output 中标记无法获取，但不中断其他 ticker；保持接口返回格式。
    - 采集方式：按需拉取、直接落库。scheduled batch 在每次 research job 开始时抓取一次 `global_context`，并复制到当批每个 ticker 的 `research_runs.input_json` 中以保证 replayability；single-ticker manual run 默认复用当日最近一次 `global_context` 快照，也可显式要求重新抓取。eval_runs 仅在需要回测时调用 market_data 获取价格；不再做额外预取/缓存或独立采集进程。

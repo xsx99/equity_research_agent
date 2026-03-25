@@ -31,9 +31,38 @@ class MarketSnapshot(TypedDict):
     return_1d: Optional[float]
     return_5d: Optional[float]
     return_since_market_open: Optional[float]
+    session_volume: Optional[int]
+    avg_volume_20d: Optional[float]
+    relative_volume: Optional[float]
     sector: Optional[str]
     company_name: Optional[str]
     earnings_in_days: Optional[int]
+    pe_ratio: Optional[float]
+    ps_ratio: Optional[float]
+    short_interest_pct_float: Optional[float]
+    technical_signals: "TechnicalSignals"
+
+
+class MomentumSignals(TypedDict):
+    """Momentum-focused technical indicators."""
+
+    rsi_14: Optional[float]
+    rsi_3: Optional[float]
+
+
+class VolatilitySignals(TypedDict):
+    """Volatility-focused technical indicators."""
+
+    atr_14: Optional[float]
+    yesterday_range: Optional[float]
+    atr_multiple: Optional[float]
+
+
+class TechnicalSignals(TypedDict):
+    """Replayable technical signals stored in the research input."""
+
+    momentum: MomentumSignals
+    volatility: VolatilitySignals
 
 
 class DailyBar(TypedDict):
@@ -41,7 +70,10 @@ class DailyBar(TypedDict):
 
     date: date
     open: Optional[float]
+    high: Optional[float]
+    low: Optional[float]
     close: float
+    volume: Optional[int]
 
 
 class MarketDataProvider(Protocol):
@@ -77,9 +109,16 @@ def _empty_snapshot() -> MarketSnapshot:
         "return_1d": None,
         "return_5d": None,
         "return_since_market_open": None,
+        "session_volume": None,
+        "avg_volume_20d": None,
+        "relative_volume": None,
         "sector": None,
         "company_name": None,
         "earnings_in_days": None,
+        "pe_ratio": None,
+        "ps_ratio": None,
+        "short_interest_pct_float": None,
+        "technical_signals": _empty_technical_signals(),
     }
 
 
@@ -91,11 +130,34 @@ def _compute_return(
     return (last_price / anchor_price) - 1
 
 
+def _empty_technical_signals() -> TechnicalSignals:
+    return {
+        "momentum": {
+            "rsi_14": None,
+            "rsi_3": None,
+        },
+        "volatility": {
+            "atr_14": None,
+            "yesterday_range": None,
+            "atr_multiple": None,
+        },
+    }
+
+
 def _to_int_or_none(value: Any) -> Optional[int]:
     if value is None:
         return None
     try:
         return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _to_float_or_none(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        return float(value)
     except (TypeError, ValueError):
         return None
 
@@ -163,6 +225,101 @@ def _compute_return_since_market_open(
     return _compute_return(last_bar.get("close"), last_bar.get("open"))
 
 
+def _compute_rsi(closes: list[float], period: int) -> Optional[float]:
+    if len(closes) < period + 1:
+        return None
+    window = closes[-(period + 1):]
+    gains = 0.0
+    losses = 0.0
+    for previous_close, current_close in zip(window, window[1:]):
+        change = current_close - previous_close
+        if change > 0:
+            gains += change
+        elif change < 0:
+            losses -= change
+
+    average_gain = gains / period
+    average_loss = losses / period
+    if average_gain == 0 and average_loss == 0:
+        return 50.0
+    if average_loss == 0:
+        return 100.0
+    if average_gain == 0:
+        return 0.0
+    relative_strength = average_gain / average_loss
+    return 100.0 - (100.0 / (1.0 + relative_strength))
+
+
+def _completed_bars_for_volatility(
+    daily_bars: list[DailyBar],
+    now: datetime,
+) -> list[DailyBar]:
+    if not daily_bars:
+        return []
+    last_bar = daily_bars[-1]
+    if (
+        _is_regular_market_session(now)
+        and last_bar["date"] == now.astimezone(MARKET_TIMEZONE).date()
+    ):
+        return daily_bars[:-1]
+    return daily_bars
+
+
+def _compute_atr_14(completed_bars: list[DailyBar]) -> Optional[float]:
+    period = 14
+    if len(completed_bars) < period:
+        return None
+    start_index = len(completed_bars) - period
+    true_ranges: list[float] = []
+
+    for index in range(start_index, len(completed_bars)):
+        bar = completed_bars[index]
+        high = _to_float_or_none(bar.get("high"))
+        low = _to_float_or_none(bar.get("low"))
+        if high is None or low is None:
+            return None
+        components = [high - low]
+        if index > 0:
+            previous_close = _to_float_or_none(completed_bars[index - 1].get("close"))
+            if previous_close is not None:
+                components.extend([abs(high - previous_close), abs(low - previous_close)])
+        true_ranges.append(max(components))
+
+    if len(true_ranges) < period:
+        return None
+    return sum(true_ranges) / period
+
+
+def _compute_technical_signals(
+    daily_bars: list[DailyBar],
+    now: datetime,
+) -> TechnicalSignals:
+    technical_signals = _empty_technical_signals()
+    closes = [
+        close
+        for close in (_to_float_or_none(bar.get("close")) for bar in daily_bars)
+        if close is not None
+    ]
+    technical_signals["momentum"]["rsi_14"] = _compute_rsi(closes, 14)
+    technical_signals["momentum"]["rsi_3"] = _compute_rsi(closes, 3)
+
+    completed_bars = _completed_bars_for_volatility(daily_bars, now)
+    atr_14 = _compute_atr_14(completed_bars)
+    technical_signals["volatility"]["atr_14"] = atr_14
+
+    if completed_bars:
+        reference_bar = completed_bars[-1]
+        high = _to_float_or_none(reference_bar.get("high"))
+        low = _to_float_or_none(reference_bar.get("low"))
+        if high is not None and low is not None:
+            yesterday_range = high - low
+            technical_signals["volatility"]["yesterday_range"] = yesterday_range
+            if atr_14 not in (None, 0):
+                technical_signals["volatility"]["atr_multiple"] = yesterday_range / atr_14
+
+    return technical_signals
+
+
 # ---------------------------------------------------------------------------
 # Alpaca + Finnhub provider
 # ---------------------------------------------------------------------------
@@ -183,7 +340,7 @@ class AlpacaMarketDataProvider:
     ) -> None:
         self.api_key = api_key or os.getenv("ALPACA_API_KEY")
         self.secret_key = (
-            secret_key or os.getenv("ALPACA_SECRET_KEY")
+            secret_key or os.getenv("ALPACA_SECRET_KEY") or os.getenv("ALPACA_API_SECRET")
         )
         self.data_base_url = _resolve_alpaca_data_base_url(data_base_url)
         self.finnhub_api_key = finnhub_api_key or os.getenv("FINNHUB_API_KEY")
@@ -238,11 +395,17 @@ class AlpacaMarketDataProvider:
             if close_raw is None or bar_date is None:
                 continue
             open_raw = item.get("o")
+            high_raw = item.get("h")
+            low_raw = item.get("l")
+            volume_raw = item.get("v")
             daily_bars.append(
                 {
                     "date": bar_date,
                     "open": float(open_raw) if open_raw is not None else None,
+                    "high": float(high_raw) if high_raw is not None else None,
+                    "low": float(low_raw) if low_raw is not None else None,
                     "close": float(close_raw),
+                    "volume": _to_int_or_none(volume_raw),
                 }
             )
 
@@ -315,10 +478,15 @@ class AlpacaMarketDataProvider:
             if close_raw is None or bar_date != trading_date:
                 continue
             open_raw = item.get("o")
+            high_raw = item.get("h")
+            low_raw = item.get("l")
             return {
                 "date": bar_date,
                 "open": float(open_raw) if open_raw is not None else None,
+                "high": float(high_raw) if high_raw is not None else None,
+                "low": float(low_raw) if low_raw is not None else None,
                 "close": float(close_raw),
+                "volume": _to_int_or_none(item.get("v")),
             }
         return None
 
@@ -365,18 +533,36 @@ class AlpacaMarketDataProvider:
     def fetch_context(self, ticker: str) -> dict[str, Any]:
         sector: Optional[str] = None
         company_name: Optional[str] = None
+        metrics: dict[str, Any] = {}
         if self.finnhub_api_key:
             profile = self._fetch_profile_from_finnhub(ticker)
-            raw_sector = profile.get("finnhubIndustry")
-            if isinstance(raw_sector, str) and raw_sector.strip():
-                sector = raw_sector.strip()
+            sector = self._extract_sector_from_profile(profile)
             raw_name = profile.get("name")
             if isinstance(raw_name, str) and raw_name.strip():
                 company_name = raw_name.strip()
+            metrics = self._fetch_metrics_from_finnhub(ticker)
         return {
             "sector": sector,
             "company_name": company_name,
             "earnings_in_days": self._fetch_earnings_in_days_from_finnhub(ticker),
+            "pe_ratio": self._extract_metric_value(
+                metrics,
+                "peBasicExclExtraTTM",
+                "peTTM",
+                "peNormalizedAnnual",
+            ),
+            "ps_ratio": self._extract_metric_value(
+                metrics,
+                "psTTM",
+                "psAnnual",
+                "priceToSalesAnnual",
+            ),
+            "short_interest_pct_float": self._extract_metric_value(
+                metrics,
+                "shortPercentOfFloat",
+                "shortInterestPercent",
+                "shortRatio",
+            ),
         }
 
     def _fetch_profile_from_finnhub(self, ticker: str) -> dict[str, Any]:
@@ -389,6 +575,37 @@ class AlpacaMarketDataProvider:
         response.raise_for_status()
         payload = response.json()
         return payload if isinstance(payload, dict) else {}
+
+    def _fetch_sector_from_finnhub(self, ticker: str) -> Optional[str]:
+        """Compatibility helper for smoke checks."""
+        return self._extract_sector_from_profile(self._fetch_profile_from_finnhub(ticker))
+
+    @staticmethod
+    def _extract_sector_from_profile(profile: dict[str, Any]) -> Optional[str]:
+        raw_sector = profile.get("finnhubIndustry")
+        if isinstance(raw_sector, str) and raw_sector.strip():
+            return raw_sector.strip()
+        return None
+
+    def _fetch_metrics_from_finnhub(self, ticker: str) -> dict[str, Any]:
+        if not self.finnhub_api_key:
+            return {}
+        response = self._client.get(
+            "https://finnhub.io/api/v1/stock/metric",
+            params={"symbol": ticker.upper(), "metric": "all", "token": self.finnhub_api_key},
+        )
+        response.raise_for_status()
+        payload = response.json()
+        metrics = payload.get("metric") if isinstance(payload, dict) else None
+        return metrics if isinstance(metrics, dict) else {}
+
+    @staticmethod
+    def _extract_metric_value(metrics: dict[str, Any], *keys: str) -> Optional[float]:
+        for key in keys:
+            value = _to_float_or_none(metrics.get(key))
+            if value is not None:
+                return value
+        return None
 
     def _fetch_earnings_in_days_from_finnhub(self, ticker: str) -> Optional[int]:
         if not self.finnhub_api_key:
@@ -450,7 +667,7 @@ def get_market_snapshot(
 
     try:
         if hasattr(provider_instance, "fetch_daily_bars"):
-            daily_bars = provider_instance.fetch_daily_bars(ticker, lookback_days=6)
+            daily_bars = provider_instance.fetch_daily_bars(ticker, lookback_days=25)
             closes = [bar["close"] for bar in daily_bars]
         else:
             closes = provider_instance.fetch_daily_closes(ticker, lookback_days=6)
@@ -470,6 +687,27 @@ def get_market_snapshot(
         snapshot["return_since_market_open"] = _compute_return_since_market_open(
             last_bar, current_time
         )
+        session_volume = _to_int_or_none(last_bar.get("volume")) if last_bar else None
+        prior_volumes = [
+            volume
+            for volume in (
+                _to_float_or_none(bar.get("volume")) for bar in daily_bars[:-1][-20:]
+            )
+            if volume is not None
+        ]
+        avg_volume_20d = (
+            sum(prior_volumes) / len(prior_volumes) if prior_volumes else None
+        )
+        snapshot["session_volume"] = session_volume
+        snapshot["avg_volume_20d"] = avg_volume_20d
+        if session_volume is None or avg_volume_20d in (None, 0):
+            snapshot["relative_volume"] = None
+        else:
+            snapshot["relative_volume"] = float(session_volume) / avg_volume_20d
+        snapshot["technical_signals"] = _compute_technical_signals(
+            daily_bars,
+            current_time,
+        )
 
         try:
             context = provider_instance.fetch_context(ticker)
@@ -482,6 +720,11 @@ def get_market_snapshot(
         snapshot["sector"] = context.get("sector")
         snapshot["company_name"] = context.get("company_name")
         snapshot["earnings_in_days"] = _to_int_or_none(context.get("earnings_in_days"))
+        snapshot["pe_ratio"] = _to_float_or_none(context.get("pe_ratio"))
+        snapshot["ps_ratio"] = _to_float_or_none(context.get("ps_ratio"))
+        snapshot["short_interest_pct_float"] = _to_float_or_none(
+            context.get("short_interest_pct_float")
+        )
         return snapshot
     except Exception as exc:
         logger.error("market_snapshot_failed", ticker=ticker, error=str(exc), exc_info=True)
@@ -648,8 +891,10 @@ class MarketDataTool(BaseTool):
             "description": (
                 "Fetch the latest market data snapshot for a stock ticker. "
                 "Returns last_price, 1-day return, 5-day return, return since "
-                "market open during the current regular session, sector, and "
-                "days until the next earnings announcement."
+                "market open during the current regular session, session volume, "
+                "20-day average volume, relative volume, sector, days until the "
+                "next earnings announcement, basic valuation / short-interest metrics, "
+                "plus replayable technical signals such as RSI and ATR-derived volatility."
             ),
             "parameters": {
                 "type": "object",

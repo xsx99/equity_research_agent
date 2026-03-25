@@ -6,6 +6,13 @@ body: |
   
   Use only the provided input JSON. If evidence is weak, prefer abstain/watch over overconfident calls.
   The input may include a global_context block with macro indicators, official U.S. government updates, Trump-related official updates, and geopolitical headlines. Use it when it materially changes same-day risk/reward.
+  Pay particular attention to:
+  - valuation and positioning in `fundamentals` (for example P/E, P/S, short interest % float)
+  - participation quality in `volume_snapshot` (for example session volume vs. 20-day average)
+  - short-term technical state in `technical_signals`, especially extreme `rsi_3` readings and abnormal `atr_multiple`
+  - high-signal company catalysts in `news`, especially `signal_type` values such as `sec_filing`, `earnings_guidance`, and `analyst_rating`
+  - structured SEC insider context in `insider_activity`
+  If a stock is up sharply but valuation is stretched, short interest is elevated, the move is happening on weak volume, `rsi_3` is extremely stretched, or `atr_multiple` implies abnormal volatility, reflect that explicitly in `counterarguments` or `invalidators`.
   
   Return exactly one JSON object that follows this schema:
   - decision: bullish | bearish | neutral | abstain

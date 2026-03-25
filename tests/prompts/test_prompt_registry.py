@@ -330,6 +330,76 @@ def test_research_input_payload_defaults_empty_global_context():
     assert payload.global_context.geopolitical_news == []
 
 
+def test_research_input_payload_accepts_fundamentals_volume_and_insider_activity():
+    data = _valid_input()
+    data["context"]["company_name"] = "Apple Inc."
+    data["fundamentals"] = {
+        "pe_ratio": 28.4,
+        "ps_ratio": 7.2,
+        "short_interest_pct_float": 0.9,
+    }
+    data["volume_snapshot"] = {
+        "session_volume": 12500000,
+        "avg_volume_20d": 9100000.0,
+        "relative_volume": 1.37,
+    }
+    data["technical_signals"] = {
+        "momentum": {
+            "rsi_14": 58.2,
+            "rsi_3": 96.5,
+        },
+        "volatility": {
+            "atr_14": 15.2,
+            "yesterday_range": 45.0,
+            "atr_multiple": 2.96,
+        },
+    }
+    data["news"] = [
+        {
+            "title": "Morgan Stanley upgrades Apple to Overweight",
+            "summary": "The firm cited stronger iPhone demand and services execution.",
+            "published_at": "2026-03-21",
+            "source": "Dow Jones",
+            "url": "https://example.com/apple-upgrade",
+            "signal_type": "analyst_rating",
+        }
+    ]
+    data["insider_activity"] = {
+        "window_days": 30,
+        "purchase_count": 1,
+        "sale_count": 0,
+        "net_shares": 25000,
+        "net_value": 4200000.0,
+        "recent_trades": [
+            {
+                "insider_name": "Jane Doe",
+                "insider_title": "Director",
+                "transaction_type": "P",
+                "transaction_date": "2026-03-20",
+                "filing_date": "2026-03-21",
+                "shares": 25000,
+                "price_per_share": 168.0,
+                "total_value": 4200000.0,
+                "filing_url": "https://www.sec.gov/Archives/example",
+            }
+        ],
+    }
+
+    payload = ResearchInputPayload.model_validate(data)
+
+    assert payload.context.company_name == "Apple Inc."
+    assert payload.fundamentals.pe_ratio == pytest.approx(28.4)
+    assert payload.volume_snapshot.relative_volume == pytest.approx(1.37)
+    assert payload.technical_signals.momentum.rsi_3 == pytest.approx(96.5)
+    assert payload.technical_signals.volatility.atr_multiple == pytest.approx(2.96)
+    assert payload.news[0].signal_type == "analyst_rating"
+    assert payload.news[0].source == "Dow Jones"
+    assert payload.insider_activity.purchase_count == 1
+    assert payload.insider_activity.recent_trades[0].filing_url == (
+        "https://www.sec.gov/Archives/example"
+    )
+
+
 def test_structured_output_valid():
     out = StructuredResearchOutput.model_validate({
         "decision": "bullish",

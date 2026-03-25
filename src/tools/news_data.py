@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import os
+import re
 from typing import Any, Optional, Protocol, TypedDict
 
 import httpx
@@ -25,6 +26,9 @@ class NewsItem(TypedDict):
     title: str
     summary: str
     published_at: Optional[str]  # ISO-8601 date string, e.g. "2026-03-21"
+    source: Optional[str]
+    url: Optional[str]
+    signal_type: Optional[str]
 
 
 class NewsProvider(Protocol):
@@ -43,11 +47,117 @@ def _normalized_news_item(
     title: Optional[str],
     summary: Optional[str],
     published_at: Optional[str] = None,
+    *,
+    source: Optional[str] = None,
+    url: Optional[str] = None,
+    signal_type: Optional[str] = None,
 ) -> Optional[NewsItem]:
     clean_title = (title or "").strip()
     if not clean_title:
         return None
-    return {"title": clean_title, "summary": (summary or "").strip(), "published_at": published_at}
+    clean_summary = (summary or "").strip()
+    normalized_signal_type = signal_type or _infer_signal_type(
+        clean_title,
+        clean_summary,
+        source=source,
+    )
+    return {
+        "title": clean_title,
+        "summary": clean_summary,
+        "published_at": published_at,
+        "source": (source or "").strip() or None,
+        "url": (url or "").strip() or None,
+        "signal_type": normalized_signal_type,
+    }
+
+
+_LOW_SIGNAL_TITLE_PATTERNS = (
+    re.compile(r"\bis it too late\b", flags=re.IGNORECASE),
+    re.compile(r"\bshould you buy\b", flags=re.IGNORECASE),
+    re.compile(r"\bto buy now\b", flags=re.IGNORECASE),
+    re.compile(r"\bhere'?s why\b", flags=re.IGNORECASE),
+    re.compile(r"\bwhy .* stock .* (up|down) today\b", flags=re.IGNORECASE),
+    re.compile(r"\btop \d+ .* stocks?\b", flags=re.IGNORECASE),
+    re.compile(r"\bbest .* stocks?\b", flags=re.IGNORECASE),
+    re.compile(r"\bprediction\b", flags=re.IGNORECASE),
+)
+
+
+_SIGNAL_TYPE_PRIORITY = {
+    "earnings_guidance": 120,
+    "sec_filing": 115,
+    "analyst_rating": 110,
+    "earnings": 100,
+    "company_update": 90,
+    "general_news": 70,
+}
+
+
+def _looks_low_signal(title: str) -> bool:
+    normalized = " ".join(title.split())
+    return any(pattern.search(normalized) for pattern in _LOW_SIGNAL_TITLE_PATTERNS)
+
+
+def _infer_signal_type(
+    title: str,
+    summary: str,
+    *,
+    source: Optional[str] = None,
+) -> str:
+    text = " ".join((title, summary, source or "")).lower()
+    if any(keyword in text for keyword in ("guidance", "outlook", "forecast", "preliminary results")):
+        return "earnings_guidance"
+    if any(
+        keyword in text
+        for keyword in ("upgrade", "upgrades", "downgrade", "downgrades", "price target", "initiates coverage")
+    ):
+        return "analyst_rating"
+    if any(keyword in text for keyword in ("sec", "form 4", "8-k", "10-q", "10-k", "filing")):
+        return "sec_filing"
+    if any(keyword in text for keyword in ("earnings", "revenue", "eps", "quarter", "profit warning")):
+        return "earnings"
+    if any(keyword in text for keyword in ("press release", "business wire", "globe newswire")):
+        return "company_update"
+    return "general_news"
+
+
+def _normalize_provider_news_item(item: Any) -> Optional[NewsItem]:
+    if not isinstance(item, dict):
+        return None
+    return _normalized_news_item(
+        item.get("title"),
+        item.get("summary"),
+        item.get("published_at"),
+        source=item.get("source"),
+        url=item.get("url"),
+        signal_type=item.get("signal_type"),
+    )
+
+
+def _dedupe_key(item: NewsItem) -> str:
+    return (item.get("url") or item["title"]).strip().lower()
+
+
+def _rank_and_filter_news_items(items: list[NewsItem], limit: int) -> list[NewsItem]:
+    kept: list[NewsItem] = []
+    seen: set[str] = set()
+    for item in items:
+        if _looks_low_signal(item["title"]):
+            continue
+        key = _dedupe_key(item)
+        if key in seen:
+            continue
+        seen.add(key)
+        kept.append(item)
+
+    kept.sort(
+        key=lambda item: (
+            _SIGNAL_TYPE_PRIORITY.get(item.get("signal_type") or "general_news", 0),
+            item.get("published_at") or "",
+        ),
+        reverse=True,
+    )
+    return kept[:limit]
 
 
 # ---------------------------------------------------------------------------
@@ -95,7 +205,13 @@ class FinnhubNewsProvider:
             ts = row.get("datetime")
             if isinstance(ts, (int, float)) and ts > 0:
                 published_at = datetime.fromtimestamp(ts, tz=timezone.utc).date().isoformat()
-            item = _normalized_news_item(row.get("headline"), row.get("summary"), published_at)
+            item = _normalized_news_item(
+                row.get("headline"),
+                row.get("summary"),
+                published_at,
+                source=row.get("source"),
+                url=row.get("url"),
+            )
             if item:
                 items.append(item)
             if len(items) >= limit:
@@ -150,7 +266,20 @@ class MarketauxNewsProvider:
             raw_date = row.get("published_at")
             if isinstance(raw_date, str) and raw_date:
                 published_at = raw_date[:10]  # keep YYYY-MM-DD portion
-            item = _normalized_news_item(row.get("title"), row.get("description"), published_at)
+            raw_source = row.get("source")
+            source_name: Optional[str]
+            if isinstance(raw_source, dict):
+                name = raw_source.get("name")
+                source_name = str(name).strip() if name else None
+            else:
+                source_name = str(raw_source).strip() if raw_source else None
+            item = _normalized_news_item(
+                row.get("title"),
+                row.get("description"),
+                published_at,
+                source=source_name,
+                url=row.get("url"),
+            )
             if item:
                 items.append(item)
             if len(items) >= limit:
@@ -217,7 +346,13 @@ class AlpacaNewsProvider:
             raw_date = row.get("created_at")
             if isinstance(raw_date, str) and raw_date:
                 published_at = raw_date[:10]
-            item = _normalized_news_item(row.get("headline"), row.get("summary"), published_at)
+            item = _normalized_news_item(
+                row.get("headline"),
+                row.get("summary"),
+                published_at,
+                source=row.get("source"),
+                url=row.get("url"),
+            )
             if item:
                 items.append(item)
             if len(items) >= limit:
@@ -240,7 +375,9 @@ def _default_news_providers() -> list[NewsProvider]:
         providers.append(FinnhubNewsProvider())
     if os.getenv("MARKETAUX_API_KEY"):
         providers.append(MarketauxNewsProvider())
-    if os.getenv("ALPACA_API_KEY") and os.getenv("ALPACA_SECRET_KEY"):
+    if os.getenv("ALPACA_API_KEY") and (
+        os.getenv("ALPACA_SECRET_KEY") or os.getenv("ALPACA_API_SECRET")
+    ):
         providers.append(AlpacaNewsProvider())
     return providers
 
@@ -250,10 +387,11 @@ def get_recent_news(
     limit: int = 5,
     providers: Optional[list[NewsProvider]] = None,
 ) -> list[NewsItem]:
-    """Fetch recent news from the provider chain with resilient fallback."""
+    """Fetch recent news from all configured providers and keep the highest-signal items."""
     bounded_limit = max(1, min(limit, 5))
     created_default = providers is None
     provider_list = providers or _default_news_providers()
+    collected_items: list[NewsItem] = []
 
     try:
         for provider in provider_list:
@@ -268,9 +406,13 @@ def get_recent_news(
                     error=str(exc),
                 )
                 continue
-            if items:
-                return items[:bounded_limit]
-        return []
+            if not items:
+                continue
+            for item in items:
+                normalized_item = _normalize_provider_news_item(item)
+                if normalized_item:
+                    collected_items.append(normalized_item)
+        return _rank_and_filter_news_items(collected_items, bounded_limit)
     finally:
         if created_default:
             for provider in provider_list:
@@ -303,8 +445,10 @@ class NewsDataTool(BaseTool):
         return {
             "name": self.name,
             "description": (
-                "Fetch recent news headlines and summaries for a stock ticker. "
-                "Returns up to 5 news items, each with a title and summary."
+                "Fetch recent company news for a stock ticker. Aggregates the "
+                "configured providers, filters out low-signal retail-sentiment "
+                "headlines, and returns up to 5 higher-signal items with source, "
+                "URL, and signal_type metadata when available."
             ),
             "parameters": {
                 "type": "object",

@@ -143,12 +143,52 @@ def _smoke_market_snapshot(registry, ticker: str) -> SmokeCheckResult:
             f"Snapshot for {ticker} is missing return_since_market_open.",
             preview=snapshot,
         )
+    if "session_volume" not in snapshot or "relative_volume" not in snapshot:
+        return _failed(
+            name,
+            f"Snapshot for {ticker} is missing volume context fields.",
+            preview=snapshot,
+        )
+    if "pe_ratio" not in snapshot or "short_interest_pct_float" not in snapshot:
+        return _failed(
+            name,
+            f"Snapshot for {ticker} is missing fundamentals fields.",
+            preview=snapshot,
+        )
+    technical_signals = snapshot.get("technical_signals")
+    if not isinstance(technical_signals, dict):
+        return _failed(
+            name,
+            f"Snapshot for {ticker} is missing technical_signals.",
+            preview=snapshot,
+        )
+    momentum = technical_signals.get("momentum")
+    volatility = technical_signals.get("volatility")
+    if not isinstance(momentum, dict) or "rsi_3" not in momentum or "rsi_14" not in momentum:
+        return _failed(
+            name,
+            f"Snapshot for {ticker} is missing RSI momentum signals.",
+            preview=snapshot,
+        )
+    if (
+        not isinstance(volatility, dict)
+        or "atr_14" not in volatility
+        or "yesterday_range" not in volatility
+        or "atr_multiple" not in volatility
+    ):
+        return _failed(
+            name,
+            f"Snapshot for {ticker} is missing ATR volatility signals.",
+            preview=snapshot,
+        )
     since_open = snapshot.get("return_since_market_open")
     return _passed(
         name,
         (
             f"Composite snapshot for {ticker}: last_price={snapshot['last_price']:.2f}, "
-            f"return_since_market_open={since_open if since_open is not None else 'n/a'}"
+            f"return_since_market_open={since_open if since_open is not None else 'n/a'}, "
+            f"relative_volume={snapshot.get('relative_volume') if snapshot.get('relative_volume') is not None else 'n/a'}, "
+            f"rsi_3={momentum.get('rsi_3') if momentum.get('rsi_3') is not None else 'n/a'}"
         ),
         preview=snapshot,
     )

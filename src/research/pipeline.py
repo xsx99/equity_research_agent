@@ -52,13 +52,21 @@ def _filter_relevant_news(
     ticker: str,
     company_name: Optional[str],
 ) -> list[dict[str, Any]]:
-    """Keep only articles whose title mentions the ticker or company name."""
+    """Keep only articles whose text mentions the ticker/company or are already classified as high-signal."""
     needle_ticker = ticker.lower()
     needle_company = _core_company_name(company_name) if company_name else ""
     result = []
     for item in news:
-        title = (item.get("title") or "").lower()
-        if needle_ticker in title or (needle_company and needle_company in title):
+        combined_text = " ".join(
+            str(part or "").lower()
+            for part in (item.get("title"), item.get("summary"))
+        )
+        signal_type = (item.get("signal_type") or "").lower()
+        if (
+            needle_ticker in combined_text
+            or (needle_company and needle_company in combined_text)
+            or signal_type in {"earnings_guidance", "analyst_rating", "sec_filing"}
+        ):
             result.append(item)
     return result
 
@@ -259,6 +267,7 @@ class ResearchPipeline:
         market = self._fetch_market_data(ticker, tool_context)
         news = self._fetch_news(ticker, tool_context)
         news = _filter_relevant_news(news, ticker, market.get("company_name"))
+        insider_activity = self._fetch_insider_activity(ticker, as_of)
 
         return {
             "ticker": ticker,
@@ -271,9 +280,23 @@ class ResearchPipeline:
             },
             "context": {
                 "sector": market.get("sector"),
+                "company_name": market.get("company_name"),
                 "earnings_in_days": market.get("earnings_in_days"),
             },
+            "fundamentals": {
+                "pe_ratio": market.get("pe_ratio"),
+                "ps_ratio": market.get("ps_ratio"),
+                "short_interest_pct_float": market.get("short_interest_pct_float"),
+            },
+            "volume_snapshot": {
+                "session_volume": market.get("session_volume"),
+                "avg_volume_20d": market.get("avg_volume_20d"),
+                "relative_volume": market.get("relative_volume"),
+            },
+            "technical_signals": market.get("technical_signals")
+            or self._empty_technical_signals(),
             "news": news[:5],
+            "insider_activity": insider_activity,
             "global_context": global_context or self._empty_global_context(as_of),
         }
 
@@ -305,6 +328,25 @@ class ResearchPipeline:
             )
             return []
 
+    def _fetch_insider_activity(self, ticker: str, as_of: datetime) -> dict[str, Any]:
+        """Summarize recent SEC Form 4 activity already collected into Postgres."""
+        try:
+            result = repository.get_recent_insider_activity(
+                self.session,
+                ticker=ticker,
+                as_of=as_of,
+                days=30,
+                limit=5,
+            )
+            return result if isinstance(result, dict) else self._empty_insider_activity()
+        except Exception as exc:
+            logger.warning(
+                "research_pipeline_insider_activity_failed",
+                ticker=ticker,
+                error=str(exc),
+            )
+            return self._empty_insider_activity()
+
     def _fetch_global_context(self, as_of: datetime) -> dict[str, Any]:
         """Dispatch the global context tool; return an empty block on failure."""
         try:
@@ -335,4 +377,29 @@ class ResearchPipeline:
             "official_updates": [],
             "trump_updates": [],
             "geopolitical_news": [],
+        }
+
+    @staticmethod
+    def _empty_insider_activity() -> dict[str, Any]:
+        return {
+            "window_days": 30,
+            "purchase_count": 0,
+            "sale_count": 0,
+            "net_shares": None,
+            "net_value": None,
+            "recent_trades": [],
+        }
+
+    @staticmethod
+    def _empty_technical_signals() -> dict[str, Any]:
+        return {
+            "momentum": {
+                "rsi_14": None,
+                "rsi_3": None,
+            },
+            "volatility": {
+                "atr_14": None,
+                "yesterday_range": None,
+                "atr_multiple": None,
+            },
         }

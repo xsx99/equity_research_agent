@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
@@ -15,6 +15,7 @@ from sqlalchemy import desc, func, text
 from src.core import config as app_config  # noqa: F401
 from src.db.connection import get_session
 from src.db.models import InsiderTrade
+from src.research import repository
 from src.tools import ToolContext, build_research_tool_registry
 
 from scripts.smoke import SmokeCheckResult, _failed, _passed, _print_results
@@ -124,6 +125,35 @@ def _smoke_db_tools(registry, db_inputs: DbSmokeInputs) -> list[SmokeCheckResult
                 continue
             preview = result[0] if isinstance(result, list) else result
             results.append(_passed(tool_name, success_details, preview=preview))
+
+        try:
+            insider_activity = repository.get_recent_insider_activity(
+                session,
+                ticker=db_inputs.ticker,
+                as_of=datetime.now().astimezone(),
+                days=db_inputs.days,
+                limit=5,
+            )
+        except Exception as exc:
+            results.append(_failed("insider_activity_summary", f"Execution failed: {exc}"))
+        else:
+            recent_trades = insider_activity.get("recent_trades")
+            if not isinstance(insider_activity, dict) or not isinstance(recent_trades, list):
+                results.append(
+                    _failed(
+                        "insider_activity_summary",
+                        "Repository helper returned malformed insider activity payload.",
+                        preview=insider_activity,
+                    )
+                )
+            else:
+                results.append(
+                    _passed(
+                        "insider_activity_summary",
+                        f"Built insider activity summary for {db_inputs.ticker}.",
+                        preview=insider_activity,
+                    )
+                )
     return results
 
 

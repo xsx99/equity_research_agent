@@ -95,7 +95,25 @@ def _make_stub_tool_registry() -> ToolRegistry:
                 "return_1d": 0.01,
                 "return_5d": 0.03,
                 "return_since_market_open": 0.02,
+                "session_volume": 18000000,
+                "avg_volume_20d": 9100000.0,
+                "relative_volume": 1.98,
+                "technical_signals": {
+                    "momentum": {
+                        "rsi_14": 58.2,
+                        "rsi_3": 96.5,
+                    },
+                    "volatility": {
+                        "atr_14": 15.2,
+                        "yesterday_range": 45.0,
+                        "atr_multiple": 2.96,
+                    },
+                },
+                "pe_ratio": 28.4,
+                "ps_ratio": 7.2,
+                "short_interest_pct_float": 1.1,
                 "sector": "Technology",
+                "company_name": "Apple Inc.",
                 "earnings_in_days": 30,
             }
 
@@ -107,7 +125,15 @@ def _make_stub_tool_registry() -> ToolRegistry:
             return {"name": self.name, "description": "", "parameters": {"type": "object", "properties": {}, "required": []}}
 
         def run(self, input: dict[str, Any], context: ToolContext) -> list[dict[str, str]]:
-            return [{"title": "AAPL hits record", "summary": "All-time high."}]
+            return [
+                {
+                    "title": "Apple raises March-quarter revenue guidance",
+                    "summary": "Management increased guidance after stronger demand.",
+                    "source": "Business Wire",
+                    "url": "https://example.com/guidance",
+                    "signal_type": "earnings_guidance",
+                }
+            ]
 
     class _StubGlobalContextTool(BaseTool):
         name = "get_global_context"
@@ -180,6 +206,26 @@ class TestRunTickerHappyPath:
         run = MagicMock()
         run.run_id = uuid.uuid4()
         mock_repo.create_run.return_value = run
+        mock_repo.get_recent_insider_activity.return_value = {
+            "window_days": 30,
+            "purchase_count": 1,
+            "sale_count": 0,
+            "net_shares": 25000,
+            "net_value": 4200000.0,
+            "recent_trades": [
+                {
+                    "insider_name": "Jane Doe",
+                    "insider_title": "Director",
+                    "transaction_type": "P",
+                    "transaction_date": "2026-03-20",
+                    "filing_date": "2026-03-21",
+                    "shares": 25000,
+                    "price_per_share": 168.0,
+                    "total_value": 4200000.0,
+                    "filing_url": "https://www.sec.gov/Archives/example",
+                }
+            ],
+        }
 
         session = _make_session()
         pipeline = ResearchPipeline(
@@ -194,7 +240,19 @@ class TestRunTickerHappyPath:
         assert input_json["ticker"] == "AAPL"
         assert input_json["price_snapshot"]["last_price"] == 150.0
         assert input_json["price_snapshot"]["return_since_market_open"] == 0.02
+        assert input_json["context"]["company_name"] == "Apple Inc."
+        assert input_json["fundamentals"]["pe_ratio"] == pytest.approx(28.4)
+        assert input_json["fundamentals"]["short_interest_pct_float"] == pytest.approx(1.1)
+        assert input_json["volume_snapshot"]["session_volume"] == 18000000
+        assert input_json["volume_snapshot"]["relative_volume"] == pytest.approx(1.98)
+        assert input_json["technical_signals"]["momentum"]["rsi_3"] == pytest.approx(96.5)
+        assert input_json["technical_signals"]["volatility"]["atr_multiple"] == pytest.approx(2.96)
         assert len(input_json["news"]) >= 1
+        assert input_json["news"][0]["signal_type"] == "earnings_guidance"
+        assert input_json["insider_activity"]["purchase_count"] == 1
+        assert input_json["insider_activity"]["recent_trades"][0]["filing_url"] == (
+            "https://www.sec.gov/Archives/example"
+        )
         assert input_json["global_context"]["indicators"]["vix"]["value"] == pytest.approx(19.2)
 
     @patch("src.research.pipeline.repository")
