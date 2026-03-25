@@ -136,3 +136,9 @@ Research App MVP 设计文档（重构版）
       将不同场景的分析逻辑抽象为独立的 Sub-Agents（Skills），例如 Macro_Skill（关注利率与宏观数据）、Earnings_Skill（关注财报突发事件）或 Momentum_Skill（纯技术面动量突破）。
     路由分发 (Router)： 
       在 run_research.py 前置一个轻量级 Router（基于 Rule-based 规则或极小的 LLM 调用）。Router 根据当前标的的市场环境特征，决定激活哪一个（或组合哪几个）Skill Agent 来执行特定的 Research 任务，并将最终结果汇总落库。
+
+15. TODO
+  1. Add X posts from telegram
+  2. Add ecnomic calendar 
+  3. make UI better 
+  4. add eval agent
