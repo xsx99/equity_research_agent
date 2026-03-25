@@ -118,9 +118,16 @@
       </div>
     </div>
 
-    <div class="input-section-grid">
-      <div>
-        <h3 class="section-label">Price Snapshot</h3>
+    <div data-tabs>
+      <div class="tab-bar">
+        <button class="tab-btn active" data-tab="price">Price Snapshot</button>
+        <button class="tab-btn" data-tab="context">Context</button>
+        <button class="tab-btn" data-tab="fundamentals">Fundamentals</button>
+        <button class="tab-btn" data-tab="volume">Volume</button>
+        <button class="tab-btn" data-tab="technicals">Technicals</button>
+      </div>
+
+      <div class="tab-panel active" data-panel="price">
         <div class="input-metric-grid">
           <div class="metric-tile">
             <span class="metric-label">Last Price</span>
@@ -141,8 +148,7 @@
         </div>
       </div>
 
-      <div>
-        <h3 class="section-label">Context</h3>
+      <div class="tab-panel" data-panel="context">
         <div class="input-metric-grid">
           <div class="metric-tile">
             <span class="metric-label">Company</span>
@@ -158,11 +164,8 @@
           </div>
         </div>
       </div>
-    </div>
 
-    <div class="input-section-grid" style="margin-top:1rem;">
-      <div>
-        <h3 class="section-label">Fundamentals</h3>
+      <div class="tab-panel" data-panel="fundamentals">
         <div class="input-metric-grid">
           <div class="metric-tile">
             <span class="metric-label">P/E</span>
@@ -179,8 +182,7 @@
         </div>
       </div>
 
-      <div>
-        <h3 class="section-label">Volume</h3>
+      <div class="tab-panel" data-panel="volume">
         <div class="input-metric-grid">
           <div class="metric-tile">
             <span class="metric-label">Session Volume</span>
@@ -196,11 +198,8 @@
           </div>
         </div>
       </div>
-    </div>
 
-    <h3 class="section-label">Technical Signals</h3>
-    <div class="input-section-grid">
-      <div>
+      <div class="tab-panel" data-panel="technicals">
         <div class="input-metric-grid">
           <div class="metric-tile">
             <span class="metric-label">RSI 14</span>
@@ -210,11 +209,6 @@
             <span class="metric-label">RSI 3</span>
             <span class="metric-value">{% if detail.input_rsi_3 is not none %}{{ '%.1f' % detail.input_rsi_3 }}{% else %}—{% endif %}</span>
           </div>
-        </div>
-      </div>
-
-      <div>
-        <div class="input-metric-grid">
           <div class="metric-tile">
             <span class="metric-label">ATR 14</span>
             <span class="metric-value">{% if detail.input_atr_14 is not none %}{{ '%.2f' % detail.input_atr_14 }}{% else %}—{% endif %}</span>
@@ -278,7 +272,12 @@
     <div class="news-list" style="margin-top:0.75rem;">
       {% for item in detail.input_insider_recent_trades %}
       <article class="news-item">
-        <h4>{{ item.insider_name or 'Unknown insider' }}{% if item.insider_title %} · {{ item.insider_title }}{% endif %}</h4>
+        <h4>
+          {{ item.insider_name or 'Unknown insider' }}{% if item.insider_title %} · {{ item.insider_title }}{% endif %}
+          {% if item.trade_count and item.trade_count > 1 %}
+          <span class="detail-muted" style="font-size:11px; font-weight:400;"> ({{ item.trade_count }} transactions)</span>
+          {% endif %}
+        </h4>
         <p>
           {{ item.transaction_type or '—' }}
           {% if item.transaction_date %} · Trade {{ item.transaction_date }}{% endif %}
@@ -295,76 +294,6 @@
     <p class="detail-muted">No insider activity captured for this run.</p>
     {% endif %}
 
-    <h3 class="section-label">Global Context</h3>
-    <div class="input-overview">
-      <div class="input-pill">
-        <span class="input-pill-label">Snapshot</span>
-        <span class="input-pill-value">
-          {% if detail.input_global_context_as_of %}
-          <time datetime="{{ detail.input_global_context_as_of | iso_datetime }}" data-local-time-format="datetime">{{ detail.input_global_context_as_of | local_time('datetime') }}</time>
-          {% else %}—{% endif %}
-        </span>
-      </div>
-    </div>
-
-    {% if detail.input_global_indicators %}
-    <div class="input-metric-grid" style="margin-top:0.75rem;">
-      {% for item in detail.input_global_indicators %}
-      <div class="metric-tile">
-        <span class="metric-label">{{ item.label }}</span>
-        <span class="metric-value">
-          {% if item.value is not none %}
-            {{ item.value }}{% if item.unit %} {{ item.unit }}{% endif %}
-          {% else %}—{% endif %}
-        </span>
-      </div>
-      {% endfor %}
-    </div>
-    {% else %}
-    <p class="detail-muted">No macro indicators captured for this run.</p>
-    {% endif %}
-
-    <h3 class="section-label">US Official Updates</h3>
-    {% if detail.input_official_updates %}
-    <div class="news-list">
-      {% for item in detail.input_official_updates %}
-      <article class="news-item">
-        <h4>{{ item.title or 'Untitled official update' }}</h4>
-        <p>{{ item.summary or 'No summary captured.' }}</p>
-      </article>
-      {% endfor %}
-    </div>
-    {% else %}
-    <p class="detail-muted">No official U.S. government updates captured for this run.</p>
-    {% endif %}
-
-    <h3 class="section-label">Trump Updates</h3>
-    {% if detail.input_trump_updates %}
-    <div class="news-list">
-      {% for item in detail.input_trump_updates %}
-      <article class="news-item">
-        <h4>{{ item.title or 'Untitled Trump update' }}</h4>
-        <p>{{ item.summary or 'No summary captured.' }}</p>
-      </article>
-      {% endfor %}
-    </div>
-    {% else %}
-    <p class="detail-muted">No Trump-specific official updates captured for this run.</p>
-    {% endif %}
-
-    <h3 class="section-label">Geopolitical News</h3>
-    {% if detail.input_geopolitical_news %}
-    <div class="news-list">
-      {% for item in detail.input_geopolitical_news %}
-      <article class="news-item">
-        <h4>{{ item.title or 'Untitled geopolitical item' }}</h4>
-        <p>{{ item.summary or 'No summary captured.' }}</p>
-      </article>
-      {% endfor %}
-    </div>
-    {% else %}
-    <p class="detail-muted">No geopolitical news captured for this run.</p>
-    {% endif %}
     {% else %}
     <p class="detail-muted">No input data available.</p>
     {% endif %}
@@ -440,4 +369,20 @@
 <div style="margin-top:1rem;">
   <a href="/research" class="btn btn-primary btn-sm">← Back to Research</a>
 </div>
+
+<script>
+  document.querySelectorAll('[data-tabs]').forEach(container => {
+    const bar = container.querySelector('.tab-bar');
+    bar.querySelectorAll('.tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        bar.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const target = btn.dataset.tab;
+        container.querySelectorAll('.tab-panel').forEach(p => {
+          p.classList.toggle('active', p.dataset.panel === target);
+        });
+      });
+    });
+  });
+</script>
 {% endblock %}

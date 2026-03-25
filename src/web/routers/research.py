@@ -90,24 +90,33 @@ def _normalize_global_events(items: list[Any]) -> list[dict[str, Any]]:
 
 
 def _normalize_insider_trades(items: list[Any]) -> list[dict[str, Any]]:
-    normalized: list[dict[str, Any]] = []
+    grouped: dict[tuple, dict[str, Any]] = {}
     for item in items:
         if not isinstance(item, dict):
             continue
-        normalized.append(
-            {
+        key = (
+            item.get("insider_name"),
+            item.get("insider_title"),
+            item.get("transaction_type"),
+            item.get("transaction_date"),
+        )
+        if key not in grouped:
+            grouped[key] = {
                 "insider_name": item.get("insider_name"),
                 "insider_title": item.get("insider_title"),
                 "transaction_type": item.get("transaction_type"),
                 "transaction_date": item.get("transaction_date"),
                 "filing_date": item.get("filing_date"),
-                "shares": item.get("shares"),
-                "price_per_share": item.get("price_per_share"),
-                "total_value": item.get("total_value"),
+                "shares": item.get("shares") or 0,
+                "total_value": item.get("total_value") or 0,
                 "filing_url": item.get("filing_url"),
+                "trade_count": 1,
             }
-        )
-    return normalized
+        else:
+            grouped[key]["shares"] = (grouped[key]["shares"] or 0) + (item.get("shares") or 0)
+            grouped[key]["total_value"] = (grouped[key]["total_value"] or 0) + (item.get("total_value") or 0)
+            grouped[key]["trade_count"] += 1
+    return list(grouped.values())
 
 
 def _normalize_indicators(global_indicators: dict) -> list[dict[str, Any]]:
@@ -188,8 +197,32 @@ def research_list(request: Request):
             "outcome_counts": dict(outcome_counts),
         }
 
+        # Pull global context from the most recent succeeded run that has it
+        global_context_display: dict | None = None
+        latest_run_with_gc = (
+            session.query(ResearchRun)
+            .filter(ResearchRun.status == "succeeded")
+            .order_by(ResearchRun.created_at.desc())
+            .first()
+        )
+        if latest_run_with_gc:
+            gc = (latest_run_with_gc.input_json or {}).get("global_context") or {}
+            if gc:
+                global_context_display = {
+                    "as_of": gc.get("as_of"),
+                    "indicators": _normalize_indicators(gc.get("indicators") or {}),
+                    "official_updates": _normalize_global_events(gc.get("official_updates") or []),
+                    "trump_updates": _normalize_global_events(gc.get("trump_updates") or []),
+                    "geopolitical_news": _normalize_global_events(gc.get("geopolitical_news") or []),
+                }
+
     return _templates.TemplateResponse(
-        request, "research.html", {"grouped": grouped, "stats": stats, "flash": get_flash(request)},
+        request, "research.html", {
+            "grouped": grouped,
+            "stats": stats,
+            "global_context": global_context_display,
+            "flash": get_flash(request),
+        },
     )
 
 
@@ -272,7 +305,11 @@ def research_detail(run_id: str, request: Request):
             "input_atr_14": volatility_signals.get("atr_14"),
             "input_yesterday_range": volatility_signals.get("yesterday_range"),
             "input_atr_multiple": volatility_signals.get("atr_multiple"),
-            "input_news": _normalize_news(input_data.get("news") or []),
+            "input_news": sorted(
+                _normalize_news(input_data.get("news") or []),
+                key=lambda x: x.get("published_at") or "",
+                reverse=True,
+            ),
             "input_insider_window_days": (input_data.get("insider_activity") or {}).get("window_days"),
             "input_insider_purchase_count": (input_data.get("insider_activity") or {}).get("purchase_count"),
             "input_insider_sale_count": (input_data.get("insider_activity") or {}).get("sale_count"),

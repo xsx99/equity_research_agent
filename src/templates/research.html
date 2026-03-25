@@ -93,4 +93,80 @@
 {% else %}
 <p style="color:#666; margin-top:1rem;">No research runs yet. Add tickers to the watchlist and click "Run Research Now".</p>
 {% endif %}
+
+{% if global_context %}
+<div class="card" style="margin-top:2rem;">
+  <h2 style="margin-top:0;">Global Context
+    {% if global_context.as_of %}
+    <span class="detail-muted" style="font-size:12px; font-weight:400; margin-left:0.5rem;">
+      as of <time datetime="{{ global_context.as_of | iso_datetime }}" data-local-time-format="datetime">{{ global_context.as_of | local_time('datetime') }}</time>
+    </span>
+    {% endif %}
+  </h2>
+
+  {% if global_context.indicators %}
+  <h3 class="section-label">Macro Indicators</h3>
+  <div class="input-metric-grid">
+    {% for item in global_context.indicators %}
+    <div class="metric-tile">
+      <span class="metric-label">{{ item.label }}</span>
+      <span class="metric-value" style="font-size:15px;">
+        {% if item.value is not none %}{{ item.value }}{% if item.unit %} {{ item.unit }}{% endif %}{% else %}—{% endif %}
+      </span>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <div style="display:grid; grid-template-columns: 1fr 1fr; gap:1rem; margin-top:1rem;">
+    <div>
+      <h3 class="section-label">US Official Updates</h3>
+      {% if global_context.official_updates %}
+      <div class="news-list">
+        {% for item in global_context.official_updates %}
+        <article class="news-item">
+          <h4>{{ item.title or 'Untitled' }}</h4>
+          {% if item.published_at %}<p class="detail-muted" style="font-size:11px;">{{ item.published_at }}</p>{% endif %}
+          {% if item.summary %}<p>{{ item.summary }}</p>{% endif %}
+        </article>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="detail-muted">None captured.</p>
+      {% endif %}
+    </div>
+    <div>
+      <h3 class="section-label">Trump Updates</h3>
+      {% if global_context.trump_updates %}
+      <div class="news-list">
+        {% for item in global_context.trump_updates %}
+        <article class="news-item">
+          <h4>{{ item.title or 'Untitled' }}</h4>
+          {% if item.published_at %}<p class="detail-muted" style="font-size:11px;">{{ item.published_at }}</p>{% endif %}
+          {% if item.summary %}<p>{{ item.summary }}</p>{% endif %}
+        </article>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="detail-muted">None captured.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <h3 class="section-label" style="margin-top:1rem;">Geopolitical News</h3>
+  {% if global_context.geopolitical_news %}
+  <div class="news-list">
+    {% for item in global_context.geopolitical_news %}
+    <article class="news-item">
+      <h4>{{ item.title or 'Untitled' }}</h4>
+      {% if item.published_at %}<p class="detail-muted" style="font-size:11px;">{{ item.published_at }}</p>{% endif %}
+      {% if item.summary %}<p>{{ item.summary }}</p>{% endif %}
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="detail-muted">None captured.</p>
+  {% endif %}
+</div>
+{% endif %}
 {% endblock %}

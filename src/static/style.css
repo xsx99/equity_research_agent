@@ -311,3 +311,30 @@ pre {
 }
 a { color: #1a1a2e; }
 a:hover { text-decoration: underline; }
+
+/* Tabs */
+.tab-bar {
+  display: flex;
+  gap: 0;
+  border-bottom: 2px solid #e0e0e0;
+  margin-bottom: 1rem;
+}
+.tab-btn {
+  padding: 0.5rem 1rem;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #888;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+  opacity: 1;
+}
+.tab-btn:hover { color: #1a1a2e; opacity: 1; }
+.tab-btn.active { color: #1a1a2e; border-bottom-color: #1a1a2e; }
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
