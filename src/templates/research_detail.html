@@ -169,6 +169,77 @@
     {% else %}
     <p class="detail-muted">No news data captured for this run.</p>
     {% endif %}
+
+    <h3 class="section-label">Global Context</h3>
+    <div class="input-overview">
+      <div class="input-pill">
+        <span class="input-pill-label">Snapshot</span>
+        <span class="input-pill-value">
+          {% if detail.input_global_context_as_of %}
+          <time datetime="{{ detail.input_global_context_as_of | iso_datetime }}" data-local-time-format="datetime">{{ detail.input_global_context_as_of | local_time('datetime') }}</time>
+          {% else %}—{% endif %}
+        </span>
+      </div>
+    </div>
+
+    {% if detail.input_global_indicators %}
+    <div class="input-metric-grid" style="margin-top:0.75rem;">
+      {% for item in detail.input_global_indicators %}
+      <div class="metric-tile">
+        <span class="metric-label">{{ item.label }}</span>
+        <span class="metric-value">
+          {% if item.value is not none %}
+            {{ item.value }}{% if item.unit %} {{ item.unit }}{% endif %}
+          {% else %}—{% endif %}
+        </span>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="detail-muted">No macro indicators captured for this run.</p>
+    {% endif %}
+
+    <h3 class="section-label">US Official Updates</h3>
+    {% if detail.input_official_updates %}
+    <div class="news-list">
+      {% for item in detail.input_official_updates %}
+      <article class="news-item">
+        <h4>{{ item.title or 'Untitled official update' }}</h4>
+        <p>{{ item.summary or 'No summary captured.' }}</p>
+      </article>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="detail-muted">No official U.S. government updates captured for this run.</p>
+    {% endif %}
+
+    <h3 class="section-label">Trump Updates</h3>
+    {% if detail.input_trump_updates %}
+    <div class="news-list">
+      {% for item in detail.input_trump_updates %}
+      <article class="news-item">
+        <h4>{{ item.title or 'Untitled Trump update' }}</h4>
+        <p>{{ item.summary or 'No summary captured.' }}</p>
+      </article>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="detail-muted">No Trump-specific official updates captured for this run.</p>
+    {% endif %}
+
+    <h3 class="section-label">Geopolitical News</h3>
+    {% if detail.input_geopolitical_news %}
+    <div class="news-list">
+      {% for item in detail.input_geopolitical_news %}
+      <article class="news-item">
+        <h4>{{ item.title or 'Untitled geopolitical item' }}</h4>
+        <p>{{ item.summary or 'No summary captured.' }}</p>
+      </article>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="detail-muted">No geopolitical news captured for this run.</p>
+    {% endif %}
     {% else %}
     <p class="detail-muted">No input data available.</p>
     {% endif %}

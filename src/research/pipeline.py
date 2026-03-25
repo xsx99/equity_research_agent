@@ -4,6 +4,7 @@ Responsible for:
 - Loading active watchlist tickers from Postgres.
 - Fetching market snapshot and news via the tool registry (deterministic Python,
   not model-driven tool-calling).
+- Fetching one replayable global macro/news context block per batch.
 - Building a replayable ``input_json`` snapshot.
 - Creating / updating ``ResearchRun`` status rows.
 - Calling ``ResearchAgent`` for one model invocation per ticker.
@@ -140,9 +141,14 @@ class ResearchPipeline:
 
         logger.info("research_pipeline_started", ticker_count=len(tickers))
         result = PipelineResult()
+        batch_global_context = self._fetch_global_context(as_of)
 
         for ticker in tickers:
-            ticker_result = self.run_ticker(ticker, as_of=as_of)
+            ticker_result = self.run_ticker(
+                ticker,
+                as_of=as_of,
+                global_context=batch_global_context,
+            )
             result.ticker_results.append(ticker_result)
             if ticker_result.success:
                 result.succeeded += 1
@@ -156,7 +162,14 @@ class ResearchPipeline:
         )
         return result
 
-    def run_ticker(self, ticker: str, as_of: Optional[datetime] = None) -> TickerResult:
+    def run_ticker(
+        self,
+        ticker: str,
+        as_of: Optional[datetime] = None,
+        *,
+        global_context: Optional[dict[str, Any]] = None,
+        reuse_latest_global_context: bool = False,
+    ) -> TickerResult:
         """Run the full research lifecycle for a single ticker.
 
         Status transitions:
@@ -168,9 +181,18 @@ class ResearchPipeline:
         run: Optional[ResearchRun] = None
 
         try:
+            if global_context is None and reuse_latest_global_context:
+                global_context = self._get_reusable_global_context(as_of)
+            if global_context is None:
+                global_context = self._fetch_global_context(as_of)
+
             # 1. Fetch market data and news before creating the run row so that
             #    a data-fetch error does not leave a dangling queued run.
-            input_json = self._build_input_json(ticker, as_of)
+            input_json = self._build_input_json(
+                ticker,
+                as_of,
+                global_context=global_context,
+            )
 
             # 2. Create the run row (queued) and flush so run_id is available.
             run = repository.create_run(
@@ -224,7 +246,13 @@ class ResearchPipeline:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _build_input_json(self, ticker: str, as_of: datetime) -> dict[str, Any]:
+    def _build_input_json(
+        self,
+        ticker: str,
+        as_of: datetime,
+        *,
+        global_context: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
         """Assemble the replayable input snapshot for *ticker*."""
         tool_context = ToolContext()
 
@@ -246,6 +274,7 @@ class ResearchPipeline:
                 "earnings_in_days": market.get("earnings_in_days"),
             },
             "news": news[:5],
+            "global_context": global_context or self._empty_global_context(as_of),
         }
 
     def _fetch_market_data(self, ticker: str, context: ToolContext) -> dict[str, Any]:
@@ -275,3 +304,35 @@ class ResearchPipeline:
                 error=str(exc),
             )
             return []
+
+    def _fetch_global_context(self, as_of: datetime) -> dict[str, Any]:
+        """Dispatch the global context tool; return an empty block on failure."""
+        try:
+            return self.tool_registry.dispatch(
+                "get_global_context",
+                {"as_of": as_of.isoformat(), "limit": 5},
+                ToolContext(),
+            )
+        except Exception as exc:
+            logger.warning(
+                "research_pipeline_global_context_failed",
+                error=str(exc),
+            )
+            return self._empty_global_context(as_of)
+
+    def _get_reusable_global_context(self, as_of: datetime) -> Optional[dict[str, Any]]:
+        """Return the latest same-day global context block if one already exists."""
+        return repository.get_latest_global_context_for_trade_date(
+            self.session,
+            trade_date=as_of.date(),
+        )
+
+    @staticmethod
+    def _empty_global_context(as_of: datetime) -> dict[str, Any]:
+        return {
+            "as_of": as_of.isoformat(),
+            "indicators": {},
+            "official_updates": [],
+            "trump_updates": [],
+            "geopolitical_news": [],
+        }

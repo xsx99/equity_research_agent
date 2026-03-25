@@ -39,6 +39,30 @@ _GOOD_OUTPUT = {
     "invalidators": ["price drops below 200-day MA"],
 }
 
+_GLOBAL_CONTEXT = {
+    "as_of": _AS_OF.isoformat(),
+    "indicators": {
+        "vix": {
+            "label": "CBOE Volatility Index",
+            "source": "FRED:VIXCLS",
+            "unit": "index",
+            "value": 19.2,
+            "observed_on": "2026-03-22",
+        }
+    },
+    "official_updates": [
+        {
+            "source": "whitehouse.gov",
+            "title": "Official White House statement",
+            "summary": "Policy update.",
+            "published_at": "2026-03-22T08:45:00Z",
+            "url": "https://www.whitehouse.gov/example",
+        }
+    ],
+    "trump_updates": [],
+    "geopolitical_news": [],
+}
+
 
 def _good_runner(prompt: str, model_name: str) -> str:
     return json.dumps(_GOOD_OUTPUT)
@@ -85,9 +109,20 @@ def _make_stub_tool_registry() -> ToolRegistry:
         def run(self, input: dict[str, Any], context: ToolContext) -> list[dict[str, str]]:
             return [{"title": "AAPL hits record", "summary": "All-time high."}]
 
+    class _StubGlobalContextTool(BaseTool):
+        name = "get_global_context"
+
+        @property
+        def schema(self) -> dict[str, Any]:
+            return {"name": self.name, "description": "", "parameters": {"type": "object", "properties": {}, "required": []}}
+
+        def run(self, input: dict[str, Any], context: ToolContext) -> dict[str, Any]:
+            return _GLOBAL_CONTEXT
+
     registry = ToolRegistry()
     registry.register(_StubMarketTool())
     registry.register(_StubNewsTool())
+    registry.register(_StubGlobalContextTool())
     return registry
 
 
@@ -160,6 +195,46 @@ class TestRunTickerHappyPath:
         assert input_json["price_snapshot"]["last_price"] == 150.0
         assert input_json["price_snapshot"]["return_since_market_open"] == 0.02
         assert len(input_json["news"]) >= 1
+        assert input_json["global_context"]["indicators"]["vix"]["value"] == pytest.approx(19.2)
+
+    @patch("src.research.pipeline.repository")
+    def test_run_all_fetches_global_context_once_for_batch(self, mock_repo):
+        mock_repo.get_active_tickers.return_value = ["AAPL", "MSFT"]
+        mock_repo.create_run.side_effect = [MagicMock(run_id=uuid.uuid4()), MagicMock(run_id=uuid.uuid4())]
+
+        pipeline = ResearchPipeline(
+            session=_make_session(),
+            agent=_make_agent(),
+            tool_registry=_make_stub_tool_registry(),
+        )
+        pipeline._fetch_global_context = MagicMock(return_value=_GLOBAL_CONTEXT)
+
+        pipeline.run_all(as_of=_AS_OF)
+
+        pipeline._fetch_global_context.assert_called_once()
+
+    @patch("src.research.pipeline.repository")
+    def test_run_ticker_reuses_existing_global_context_when_requested(self, mock_repo):
+        run = MagicMock()
+        run.run_id = uuid.uuid4()
+        mock_repo.create_run.return_value = run
+
+        pipeline = ResearchPipeline(
+            session=_make_session(),
+            agent=_make_agent(),
+            tool_registry=_make_stub_tool_registry(),
+        )
+        pipeline._get_reusable_global_context = MagicMock(return_value=_GLOBAL_CONTEXT)
+        pipeline._fetch_global_context = MagicMock(return_value={"unexpected": True})
+
+        pipeline.run_ticker(
+            "AAPL",
+            as_of=_AS_OF,
+            reuse_latest_global_context=True,
+        )
+
+        pipeline._get_reusable_global_context.assert_called_once_with(_AS_OF)
+        pipeline._fetch_global_context.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

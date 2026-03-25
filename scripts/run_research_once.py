@@ -44,6 +44,14 @@ def main() -> int:
         default=DEFAULT_MODEL_NAME,
         help=f"LLM model name (default: {DEFAULT_MODEL_NAME}).",
     )
+    parser.add_argument(
+        "--refresh-global-context",
+        action="store_true",
+        help=(
+            "For single-ticker runs, fetch a fresh macro/global context instead "
+            "of reusing the latest same-day snapshot when one exists."
+        ),
+    )
     args = parser.parse_args()
 
     agent = ResearchAgent(
@@ -58,7 +66,10 @@ def main() -> int:
         if args.ticker:
             ticker = args.ticker.upper()
             logger.info("run_research_once_single_ticker", ticker=ticker)
-            result = pipeline.run_ticker(ticker)
+            result = pipeline.run_ticker(
+                ticker,
+                reuse_latest_global_context=not args.refresh_global_context,
+            )
             pipeline_result = PipelineResult(
                 succeeded=1 if result.success else 0,
                 failed=0 if result.success else 1,

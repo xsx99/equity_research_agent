@@ -8,7 +8,7 @@ Research App MVP 设计文档（重构版）
 
 2. 范围与非目标
    - 范围：基础 UI、定时 research、结构化落库、简易 eval、最小部署与运维指引。
-   - 非目标：登录/权限、React/SPA/WebSocket、Redis 或复杂队列、宏观/社媒/SEC 深度解析、复杂多模型比较。
+   - 非目标：登录/权限、React/SPA/WebSocket、Redis 或复杂队列、复杂多模型比较。
 
 3. 系统架构概览
    - FastAPI Web：/watchlist、/research 列表与详情、手动触发入口。
@@ -19,7 +19,7 @@ Research App MVP 设计文档（重构版）
 
 4. 核心模块说明
    - Web/UI（app.py，templates/*，static/style.css）：展示与表单处理；仅服务器渲染。
-   - agent/LLM（run_research.py，llm_client.py，tool/get_market_data.py，tool/get_news_data.py）：分层封装数据源与模型调用；串行处理全部 active tickers；LLM 层使用 Phidata Agent，工具通过依赖注入集中管理上下文与外部连接。
+   - agent/LLM（run_research.py，llm_client.py，tool/get_market_data.py，tool/get_news_data.py，tool/get_global_context.py）：分层封装数据源与模型调用；串行处理全部 active tickers；LLM 层使用 Phidata Agent，工具通过依赖注入集中管理上下文与外部连接。
    - Eval（eval_runs.py）：每日 16:10 ET 扫描当日未评估且成功的 `1d` run，写 realized_return、benchmark_return、outcome_label 等；`9:30 ET` 前的 run 使用同日 open-to-close，`9:30 ET` 后的 manual run 使用持久化的 run-time price 到 close；两种窗口都沿用同一 `rule_v1` label matrix，并在 `evaluation_params` 中记录 price window / entry source。
    - DB 访问（db.py，models.py）：连接管理与基础 CRUD；输入/输出 JSON 全量存储便于回放。
    - Config（config.py）：环境变量、路径（含 Postgres 数据目录）统一管理。
@@ -53,18 +53,20 @@ Research App MVP 设计文档（重构版）
    - Constraints: `time_horizon` 当前必须为 `1d`；confidence 0–1；arrays are string arrays。
 
 7. Research 输入 schema 与数据源抽象
-   - 输入字段：ticker, as_of, price_snapshot{last_price, return_1d, return_5d, return_since_market_open}, context{sector, earnings_in_days，可为 null}, news[title, summary] 3-5 条。
+   - 输入字段：ticker, as_of, price_snapshot{last_price, return_1d, return_5d, return_since_market_open}, context{sector, earnings_in_days，可为 null}, news[title, summary] 3-5 条, global_context{as_of, indicators{oil_price, gold_price, us_treasury_2y, us_treasury_10y, us_treasury_20y, credit_spread, vix}, official_updates[], trump_updates[], geopolitical_news[]}。
    - 目标：保证可回放同一 case；input_json 存于 research_runs。
    - `price_snapshot.last_price` 必须是 run 创建当下抓到的价格。对盘中 manual run，它同时作为 same-day quick eval 的 entry price，不能在收盘后再回推估算。
    - 数据源接口契约：
      - market_data.get_snapshot(ticker) -> {last_price, return_1d, return_5d, return_since_market_open?, sector?, earnings_in_days?}
      - news_data.get_recent(ticker, limit=5) -> [{title, summary}]
+     - global_context.get_snapshot(as_of, limit=5) -> {as_of, indicators{}, official_updates[], trump_updates[], geopolitical_news[]}
    - 模块可替换；调用层不依赖具体提供商，只依赖接口结果格式。
    - 最小实现建议：
      - collector/market_data.py：使用 yfinance 拉取最新价格与过去 1d/5d 收盘价计算 return；若处于美股常规交易时段，再补充相对当日开盘价的 `return_since_market_open`；可选 sector、earnings 距离从 yfinance 基本信息获取；对缺失字段返回 None。
      - collector/news_data.py：若有 NewsAPI key，优先调用；否则使用 yfinance.Ticker.news 或简单占位返回最近标题与摘要列表；限制 3–5 条；对无新闻返回空列表。
+     - collector/global_context.py：宏观指标优先通过 FRED 获取；`official_updates` schema 仍保留，但默认不注入 prompt，避免低相关度 White House 页面污染研究输入；Trump 更新只保留近期且直接相关、且具市场影响含义的官方条目；地缘政治新闻限制为 Reuters/AP 等一级来源，并要求近期且主题相关。
      - 错误处理：数据源失败时记录日志并在 output 中标记无法获取，但不中断其他 ticker；保持接口返回格式。
-   - 采集方式：按需拉取、直接落库。run_research 调用 market_data/news_data 获取实时快照后写入 research_runs.input_json；eval_runs 仅在需要回测时调用 market_data 获取价格，news 可选备注；不再做额外预取/缓存或独立采集进程。
+   - 采集方式：按需拉取、直接落库。scheduled batch 在每次 research job 开始时抓取一次 `global_context`，并复制到当批每个 ticker 的 `research_runs.input_json` 中以保证 replayability；single-ticker manual run 默认复用当日最近一次 `global_context` 快照，也可显式要求重新抓取。eval_runs 仅在需要回测时调用 market_data 获取价格；不再做额外预取/缓存或独立采集进程。
 
 8. Prompt 设计与版本管理与 Agent 框架
    - 单一版本 v1，强调谨慎、允许 abstain、基于输入、固定 `time_horizon=1d`、提供反方与 invalidators。
@@ -76,16 +78,16 @@ Research App MVP 设计文档（重构版）
    - 详细边界与取舍见 `plan/research_app/architecture_recommendation.md`。
 
 9. 运行流程
-   - research cron：工作日 `9:20 ET` 读取所有 active tickers -> 在 Python orchestration 中现场拉取 market snapshot + news + 必要 DB context -> 写入 `research_runs.input_json` 快照 -> 调用 Phidata 包装的单次 LLM -> 直接写 runs/outputs 入 Postgres。插入 run 时 status=queued，开始处理某 ticker 时置 running+started_at，成功后置 succeeded+finished_at，失败则置 failed 并写 error_message+finished_at（不中断其他 ticker）。
+   - research cron：工作日 `9:20 ET` 读取所有 active tickers -> 在 Python orchestration 中先抓取一次 batch 级 `global_context`，再对每个 ticker 现场拉取 market snapshot + ticker news + 必要 DB context -> 写入 `research_runs.input_json` 快照 -> 调用 Phidata 包装的单次 LLM -> 直接写 runs/outputs 入 Postgres。插入 run 时 status=queued，开始处理某 ticker 时置 running+started_at，成功后置 succeeded+finished_at，失败则置 failed 并写 error_message+finished_at（不中断其他 ticker）。
    - eval cron：工作日 `16:10 ET` 仅处理当日成功且 `time_horizon=1d` 的 run。`9:30 ET` 前的 run 使用同日 open-to-close；`9:30 ET` 后的 manual run 使用 `research_runs.input_json.price_snapshot.last_price` 到同日 close；benchmark 统一对比 `SPY` 同窗口收益；`evaluation_params` 记录 `price_window` 与 entry/exit 价格来源。
    - 采集复用：两条 cron 都调用同一 market_data/news_data 抽象，按需请求，无额外缓存/中间存储。MVP 中 LLM 不直接调用外部 tools。
-   - 手动触发：POST /admin/run-now 或等效脚本，仅限本机/内网，便于调试。manual run 也进入当日 eval 候选，但盘中 run 使用 run-time-price-to-close quick eval，避免 look-ahead bias。
+   - 手动触发：POST /admin/run-now 或等效脚本，仅限本机/内网，便于调试。manual run 也进入当日 eval 候选，但盘中 run 使用 run-time-price-to-close quick eval，避免 look-ahead bias。single-ticker manual script 默认复用当日最近一次 `global_context`，通过显式参数才重新抓取宏观/全球事件快照。
 
 10. UI 与路由
    - GET /watchlist：表格列 ticker、状态；输入框添加；行级删除或停用。
    - POST /watchlist/add；POST /watchlist/{id}/delete 或 /watchlist/delete。
    - GET /research：表格列 ticker、分析时间、decision、confidence、actionability、time_horizon、thesis_summary；顶部展示聚合 eval 结果。默认聚合只统计 formal same-day open-to-close eval，不把盘中 manual quick eval 混入主指标。
-   - GET /research/{run_id}：展示 input_json、output_json、eval outcome_label（可用 <pre>）；详情中展示当前 run 的 eval window 说明（formal open-to-close 或 manual run-time-price-to-close）；可附上该 ticker 的历史 eval 小结。
+   - GET /research/{run_id}：展示结构化的 research input/output 与 eval outcome_label；详情中展示当前 run 的 eval window 说明（formal open-to-close 或 manual run-time-price-to-close）、macro indicators、US official updates、Trump updates、geopolitical news；可附上该 ticker 的历史 eval 小结。
 
 11. 部署与运维要点
    - 单机部署，Postgres 数据目录固定在持久化磁盘（非 tmpfs）；树莓派需确认磁盘挂载。

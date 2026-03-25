@@ -4,6 +4,7 @@ from src.tools.base import BaseTool, ToolError
 from src.tools.registry import ToolRegistry
 from src.tools.market_data import MarketDataTool
 from src.tools.news_data import NewsDataTool
+from src.tools.global_context import GlobalContextTool
 from src.tools.insider_queries import (
     RecentTradesTool,
     TradesByTickerTool,
@@ -19,6 +20,7 @@ def build_research_tool_registry() -> ToolRegistry:
     registry = ToolRegistry()
     registry.register(MarketDataTool())
     registry.register(NewsDataTool())
+    registry.register(GlobalContextTool())
     registry.register(RecentTradesTool())
     registry.register(TradesByTickerTool())
     registry.register(TradesByInsiderTool())
@@ -35,6 +37,7 @@ __all__ = [
     "ToolRegistry",
     "MarketDataTool",
     "NewsDataTool",
+    "GlobalContextTool",
     "RecentTradesTool",
     "TradesByTickerTool",
     "TradesByInsiderTool",

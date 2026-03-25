@@ -278,6 +278,11 @@ def research_detail(run_id: str, request: Request):
         price_snapshot = input_data.get("price_snapshot") or {}
         research_context = input_data.get("context") or {}
         news_items = input_data.get("news") or []
+        global_context = input_data.get("global_context") or {}
+        global_indicators = global_context.get("indicators") or {}
+        official_updates = global_context.get("official_updates") or []
+        trump_updates = global_context.get("trump_updates") or []
+        geopolitical_news = global_context.get("geopolitical_news") or []
         normalized_news = []
         for item in news_items:
             if isinstance(item, dict):
@@ -289,6 +294,45 @@ def research_detail(run_id: str, request: Request):
                 )
             else:
                 normalized_news.append({"title": str(item), "summary": None})
+        normalized_indicators = []
+        for key, item in global_indicators.items():
+            if not isinstance(item, dict):
+                continue
+            normalized_indicators.append(
+                {
+                    "key": key,
+                    "label": item.get("label") or key,
+                    "source": item.get("source"),
+                    "unit": item.get("unit"),
+                    "value": item.get("value"),
+                    "observed_on": item.get("observed_on"),
+                }
+            )
+
+        def _normalize_global_events(items: list[Any]) -> list[dict[str, Any]]:
+            normalized: list[dict[str, Any]] = []
+            for item in items:
+                if isinstance(item, dict):
+                    normalized.append(
+                        {
+                            "source": item.get("source"),
+                            "title": item.get("title"),
+                            "summary": item.get("summary"),
+                            "published_at": item.get("published_at"),
+                            "url": item.get("url"),
+                        }
+                    )
+                else:
+                    normalized.append(
+                        {
+                            "source": None,
+                            "title": str(item),
+                            "summary": None,
+                            "published_at": None,
+                            "url": None,
+                        }
+                    )
+            return normalized
 
         # Ticker history: last 10 eval results for same ticker
         ticker_history = (
@@ -333,6 +377,11 @@ def research_detail(run_id: str, request: Request):
             "input_sector": research_context.get("sector"),
             "input_earnings_in_days": research_context.get("earnings_in_days"),
             "input_news": normalized_news,
+            "input_global_context_as_of": global_context.get("as_of"),
+            "input_global_indicators": normalized_indicators,
+            "input_official_updates": _normalize_global_events(official_updates),
+            "input_trump_updates": _normalize_global_events(trump_updates),
+            "input_geopolitical_news": _normalize_global_events(geopolitical_news),
             "decision": out.decision if out else None,
             "confidence": out.confidence if out else None,
             "time_horizon": out.time_horizon if out else None,

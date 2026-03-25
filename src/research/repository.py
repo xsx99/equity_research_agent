@@ -229,6 +229,31 @@ def get_same_day_eval_candidates(
     return eligible
 
 
+def get_latest_global_context_for_trade_date(
+    session: Session,
+    trade_date: date,
+) -> Optional[dict[str, Any]]:
+    """Return the latest stored global_context block for *trade_date*."""
+    rows = (
+        session.query(ResearchRun)
+        .order_by(ResearchRun.as_of.desc())
+        .all()
+    )
+    for run in rows:
+        run_as_of = run.as_of
+        if run_as_of.tzinfo is None:
+            run_as_of = run_as_of.replace(tzinfo=timezone.utc)
+        else:
+            run_as_of = run_as_of.astimezone(timezone.utc)
+        if run_as_of.date() != trade_date:
+            continue
+        input_json = run.input_json if isinstance(run.input_json, dict) else {}
+        global_context = input_json.get("global_context")
+        if isinstance(global_context, dict):
+            return global_context
+    return None
+
+
 def upsert_eval_result(
     session: Session,
     *,

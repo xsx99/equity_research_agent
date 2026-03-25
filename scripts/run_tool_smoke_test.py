@@ -4,6 +4,7 @@
 Use --only to target a specific group instead of running all checks:
   python scripts/run_tool_smoke_test.py --only market
   python scripts/run_tool_smoke_test.py --only news
+  python scripts/run_tool_smoke_test.py --only global
 
 Or run individual smoke modules directly (supports their own --only flag):
   python scripts/smoke/market.py --only alpaca_bars
@@ -23,6 +24,7 @@ from src.tools import build_research_tool_registry
 
 from scripts.smoke import SmokeCheckResult, _failed, _print_results
 from scripts.smoke.db import _build_db_smoke_inputs, _smoke_db_tools
+from scripts.smoke.global_context import _smoke_global_context
 from scripts.smoke.market import (
     _smoke_alpaca_bars,
     _smoke_finnhub_earnings,
@@ -36,7 +38,7 @@ from scripts.smoke.news import (
     _smoke_news_chain,
 )
 
-_ALL_GROUPS = ("market", "news", "db")
+_ALL_GROUPS = ("market", "news", "global", "db")
 
 
 def main() -> int:
@@ -84,6 +86,9 @@ def main() -> int:
         results.append(_smoke_marketaux_news(ticker, limit))
         results.append(_smoke_alpaca_news(ticker, limit))
         results.append(_smoke_news_chain(registry, ticker, limit))
+    if "global" in groups:
+        limit = max(1, min(args.news_limit, 5))
+        results.append(_smoke_global_context(registry, limit))
 
     if "db" in groups:
         try:

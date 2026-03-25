@@ -58,6 +58,42 @@ class ResearchNewsItem(BaseModel):
     published_at: Optional[str] = None  # ISO date string, e.g. "2026-03-21"
 
 
+class ResearchGlobalIndicator(BaseModel):
+    """A single normalized macro indicator value."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    label: str
+    source: str
+    unit: str
+    value: Optional[float] = None
+    observed_on: Optional[str] = None
+
+
+class ResearchGlobalEventItem(BaseModel):
+    """A single official/geopolitical event in the global context block."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source: str
+    title: str
+    summary: str = ""
+    published_at: Optional[str] = None
+    url: Optional[str] = None
+
+
+class ResearchGlobalContext(BaseModel):
+    """Global macro/news context shared across a research batch."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    as_of: Any = None
+    indicators: dict[str, ResearchGlobalIndicator] = Field(default_factory=dict)
+    official_updates: list[ResearchGlobalEventItem] = Field(default_factory=list, max_length=5)
+    trump_updates: list[ResearchGlobalEventItem] = Field(default_factory=list, max_length=5)
+    geopolitical_news: list[ResearchGlobalEventItem] = Field(default_factory=list, max_length=5)
+
+
 class ResearchInputPayload(BaseModel):
     """Full input payload validated before it is passed to the LLM."""
 
@@ -68,6 +104,7 @@ class ResearchInputPayload(BaseModel):
     price_snapshot: ResearchPriceSnapshot
     context: ResearchContext = Field(default_factory=ResearchContext)
     news: list[ResearchNewsItem] = Field(default_factory=list, max_length=5)
+    global_context: ResearchGlobalContext = Field(default_factory=ResearchGlobalContext)
 
 
 class StructuredResearchOutput(BaseModel):

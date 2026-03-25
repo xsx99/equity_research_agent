@@ -68,6 +68,52 @@ def _make_run(
                 "summary": "Channel checks pointed to steady upgrade activity.",
             },
         ],
+        "global_context": {
+            "as_of": _AS_OF.isoformat(),
+            "indicators": {
+                "vix": {
+                    "label": "CBOE Volatility Index",
+                    "source": "FRED:VIXCLS",
+                    "unit": "index",
+                    "value": 17.9,
+                    "observed_on": "2026-03-22",
+                },
+                "us_treasury_10y": {
+                    "label": "Market Yield on U.S. Treasury Securities at 10-Year Constant Maturity",
+                    "source": "FRED:DGS10",
+                    "unit": "pct",
+                    "value": 4.12,
+                    "observed_on": "2026-03-22",
+                },
+            },
+            "official_updates": [
+                {
+                    "source": "whitehouse.gov",
+                    "title": "Official White House statement",
+                    "summary": "The administration issued a policy update.",
+                    "published_at": _AS_OF.isoformat(),
+                    "url": "https://www.whitehouse.gov/example",
+                }
+            ],
+            "trump_updates": [
+                {
+                    "source": "whitehouse.gov",
+                    "title": "President Donald J. Trump delivers remarks",
+                    "summary": "The President delivered remarks.",
+                    "published_at": _AS_OF.isoformat(),
+                    "url": "https://www.whitehouse.gov/remarks/example",
+                }
+            ],
+            "geopolitical_news": [
+                {
+                    "source": "AP News",
+                    "title": "AP geopolitical update",
+                    "summary": "Regional tensions remained elevated.",
+                    "published_at": _AS_OF.isoformat(),
+                    "url": "https://apnews.com/article/example",
+                }
+            ],
+        },
     }
     run.error_message = None
     run.started_at = _AS_OF
@@ -295,6 +341,10 @@ class TestResearchDetail:
         assert "$187.42" in resp.text
         assert "Technology" in resp.text
         assert "Apple expands AI tooling" in resp.text
+        assert "Global Context" in resp.text
+        assert "CBOE Volatility Index" in resp.text
+        assert "Official White House statement" in resp.text
+        assert "AP geopolitical update" in resp.text
         assert "Input JSON" not in resp.text
         assert "Output JSON" not in resp.text
         assert 'data-local-time-format="datetime"' in resp.text

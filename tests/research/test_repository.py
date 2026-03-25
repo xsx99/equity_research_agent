@@ -303,6 +303,46 @@ class TestGetEligibleRuns:
         assert results == []
 
 
+class TestGetLatestGlobalContextForTradeDate:
+    def test_returns_latest_same_day_global_context(self):
+        older = _make_run(
+            as_of=datetime(2026, 3, 24, 14, 0, tzinfo=timezone.utc),
+            input_json={"global_context": {"as_of": "2026-03-24T14:00:00Z", "indicators": {"vix": {"value": 20.0}}}},
+        )
+        latest = _make_run(
+            as_of=datetime(2026, 3, 24, 15, 0, tzinfo=timezone.utc),
+            input_json={"global_context": {"as_of": "2026-03-24T15:00:00Z", "indicators": {"vix": {"value": 18.0}}}},
+        )
+        session = MagicMock()
+        session.query.return_value.order_by.return_value.all.return_value = [latest, older]
+
+        result = repository.get_latest_global_context_for_trade_date(
+            session,
+            trade_date=date(2026, 3, 24),
+        )
+
+        assert result == latest.input_json["global_context"]
+
+    def test_returns_none_when_no_same_day_global_context_exists(self):
+        old_run = _make_run(
+            as_of=datetime(2026, 3, 23, 15, 0, tzinfo=timezone.utc),
+            input_json={"global_context": {"indicators": {"vix": {"value": 18.0}}}},
+        )
+        empty_run = _make_run(
+            as_of=datetime(2026, 3, 24, 15, 0, tzinfo=timezone.utc),
+            input_json={"ticker": "AAPL"},
+        )
+        session = MagicMock()
+        session.query.return_value.order_by.return_value.all.return_value = [empty_run, old_run]
+
+        result = repository.get_latest_global_context_for_trade_date(
+            session,
+            trade_date=date(2026, 3, 24),
+        )
+
+        assert result is None
+
+
 class TestUpsertEvalResult:
     def _call(self, session, existing=None, run_id=None):
         run_id = run_id or uuid.uuid4()

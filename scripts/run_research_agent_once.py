@@ -35,6 +35,45 @@ def _build_sample_payload(ticker: str) -> dict:
                 "summary": "Samsung has doubled NAND price in Q2.",
             }
         ],
+        "global_context": {
+            "as_of": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+            "indicators": {
+                "vix": {
+                    "label": "CBOE Volatility Index",
+                    "source": "FRED:VIXCLS",
+                    "unit": "index",
+                    "value": 21.4,
+                    "observed_on": datetime.now(timezone.utc).date().isoformat(),
+                },
+                "us_treasury_10y": {
+                    "label": "US Treasury 10Y",
+                    "source": "FRED:DGS10",
+                    "unit": "pct",
+                    "value": 4.21,
+                    "observed_on": datetime.now(timezone.utc).date().isoformat(),
+                },
+            },
+            "official_updates": [
+            ],
+            "trump_updates": [
+                {
+                    "source": "whitehouse.gov",
+                    "title": "President Donald J. Trump delivers remarks on Iran and oil markets",
+                    "summary": "The President commented on Iran, sanctions, and oil market conditions.",
+                    "published_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+                    "url": "https://www.whitehouse.gov/remarks/example",
+                }
+            ],
+            "geopolitical_news": [
+                {
+                    "source": "AP News",
+                    "title": "Airstrikes hit Iran as diplomatic efforts accelerate",
+                    "summary": "Regional tensions remain elevated and oil markets stay volatile.",
+                    "published_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+                    "url": "https://apnews.com/article/example",
+                }
+            ],
+        },
     }
 
 

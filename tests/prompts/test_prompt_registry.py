@@ -247,6 +247,45 @@ def _valid_input() -> dict:
         },
         "context": {"sector": "Technology", "earnings_in_days": 9},
         "news": [{"title": "Sample headline", "summary": "A summary."}],
+        "global_context": {
+            "as_of": "2026-03-21T11:58:00Z",
+            "indicators": {
+                "vix": {
+                    "label": "CBOE Volatility Index",
+                    "source": "FRED:VIXCLS",
+                    "unit": "index",
+                    "value": 18.2,
+                    "observed_on": "2026-03-21",
+                }
+            },
+            "official_updates": [
+                {
+                    "source": "whitehouse.gov",
+                    "title": "Official White House statement",
+                    "summary": "A policy update from the White House.",
+                    "published_at": "2026-03-21T11:30:00Z",
+                    "url": "https://www.whitehouse.gov/example",
+                }
+            ],
+            "trump_updates": [
+                {
+                    "source": "whitehouse.gov",
+                    "title": "President Donald J. Trump delivers remarks",
+                    "summary": "Remarks from the President.",
+                    "published_at": "2026-03-21T10:45:00Z",
+                    "url": "https://www.whitehouse.gov/remarks/example",
+                }
+            ],
+            "geopolitical_news": [
+                {
+                    "source": "AP News",
+                    "title": "AP world update",
+                    "summary": "A geopolitical development.",
+                    "published_at": "2026-03-21T09:15:00Z",
+                    "url": "https://apnews.com/article/example",
+                }
+            ],
+        },
     }
 
 
@@ -256,6 +295,8 @@ def test_research_input_payload_valid():
     assert payload.price_snapshot.last_price == pytest.approx(210.0)
     assert payload.price_snapshot.return_since_market_open == pytest.approx(0.015)
     assert len(payload.news) == 1
+    assert payload.global_context.indicators["vix"].value == pytest.approx(18.2)
+    assert payload.global_context.official_updates[0].source == "whitehouse.gov"
 
 
 def test_research_input_payload_missing_ticker_raises():
@@ -277,6 +318,16 @@ def test_research_input_payload_defaults_empty_news():
     del data["news"]
     payload = ResearchInputPayload.model_validate(data)
     assert payload.news == []
+
+
+def test_research_input_payload_defaults_empty_global_context():
+    data = _valid_input()
+    del data["global_context"]
+    payload = ResearchInputPayload.model_validate(data)
+    assert payload.global_context.indicators == {}
+    assert payload.global_context.official_updates == []
+    assert payload.global_context.trump_updates == []
+    assert payload.global_context.geopolitical_news == []
 
 
 def test_structured_output_valid():

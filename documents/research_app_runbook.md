@@ -44,6 +44,7 @@ docker compose run --rm scheduler python scripts/run_research_agent_once.py
 - The script uses `GOOGLE_API_KEY` from the environment or repo-root `.env`.
 - Override the model with `--model-name` if needed.
 - This is only a direct agent smoke path. The full batch research pipeline and DB persistence flow are still separate future work.
+- The built-in sample payload now includes a representative `global_context` block that matches the current production default: macro indicators, filtered Trump updates, and filtered geopolitical news. `official_updates` remains in schema but is omitted by default until better relevance filters are in place.
 
 ## Manual Pipeline Run Order
 
@@ -58,6 +59,7 @@ python scripts/run_eval_once.py
 - If the research run happened before `9:30 ET`, eval uses `open_to_close`.
 - If the research run happened after `9:30 ET`, eval uses `run_time_price_to_close`.
 - For post-open manual runs, confirm `price_snapshot.last_price` is present in the stored input JSON before trusting the quick-eval result.
+- Single-ticker manual runs default to reusing the latest same-day `global_context` snapshot. Add `--refresh-global-context` when you explicitly want to fetch fresh macro/global inputs.
 
 ## Tool Smoke Test
 
@@ -70,6 +72,7 @@ python scripts/run_tool_smoke_test.py --ticker AAPL
 This runs the real tool registry against live dependencies:
 - `get_market_snapshot` against Alpaca market data
 - `get_recent_news` against the configured news providers
+- `get_global_context` against the macro/global-context providers
 - `marketaux_recent_news` as a dedicated direct Marketaux provider check when `MARKETAUX_API_KEY` is set
 - all database-backed insider query tools against the live `insider_trades` table
 
@@ -87,5 +90,6 @@ docker compose exec scheduler python scripts/run_tool_smoke_test.py --ticker AAP
 ### Failure Semantics
 - Missing Alpaca credentials or unreachable market data will fail `get_market_snapshot`.
 - Missing news provider credentials or zero returned headlines will fail `get_recent_news`.
+- Missing FRED access or unreachable upstream pages can degrade `get_global_context`; the smoke check will fail if macro indicators or filtered geopolitical news come back empty.
 - Missing `MARKETAUX_API_KEY` will skip `marketaux_recent_news`; a configured but failing/empty Marketaux response will fail it.
 - Unreachable Postgres or an empty `insider_trades` table will fail the DB-backed tool checks unless `--skip-db` is set.
