@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from typing import Optional
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from zoneinfo import ZoneInfo
 
 from src.collectors.sec_edgar.collector import SECEdgarCollector
 from src.core.config import (
@@ -14,6 +14,7 @@ from src.core.config import (
     SEC_EDGAR_TARGET_DAY_OFFSET,
 )
 from src.core.logging import get_logger
+from src.core.timezones import resolve_timezone
 from src.scheduler.base import BaseJob, JobConfig
 
 logger = get_logger(__name__)
@@ -63,9 +64,6 @@ class SECEdgarJob(BaseJob):
             logger.error("sec_edgar_job_failed", error=str(e), exc_info=True)
 
     def _get_target_date(self, now: Optional[datetime] = None):
-        try:
-            tz = ZoneInfo(SCHEDULER_TIMEZONE)
-        except ZoneInfoNotFoundError:
-            tz = ZoneInfo("UTC")
+        tz = resolve_timezone(SCHEDULER_TIMEZONE, fallback="UTC")
         now = now or datetime.now(tz)
         return (now + timedelta(days=SEC_EDGAR_TARGET_DAY_OFFSET)).date()

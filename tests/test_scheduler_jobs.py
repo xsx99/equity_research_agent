@@ -4,7 +4,9 @@ Verifies that job instances have the expected job_id, trigger, trigger_kwargs,
 and run_on_startup values without touching the database or any external API.
 """
 import pytest
+from zoneinfo import ZoneInfoNotFoundError
 
+from src.core.timezones import resolve_timezone
 from src.scheduler.jobs.eval_job import EvalJob
 from src.scheduler.jobs.research_job import ResearchJob
 from src.scheduler.jobs.sec_edgar_job import SECEdgarJob
@@ -50,3 +52,21 @@ class TestAllJobIdsDistinct:
         ]
         ids = [j.config.job_id for j in jobs]
         assert len(ids) == len(set(ids)), f"Duplicate job IDs found: {ids}"
+
+
+class TestSchedulerTimezoneResolution:
+    def test_resolves_us_eastern_alias_when_platform_lacks_legacy_name(self, monkeypatch):
+        def _fake_zoneinfo(name: str):
+            if name == "US/Eastern":
+                raise ZoneInfoNotFoundError(name)
+            if name == "America/New_York":
+                return object()
+            if name == "UTC":
+                raise AssertionError("should not fall back to UTC when alias exists")
+            raise AssertionError(f"unexpected timezone lookup: {name}")
+
+        monkeypatch.setattr("src.core.timezones.ZoneInfo", _fake_zoneinfo)
+
+        resolved = resolve_timezone("US/Eastern", fallback="UTC")
+
+        assert resolved is not None

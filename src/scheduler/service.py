@@ -1,12 +1,13 @@
 """Scheduler service — registers and starts all background jobs."""
 from __future__ import annotations
 
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 
 from src.core.config import SCHEDULER_TIMEZONE
 from src.core.logging import get_logger
+from src.core.timezones import resolve_timezone
 from src.scheduler.base import BaseJob
 
 logger = get_logger(__name__)
@@ -57,10 +58,9 @@ class SchedulerService:
 
     @staticmethod
     def _resolve_timezone() -> ZoneInfo:
-        try:
-            return ZoneInfo(SCHEDULER_TIMEZONE)
-        except ZoneInfoNotFoundError:
+        resolved = resolve_timezone(SCHEDULER_TIMEZONE, fallback="UTC")
+        if str(resolved) == "UTC" and SCHEDULER_TIMEZONE != "UTC":
             logger.warning(
                 "invalid_timezone", timezone=SCHEDULER_TIMEZONE, fallback="UTC"
             )
-            return ZoneInfo("UTC")
+        return resolved

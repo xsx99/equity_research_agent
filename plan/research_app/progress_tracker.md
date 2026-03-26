@@ -1,5 +1,9 @@
 # Research App Progress Tracker
 
+## 2026-03-26
+
+- Fixed the scheduler/eval timezone bug that was causing pre-open research to fire at `05:20 ET` and eval to fire at `12:10 ET` inside the slim Docker image: the app now defaults `SCHEDULER_TIMEZONE` to `America/New_York`, retries the legacy `US/Eastern` alias through a shared timezone resolver, and normalizes same-day trade-date lookups in both eval candidate selection and reusable `global_context` reuse to market-local dates instead of UTC calendar dates; added regression coverage for both the scheduler alias fallback and the market-date normalization edge case around late-evening ET runs.
+
 ## 2026-03-24
 
 - Added replayable `technical_signals` to the research input using existing Alpaca daily bars only: market snapshots now include `rsi_14`, `rsi_3`, `atr_14`, `yesterday_range`, and `atr_multiple`, the pipeline persists them under `input_json.technical_signals`, the detail UI renders them as a dedicated section, the prompt now explicitly tells the model to watch extreme short-term RSI / ATR anomalies, and the live market smoke check now verifies the technical block.

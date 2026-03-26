@@ -25,7 +25,7 @@ SEC_RATE_LIMIT = 10  # requests per second (SEC allows 10)
 # Scheduler settings
 SCHEDULER_TIMEZONE = os.getenv(
     "SCHEDULER_TIMEZONE",
-    "US/Eastern",
+    "America/New_York",
 )
 SEC_EDGAR_SCHEDULE_HOUR = int(
     os.getenv("SEC_EDGAR_SCHEDULE_HOUR", "2")

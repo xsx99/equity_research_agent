@@ -4,7 +4,7 @@ from __future__ import annotations
 import time
 from datetime import date, datetime
 from typing import Optional
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -20,6 +20,7 @@ from src.core.config import (
 )
 from src.db.connection import get_session
 from src.core.logging import get_logger
+from src.core.timezones import resolve_timezone
 
 logger = get_logger(__name__)
 
@@ -48,11 +49,10 @@ class SECEdgarCollector(BaseCollector):
         self._last_request_time = time.time()
 
     def _resolve_timezone(self, tz_name: str) -> ZoneInfo:
-        try:
-            return ZoneInfo(tz_name)
-        except ZoneInfoNotFoundError:
+        resolved = resolve_timezone(tz_name, fallback="UTC")
+        if str(resolved) == "UTC" and tz_name != "UTC":
             logger.warning(f"Invalid timezone '{tz_name}', defaulting to UTC")
-            return ZoneInfo("UTC")
+        return resolved
 
     def collect(self, target_date: Optional[date] = None) -> CollectionResult:
         """Collect Form 4 filings for *target_date* and store in the database."""

@@ -24,9 +24,11 @@ from sqlalchemy.orm import Session
 
 from src.agents.research import ResearchAgent
 from src.core.logging import get_logger
+from src.core.timezones import as_trade_date
 from src.db.models.research import ResearchRun
 from src.research import repository
 from src.tools import ToolContext, ToolRegistry, build_research_tool_registry
+from src.tools.market_data import MARKET_TIMEZONE
 
 logger = get_logger(__name__)
 
@@ -366,7 +368,7 @@ class ResearchPipeline:
         """Return the latest same-day global context block if one already exists."""
         return repository.get_latest_global_context_for_trade_date(
             self.session,
-            trade_date=as_of.date(),
+            trade_date=as_trade_date(as_of, MARKET_TIMEZONE),
         )
 
     @staticmethod

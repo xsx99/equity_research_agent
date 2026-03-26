@@ -11,11 +11,13 @@ from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
+from src.core.timezones import as_trade_date
 from src.db.models.evaluation import EvalResult
 from src.db.models.insider_trades import InsiderTrade
 from src.db.models.research import ResearchOutput, ResearchRun, ResearchTimeHorizon, RunStatus
 from src.db.models.watch_list import Watchlist
 from src.core.logging import get_logger
+from src.tools.market_data import MARKET_TIMEZONE
 
 logger = get_logger(__name__)
 
@@ -220,12 +222,7 @@ def get_same_day_eval_candidates(
     for run, output in rows:
         if output.time_horizon != ResearchTimeHorizon.ONE_DAY.value:
             continue
-        run_as_of = run.as_of
-        if run_as_of.tzinfo is None:
-            run_as_of = run_as_of.replace(tzinfo=timezone.utc)
-        else:
-            run_as_of = run_as_of.astimezone(timezone.utc)
-        if run_as_of.date() == trade_date:
+        if as_trade_date(run.as_of, MARKET_TIMEZONE) == trade_date:
             eligible.append((run, output))
     return eligible
 
@@ -241,12 +238,7 @@ def get_latest_global_context_for_trade_date(
         .all()
     )
     for run in rows:
-        run_as_of = run.as_of
-        if run_as_of.tzinfo is None:
-            run_as_of = run_as_of.replace(tzinfo=timezone.utc)
-        else:
-            run_as_of = run_as_of.astimezone(timezone.utc)
-        if run_as_of.date() != trade_date:
+        if as_trade_date(run.as_of, MARKET_TIMEZONE) != trade_date:
             continue
         input_json = run.input_json if isinstance(run.input_json, dict) else {}
         global_context = input_json.get("global_context")
