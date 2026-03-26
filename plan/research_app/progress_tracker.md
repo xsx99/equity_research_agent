@@ -2,6 +2,7 @@
 
 ## 2026-03-26
 
+- Fixed stale/misleading `global_context` VIX handling on the research page: the FRED CSV fallback now preserves `observed_on` from the `observation_date` column, `VIX` now falls back to a live Yahoo `^VIX` daily bar when same-day FRED data has not landed yet, and the `/research` Global Context tiles now show each indicator's observation date so lagging macro series are visibly distinguished from the snapshot timestamp; added regression coverage for both the CSV-date parsing and the live-VIX fallback path.
 - Fixed the scheduler/eval timezone bug that was causing pre-open research to fire at `05:20 ET` and eval to fire at `12:10 ET` inside the slim Docker image: the app now defaults `SCHEDULER_TIMEZONE` to `America/New_York`, retries the legacy `US/Eastern` alias through a shared timezone resolver, and normalizes same-day trade-date lookups in both eval candidate selection and reusable `global_context` reuse to market-local dates instead of UTC calendar dates; added regression coverage for both the scheduler alias fallback and the market-date normalization edge case around late-evening ET runs.
 
 ## 2026-03-24

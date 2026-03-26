@@ -113,6 +113,9 @@
       <span class="metric-value" style="font-size:15px;">
         {% if item.value is not none %}{{ item.value }}{% if item.unit %} {{ item.unit }}{% endif %}{% else %}—{% endif %}
       </span>
+      {% if item.observed_on %}
+      <span class="detail-muted" style="font-size:11px;">obs {{ item.observed_on }}</span>
+      {% endif %}
     </div>
     {% endfor %}
   </div>
