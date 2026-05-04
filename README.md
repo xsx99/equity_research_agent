@@ -1,8 +1,7 @@
-# Insider Trading Tracker
+# Equity Research Agent
 
-This repository is a single-user research system built around one idea: combine raw insider-trading data with market context, generate a structured thesis, and score that thesis quickly enough to learn from it. The current implementation includes a scheduled SEC Form 4 collector, a research pipeline that builds replayable model inputs, a same-day evaluation loop, a small FastAPI UI, and Raspberry Pi-oriented Docker deployment.
+This repository is an LLM-based research system built around one idea: combine raw equity signals with market context, generate a structured thesis, and score that thesis quickly enough to learn from it. The current implementation includes a scheduled SEC Form 4 collector, a research pipeline that builds replayable model inputs, a same-day evaluation loop, a small FastAPI UI, and Raspberry Pi-oriented Docker deployment.
 
-For an engineering manager reviewing the repo, the main signal is not the specific domain. The useful signal is the engineering shape of the system: clear module boundaries, deterministic orchestration around LLM usage, operational constraints carried into code and docs, and a bias toward replayability and incremental delivery.
 
 ## What This Repo Demonstrates
 
@@ -20,11 +19,11 @@ At a high level, the system has four moving parts:
 1. SEC ingestion
    Pulls SEC EDGAR Form 4 filings, parses insider transactions, and upserts them into Postgres.
 2. Research generation
-   Builds a research input per ticker from market data, filtered news, insider activity, and global context, then calls the research agent once per ticker.
+   Builds a research input per ticker from technical signals, filtered news, insider activity, and global context, then calls the research agent once per ticker.
 3. Same-day evaluation
    Scores completed runs against actual price movement using explicit same-day evaluation rules.
 4. Operator-facing UI and scheduling
-   Exposes watchlist/research pages in FastAPI and runs scheduled SEC, research, and eval jobs with APScheduler.
+   Exposes watchlist/research pages in FastAPI and runs scheduled SEC, research, and eval jobs with scheduler.
 
 Simplified flow:
 
@@ -33,7 +32,7 @@ SEC EDGAR -> insider_trades
                     |
 watchlist -> ResearchPipeline -> ResearchAgent -> research_runs + research_outputs
                     |                                        |
-      market/news/global context tools                       v
+      technical/news/global context tools                       v
                                                      EvalPipeline -> eval_results
                                                                      |
                                                                   FastAPI UI
