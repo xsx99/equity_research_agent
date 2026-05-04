@@ -1,5 +1,9 @@
 # Research App Progress Tracker
 
+## 2026-05-04
+
+- Added a top-level `README.md` aimed at an engineering-manager audience, summarizing the system scope, architecture, key technical decisions, runtime workflows, operational constraints, and verification paths so the repo communicates engineering judgment more clearly during review.
+
 ## 2026-03-26
 
 - Fixed stale/misleading `global_context` VIX handling on the research page: the FRED CSV fallback now preserves `observed_on` from the `observation_date` column, `VIX` now falls back to a live Yahoo `^VIX` daily bar when same-day FRED data has not landed yet, and the `/research` Global Context tiles now show each indicator's observation date so lagging macro series are visibly distinguished from the snapshot timestamp; added regression coverage for both the CSV-date parsing and the live-VIX fallback path.
