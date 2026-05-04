@@ -59,11 +59,7 @@ That separation avoids look-ahead bias and makes the scoring logic inspectable r
 
 ### 4. Provider abstraction at the tool layer
 
-Market data, news, global context, and insider-query logic live behind tool/provider boundaries. That keeps the research pipeline focused on orchestration instead of vendor-specific code.
-
-### 5. Deployment constraints are treated as first-class
-
-The project docs and compose files explicitly require Postgres to live on a real disk path such as `/data/postgres_data`, not tmpfs or ephemeral container storage. This is a small detail, but it reflects the broader design bias of the repo: infrastructure assumptions should be made explicit and verifiable.
+Technical signals, news, global context, and insider-query logic live behind tool/provider boundaries. That keeps the research pipeline focused on orchestration instead of vendor-specific code.
 
 ## How The System Works
 
@@ -102,95 +98,6 @@ The project docs and compose files explicitly require Postgres to live on a real
 - [`plan/`](plan) design docs, architecture notes, and progress tracking
 - [`tests/`](tests) unit and integration-style test coverage
 
-## Running It Locally
-
-The shortest path to a meaningful local setup is:
-
-1. Create and activate the virtual environment.
-
-```bash
-source ~/.venv/bin/activate
-pip install -r requirements.txt
-```
-
-2. Provide environment variables in repo-root `.env`.
-
-Required in practice:
-
-- `DATABASE_URL` or the `POSTGRES_*` variables
-- `GOOGLE_API_KEY`
-- `ALPACA_API_KEY`
-- `ALPACA_SECRET_KEY`
-
-Optional but useful:
-
-- `FINNHUB_API_KEY`
-- `MARKETAUX_API_KEY`
-
-3. Point `DATABASE_URL` at a local Postgres instance on a persistent disk-backed path.
-
-The checked-in `docker-compose.db.yml` is deployment-oriented and expects the Raspberry Pi secret file at `/home/pi/secrets/trading_agent.env`. For local development, either use your own Postgres instance or adapt that compose file to your machine before starting it.
-
-Wherever Postgres runs, keep the data directory on real disk-backed storage. In the deployment compose file that path is `/data/postgres_data`, and the same constraint applies locally.
-
-4. Run migrations.
-
-```bash
-source ~/.venv/bin/activate
-alembic upgrade head
-```
-
-5. Start the web app.
-
-```bash
-source ~/.venv/bin/activate
-uvicorn src.app:app --reload
-```
-
-6. Start the scheduler in a separate shell if you want background jobs.
-
-```bash
-source ~/.venv/bin/activate
-python scripts/run_scheduler_service.py
-```
-
-## Useful Commands
-
-```bash
-# Run the test suite
-source ~/.venv/bin/activate
-pytest -q
-
-# Direct agent smoke test (no DB writes)
-source ~/.venv/bin/activate
-python scripts/run_research_agent_once.py
-
-# External tool smoke test
-source ~/.venv/bin/activate
-python scripts/run_tool_smoke_test.py --ticker AAPL --skip-db
-
-# Run research for one ticker
-source ~/.venv/bin/activate
-python scripts/run_research_once.py --ticker AAPL
-
-# Run evaluation once
-source ~/.venv/bin/activate
-python scripts/run_eval_once.py
-```
-
-For deployment details and operator procedures, see:
-
-- [`documents/research_app_deploy.md`](documents/research_app_deploy.md)
-- [`documents/research_app_runbook.md`](documents/research_app_runbook.md)
-
-To verify the database is not writing to ephemeral storage:
-
-```sql
-SHOW data_directory;
-```
-
-Confirm the returned path is a persistent disk path rather than `/tmp`, `/run`, `/dev/shm`, or another tmpfs-backed location.
-
 ## Current Status
 
 Implemented today:
@@ -210,7 +117,3 @@ Still intentionally incomplete:
 - deeper post-run critique / learning loops
 - social/alternative data ingestion
 - more sophisticated evaluation beyond the current MVP rule set
-
-## Why This README Is Written This Way
-
-This README is intentionally opinionated. It is not optimized as a generic quick-start. It is optimized to make the repo legible to someone evaluating engineering judgment: what the system does, how responsibilities are separated, where tradeoffs were made, and how much of the work is production-shaped versus exploratory.
