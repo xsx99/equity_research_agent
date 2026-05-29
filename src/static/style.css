@@ -27,7 +27,8 @@ nav a:hover, nav a.active { color: #fff; }
 nav .brand { color: #fff; font-weight: 600; font-size: 15px; margin-right: auto; }
 
 .container {
-  max-width: 1100px;
+  max-width: 1600px;
+  width: 95%;
   margin: 0 auto;
   padding: 1.5rem;
 }
@@ -280,7 +281,7 @@ pre {
 
 /* Per-ticker scrollable table wrapper — shows ~3 rows before scrolling */
 .ticker-scroll {
-  max-height: 160px;
+  max-height: 400px;
   overflow-y: auto;
   border: 1px solid #e0e0e0;
   border-radius: 6px;
@@ -298,16 +299,12 @@ pre {
 
 /* Thesis column: td stays normal; inner div caps height to ~3 lines */
 .thesis-cell {
-  max-width: 480px;
+  min-width: 300px;
 }
 .thesis-cell .thesis-text {
   white-space: normal;
   line-height: 1.45;
-  max-height: calc(1.45em * 3);
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
+  
 }
 a { color: #1a1a2e; }
 a:hover { text-decoration: underline; }
@@ -338,3 +335,21 @@ a:hover { text-decoration: underline; }
 .tab-btn.active { color: #1a1a2e; border-bottom-color: #1a1a2e; }
 .tab-panel { display: none; }
 .tab-panel.active { display: block; }
+
+/* Sections */
+.section-card {
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 1.5rem;
+  margin-bottom: 2rem;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+}
+.section-card > h2:first-child {
+  margin-top: 0;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid #eee;
+  margin-bottom: 1.5rem;
+  font-size: 18px;
+  color: #1a1a2e;
+}
