@@ -58,6 +58,7 @@ h2 { font-size: 16px; font-weight: 600; margin: 1.5rem 0 0.75rem; }
   border-radius: 6px;
   padding: 0.5rem 0.75rem;
   min-width: 80px;
+  flex: 1;
 }
 .stat-box .label { font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 0.05em; }
 .stat-box .value { font-size: 22px; font-weight: 700; margin-top: 2px; }
