@@ -66,8 +66,55 @@ jobs:
       - uses: actions/checkout@v4
       - name: Deploy locally
         run: |
+          set -euo pipefail
           ENV_FILE=/home/pi/secrets/trading_agent.env
-          sudo docker compose --env-file "$ENV_FILE" -f docker-compose.db.yml up -d
+          POSTGRES_CONTAINER=postgres_db
+          POSTGRES_NETWORK=postgres_network
+          POSTGRES_DATA_HOST_PATH=/data/postgres_data
+          POSTGRES_DATA_CONTAINER_PATH=/var/lib/postgresql/data
+
+          sudo docker network inspect "$POSTGRES_NETWORK" >/dev/null 2>&1 || sudo docker network create "$POSTGRES_NETWORK"
+
+          if sudo docker container inspect "$POSTGRES_CONTAINER" >/dev/null 2>&1; then
+            echo "Reusing existing $POSTGRES_CONTAINER container."
+            if [ "$(sudo docker inspect -f '{{.State.Running}}' "$POSTGRES_CONTAINER")" != "true" ]; then
+              sudo docker start "$POSTGRES_CONTAINER"
+            fi
+          else
+            sudo docker compose --env-file "$ENV_FILE" -f docker-compose.db.yml up -d
+          fi
+
+          if ! sudo docker inspect -f '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' "$POSTGRES_CONTAINER" | grep -qx "$POSTGRES_NETWORK"; then
+            sudo docker network connect "$POSTGRES_NETWORK" "$POSTGRES_CONTAINER"
+          fi
+
+          echo "Waiting for PostgreSQL to be ready..."
+          for _ in {1..30}; do
+            if sudo docker exec "$POSTGRES_CONTAINER" pg_isready -U postgres -d mono_db >/dev/null 2>&1; then
+              break
+            fi
+            sleep 2
+          done
+          if ! sudo docker exec "$POSTGRES_CONTAINER" pg_isready -U postgres -d mono_db >/dev/null 2>&1; then
+            echo "PostgreSQL failed to become ready in time"
+            sudo docker logs "$POSTGRES_CONTAINER" || true
+            exit 1
+          fi
+
+          DATA_DIR="$(sudo docker exec "$POSTGRES_CONTAINER" psql -U postgres -d mono_db -Atc "SHOW data_directory;")"
+          if [ "$DATA_DIR" != "$POSTGRES_DATA_CONTAINER_PATH" ]; then
+            echo "Unexpected PostgreSQL data_directory: $DATA_DIR"
+            echo "Expected: $POSTGRES_DATA_CONTAINER_PATH"
+            exit 1
+          fi
+
+          HOST_MOUNT="$(sudo docker inspect -f '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql/data"}}{{.Source}}{{end}}{{end}}' "$POSTGRES_CONTAINER")"
+          if [ "$HOST_MOUNT" != "$POSTGRES_DATA_HOST_PATH" ]; then
+            echo "Unexpected PostgreSQL host data mount: ${HOST_MOUNT:-<none>}"
+            echo "Expected: $POSTGRES_DATA_HOST_PATH"
+            exit 1
+          fi
+
           sudo docker compose --env-file "$ENV_FILE" build --no-cache scheduler web
           sudo docker compose --env-file "$ENV_FILE" up -d --force-recreate scheduler web nginx
           echo "Deployment complete on local machine."

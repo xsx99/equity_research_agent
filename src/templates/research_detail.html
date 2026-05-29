@@ -294,6 +294,47 @@
     <p class="detail-muted">No insider activity captured for this run.</p>
     {% endif %}
 
+    {% if detail.input_global_context_as_of or detail.input_global_indicators or detail.input_official_updates or detail.input_trump_updates or detail.input_geopolitical_news %}
+    <h3 class="section-label">Global Context</h3>
+    {% if detail.input_global_context_as_of %}
+    <p class="detail-muted">
+      as of <time datetime="{{ detail.input_global_context_as_of | iso_datetime }}" data-local-time-format="datetime">{{ detail.input_global_context_as_of | local_time('datetime') }}</time>
+    </p>
+    {% endif %}
+
+    {% if detail.input_global_indicators %}
+    <div class="input-metric-grid">
+      {% for item in detail.input_global_indicators %}
+      <div class="metric-tile">
+        <span class="metric-label">{{ item.label }}</span>
+        <span class="metric-value">
+          {% if item.value is not none %}{{ item.value }}{% else %}—{% endif %}
+          {% if item.unit %}<span class="detail-muted">{{ item.unit }}</span>{% endif %}
+        </span>
+        {% if item.observed_on %}
+        <span class="detail-muted">Observed {{ item.observed_on }}</span>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if detail.input_official_updates or detail.input_trump_updates or detail.input_geopolitical_news %}
+    <div class="news-list" style="margin-top:0.75rem;">
+      {% for item in detail.input_official_updates + detail.input_trump_updates + detail.input_geopolitical_news %}
+      <article class="news-item">
+        <h4>{{ item.title or 'Untitled update' }}</h4>
+        <p class="detail-muted">
+          {% if item.source %}{{ item.source }}{% else %}Unknown source{% endif %}
+          {% if item.published_at %} · {{ item.published_at }}{% endif %}
+        </p>
+        <p>{{ item.summary or 'No summary captured.' }}</p>
+      </article>
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% endif %}
+
     {% else %}
     <p class="detail-muted">No input data available.</p>
     {% endif %}

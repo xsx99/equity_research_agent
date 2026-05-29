@@ -22,18 +22,36 @@ jobs:
 
       - name: Start PostgreSQL
         run: |
+          set -euo pipefail
           ENV_FILE=/home/pi/secrets/trading_agent.env
-          sudo docker compose --env-file "$ENV_FILE" -f docker-compose.db.yml up -d
+          POSTGRES_CONTAINER=postgres_db
+          POSTGRES_NETWORK=postgres_network
+
+          sudo docker network inspect "$POSTGRES_NETWORK" >/dev/null 2>&1 || sudo docker network create "$POSTGRES_NETWORK"
+
+          if sudo docker container inspect "$POSTGRES_CONTAINER" >/dev/null 2>&1; then
+            echo "Reusing existing $POSTGRES_CONTAINER container."
+            if [ "$(sudo docker inspect -f '{{.State.Running}}' "$POSTGRES_CONTAINER")" != "true" ]; then
+              sudo docker start "$POSTGRES_CONTAINER"
+            fi
+          else
+            sudo docker compose --env-file "$ENV_FILE" -f docker-compose.db.yml up -d
+          fi
+
+          if ! sudo docker inspect -f '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' "$POSTGRES_CONTAINER" | grep -qx "$POSTGRES_NETWORK"; then
+            sudo docker network connect "$POSTGRES_NETWORK" "$POSTGRES_CONTAINER"
+          fi
+
           echo "Waiting for PostgreSQL to be ready..."
           for _ in {1..30}; do
-            if sudo docker exec postgres_db pg_isready -U postgres -d mono_db >/dev/null 2>&1; then
+            if sudo docker exec "$POSTGRES_CONTAINER" pg_isready -U postgres -d mono_db >/dev/null 2>&1; then
               echo "PostgreSQL is ready!"
               exit 0
             fi
             sleep 2
           done
           echo "PostgreSQL failed to become ready in time"
-          sudo docker logs postgres_db
+          sudo docker logs "$POSTGRES_CONTAINER"
           exit 1
           
       - name: Run database migrations

@@ -1,5 +1,10 @@
 # Research App Progress Tracker
 
+## 2026-05-29
+
+- Fixed the self-hosted GitHub Actions deploy path so it reuses an existing persistent `postgres_db` container instead of attempting to recreate it during app deploys, treats `postgres_network` as an external Docker network consistently across compose files, verifies Postgres readiness plus persistent disk backing before restarting app services, and documents the conflict diagnosis commands.
+- Refreshed the app route tests for the current `src.web` app factory/router split and restored global context rendering on the research detail page so the existing route suite reflects the intended UI behavior.
+
 ## 2026-05-04
 
 - Added a top-level `README.md` aimed at an engineering-manager audience, summarizing the system scope, architecture, key technical decisions, runtime workflows, operational constraints, and verification paths so the repo communicates engineering judgment more clearly during review.

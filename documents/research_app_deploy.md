@@ -47,7 +47,7 @@ sudo mkdir -p /data/postgres_data /data/mono_db_logs
 sudo chown pi:pi /data/mono_db_logs
 ```
 
-3. Ensure the `postgres_network` Docker network exists:
+3. Ensure the external `postgres_network` Docker network exists:
 
 ```bash
 docker network inspect postgres_network >/dev/null 2>&1 || docker network create postgres_network
@@ -62,7 +62,7 @@ docker compose -f docker-compose.db.yml up -d
 5. Build and start the app stack:
 
 ```bash
-cd /path/to/insider_trading_tracker
+cd /path/to/equity_research_agent
 docker compose up -d --build
 ```
 
@@ -137,18 +137,35 @@ For same-day manual iteration, run research first, then eval after the close. If
 ## Redeploying After a Code Change
 
 ```bash
-cd /path/to/insider_trading_tracker
+cd /path/to/equity_research_agent
 git pull
 docker compose up -d --build
 ```
 
 The `nginx_certs` volume is preserved across rebuilds, so the TLS certificate is not regenerated.
 
+The GitHub Actions deploy job treats Postgres as a persistent external dependency:
+
+- It creates `postgres_network` if missing.
+- It reuses an existing `postgres_db` container instead of trying to recreate it.
+- It verifies Postgres is ready with `pg_isready`.
+- It verifies `SHOW data_directory;` returns `/var/lib/postgresql/data`.
+- It verifies that `/var/lib/postgresql/data` is backed by the host path `/data/postgres_data`.
+
+If deploy fails with a container-name conflict, do not remove the container until you confirm where the data lives:
+
+```bash
+docker inspect -f '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql/data"}}{{.Source}}{{end}}{{end}}' postgres_db
+docker exec postgres_db psql -U postgres -d mono_db -c "SHOW data_directory;"
+```
+
+Expected host mount: `/data/postgres_data`.
+
 ## Rotating the TLS Certificate
 
 The self-signed cert is valid for 10 years. To force regeneration:
 
 ```bash
-docker volume rm insider_trading_tracker_nginx_certs
+docker volume rm equity_research_agent_nginx_certs
 docker compose up -d nginx
 ```
