@@ -6,22 +6,28 @@
 - Execution policy: implement one PR slice at a time, stop after verification, wait for user review/merge before continuing.
 - Updated the design and implementation plan to include strategy evolution: the system can summarize repeated learning into new strategy proposals, add them to the strategy catalog as candidate/shadow strategies, and promote them through gated lifecycle states.
 - Updated the design and implementation plan to include hourly intraday news scans and risk-gated immediate rebalance actions for critical/high positive or negative news.
+- Updated the design and implementation plan with 500+ eval learnings: V2 is explicitly a relative-strength catalyst bot, bullish catalyst signals are higher-trust than bearish macro narratives, macro risk is a sizing/risk-budget input rather than a single-name short trigger, and confidence must be calibrated by historical pattern quality.
+- Added trade identity requirements for core holdings, catalyst common stock, theme sell-put, valuation-repair sell-put, catalyst-watch, and ordinary watch.
+- Added paper/simulation-only options strategy layer requirements for `sell_put`, `close_put`, `roll_put`, `avoid_earnings_put`, and `put_assignment_plan`.
+- Added worst-case assigned-portfolio risk requirements so paper short puts are evaluated as if simultaneous assignment can occur.
 
 ## PR Slice Status
 
 | Slice | Scope | Status | Notes |
 | --- | --- | --- | --- |
-| PR 1 | Trading foundation schema + strategy catalog | Pending | First implementation slice after user confirmation. |
-| PR 2 | Universe scan + signal snapshots | Pending | Depends on PR 1 schema. |
-| PR 3 | Strategy matching + candidate scoring | Pending | Depends on PR 1 catalog and PR 2 signals. |
-| PR 4 | Position sizing + portfolio risk manager | Pending | Depends on candidates and risk tables. |
-| PR 5 | Trading decisions + paper broker + portfolio state | Pending | Depends on risk gate. |
-| PR 6 | Intraday news alerts + rebalance | Pending | Hourly news scan during market hours; critical/high alerts can trigger risk-gated hold/reduce/exit/add decisions. |
-| PR 7 | Reflection + learning factors | Pending | Uses highest-quality configured reflection model and may emit strategy proposal hints. |
-| PR 8 | Strategy evolution + dynamic strategy catalog | Pending | Converts repeated learning into candidate/shadow strategies beyond the initial 15 seeds. |
-| PR 9 | Today dashboard UI | Pending | Depends on persisted trading/portfolio/news alerts/reflection/strategy evolution state. |
-| PR 10 | Scheduler, smoke tests, deploy docs | Pending | Final operational wiring. |
+| PR 1 | Trading foundation schema + strategy catalog | Pending | Adds 15 tactical strategies, 4 strategy buckets, and trade identity taxonomy. |
+| PR 2 | Universe scan + signal snapshots | Pending | Adds relative-strength benchmark/peer fields and explicit missing signal handling. |
+| PR 3 | Strategy matching + candidate scoring | Pending | Adds trade classification, catalyst-watch split, bearish gating, and confidence calibration inputs. |
+| PR 4 | Position sizing + portfolio risk manager | Pending | Depends on candidates and risk tables; keeps core holdings separate from short-term catalyst trades. |
+| PR 5 | Trading decisions + paper stock broker + portfolio state | Pending | Depends on stock risk gate. |
+| PR 6 | Paper options strategy layer + assignment risk | Pending | Paper/simulation-only short puts; sell/close/roll/avoid/assignment plan plus worst-case assignment checks. |
+| PR 7 | Intraday news alerts + rebalance | Pending | Hourly news scan during market hours; critical/high alerts can trigger risk-gated stock and paper-put actions. |
+| PR 8 | Reflection + learning factors | Pending | Uses highest-quality configured reflection model; includes peer benchmarks, bullish/bearish calibration, and option attribution. |
+| PR 9 | Strategy evolution + dynamic strategy catalog | Pending | Converts repeated learning into candidate/shadow strategies beyond the initial seeds. |
+| PR 10 | Today dashboard UI | Pending | Depends on persisted trading/portfolio/options/news alerts/reflection/strategy evolution state. |
+| PR 11 | Scheduler, smoke tests, deploy docs | Pending | Final operational wiring. |
 
 ## Verification Log
 
-- No implementation tests run yet; planning-only update.
+- 2026-05-29: `git diff --check` passed for the planning-only update.
+- No implementation tests run yet; documentation/planning update only.

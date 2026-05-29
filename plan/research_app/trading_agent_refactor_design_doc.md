@@ -6,6 +6,8 @@
 
 V2 的目标是把系统从“用户维护 watchlist 后生成研究结论”升级为“系统每天扫描可交易股票 universe，生成量化信号和策略候选，执行纸上交易，收盘后反思交易质量，并把可复用 learning factor 回注到下一次 trading decision”。宏观环境判断必须作为独立模块存在，只提供市场 regime、风险预算和约束，不和个股策略逻辑混在同一个 agent/prompt 里。
 
+500+ eval 的核心结论是：当前 trading agent 更像 bullish catalyst scanner，而不是成熟自动交易系统。它在财报 beat-and-raise、上调评级、AI/半导体主题、资金追逐、放量突破等明确 catalyst 场景下有可优化的短期延续性；但 bearish 信号质量明显差，尤其容易把宏观 risk-off、VIX、油价、美债、地缘政治等长逻辑链误转成单票做空信号。V2 必须把这个经验固化为设计约束：宏观主要用于仓位和风险预算，不直接决定单票 bearish；核心能力先聚焦 relative-strength catalyst selection。
+
 ## 2. Goals
 
 1. 每天自动扫描股票 universe，筛选合适的交易标的，不再依赖用户手动添加 watchlist。
@@ -18,6 +20,11 @@ V2 的目标是把系统从“用户维护 watchlist 后生成研究结论”升
 8. 下一次 trading agent 决策时注入 active learning factors，并让 active/shadow strategies 参与下一轮扫描，但保留审计、版本和回滚能力。
 9. UI 首页改为交易工作台，重点显示当天持仓、当天 trades、live alerts、收盘反思、learning factors 和 strategy evolution。
 10. 明确分离 `Macro Engine` 与 `Stock Trading Strategy Engine`。
+11. 把系统定位为 `relative-strength catalyst bot`：先找明确个股 catalyst，再验证相对行业、主题、同类股票和成交量/价格结构，最后决定是否交易。
+12. 每个交易必须先归类为核心仓、catalyst 正股、主题卖 put、估值修复卖 put等 trade identity，并由这个身份决定仓位、持有周期、退出规则和反思口径。
+13. 增加 paper/simulation-only options strategy layer，至少支持 `sell_put`、`close_put`、`roll_put`、`avoid_earnings_put`、`put_assignment_plan`。
+14. Risk manager 必须用 worst-case assigned portfolio 评估 short put 风险，而不是只看当前股票仓位。
+15. Confidence 必须按历史 pattern 和策略桶校准，不能因为叙事完整或宏观理由多就给高分。
 
 ## 3. Non-Goals
 
@@ -28,6 +35,9 @@ V2 的目标是把系统从“用户维护 watchlist 后生成研究结论”升
 - 不让新生成的 strategy 直接扩大组合风险。自动发现的 strategy 必须先进入 candidate/shadow lifecycle，并受更小的 strategy/risk budget 约束。
 - 不让新闻情绪单独绕过风险管理。Intraday 新闻只能触发有审计的 rebalance proposal，最终仍由 `RiskManager` 和 `PaperBroker` 执行。
 - 不把宏观新闻直接混入每个 ticker prompt 里做随意推理。宏观只通过结构化 macro snapshot/regime 进入个股策略和交易 agent。
+- 不因为宏观 risk-off、估值高、RSI 高、VIX 上升等单独理由生成单票做空或高 confidence bearish trade。除非有直接公司级负面 catalyst 和价格/成交量确认，否则 bearish 结论只能作为风险提示、减仓或暂停加仓依据。
+- 不让短线 catalyst 信号直接驱动核心仓卖出。核心仓由独立的风险预算、加仓/暂停加仓规则和 thesis invalidation 管理。
+- Options layer 在 V2 只做 paper/simulation，不接入真实期权下单，也不模拟保证金账户的裸卖 put。默认假设 cash-secured short put 风险。
 
 ## 4. Recommended Approach
 
@@ -69,13 +79,16 @@ MacroPipeline -> macro_snapshot + market_regime
 StrategyPipeline -> candidate_scores by strategy
       |
       v
+TradeClassifier + OptionsStrategyLayer -> trade identity + instrument plan
+      |
+      v
 TradingPipeline -> proposed trading_decisions
       |
       v
-PositionSizer + RiskManager -> approved/reduced/rejected decisions
+PositionSizer + RiskManager -> approved/reduced/rejected decisions, including worst-case assignment checks
       |
       v
-PaperBroker -> paper_orders -> paper_executions
+PaperBroker -> paper_orders / paper_option_orders -> paper_executions
       |
       v
 PortfolioPipeline -> positions + portfolio_snapshots + trade PnL
@@ -107,9 +120,11 @@ Next trading run receives active learning_factors
 | `MacroPipeline` | Fetch rates, VIX, credit spreads, commodities, broad index trend, economic calendar; produce market regime | Optional bounded summary using Gemini Flash | `macro_snapshots` |
 | `SignalPipeline` | Compute deterministic per-ticker quant features and normalized signal values | No | `signal_snapshots` |
 | `StrategyPipeline` | Match each ticker to versioned strategy definitions, score strategy fit, attach strategy horizon, and create ranked candidates | Mostly no; optional strategy explanation | `strategy_runs`, `candidate_scores` |
+| `TradeClassifier` | Assign trade identity before any order decision: core holding, catalyst stock, theme sell-put, valuation repair sell-put, or watch/catalyst-watch | No | `trade_classifications` or embedded in `trading_decisions` |
+| `OptionsStrategyLayer` | Create paper-only short-put plans and lifecycle actions, including strike/expiry/DTE/delta/IV/premium/breakeven/assignment risk fields | Mostly no; optional explanation | `option_strategy_decisions`, `paper_option_orders`, `paper_option_positions` |
 | `TradingPipeline` | Combine candidates, macro regime, risk rules, positions, learning factors; produce structured trading decisions | Yes, Gemini Flash bounded decision schema | `trading_decisions`, `paper_orders` |
 | `PositionSizer` | Convert approved trade intent into target quantity/weight using volatility, liquidity, strategy budget, macro budget, and factor exposure constraints | No | `position_sizing_decisions` |
-| `RiskManager` | Enforce portfolio-level risk limits, factor exposure concentration limits, correlation clusters, and hard reject/reduce rules | No | `portfolio_risk_snapshots`, `risk_factor_exposures` |
+| `RiskManager` | Enforce portfolio-level risk limits, factor exposure concentration limits, correlation clusters, short-put assignment exposure, and hard reject/reduce rules | No | `portfolio_risk_snapshots`, `risk_factor_exposures`, `option_risk_snapshots` |
 | `PaperBroker` | Simulate fills, slippage, commissions, rejects, and order status transitions | No | `paper_orders`, `paper_executions` |
 | `PortfolioPipeline` | Maintain positions, cash, exposure, realized/unrealized PnL | No | `paper_positions`, `portfolio_snapshots` |
 | `HourlyNewsScanPipeline` | Scan market/company news hourly during regular trading hours, dedupe events, classify impact, and create actionable alerts | Optional Gemini Flash bounded classifier after deterministic filters | `intraday_news_scans`, `news_alerts` |
@@ -176,11 +191,94 @@ Examples:
 
 Each strategy has explicit inputs, thresholds, candidate scoring, risk tags, holding assumption, and invalidators.
 
+### Relative-Strength Catalyst Policy
+
+V2 should optimize for the pattern that evals showed actually has edge: bullish catalyst plus relative strength confirmation. A bullish stock is not actionable just because the news sounds positive. It becomes actionable when:
+
+- the catalyst is company-specific or tightly theme-specific, such as earnings beat-and-raise, guidance raise, analyst revision cluster, high-signal AI/semiconductor/order/customer news, or confirmed capital rotation
+- the stock is outperforming the right benchmark, such as `SMH`/`SOXX` for semiconductors, `QQQ` for growth/AI software, or a configured peer basket
+- price and volume confirm the thesis through relative volume, breakout, constructive pullback, VWAP hold/reclaim, or base breakout
+- invalidators are concrete and close enough to be traded
+
+Performance evaluation must therefore compare each trade against:
+
+- `SPY`, for broad market context
+- `QQQ`, for growth/tech beta
+- sector/theme ETFs such as `SMH` or `SOXX` when relevant
+- same-day peer baskets built from sector, industry, theme, market cap, and catalyst type
+
+The key attribution question is not only whether the stock went up. It is whether the selected stock outperformed a reasonable basket of similar alternatives available the same day.
+
+### Bearish Signal Policy
+
+Bearish output is lower trust than bullish catalyst output until proven otherwise. The system should treat bearish evidence in tiers:
+
+| Bearish Evidence Type | Allowed Use |
+| --- | --- |
+| Direct company-level negative catalyst, e.g. guide-down, accounting issue, failed trial, regulatory action, major customer loss, dilutive offering | May trigger `reduce`, `exit`, `no_trade`, or low-budget bearish/short paper strategy if enabled and price/volume confirm. |
+| Sector/theme breakdown with the ticker showing relative weakness vs peers | May reduce position size, reject new longs, or close weak trades. |
+| Macro risk-off, VIX, rates, oil, geopolitical risk, broad index weakness | Position sizing and risk-budget input only; not enough for single-name bearish trade. |
+| Valuation high, RSI high, stock extended | Risk warning, reduced size, stricter entry, or catalyst-watch; not a high-confidence bearish trade by itself. |
+
+This policy directly addresses the eval failure mode where the model built a long macro chain from “risk-off” to “high-beta semiconductor likely down tomorrow” even while the industry and stock trend stayed strong.
+
+### Trade Identity and Portfolio Pools
+
+Every trade decision must carry a `trade_identity` before sizing:
+
+| Trade Identity | Instrument | Typical Horizon | Sizing / Exit Policy |
+| --- | --- | --- | --- |
+| `core_holding` | Stock | Multi-month to multi-year | Managed outside the short-term catalyst pool. Bot may recommend pause add, add on pullback, trim for risk budget, or thesis review; it should not liquidate core holdings because of one short-term signal. |
+| `catalyst_common_stock` | Stock | Intraday to 1-3 months | Requires explicit catalyst, relative strength, volume/price confirmation, and concrete invalidators. |
+| `strong_theme_sell_put` | Cash-secured short put | 2-8 weeks | Used when theme/stock is strong but near-term entry is unclear; requires acceptable assignment plan and worst-case portfolio fit. |
+| `valuation_repair_sell_put` | Cash-secured short put | 2-8 weeks | Used for quality software or similar names where valuation repair is plausible but common-stock timing is weak. |
+| `catalyst_watch` | No order by default | Event window | Direction uncertain but big move potential is high; shown for human review and later reflection. |
+| `ordinary_watch` | No order | N/A | Insufficient actionability; stored for context only. |
+
+The trade identity decides which risk budget applies, which holding-period assumptions are valid, and which exit rules reflection should grade against. Core holdings must have a separate decision pool from short-term catalyst trades.
+
+### Paper Options Strategy Layer
+
+The options layer is V2 paper/simulation-only. It must support these strategy actions:
+
+- `sell_put`: open a cash-secured short put when assignment would be acceptable under the strategy bucket and risk budget
+- `close_put`: close an existing paper short put when profit target, risk limit, catalyst invalidator, or earnings rule triggers
+- `roll_put`: close the current short put and open a replacement strike/expiry only when the new assignment risk is acceptable
+- `avoid_earnings_put`: block opening or rolling short puts through earnings when the event risk exceeds the strategy rule
+- `put_assignment_plan`: document what happens if assignment occurs, including whether shares become core, catalyst stock, or immediate reduce/exit candidate
+
+Every short put decision must record:
+
+- `underlying_ticker`
+- `strike`
+- `expiry`
+- `dte`
+- `delta`
+- `iv_rank` or `iv_percentile`
+- `premium`
+- `breakeven`
+- `assignment_notional`
+- `cash_secured_amount`
+- `underlying_exposure`
+- `earnings_date`
+- `assignment_plan`
+- `profit_target_pct`
+- `max_loss_or_adjustment_rule`
+- `roll_conditions`
+- `close_conditions`
+
+Options confidence should be calibrated separately from stock confidence. A strong theme without a near-term stock entry can justify `sell_put`, but it should not inherit the same confidence score as a confirmed catalyst stock breakout.
+
 ### Strategy Catalog
 
 The first production strategy set should be stored as versioned strategy definitions. The morning scanner evaluates every eligible universe symbol against these definitions, then emits `(ticker, strategy_id, horizon, score, evidence)` candidates. A ticker can match multiple strategies, but the trading layer must choose one primary strategy per action so attribution and learning remain clean.
 
-The 15 strategies below are the seed catalog. They are not a fixed universe of possible strategies. Reflection and learning can create new strategy proposals when repeated evidence shows a pattern that is not well captured by the existing catalog.
+The seed catalog has two layers:
+
+- tactical pattern strategies that explain why a ticker is interesting
+- portfolio/option strategy buckets that decide how the system should express the idea
+
+The 15 tactical strategies below are the initial pattern catalog. They are not a fixed universe of possible strategies. Reflection and learning can create new strategy proposals when repeated evidence shows a pattern that is not well captured by the existing catalog.
 
 | Strategy | Strategy ID | Core Signals To Check | Typical Horizon | Thesis |
 | --- | --- | --- | --- | --- |
@@ -199,6 +297,15 @@ The 15 strategies below are the seed catalog. They are not a fixed universe of p
 | Failed Breakdown / Reclaim | `failed_breakdown_reclaim_v1` | Break below support; quick reclaim above support/VWAP; short-term reversal volume; trapped shorts signal; close back inside range | 2 days-3 weeks | Failed breakdown creates reversal squeeze. |
 | Oversold Bounce | `oversold_bounce_v1` | Extreme short-term oversold RSI/distance from mean; capitulation volume; stabilization/reclaim trigger; no unresolved major negative catalyst | 1 day-2 weeks | Short-term oversold move mean reverts. |
 | Short Squeeze Breakout | `short_squeeze_breakout_v1` | High short interest; rising borrow/fee if available; positive catalyst; volume surge; breakout through resistance; days-to-cover/liquidity risk | 1 day-2 weeks | Crowded short positioning is forced to cover. |
+
+The portfolio/option strategy buckets below are also stored in the strategy catalog so attribution and risk budgets are explicit:
+
+| Strategy Bucket | Strategy ID | Required Context | Typical Horizon | Thesis |
+| --- | --- | --- | --- | --- |
+| Strong Theme Catalyst Long Stock | `strong_theme_catalyst_long_stock` | Clear bullish catalyst, theme alignment, relative strength vs benchmark/peers, volume/price confirmation | Intraday-3 months | Best expression is common stock because near-term continuation is confirmed. |
+| Strong Theme No Clear Near-Term Sell Put | `strong_theme_no_clear_near_term_sell_put` | Strong theme and acceptable underlying, but no clean near-term stock entry; IV/premium attractive; assignment acceptable | 2-8 weeks | Get paid to wait for a strong theme at a better effective entry. |
+| Valuation Repair Quality Software Sell Put | `valuation_repair_quality_software_sell_put` | Quality software name, improving valuation/margin/growth narrative, no near-term common-stock trigger; assignment acceptable | 2-8 weeks | Valuation repair can support cash-secured put premium while avoiding weak timing. |
+| Core Accumulation On Pullback | `core_accumulation_on_pullback` | Approved core holding, thesis intact, pullback into defined support or risk budget availability | Multi-month+ | Add to core only when the pullback improves risk/reward and portfolio concentration allows it. |
 
 ### Strategy Lifecycle
 
@@ -300,11 +407,13 @@ Signals should be deterministic Python outputs and stored before any LLM call. E
 | Mean Reversion | RSI 2/3/14, distance from VWAP/SMA, short-term reversal score |
 | Volume / Liquidity | relative volume, dollar volume, volume acceleration, spread proxy, liquidity eligibility |
 | Volatility / Risk | ATR%, realized volatility, gap size, intraday range, beta proxy, drawdown from recent high |
-| Relative Strength | return vs SPY, sector-relative return, rank within sector |
+| Relative Strength | return vs SPY, QQQ, sector ETF, theme ETF, peer basket; rank within sector/theme/peer group |
 | Event / Calendar | earnings date distance, post-earnings window, economic calendar risk day |
 | Insider / SEC | net insider value, cluster buys, sale concentration, officer/director weight |
-| News / Sentiment | high-signal news count, analyst rating events, guidance, filing/news freshness |
+| News / Sentiment | high-signal news count, analyst rating events, guidance, filing/news freshness, catalyst quality score |
 | Fundamentals | valuation bands, short interest, market cap/liquidity quality filters |
+| Options | option chain availability, delta, IV rank/percentile, premium, breakeven, DTE, earnings-through-expiry flag |
+| Confidence Calibration | historical win rate/alpha by strategy bucket, direction, catalyst type, sector/theme, and market regime |
 
 首版不需要一次实现所有信号，但 schema 要允许增量添加。缺失信号必须显式保存为 `null` 或 `status=missing`，不能在 prompt 中伪造。
 
@@ -312,16 +421,18 @@ Signals should be deterministic Python outputs and stored before any LLM call. E
 
 The signal schema should explicitly support the strategy catalog above:
 
-- Catalyst signals: `fresh_catalyst_type`, `catalyst_published_at`, `catalyst_strength_score`, `beat_raise_flag`, `guidance_revision_score`, `analyst_revision_count`.
+- Catalyst signals: `fresh_catalyst_type`, `catalyst_published_at`, `catalyst_strength_score`, `beat_raise_flag`, `guidance_revision_score`, `analyst_revision_count`, `direct_negative_catalyst_type`.
 - Gap/VWAP signals: `opening_gap_pct`, `premarket_gap_pct`, `vwap_reclaim`, `vwap_hold`, `opening_range_high_break`, `opening_range_low_break`, `gap_fill_pct_remaining`.
 - Breakout/base signals: `resistance_break_score`, `base_duration_days`, `price_near_52w_high_pct`, `new_high_break`, `breakout_volume_confirmed`.
 - Trend/pullback signals: `trend_slope_20d`, `price_vs_sma_20`, `price_vs_sma_50`, `pullback_depth_pct`, `support_reclaim_score`, `selling_volume_dry_up`.
 - Volatility compression signals: `atr_pct`, `realized_volatility_percentile`, `range_compression_percentile`, `squeeze_score`, `range_break_direction`.
-- Relative strength signals: `rs_vs_spy_20d`, `rs_vs_sector_20d`, `sector_rank_percentile`, `rotation_score`.
+- Relative strength signals: `rs_vs_spy_20d`, `rs_vs_qqq_20d`, `rs_vs_sector_20d`, `rs_vs_theme_etf_20d`, `rs_vs_peer_basket_20d`, `sector_rank_percentile`, `peer_rank_percentile`, `rotation_score`.
 - Mean reversion signals: `rsi_2`, `rsi_3`, `rsi_14`, `distance_from_sma_20_pct`, `capitulation_volume_score`, `reversal_triggered`.
 - Short squeeze signals: `short_interest_pct_float`, `days_to_cover`, `borrow_fee_proxy`, `float_rotation_proxy`, `squeeze_pressure_score`.
 - Sympathy signals: `leader_ticker`, `leader_catalyst_type`, `peer_link_strength`, `industry_move_pct`, `laggard_confirmation_score`.
 - Event timing signals: `earnings_in_days`, `known_event_date`, `pre_event_runup_score`, `event_risk_flag`.
+- Options signals: `put_strike`, `put_expiry`, `put_dte`, `put_delta`, `put_iv_rank`, `put_premium`, `put_breakeven`, `assignment_notional`, `cash_secured_amount`, `earnings_before_expiry`.
+- Confidence calibration signals: `historical_strategy_win_rate`, `historical_strategy_alpha_vs_benchmark`, `historical_direction_win_rate`, `historical_catalyst_type_alpha`, `confidence_calibration_bucket`.
 
 ## 8. Daily Workflow
 
@@ -348,11 +459,13 @@ Manual runs remain available for debugging, but scheduled daily flow is the prim
 Morning workflow semantics:
 
 1. Scan the configured universe before the open and compute all available pre-market/daily signals.
-2. Match each symbol against the strategy catalog. Each match carries its own strategy horizon, required evidence, and invalidators.
-3. Rank candidates by strategy fit, signal quality, macro compatibility, liquidity, and learning-factor adjustments.
-4. Pass only the top candidates plus current positions into `TradingPipeline`.
-5. `TradingPipeline` proposes an action, target size, and horizon.
-6. Deterministic risk constraints and portfolio budget decide whether the proposed action becomes a staged paper order, is reduced, or is rejected.
+2. Match each symbol against tactical strategies and portfolio/option strategy buckets. Each match carries its own strategy horizon, required evidence, and invalidators.
+3. Build benchmark and peer-basket context for each candidate so relative strength is measured against the right opportunity set, not only `SPY`.
+4. Classify each candidate or existing position into a trade identity before any order decision.
+5. Rank candidates by strategy fit, catalyst quality, relative strength, signal quality, macro compatibility, liquidity, confidence calibration, and learning-factor adjustments.
+6. Pass only the top candidates plus current positions and paper short puts into `TradingPipeline`.
+7. `TradingPipeline` proposes an action, target size, horizon, instrument expression, and trade identity.
+8. Deterministic risk constraints and portfolio budget decide whether the proposed action becomes a staged paper stock order, staged paper option order, is reduced, or is rejected.
 
 The final morning output is not just a ranked list. It is a trade plan: selected ticker, selected strategy, horizon, action, target exposure, risk budget used, and explicit reason if a high-scoring candidate was skipped.
 
@@ -400,6 +513,9 @@ Allowed intraday rebalance actions:
 - `exit`: close position because invalidator triggered.
 - `add`: increase exposure only if positive news confirms the active strategy, risk budget remains available, and factor concentration stays within limits.
 - `open_new`: disabled by default for V2 unless the alert is critical/high and the ticker was already a morning candidate or approved override.
+- `close_put`: close paper short put because thesis, earnings risk, or assignment risk changed.
+- `roll_put`: roll paper short put only if the replacement contract improves risk and still passes worst-case assignment checks.
+- `avoid_earnings_put`: block any new or rolled short put when event risk is not explicitly acceptable.
 
 Intraday rebalance is still gated:
 
@@ -429,7 +545,20 @@ It returns one JSON object per candidate or position:
   "ticker": "AAPL",
   "decision": "enter_long",
   "strategy_id": "relative_strength_breakout_v1",
+  "strategy_bucket_id": "strong_theme_catalyst_long_stock",
+  "trade_identity": "catalyst_common_stock",
+  "instrument_type": "stock",
   "confidence": 0.72,
+  "confidence_basis": {
+    "calibration_bucket": "bullish_catalyst_relative_strength",
+    "historical_win_rate": 0.58,
+    "historical_alpha_vs_peer_basket": 0.012
+  },
+  "benchmark_context": {
+    "primary_benchmark": "QQQ",
+    "sector_or_theme_benchmark": "SMH",
+    "peer_basket_id": "semis_ai_large_mid_2026_05_29"
+  },
   "target_weight": 0.05,
   "max_loss_pct": 0.025,
   "time_horizon": "2w-3m",
@@ -446,15 +575,24 @@ It returns one JSON object per candidate or position:
 Allowed decisions:
 
 - `enter_long`
-- `enter_short` (optional; can be disabled in config)
+- `enter_short` (optional; disabled by default, and never allowed from macro-only bearish evidence)
 - `hold`
 - `reduce`
 - `exit`
 - `no_trade`
+- `sell_put`
+- `close_put`
+- `roll_put`
+- `avoid_earnings_put`
+- `put_assignment_plan`
 
 Risk checks run before order creation. If risk checks fail, no paper order is created even if the LLM decision is actionable.
 
+For option decisions, the trading decision must include an `option_plan` object with strike, expiry, DTE, delta, IV rank/percentile, premium, breakeven, assignment notional, cash-secured amount, earnings date, roll/close conditions, and assignment plan. Missing option-chain data should produce `no_trade` or `catalyst_watch`, not a fabricated option plan.
+
 `time_horizon` should come from the selected strategy definition, not from a global default. The trading agent may shorten or skip a trade if risk conditions conflict with the strategy horizon, but it should not silently rewrite the strategy's typical horizon without recording a reason.
+
+Confidence must be calibrated by historical pattern quality. Bullish catalyst plus relative strength can earn high confidence when past evidence supports it. Macro-only bearish, valuation-only bearish, RSI-only bearish, or “stock is extended” reasoning must remain low confidence and should normally map to risk warning, smaller size, no trade, or watch.
 
 ### Risk Constraint and Budget Decision
 
@@ -470,8 +608,11 @@ Risk decision fields:
 - `strategy_budget_remaining`
 - `macro_budget_multiplier`
 - `factor_exposure_before` and `factor_exposure_after`
+- `worst_case_assigned_exposure_before` and `worst_case_assigned_exposure_after`
 - `remaining_factor_budget_by_type`
 - `binding_factor_limits`
+- `option_assignment_notional`
+- `cash_secured_requirement`
 - `position_limit_check`
 - `liquidity_check`
 - `stale_signal_check`
@@ -484,9 +625,11 @@ Risk decision fields:
 ### Paper Broker Rules
 
 - Default execution model: market-on-open for planned entries, close price for end-of-day exits.
+- Stock and option simulations can share order-state semantics, but option fills must stay paper-only and use explicit option-chain data or fixture data.
 - Slippage model: configurable bps by liquidity bucket.
 - Commission model: configurable flat or zero.
 - Fill rejection if price, volume, or market data is missing.
+- Option fill rejection if strike, expiry, bid/ask/mark, delta, IV rank/percentile, or earnings date data required by the strategy is missing.
 - All fills are persisted; order state transitions are auditable.
 
 ### Position Management
@@ -514,6 +657,34 @@ final_weight = min(liquidity_capped_weight, remaining_factor_budget, single_name
 
 The exact formula can evolve, but every sizing decision must persist inputs, caps applied, and final size. If a trade is reduced because of risk, the UI should show the binding constraint.
 
+### Short Put Assignment Risk
+
+For paper short puts, risk must be evaluated as if assignment can happen. The risk manager should calculate both:
+
+- current portfolio exposure: stock positions plus marked option positions
+- worst-case assigned portfolio: current stock positions plus all short puts converted into long stock at their strikes
+
+The worst-case assigned portfolio is the primary control for `sell_put` and `roll_put`. A trade is rejected or reduced if simultaneous assignment would create unacceptable concentration, even if current stock exposure looks safe.
+
+Required assignment metrics:
+
+- assignment notional by ticker
+- cash-secured amount by contract and total portfolio
+- breakeven exposure by ticker
+- sector/theme/industry exposure after assignment
+- high-beta AI/semis/space exposure after assignment
+- strategy bucket exposure after assignment
+- correlation-cluster exposure after assignment
+- earnings-through-expiry flag and event-risk exposure
+
+Example assignment question the risk manager must answer:
+
+```text
+If every open short put is assigned at strike, does the portfolio become an over-concentrated high-beta AI/semiconductor/space book?
+```
+
+If yes, the system can propose `avoid_earnings_put`, `close_put`, `roll_put` to a lower-risk contract, reduce new common-stock exposure, or reject new short puts.
+
 ### Portfolio Risk Factor Model
 
 `RiskManager` should maintain a portfolio risk snapshot before order staging, after order staging, and after fills. The purpose is to avoid a portfolio that looks diversified by ticker count but is concentrated in the same underlying risk.
@@ -534,6 +705,7 @@ Risk factors to track:
 | Event/catalyst | earnings, analyst revision, regulatory, M&A, macro event | Avoid too many event-risk trades on the same day. |
 | Macro sensitivity | rates-sensitive, oil-sensitive, USD-sensitive, credit-sensitive | Keep macro factor exposure aligned with macro regime. |
 | Correlation cluster | rolling return correlation or sector/theme cluster | Catch hidden concentration across related tickers. |
+| Option assignment | short-put assignment notional, breakeven exposure, cash-secured requirement | Avoid hidden long exposure that appears only after assignment. |
 
 Factor exposures should be approximate in V2. A robust simple model is better than a fragile complex one: start with sector/industry, strategy, horizon, direction, beta proxy, volatility bucket, liquidity bucket, and event type, then add rolling-correlation clusters once enough market data is available.
 
@@ -553,6 +725,9 @@ Factor exposures should be approximate in V2. A robust simple model is better th
 - Low-liquidity bucket cap.
 - Market beta-adjusted exposure cap.
 - Correlation cluster cap so related tickers do not create hidden concentration.
+- Short-put assignment notional cap by ticker, sector/theme, strategy bucket, and correlation cluster.
+- Cash-secured requirement cap so paper puts cannot overcommit available cash.
+- Earnings-through-expiry rule for short puts, with `avoid_earnings_put` as the default when event risk is not explicitly accepted.
 - No averaging down in V2 unless explicitly added later.
 - No trading around missing or stale signal snapshots.
 
@@ -584,7 +759,14 @@ Example risk-limit config:
   "max_high_vol_bucket_weight": 0.25,
   "max_low_liquidity_weight": 0.10,
   "max_beta_adjusted_net_exposure": 0.80,
-  "max_correlation_cluster_weight": 0.25
+  "max_correlation_cluster_weight": 0.25,
+  "max_short_put_assignment_notional_pct": 0.35,
+  "max_single_name_assigned_weight": 0.10,
+  "max_theme_assigned_weight": {
+    "ai_semis": 0.30,
+    "space": 0.15
+  },
+  "max_cash_secured_put_commitment_pct": 0.50
 }
 ```
 
@@ -600,12 +782,19 @@ Reflection runs after the portfolio is marked to close. It receives:
 - intraday news alerts and rebalance decisions
 - paper orders/executions
 - end-of-day PnL, benchmark return, sector return
+- peer-basket returns and relevant ETF returns, e.g. `QQQ`, `SMH`, `SOXX`
+- paper option positions, short-put lifecycle actions, and worst-case assignment snapshots
 - per-trade MFE/MAE if available
 - invalidators and whether they triggered
 - prior learning factors used
 
 Reflection should evaluate the portfolio, not just individual research calls. The main questions are:
 
+- Did bullish catalyst trades outperform the relevant ETF and peer basket, or only ride a sector tailwind?
+- Did bearish or risk-off reasoning actually add value, or did it incorrectly suppress strong-trend names?
+- Were high-confidence calls calibrated by historical pattern quality, or did narrative completeness inflate confidence?
+- Did `neutral/watch` hide a catalyst-watch opportunity with large move potential?
+- Did short-put trades have acceptable assignment risk, and would assignment have improved or damaged portfolio construction?
 - Did the selected strategies perform as expected for their horizons?
 - Did risk constraints prevent losses or block profitable opportunities?
 - Were skipped candidates better than selected trades?
@@ -690,7 +879,12 @@ Proposed new tables:
 | `strategy_evaluation_results` | Shadow/experimental performance and promotion/retirement evidence for strategy definitions |
 | `strategy_runs` | One candidate-scoring batch per day |
 | `candidate_scores` | Ranked ticker candidates by strategy, horizon, evidence, macro compatibility |
+| `trade_classifications` | Trade identity, portfolio pool, strategy bucket, intended horizon, and exit-policy metadata for each candidate/position decision |
 | `trading_decisions` | Trading agent decisions and context snapshot |
+| `option_strategy_decisions` | Paper-only option strategy actions such as sell/close/roll/avoid/assignment plan with required option metadata |
+| `paper_option_orders` | Staged/submitted/filled/rejected simulated option orders |
+| `paper_option_positions` | Current simulated option position state, including short puts |
+| `option_risk_snapshots` | Current and worst-case-assigned short-put exposure snapshots |
 | `intraday_news_scans` | Hourly scan metadata, status, provider coverage, and error state |
 | `news_alerts` | Normalized positive/negative news alerts with severity, sentiment, dedupe key, affected tickers/positions |
 | `intraday_rebalance_decisions` | Alert-driven hold/reduce/exit/add/open_new proposals and final risk-gated outcome |
@@ -720,6 +914,7 @@ Existing tables remain useful:
 {
   "strategy_id": "gap_and_go_v1",
   "display_name": "Gap-and-Go",
+  "strategy_layer": "tactical_pattern",
   "typical_horizon": "intraday-3d",
   "core_thesis": "Overnight information continues as momentum.",
   "required_signals": ["opening_gap_pct", "vwap_hold", "opening_range_high_break", "relative_volume"],
@@ -740,6 +935,8 @@ Existing tables remain useful:
 This keeps strategy identity, horizon, and signal requirements in data. Python strategy evaluators can still implement the scoring math, but the DB row is the audit source for what version was active on a given trade date.
 
 Discovered strategies use the same `strategy_definitions` shape once promoted from proposal to catalog entry. They differ only by `source`, `lifecycle_status`, parent/revision metadata, and risk budget limits.
+
+Portfolio/option strategy buckets use the same table with `strategy_layer = "expression_bucket"` and include fields such as `allowed_trade_identities`, `allowed_instruments`, `required_assignment_fields`, `earnings_policy`, and `default_exit_policy`.
 
 ## 13. UI Design
 
@@ -770,19 +967,21 @@ Main sections:
 0. `Live Alerts`
    - hourly scan status, critical/high warning count, ticker, sentiment, severity, source, published time, linked position/candidate, rebalance action
 1. `Current Positions`
-   - ticker, side, quantity, average price, last/close price, day PnL, total PnL, strategy, horizon, factor tags, holding age, invalidator status
+   - ticker, side, trade identity, quantity, average price, last/close price, day PnL, total PnL, strategy, horizon, factor tags, holding age, invalidator status
 2. `Today's Trades`
-   - time, ticker, action, proposed size, final size, fill price, strategy, horizon, decision confidence, order status, reject/reduction reason
+   - time, ticker, action, instrument, trade identity, proposed size, final size, fill price, strategy bucket, horizon, decision confidence, order status, reject/reduction reason
 3. `Candidate Scanner`
-   - ranked candidates, strategy, horizon, score, top signals, why selected, why rejected
+   - ranked candidates, strategy, strategy bucket, horizon, score, benchmark/peer outperformance, top signals, why selected, why rejected
 4. `Risk Exposure`
-   - sector/industry exposure, strategy exposure, horizon bucket exposure, beta-adjusted exposure, volatility/liquidity buckets, event exposure, correlation clusters, binding limits
+   - sector/industry exposure, strategy exposure, horizon bucket exposure, beta-adjusted exposure, volatility/liquidity buckets, event exposure, correlation clusters, short-put assignment exposure, cash-secured commitment, binding limits
 5. `Post-Close Reflection`
-   - what worked, what failed, strategy attribution, intraday alert/rebalance attribution, concrete evidence
+   - what worked, what failed, strategy attribution, benchmark/peer-basket attribution, bullish vs bearish calibration, intraday alert/rebalance attribution, concrete evidence
 6. `Learning Factors`
    - new factors, active factors used today, status, scope, confidence, source reflection
 7. `Strategy Evolution`
    - new strategy proposals, shadow strategies, experimental strategies, promotion/retirement status, evidence, duplicate/revision links
+8. `Options`
+   - paper short puts, strike, expiry, DTE, delta, IV rank, premium, breakeven, assignment notional, cash secured amount, earnings date, roll/close/assignment plan
 
 ### `/macro`
 
@@ -803,10 +1002,14 @@ Keep the current research run UI for drill-down and audit, but make it secondary
 - Every pipeline run stores `started_at`, `finished_at`, `status`, and `error_message`.
 - Missing provider data should degrade the relevant signal to missing, not fabricate values.
 - Candidate scoring skips tickers without minimum required signals.
+- Candidate scoring must separate `ordinary_watch` from `catalyst_watch` so high-volatility catalyst opportunities are not lost in neutral output.
 - Strategy proposals must not mutate active strategy definitions directly. They create candidate/shadow strategy definitions through explicit lifecycle transitions.
+- Macro-only bearish context must not create single-name bearish trades; if it affects a candidate, the persisted decision should show risk-budget reduction or no-trade reason.
+- Short-put decisions with missing option-chain, earnings date, or assignment-risk inputs must be rejected or downgraded to watch.
 - News alerts must be deduped by ticker/event/source/time window so repeated headlines do not trigger repeated rebalances.
 - Intraday rebalance decisions must persist the triggering `news_alert_id`, proposed action, final action, and risk decision.
 - Trading decisions must persist full context snapshots: candidate signals, macro snapshot id, portfolio snapshot id, risk config version, strategy version, learning factors used.
+- Option decisions must persist full option metadata and assignment-risk snapshot used at decision time.
 - Paper orders must be idempotent per `trade_date + ticker + strategy_id + decision_type`.
 - A failed ticker must not abort the whole universe scan.
 - Reflection failure must not mutate learning factors.
@@ -820,7 +1023,13 @@ Unit tests:
 - universe filters
 - macro regime classification
 - strategy candidate scoring
+- trade identity classification
+- relative-strength benchmark and peer-basket attribution
+- confidence calibration by strategy bucket and direction
+- bearish signal gating so macro-only bearish evidence cannot create a single-name short
 - risk checks
+- paper option strategy decision validation
+- short-put assignment exposure calculation
 - news alert dedupe and severity classification
 - intraday rebalance action gating
 - factor exposure calculation
@@ -839,6 +1048,7 @@ Smoke tests:
 - standalone news alert smoke for a tiny fixed ticker set or fixture mode
 - standalone DB smoke for writing signal/candidate/order/portfolio rows
 - standalone DB smoke for writing portfolio risk snapshots and risk factor exposures
+- standalone DB smoke for writing paper option decisions and assignment-risk snapshots
 - optional live paper-trade dry run that uses a tiny ticker set and does not consume large API quota
 
 Implementation must continue to use `source ~/.venv/bin/activate` before Python commands and must verify Postgres data directory is on persistent disk for deployment work.
@@ -849,13 +1059,16 @@ Implementation must continue to use `source ~/.venv/bin/activate` before Python 
 
 - Add data model for universe, signals, macro snapshots, strategy definitions, candidate scores.
 - Implement universe refresh and deterministic signal snapshots.
-- Seed the initial strategy catalog with core signals and typical horizons.
+- Seed the initial strategy catalog with tactical strategies plus portfolio/option strategy buckets.
+- Add trade identity taxonomy and confidence-calibration fields.
 - Add candidate scanner UI.
 
 ### Phase 2: Paper Trading
 
 - Add trading decisions, paper orders, executions, positions, portfolio snapshots.
 - Implement position sizing, risk checks, factor exposure caps, budget allocation, and paper broker.
+- Add paper/simulation-only option strategy decisions and paper short-put lifecycle state.
+- Evaluate current and worst-case assigned portfolio before approving any short put.
 - Replace homepage with `/today` trading dashboard.
 
 ### Phase 3: Intraday News Alerts and Rebalance
@@ -870,6 +1083,8 @@ Implementation must continue to use `source ~/.venv/bin/activate` before Python 
 
 - Add post-close reflection agent and `daily_reflections`.
 - Generate learning factors with lifecycle statuses.
+- Reflect on benchmark/peer-basket outperformance, bullish vs bearish signal quality, and confidence calibration.
+- Reflect on paper options outcomes and assignment-risk decisions.
 - Show reflection and learning factors in UI.
 
 ### Phase 5: Learning Injection
@@ -898,25 +1113,29 @@ Implementation must continue to use `source ~/.venv/bin/activate` before Python 
 2. The system stores replayable quant signal snapshots for every scanned candidate.
 3. Macro snapshot/regime is stored separately from stock strategy inputs.
 4. Strategy pipeline evaluates the initial strategy catalog and stores strategy-specific candidate score, evidence, invalidators, and typical horizon.
-5. The morning trade plan selects ticker, strategy, horizon, action, target exposure, and risk budget used before the market opens.
+5. The morning trade plan selects ticker, strategy, strategy bucket, trade identity, horizon, action, target exposure, and risk budget used before the market opens.
 6. Trading pipeline creates paper orders only after risk checks and budget allocation pass.
 7. Position sizing records base size, volatility adjustment, liquidity cap, remaining factor budget, final size, and binding constraints.
-8. Portfolio risk snapshots show factor exposure by sector, strategy, horizon, beta, volatility, liquidity, event type, macro sensitivity, and correlation cluster.
-9. Risk manager reduces or rejects trades that would make the portfolio too concentrated in any configured risk factor.
+8. Portfolio risk snapshots show factor exposure by sector, strategy, horizon, beta, volatility, liquidity, event type, macro sensitivity, correlation cluster, and short-put assignment exposure.
+9. Risk manager reduces or rejects trades that would make the current or worst-case assigned portfolio too concentrated in any configured risk factor.
 10. Paper portfolio shows positions, trades, exposure, and day PnL.
-11. Hourly intraday news scans create deduped positive/negative alerts for open positions, same-day trades, top candidates, and high-impact market/sector events.
-12. Critical/high alerts can trigger immediate risk-gated `hold/reduce/exit/add` rebalance decisions, with `open_new` disabled by default unless the ticker was already a morning candidate or override.
-13. Post-close reflection analyzes portfolio returns, selected trades, rejected candidates, intraday alerts, rebalance outcomes, macro constraints, factor concentration, and learning-factor impact.
-14. Strategy evolution can create new strategy proposals from repeated learning patterns without being limited to the initial 15 seed strategies.
-15. New strategies enter `candidate` or `shadow` status first, and cannot create paper orders until promoted to `experimental` or `active`.
-16. Active learning factors are visible in UI, injected into later trading decisions, and tracked through `learning_factor_applications`.
-17. `/today` shows live alerts, current positions, today trades, strategy/horizon, risk factor exposure, reflection, learning factors, strategy evolution, and macro regime without requiring the user to inspect raw JSON.
-18. Existing research run audit pages continue to work.
+11. Paper options layer records `sell_put`, `close_put`, `roll_put`, `avoid_earnings_put`, and `put_assignment_plan` actions with strike, expiry, DTE, delta, IV rank, premium, breakeven, assignment notional, cash secured amount, underlying exposure, and earnings date.
+12. Macro-only bearish context cannot create high-confidence single-name bearish trades; it can only reduce size, block strategy tags, or add risk warnings unless direct company-level negative evidence exists.
+13. Confidence displays and persistence distinguish historically strong bullish catalyst patterns from weak bearish/macro narratives.
+14. Watch output distinguishes `ordinary_watch` from `catalyst_watch`.
+15. Hourly intraday news scans create deduped positive/negative alerts for open positions, same-day trades, top candidates, and high-impact market/sector events.
+16. Critical/high alerts can trigger immediate risk-gated `hold/reduce/exit/add` rebalance decisions, with `open_new` disabled by default unless the ticker was already a morning candidate or override.
+17. Post-close reflection analyzes portfolio returns, benchmark/peer-basket returns, selected trades, rejected candidates, intraday alerts, rebalance outcomes, macro constraints, factor concentration, paper option decisions, confidence calibration, and learning-factor impact.
+18. Strategy evolution can create new strategy proposals from repeated learning patterns without being limited to the initial seed strategies.
+19. New strategies enter `candidate` or `shadow` status first, and cannot create paper orders until promoted to `experimental` or `active`.
+20. Active learning factors are visible in UI, injected into later trading decisions, and tracked through `learning_factor_applications`.
+21. `/today` shows live alerts, current positions, today trades, strategy/horizon, trade identity, paper options, risk factor exposure, reflection, learning factors, strategy evolution, and macro regime without requiring the user to inspect raw JSON.
+22. Existing research run audit pages continue to work.
 
 ## 18. Open Questions
 
 1. Universe scope: all US listed common stocks, or only a liquidity-filtered subset such as price > $5 and dollar volume > configurable threshold?
-2. Long-only first, or include short paper trades from V2?
+2. Long-only common stock first, or include direct short paper trades from V2 behind a disabled-by-default flag?
 3. Holding period: strictly intraday close-out, 1-5 day swing paper trades, or both with separate strategy tags?
 4. Should learning factors auto-activate immediately, or require approval for the first few weeks?
 5. Should manual watchlist symbols always bypass universe filters, or only appear as pinned candidates?
