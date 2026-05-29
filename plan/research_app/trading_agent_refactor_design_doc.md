@@ -6,7 +6,7 @@
 
 V2 的目标是把系统从“用户维护 watchlist 后生成研究结论”升级为“系统每天扫描可交易股票 universe，生成量化信号和策略候选，执行纸上交易，收盘后反思交易质量，并把可复用 learning factor 回注到下一次 trading decision”。宏观环境判断必须作为独立模块存在，只提供市场 regime、风险预算和约束，不和个股策略逻辑混在同一个 agent/prompt 里。
 
-500+ eval 的核心结论是：当前 trading agent 更像 bullish catalyst scanner，而不是成熟自动交易系统。它在财报 beat-and-raise、上调评级、AI/半导体主题、资金追逐、放量突破等明确 catalyst 场景下有可优化的短期延续性；但 bearish 信号质量明显差，尤其容易把宏观 risk-off、VIX、油价、美债、地缘政治等长逻辑链误转成单票做空信号。V2 必须把这个经验固化为设计约束：宏观主要用于仓位和风险预算，不直接决定单票 bearish；核心能力先聚焦 relative-strength catalyst selection。
+500+ eval 的核心结论是：当前 trading agent 更像 bullish catalyst scanner，而不是成熟自动交易系统。它在财报 beat-and-raise、上调评级、AI/半导体主题、资金追逐、放量突破等明确 catalyst 场景下有可优化的短期延续性；但 bearish 信号质量明显差，尤其容易把宏观 risk-off、VIX、油价、美债、地缘政治等长逻辑链误转成单票做空信号。V2 必须把这个经验固化为设计约束：宏观主要用于仓位和风险预算，不直接决定单票 bearish。
 
 ## 2. Goals
 
@@ -15,15 +15,15 @@ V2 的目标是把系统从“用户维护 watchlist 后生成研究结论”升
 3. 引入 versioned trading strategies，由策略层把 signals 转成候选交易意图。
 4. 允许系统从 reflection/learning 中归纳新的 trading strategy，并把新 strategy 加入 versioned strategy catalog；初始 15 个策略只是 seed set，不是上限。
 5. 引入 paper trading：每天根据策略和风险规则生成 orders，更新 paper portfolio、positions、trades、PnL。
-6. 常规交易时段每小时扫描新闻，识别高影响正面/负面事件，并在风险约束下立即触发调仓或退出。
+6. 常规交易时段每小时扫描新闻，盘前和盘后再额外扫描一次，识别高影响正面/负面事件，并在风险约束下立即触发调仓或退出。
 7. 每天收盘后自动 reflection，归因当天交易表现，并生成结构化 learning factors 和 strategy proposals。
 8. 下一次 trading agent 决策时注入 active learning factors，并让 active/shadow strategies 参与下一轮扫描，但保留审计、版本和回滚能力。
 9. UI 首页改为交易工作台，重点显示当天持仓、当天 trades、live alerts、收盘反思、learning factors 和 strategy evolution。
 10. 明确分离 `Macro Engine` 与 `Stock Trading Strategy Engine`。
-11. 把系统定位为 `relative-strength catalyst bot`：先找明确个股 catalyst，再验证相对行业、主题、同类股票和成交量/价格结构，最后决定是否交易。
-12. 每个交易必须先归类为核心仓、catalyst 正股、主题卖 put、估值修复卖 put等 trade identity，并由这个身份决定仓位、持有周期、退出规则和反思口径。
+11. 先验证相对行业、主题、同类股票和成交量/价格结构，再找明确个股，最后决定是否交易。
+12. 每个交易必须先归类为核心仓、实验性的卫星仓、卖put等等trade identity，并由这个身份决定仓位、持有周期、退出规则和反思口径。
 13. 增加 paper/simulation-only options strategy layer，至少支持 `sell_put`、`close_put`、`roll_put`、`avoid_earnings_put`、`put_assignment_plan`。
-14. Risk manager 必须用 worst-case assigned portfolio 评估 short put 风险，而不是只看当前股票仓位。
+14. Risk manager 必须用 worst-case assigned portfolio 评估 short put 风险，而不是只看当前股票仓位，同时注意宏观经济calendar和earnings calendar，防止event risk。
 15. Confidence 必须按历史 pattern 和策略桶校准，不能因为叙事完整或宏观理由多就给高分。
 16. 支持用户手动 pin ticker 让 trading bot 强制评估，但 manual request 只代表“必须评估”，不代表“允许交易”。
 
@@ -38,7 +38,7 @@ V2 的目标是把系统从“用户维护 watchlist 后生成研究结论”升
 - 不把宏观新闻直接混入每个 ticker prompt 里做随意推理。宏观只通过结构化 macro snapshot/regime 进入个股策略和交易 agent。
 - 不因为宏观 risk-off、估值高、RSI 高、VIX 上升等单独理由生成单票做空或高 confidence bearish trade。除非有直接公司级负面 catalyst 和价格/成交量确认，否则 bearish 结论只能作为风险提示、减仓或暂停加仓依据。
 - 不让短线 catalyst 信号直接驱动核心仓卖出。核心仓由独立的风险预算、加仓/暂停加仓规则和 thesis invalidation 管理。
-- Options layer 在 V2 只做 paper/simulation，不接入真实期权下单，也不模拟保证金账户的裸卖 put。默认假设 cash-secured short put 风险。
+- Options layer 在 V2 只做 paper/simulation，不接入真实期权下单。默认假设可以用保证金sell naked put。
 - 不让手动 pin 的 ticker 绕过 liquidity、missing data、risk manager、short-put assignment risk 或 bearish gating。手动 pin 只是 evaluation source，不是 trade approval。
 
 ## 4. Recommended Approach
