@@ -23,15 +23,15 @@
 ## PR Slice Overview
 
 1. **PR 1: Trading Foundation Schema + Strategy Catalog**
-   Add ORM/Alembic foundation tables, trade identity enums, and a versioned in-code seed catalog for the 15 tactical strategies plus 4 portfolio/option strategy buckets from the design doc. No scheduler, API calls, or trading behavior yet.
+   Add ORM/Alembic foundation tables, manual ticker request schema, trade identity enums, and a versioned in-code seed catalog for the 15 tactical strategies plus 4 portfolio/option strategy buckets from the design doc. No scheduler, API calls, or trading behavior yet.
 2. **PR 2: Universe Scan + Signal Snapshots**
-   Add universe provider/pipeline and deterministic signal snapshot persistence, including relative-strength benchmark/peer fields and missing-signal tracking.
+   Add universe provider/pipeline, manual ticker request ingestion, and deterministic signal snapshot persistence, including relative-strength benchmark/peer fields and missing-signal tracking.
 3. **PR 3: Strategy Matching + Candidate Scoring**
-   Match universe symbols to strategy definitions and persist ranked candidates with strategy horizon/evidence, trade identity classification, catalyst-watch vs ordinary-watch distinction, and confidence-calibration inputs.
+   Match scanner and manual-request symbols to strategy definitions and persist ranked candidates with strategy horizon/evidence, source attribution, trade identity classification, catalyst-watch vs ordinary-watch distinction, and confidence-calibration inputs.
 4. **PR 4: Position Sizing + Portfolio Risk Manager**
    Add deterministic sizing, risk factor exposure calculation, concentration caps, bearish-signal gating, and reduce/reject decisions.
 5. **PR 5: Trading Decisions + Paper Stock Broker + Portfolio State**
-   Add bounded trading agent output, paper stock orders/executions, positions, and portfolio snapshots.
+   Add bounded trading agent output, manual request mode gating, paper stock orders/executions, positions, and portfolio snapshots.
 6. **PR 6: Paper Options Strategy Layer + Assignment Risk**
    Add paper-only short-put decisions, option orders/positions, sell/close/roll/avoid/assignment-plan actions, and worst-case assigned-portfolio risk checks.
 7. **PR 7: Intraday News Alerts + Rebalance**
@@ -41,7 +41,7 @@
 9. **PR 9: Strategy Evolution + Dynamic Strategy Catalog**
    Convert repeated learning patterns into proposed strategies, shadow-test them, and promote/retire strategy definitions.
 10. **PR 10: Today Dashboard UI**
-   Add `/today`, candidate, trade, options, risk exposure, reflection, and learning views.
+   Add `/today`, pinned review, candidate, trade, options, risk exposure, reflection, and learning views.
 11. **PR 11: Scheduler, Smoke Tests, Deploy Docs**
    Wire daily jobs, standalone smoke scripts, and deployment/runbook docs.
 
@@ -212,6 +212,7 @@ Create `tests/db/test_trading_models.py` to instantiate:
 
 - `UniverseSnapshot`
 - `UniverseSymbol`
+- `ManualTickerRequest`
 - `MacroSnapshot`
 - `SignalSnapshot`
 - `StrategyDefinition`
@@ -321,7 +322,23 @@ Create focused SQLAlchemy models:
   - `typical_horizon`
   - `evidence_json`, `invalidators_json`, `risk_tags_json`
   - `macro_compatibility`
+  - `selection_source String(32)` with values such as `scanner`, `manual_request`, `watchlist_pin`
+  - `manual_request_id fk manual_ticker_requests` nullable
   - `selection_reason`, `rejection_reason`
+- `ManualTickerRequest`
+  - `manual_request_id UUID pk`
+  - `ticker String(16) index`
+  - `trade_date Date index`
+  - `submitted_at DateTime`
+  - `reason Text`
+  - `priority String(16)` with values such as `normal`, `high`
+  - `mode String(32)` with values `review_only`, `paper_trade_eligible`
+  - `expires_at DateTime`
+  - `status String(32)` with values `pending/running/completed/failed/expired/cancelled`
+  - `result_status String(32)` nullable with values `actionable_trade/catalyst_watch/ordinary_watch/no_trade/blocked_by_risk/blocked_by_missing_data`
+  - `result_decision_id UUID` nullable
+  - `source_context_json JSONB`
+  - `error_message Text`
 - `TradeClassification`
   - `trade_classification_id UUID pk`
   - `candidate_id fk candidate_scores` nullable for current-position classifications
@@ -390,6 +407,7 @@ Create `alembic/versions/005_trading_foundation_tables.py` with:
 - indexes for date, ticker, strategy, status
 - check constraints for status fields and `candidate_score between 0 and 1`
 - check constraints for strategy lifecycle status fields
+- check constraints for manual ticker request mode/status/result status fields
 - check constraints for trade identity fields
 
 - [ ] **Step 3: Run targeted tests**
@@ -436,6 +454,7 @@ Stop after PR 1. Do not implement PR 2 until the user has reviewed and merged.
 **Goal:** Build a deterministic pre-market universe and signal snapshot pipeline with benchmark/peer relative-strength inputs. No strategy matching or trading decisions yet.
 
 **Files:**
+- Create: `src/trading/manual_requests.py`
 - Create: `src/trading/universe.py`
 - Create: `src/trading/signals.py`
 - Create: `src/trading/pipeline.py`
@@ -443,6 +462,7 @@ Stop after PR 1. Do not implement PR 2 until the user has reviewed and merged.
 - Modify: `src/tools/market_data/types.py` if the provider protocol needs universe support
 - Modify: `src/tools/market_data/alpaca_provider.py` to add an asset/universe method if needed
 - Test: `tests/trading/test_universe.py`
+- Test: `tests/trading/test_manual_requests.py`
 - Test: `tests/trading/test_signals.py`
 - Test: `tests/trading/test_relative_strength.py`
 - Test: `tests/trading/test_pipeline.py`
@@ -452,11 +472,16 @@ Implementation notes:
 - Add a `UniverseProvider` interface with a test fake and an Alpaca implementation.
 - Include a config fallback `TRADING_UNIVERSE_SYMBOLS` for local/dev tests.
 - Persist included and excluded symbols with exclusion reasons.
+- Add `ManualTickerRequestService` for creating, expiring, cancelling, and loading active manual requests.
+- Merge active manual requests into the signal snapshot job even when the ticker did not pass the scanner ranking threshold.
+- Manual requests can bypass scanner selection threshold, but not ticker validation, market-data availability, liquidity rules, or later risk checks.
+- Support `review_only` and `paper_trade_eligible` request modes.
 - Build signal snapshots from existing daily bars/context where possible.
 - Add relative-strength fields vs `SPY`, `QQQ`, sector/theme ETF when configured, and peer basket when available.
 - Add catalyst quality fields and direct-negative-catalyst fields without asking the LLM to infer missing values.
 - Add option-chain placeholder fields as explicitly missing unless a provider exists.
 - Store missing signals explicitly.
+- Mark manual request results as `blocked_by_missing_data` when required market data cannot be fetched.
 - Use no LLM calls.
 
 Stop after PR 2 for review/merge.
@@ -483,11 +508,13 @@ Implementation notes:
 - Load active `StrategyDefinition` rows.
 - Score only deterministic evidence available in `signals_json`.
 - Persist one `CandidateScore` per `(ticker, strategy_id)` that passes basic eligibility.
+- Persist `selection_source` as `scanner`, `manual_request`, or `watchlist_pin`, and link `manual_request_id` when applicable.
 - Classify each candidate into `core_holding`, `catalyst_common_stock`, `strong_theme_sell_put`, `valuation_repair_sell_put`, `catalyst_watch`, or `ordinary_watch`.
 - Distinguish `catalyst_watch` from ordinary neutral/watch output when direction is uncertain but move potential is high.
 - Compute confidence calibration inputs by strategy bucket, direction, catalyst type, benchmark/peer outperformance, and available historical outcomes.
 - Downgrade macro-only bearish candidates to risk warnings or no-trade; do not create single-name bearish candidates from macro alone.
 - Preserve rejected candidates with `rejection_reason` when they are useful for later reflection.
+- Update manual request `result_status` to `catalyst_watch`, `ordinary_watch`, `no_trade`, or `blocked_by_missing_data` when no trading decision will be requested.
 - Do not call `TradingPipeline` yet.
 
 Stop after PR 3 for review/merge.
@@ -538,7 +565,9 @@ Stop after PR 4 for review/merge.
 Implementation notes:
 
 - Use `TRADING_MODEL_NAME` defaulting to `DEFAULT_FAST_MODEL_NAME`.
-- Persist the full decision context snapshot, including trade identity, strategy bucket, benchmark/peer context, and confidence basis.
+- Persist the full decision context snapshot, including trade identity, strategy bucket, benchmark/peer context, confidence basis, `selection_source`, and `manual_request_id`.
+- Enforce manual request mode: `review_only` can produce an actionable explanation but must not create a paper order; `paper_trade_eligible` can create a paper order only after normal risk approval.
+- Update linked manual request `result_status` to `actionable_trade`, `blocked_by_risk`, `no_trade`, `catalyst_watch`, or `ordinary_watch`.
 - Risk manager is the final gate before paper order creation.
 - Paper broker must be idempotent for a trade date / ticker / strategy / action.
 
@@ -595,7 +624,7 @@ Stop after PR 6 for review/merge.
 
 Implementation notes:
 
-- Scan scope starts with open stock positions, paper option positions, same-day trades, staged orders, top morning candidates, and high-impact market/sector news.
+- Scan scope starts with open stock positions, paper option positions, same-day trades, staged orders, top morning candidates, active manual/pinned review tickers, and high-impact market/sector news.
 - Use deterministic dedupe keys so repeated headlines do not trigger repeated rebalances.
 - Normalize alert fields: ticker, event type, sentiment, severity, source, published time, summary, strategy relevance, affected positions/candidates, and action-required flag.
 - Severity levels are `critical`, `high`, `medium`, `low`.
@@ -625,10 +654,11 @@ Stop after PR 7 for review/merge.
 Implementation notes:
 
 - Add `REFLECTION_MODEL_NAME`; production should warn if absent.
-- Reflection input includes portfolio outcome, candidates, accepted/rejected trades, intraday news alerts, intraday rebalance decisions, risk snapshots, factor concentration, benchmark/peer-basket returns, paper option decisions, worst-case assignment snapshots, and learning factors used.
+- Reflection input includes portfolio outcome, candidates, manual ticker requests, accepted/rejected trades, intraday news alerts, intraday rebalance decisions, risk snapshots, factor concentration, benchmark/peer-basket returns, paper option decisions, worst-case assignment snapshots, and learning factors used.
 - Analyze bullish catalyst trades separately from bearish/risk-off calls.
 - Evaluate confidence calibration by strategy bucket, direction, catalyst type, sector/theme, and market regime.
 - Evaluate whether `catalyst_watch` would have been more useful than ordinary neutral/watch.
+- Evaluate whether user-pinned tickers exposed scanner misses or mostly confirmed no-trade discipline.
 - Learning factors start as `candidate`, `active`, `suppressed`, or `retired`.
 - Only tightening risk or context reminders can auto-activate initially.
 - Reflection may emit `strategy_proposal_hints`, but PR 8 should not add them to the strategy catalog directly.
@@ -678,6 +708,8 @@ Stop after PR 9 for review/merge.
 Implementation notes:
 
 - Show live alerts, positions, trades, trade identity, strategy bucket, paper options, candidates, risk exposure, post-close reflection, learning factors, and macro regime.
+- Add a pinned-review form for ticker, reason, mode (`review_only` / `paper_trade_eligible`), priority, and expiry.
+- Show pinned-review results with request status, result status, strategy match, trade identity, confidence basis, risk result, and linked trading decision if any.
 - Show benchmark/peer outperformance and confidence basis for selected and rejected candidates.
 - Show short-put strike, expiry, DTE, delta, IV rank, premium, breakeven, assignment notional, cash-secured amount, earnings date, roll/close plan, and assignment plan.
 - Show strategy proposals, shadow/experimental strategies, and promotion/retirement status.
@@ -694,6 +726,7 @@ Stop after PR 10 for review/merge.
 
 **Files:**
 - Create: `src/scheduler/jobs/trading_preopen_job.py`
+- Create: `src/scheduler/jobs/manual_ticker_review_job.py`
 - Create: `src/scheduler/jobs/intraday_news_scan_job.py`
 - Create: `src/scheduler/jobs/trading_reflection_job.py`
 - Create: `src/scheduler/jobs/strategy_evolution_job.py`
@@ -710,6 +743,7 @@ Implementation notes:
 
 - Keep schedule in `America/New_York`.
 - Add standalone smoke modes for universe/signal DB writes and paper-trade dry run.
+- Add standalone smoke mode for a fixture-backed manual ticker request in `review_only` mode.
 - Add standalone smoke mode for paper option decisions and assignment-risk snapshots using fixture data.
 - Add standalone smoke mode for hourly news scan using a fixed tiny ticker set or fixture mode.
 - Add standalone smoke mode for strategy proposal creation from a fixed reflection fixture.
