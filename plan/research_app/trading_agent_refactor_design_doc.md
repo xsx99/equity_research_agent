@@ -11,11 +11,13 @@ V2 的目标是把系统从“用户维护 watchlist 后生成研究结论”升
 1. 每天自动扫描股票 universe，筛选合适的交易标的，不再依赖用户手动添加 watchlist。
 2. 增加更系统的 quant signals，包括 momentum、mean reversion、volume/liquidity、volatility、gap、relative strength、event/fundamental/insider 等维度。
 3. 引入 versioned trading strategies，由策略层把 signals 转成候选交易意图。
-4. 引入 paper trading：每天根据策略和风险规则生成 orders，更新 paper portfolio、positions、trades、PnL。
-5. 每天收盘后自动 reflection，归因当天交易表现，并生成结构化 learning factors。
-6. 下一次 trading agent 决策时注入 active learning factors，但保留审计、版本和回滚能力。
-7. UI 首页改为交易工作台，重点显示当天持仓、当天 trades、收盘反思和 learning factors。
-8. 明确分离 `Macro Engine` 与 `Stock Trading Strategy Engine`。
+4. 允许系统从 reflection/learning 中归纳新的 trading strategy，并把新 strategy 加入 versioned strategy catalog；初始 15 个策略只是 seed set，不是上限。
+5. 引入 paper trading：每天根据策略和风险规则生成 orders，更新 paper portfolio、positions、trades、PnL。
+6. 常规交易时段每小时扫描新闻，识别高影响正面/负面事件，并在风险约束下立即触发调仓或退出。
+7. 每天收盘后自动 reflection，归因当天交易表现，并生成结构化 learning factors 和 strategy proposals。
+8. 下一次 trading agent 决策时注入 active learning factors，并让 active/shadow strategies 参与下一轮扫描，但保留审计、版本和回滚能力。
+9. UI 首页改为交易工作台，重点显示当天持仓、当天 trades、live alerts、收盘反思、learning factors 和 strategy evolution。
+10. 明确分离 `Macro Engine` 与 `Stock Trading Strategy Engine`。
 
 ## 3. Non-Goals
 
@@ -23,6 +25,8 @@ V2 的目标是把系统从“用户维护 watchlist 后生成研究结论”升
 - 不做高频或分钟级自动交易。首版以 daily pre-market plan、market-open execution simulation、post-close reflection 为主。
 - 不让 LLM 直接执行 broker/order/database side effects。Python orchestration 仍然拥有状态流转和持久化。
 - 不把 reflection 生成的数值调参无条件自动应用到生产策略。首版只自动注入已激活的 learning factors，并对高风险变更保留人工批准或阈值门槛。
+- 不让新生成的 strategy 直接扩大组合风险。自动发现的 strategy 必须先进入 candidate/shadow lifecycle，并受更小的 strategy/risk budget 约束。
+- 不让新闻情绪单独绕过风险管理。Intraday 新闻只能触发有审计的 rebalance proposal，最终仍由 `RiskManager` 和 `PaperBroker` 执行。
 - 不把宏观新闻直接混入每个 ticker prompt 里做随意推理。宏观只通过结构化 macro snapshot/regime 进入个股策略和交易 agent。
 
 ## 4. Recommended Approach
@@ -77,7 +81,19 @@ PaperBroker -> paper_orders -> paper_executions
 PortfolioPipeline -> positions + portfolio_snapshots + trade PnL
       |
       v
+HourlyNewsScanPipeline -> news_alerts -> intraday_rebalance_decisions
+      |
+      v
+PositionSizer + RiskManager -> approved/reduced/rejected intraday actions
+      |
+      v
+PaperBroker -> intraday paper_orders -> paper_executions
+      |
+      v
 ReflectionPipeline -> daily_reflections -> learning_factors
+      |
+      v
+StrategyEvolutionPipeline -> strategy_proposals -> strategy_definitions
       |
       v
 Next trading run receives active learning_factors
@@ -96,7 +112,10 @@ Next trading run receives active learning_factors
 | `RiskManager` | Enforce portfolio-level risk limits, factor exposure concentration limits, correlation clusters, and hard reject/reduce rules | No | `portfolio_risk_snapshots`, `risk_factor_exposures` |
 | `PaperBroker` | Simulate fills, slippage, commissions, rejects, and order status transitions | No | `paper_orders`, `paper_executions` |
 | `PortfolioPipeline` | Maintain positions, cash, exposure, realized/unrealized PnL | No | `paper_positions`, `portfolio_snapshots` |
+| `HourlyNewsScanPipeline` | Scan market/company news hourly during regular trading hours, dedupe events, classify impact, and create actionable alerts | Optional Gemini Flash bounded classifier after deterministic filters | `intraday_news_scans`, `news_alerts` |
+| `IntradayRebalancePipeline` | Convert critical/high-impact alerts into reduce/exit/add/hold proposals for existing positions or active candidates | Yes, Gemini Flash bounded decision schema; risk manager remains final gate | `intraday_rebalance_decisions`, `paper_orders` |
 | `ReflectionPipeline` | Analyze day results, compare thesis vs outcome, extract learning factors | Yes, highest-quality configured model | `daily_reflections`, `learning_factors` |
+| `StrategyEvolutionPipeline` | Convert repeated learning patterns into new strategy proposals, shadow-test them, and promote/retire strategy definitions | Yes for proposal synthesis; deterministic lifecycle gates | `strategy_proposals`, `strategy_definitions`, `strategy_evaluation_results` |
 
 ### Model Routing Policy
 
@@ -108,9 +127,11 @@ Model defaults:
 | --- | --- | --- |
 | Macro summary, if used | `gemini-2.5-flash` or current Gemini Flash equivalent | Short bounded summary; most logic remains deterministic. |
 | Trading decisions | `gemini-2.5-flash` or current Gemini Flash equivalent | Needs fast structured decisions from already-computed candidates/signals. |
+| Intraday news classification and rebalance decisions | `gemini-2.5-flash` or current Gemini Flash equivalent | Needs low-latency structured event classification and action proposals. |
 | Candidate explanations | `gemini-2.5-flash` or current Gemini Flash equivalent | UI explanation only; candidate scoring remains deterministic. |
 | Research audit runs | `gemini-2.5-flash` or current Gemini Flash equivalent unless explicitly overridden | Cost-efficient audit/research path. |
 | Post-close reflection | Highest-quality configured model, e.g. `REFLECTION_MODEL_NAME` pointing to the strongest available reasoning model | Reflection generates learning factors that feed back into future trading. |
+| Strategy proposal synthesis | Highest-quality configured model, usually the same `REFLECTION_MODEL_NAME` | New strategies change future candidate generation, so quality matters more than latency. |
 
 Config should keep these separate:
 
@@ -159,6 +180,8 @@ Each strategy has explicit inputs, thresholds, candidate scoring, risk tags, hol
 
 The first production strategy set should be stored as versioned strategy definitions. The morning scanner evaluates every eligible universe symbol against these definitions, then emits `(ticker, strategy_id, horizon, score, evidence)` candidates. A ticker can match multiple strategies, but the trading layer must choose one primary strategy per action so attribution and learning remain clean.
 
+The 15 strategies below are the seed catalog. They are not a fixed universe of possible strategies. Reflection and learning can create new strategy proposals when repeated evidence shows a pattern that is not well captured by the existing catalog.
+
 | Strategy | Strategy ID | Core Signals To Check | Typical Horizon | Thesis |
 | --- | --- | --- | --- | --- |
 | Catalyst Breakout | `catalyst_breakout_v1` | Fresh high-signal catalyst; post-catalyst volume expansion; price breaking a key level; close above prior resistance; news/filing timestamp freshness | 2 days-4 weeks | New information reprices the stock. |
@@ -176,6 +199,76 @@ The first production strategy set should be stored as versioned strategy definit
 | Failed Breakdown / Reclaim | `failed_breakdown_reclaim_v1` | Break below support; quick reclaim above support/VWAP; short-term reversal volume; trapped shorts signal; close back inside range | 2 days-3 weeks | Failed breakdown creates reversal squeeze. |
 | Oversold Bounce | `oversold_bounce_v1` | Extreme short-term oversold RSI/distance from mean; capitulation volume; stabilization/reclaim trigger; no unresolved major negative catalyst | 1 day-2 weeks | Short-term oversold move mean reverts. |
 | Short Squeeze Breakout | `short_squeeze_breakout_v1` | High short interest; rising borrow/fee if available; positive catalyst; volume surge; breakout through resistance; days-to-cover/liquidity risk | 1 day-2 weeks | Crowded short positioning is forced to cover. |
+
+### Strategy Lifecycle
+
+Every strategy definition has a lifecycle. The seed strategies start as `active`. Strategies discovered from learning must move through staged gates:
+
+| Status | Meaning | Trading Impact |
+| --- | --- | --- |
+| `candidate` | Proposed by reflection/strategy evolution, stored for review and future shadow scoring | Not used for trade decisions. |
+| `shadow` | Evaluated during scans and scored like an active strategy, but cannot create paper orders | Used to collect evidence only. |
+| `experimental` | Can create paper orders with small capped budget and stricter risk limits | Limited paper trading only. |
+| `active` | Normal strategy budget and candidate ranking rules apply | Full paper trading eligibility. |
+| `retired` | No longer considered by scanner | Kept for audit. |
+
+Promotion policy:
+
+- `candidate -> shadow`: allowed automatically if required signals are computable and the proposal has a non-duplicative thesis.
+- `shadow -> experimental`: requires repeated positive shadow evidence or explicit approval.
+- `experimental -> active`: requires enough paper-trade evidence, acceptable drawdown, and no concentration/risk violations.
+- Any strategy can be retired if reflection finds persistent underperformance, overfitting, or excessive factor concentration.
+
+### Strategy Discovery From Learning
+
+`StrategyEvolutionPipeline` runs after reflection and learning factor update. Its job is to cluster repeated learning factors, rejected-candidate evidence, and portfolio attribution into possible new strategies.
+
+Inputs:
+
+- daily reflections
+- learning factors and their later impact
+- selected and rejected candidates
+- strategy performance by market regime
+- risk factor concentration outcomes
+- skipped candidates that would have worked
+- repeated signal combinations not covered by active strategy definitions
+
+Output schema:
+
+```json
+{
+  "proposed_strategy_id": "post_gap_vwap_reclaim_v1",
+  "display_name": "Post-Gap VWAP Reclaim",
+  "source": "reflection_learning",
+  "source_reflection_ids": ["reflection_2026_05_29"],
+  "core_thesis": "Stocks that initially fail a gap but reclaim VWAP with renewed relative volume often continue intraday.",
+  "typical_horizon": "intraday-3d",
+  "required_signals": ["opening_gap_pct", "vwap_reclaim", "relative_volume", "opening_range_reclaim"],
+  "optional_signals": ["fresh_catalyst_type", "sector_rank_percentile"],
+  "scoring_rules": {
+    "min_opening_gap_pct": 0.02,
+    "min_relative_volume_after_reclaim": 1.2
+  },
+  "risk_tags": ["gap_risk", "intraday_momentum"],
+  "macro_blocked_regimes": ["stressed"],
+  "invalidators": ["re-loses VWAP", "relative volume fades", "market breadth deteriorates"],
+  "evidence_summary": "Observed in 5 rejected candidates and 2 winning discretionary-like patterns.",
+  "lifecycle_status": "candidate"
+}
+```
+
+Duplicate control:
+
+- Compare required signals, thesis, horizon, and risk tags against existing strategies.
+- If overlap is high, create a proposed revision to the existing strategy instead of a new strategy.
+- Persist rejected proposals with a duplicate or insufficient-evidence reason for audit.
+
+New strategy safety:
+
+- Newly discovered strategies do not bypass risk management.
+- Newly discovered strategies start with smaller budgets and stricter concentration caps.
+- The scanner should be able to run active and shadow strategies together, but only active/experimental strategies can generate paper orders.
+- Strategy promotion/retirement decisions are stored and visible in UI.
 
 ### Strategy Matching Output
 
@@ -242,10 +335,13 @@ All scheduled times are in `America/New_York`.
 | 08:15 | Strategy matching and candidate scoring | `candidate_scores` with strategy, horizon, evidence, invalidators |
 | 08:45 | Trading decision generation | `trading_decisions` with selected action and staged `paper_orders` |
 | 09:30 | Paper open execution | `paper_executions`, open positions |
+| Hourly 10:00-15:00 | Intraday news scan | `intraday_news_scans`, `news_alerts`, possible rebalance proposals |
+| Immediately after critical/high alert | Intraday rebalance | approved/reduced/rejected `intraday_rebalance_decisions`, possible paper orders |
 | 15:55 | Optional risk check | staged close/rebalance decisions if enabled |
 | 16:05 | Portfolio mark | `portfolio_snapshots`, trade PnL |
 | 16:20 | Daily reflection | `daily_reflections` |
 | 16:40 | Learning factor update | `learning_factors`, next-run context |
+| 16:50 | Strategy evolution | `strategy_proposals`, candidate/shadow strategy updates |
 
 Manual runs remain available for debugging, but scheduled daily flow is the primary product path.
 
@@ -259,6 +355,61 @@ Morning workflow semantics:
 6. Deterministic risk constraints and portfolio budget decide whether the proposed action becomes a staged paper order, is reduced, or is rejected.
 
 The final morning output is not just a ranked list. It is a trade plan: selected ticker, selected strategy, horizon, action, target exposure, risk budget used, and explicit reason if a high-scoring candidate was skipped.
+
+### Intraday News Scan and Rebalance
+
+During regular trading hours, the system runs an hourly news scan. The initial scope should include:
+
+- open paper positions
+- tickers with staged orders or same-day trades
+- top active candidates from the morning scan
+- high-impact market/sector news from the provider feed
+
+If provider limits allow, the scan can also query broader universe news, but the first production path should prioritize portfolio-relevant names so it can react quickly without excessive API usage.
+
+Each scan produces normalized `news_alerts`:
+
+```json
+{
+  "ticker": "ASAN",
+  "alert_type": "earnings_beat_raise",
+  "sentiment": "positive",
+  "severity": "high",
+  "source": "benzinga",
+  "published_at": "2026-05-29T11:28:00-04:00",
+  "title": "Asana shares higher after better-than-expected results and raised guidance",
+  "summary": "Beat-and-raise guidance is a strong positive catalyst.",
+  "strategy_relevance": ["earnings_drift_v1", "gap_and_go_v1"],
+  "affected_positions": ["position_uuid"],
+  "dedupe_key": "ASAN|earnings_beat_raise|2026-05-29T11:28",
+  "action_required": true
+}
+```
+
+Severity rules:
+
+- `critical`: event directly invalidates an open position thesis or creates immediate gap/liquidity risk.
+- `high`: material positive/negative company event likely to affect current position or top candidate.
+- `medium`: relevant but not enough to force immediate action.
+- `low`: store for context only.
+
+Allowed intraday rebalance actions:
+
+- `hold`: alert acknowledged, no order.
+- `reduce`: cut exposure because risk/thesis changed.
+- `exit`: close position because invalidator triggered.
+- `add`: increase exposure only if positive news confirms the active strategy, risk budget remains available, and factor concentration stays within limits.
+- `open_new`: disabled by default for V2 unless the alert is critical/high and the ticker was already a morning candidate or approved override.
+
+Intraday rebalance is still gated:
+
+1. `HourlyNewsScanPipeline` dedupes and classifies alerts.
+2. `IntradayRebalancePipeline` proposes action with evidence and urgency.
+3. `PositionSizer` recalculates target size.
+4. `RiskManager` applies factor exposure and concentration limits.
+5. `PaperBroker` simulates any approved order.
+
+This loop must persist rejected and no-action alerts. They are important for reflection: the system should learn whether it ignored useful news, overreacted to noise, or correctly protected the portfolio.
 
 ## 9. Trading Decision Contract
 
@@ -446,6 +597,7 @@ Reflection runs after the portfolio is marked to close. It receives:
 - morning macro snapshot
 - strategy candidates and scores
 - trading decisions and rejected decisions
+- intraday news alerts and rebalance decisions
 - paper orders/executions
 - end-of-day PnL, benchmark return, sector return
 - per-trade MFE/MAE if available
@@ -457,10 +609,12 @@ Reflection should evaluate the portfolio, not just individual research calls. Th
 - Did the selected strategies perform as expected for their horizons?
 - Did risk constraints prevent losses or block profitable opportunities?
 - Were skipped candidates better than selected trades?
+- Did intraday news alerts trigger useful rebalances, or did the system overreact/underreact?
 - Did macro regime constraints help or hurt?
 - Was the portfolio too concentrated in any sector, strategy, horizon, beta, volatility, liquidity, event, macro, or correlation factor?
 - Did factor concentration explain more PnL than ticker selection?
 - Did active learning factors improve decisions, overfit, or become stale?
+- Are there repeated profitable or avoided-loss patterns that deserve a new trading strategy rather than another one-off learning factor?
 
 The reflection output is structured:
 
@@ -496,6 +650,8 @@ The reflection output is structured:
 }
 ```
 
+Reflection may also emit `strategy_proposal_hints`: partial observations that are not yet complete strategy definitions. `StrategyEvolutionPipeline` owns converting those hints into concrete strategy proposals so reflection stays focused on evidence and attribution.
+
 The next trading run must adapt to active learning factors by injecting them into candidate scoring and trading decision context. Adaptation means:
 
 - candidate scores can be adjusted by strategy-scoped learning factors
@@ -530,9 +686,14 @@ Proposed new tables:
 | `macro_snapshots` | One macro snapshot/regime per run/day |
 | `signal_snapshots` | Per ticker per day quant features and normalized signal JSON |
 | `strategy_definitions` | Versioned strategy metadata, required signals, horizon, scoring config, invalidators |
+| `strategy_proposals` | Proposed new strategies or revisions derived from reflection/learning, including lifecycle status and evidence |
+| `strategy_evaluation_results` | Shadow/experimental performance and promotion/retirement evidence for strategy definitions |
 | `strategy_runs` | One candidate-scoring batch per day |
 | `candidate_scores` | Ranked ticker candidates by strategy, horizon, evidence, macro compatibility |
 | `trading_decisions` | Trading agent decisions and context snapshot |
+| `intraday_news_scans` | Hourly scan metadata, status, provider coverage, and error state |
+| `news_alerts` | Normalized positive/negative news alerts with severity, sentiment, dedupe key, affected tickers/positions |
+| `intraday_rebalance_decisions` | Alert-driven hold/reduce/exit/add/open_new proposals and final risk-gated outcome |
 | `risk_limit_configs` | Versioned portfolio risk limits and factor exposure caps |
 | `position_sizing_decisions` | Deterministic sizing inputs, applied caps, final target weight/quantity |
 | `portfolio_risk_snapshots` | Portfolio-level gross/net exposure and factor exposures before/after proposed trades and after fills |
@@ -565,6 +726,9 @@ Existing tables remain useful:
   "optional_signals": ["fresh_catalyst_type", "sector_rank_percentile"],
   "risk_tags": ["gap_risk", "momentum"],
   "macro_blocked_regimes": ["stressed"],
+  "lifecycle_status": "active",
+  "source": "seed",
+  "parent_strategy_id": null,
   "scoring_rules": {
     "min_opening_gap_pct": 0.02,
     "min_relative_volume": 1.5
@@ -574,6 +738,8 @@ Existing tables remain useful:
 ```
 
 This keeps strategy identity, horizon, and signal requirements in data. Python strategy evaluators can still implement the scoring math, but the DB row is the audit source for what version was active on a given trade date.
+
+Discovered strategies use the same `strategy_definitions` shape once promoted from proposal to catalog entry. They differ only by `source`, `lifecycle_status`, parent/revision metadata, and risk budget limits.
 
 ## 13. UI Design
 
@@ -586,6 +752,7 @@ Default page should become a daily trading dashboard instead of a research run l
 - `Trades`
 - `Candidates`
 - `Reflections`
+- `Strategies`
 - `Research`
 - `Watchlist` or `Overrides`
 
@@ -600,6 +767,8 @@ Above the fold:
 
 Main sections:
 
+0. `Live Alerts`
+   - hourly scan status, critical/high warning count, ticker, sentiment, severity, source, published time, linked position/candidate, rebalance action
 1. `Current Positions`
    - ticker, side, quantity, average price, last/close price, day PnL, total PnL, strategy, horizon, factor tags, holding age, invalidator status
 2. `Today's Trades`
@@ -609,9 +778,11 @@ Main sections:
 4. `Risk Exposure`
    - sector/industry exposure, strategy exposure, horizon bucket exposure, beta-adjusted exposure, volatility/liquidity buckets, event exposure, correlation clusters, binding limits
 5. `Post-Close Reflection`
-   - what worked, what failed, strategy attribution, concrete evidence
+   - what worked, what failed, strategy attribution, intraday alert/rebalance attribution, concrete evidence
 6. `Learning Factors`
    - new factors, active factors used today, status, scope, confidence, source reflection
+7. `Strategy Evolution`
+   - new strategy proposals, shadow strategies, experimental strategies, promotion/retirement status, evidence, duplicate/revision links
 
 ### `/macro`
 
@@ -632,10 +803,14 @@ Keep the current research run UI for drill-down and audit, but make it secondary
 - Every pipeline run stores `started_at`, `finished_at`, `status`, and `error_message`.
 - Missing provider data should degrade the relevant signal to missing, not fabricate values.
 - Candidate scoring skips tickers without minimum required signals.
+- Strategy proposals must not mutate active strategy definitions directly. They create candidate/shadow strategy definitions through explicit lifecycle transitions.
+- News alerts must be deduped by ticker/event/source/time window so repeated headlines do not trigger repeated rebalances.
+- Intraday rebalance decisions must persist the triggering `news_alert_id`, proposed action, final action, and risk decision.
 - Trading decisions must persist full context snapshots: candidate signals, macro snapshot id, portfolio snapshot id, risk config version, strategy version, learning factors used.
 - Paper orders must be idempotent per `trade_date + ticker + strategy_id + decision_type`.
 - A failed ticker must not abort the whole universe scan.
 - Reflection failure must not mutate learning factors.
+- Intraday news scan failure must not block portfolio marking or post-close reflection.
 
 ## 15. Testing and Smoke Tests
 
@@ -646,17 +821,22 @@ Unit tests:
 - macro regime classification
 - strategy candidate scoring
 - risk checks
+- news alert dedupe and severity classification
+- intraday rebalance action gating
 - factor exposure calculation
 - concentration limit enforcement
 - position sizing and size-reduction reasons
 - paper order state transitions
 - portfolio PnL calculations
 - learning factor activation rules
+- strategy proposal validation and duplicate detection
+- strategy lifecycle transition rules
 - web route rendering for today/trades/reflections
 
 Smoke tests:
 
 - standalone market data smoke for universe + signal computation
+- standalone news alert smoke for a tiny fixed ticker set or fixture mode
 - standalone DB smoke for writing signal/candidate/order/portfolio rows
 - standalone DB smoke for writing portfolio risk snapshots and risk factor exposures
 - optional live paper-trade dry run that uses a tiny ticker set and does not consume large API quota
@@ -678,19 +858,35 @@ Implementation must continue to use `source ~/.venv/bin/activate` before Python 
 - Implement position sizing, risk checks, factor exposure caps, budget allocation, and paper broker.
 - Replace homepage with `/today` trading dashboard.
 
-### Phase 3: Reflection
+### Phase 3: Intraday News Alerts and Rebalance
+
+- Add hourly news scan metadata and normalized alert tables.
+- Classify positive/negative high-impact events for open positions and top candidates.
+- Trigger intraday rebalance proposals for critical/high alerts.
+- Gate every alert-driven action through `PositionSizer`, `RiskManager`, and `PaperBroker`.
+- Persist no-action/rejected alerts for post-close reflection.
+
+### Phase 4: Reflection
 
 - Add post-close reflection agent and `daily_reflections`.
 - Generate learning factors with lifecycle statuses.
 - Show reflection and learning factors in UI.
 
-### Phase 4: Learning Injection
+### Phase 5: Learning Injection
 
 - Inject active learning factors into `TradingPipeline`.
 - Persist learning factor applications.
 - Evaluate whether factors improved strategy outcomes.
 
-### Phase 5: Strategy Expansion
+### Phase 6: Strategy Evolution
+
+- Generate new strategy proposals from repeated reflection/learning patterns.
+- Add candidate/shadow strategy lifecycle states.
+- Run shadow strategies during scans without allowing them to place paper orders.
+- Promote strategies to experimental/active only when evidence and risk checks pass.
+- Show strategy proposals and lifecycle status in UI.
+
+### Phase 7: Strategy Expansion
 
 - Add more strategy definitions and signal groups.
 - Add macro-aware strategy blocking and risk-budget adjustment.
@@ -708,10 +904,14 @@ Implementation must continue to use `source ~/.venv/bin/activate` before Python 
 8. Portfolio risk snapshots show factor exposure by sector, strategy, horizon, beta, volatility, liquidity, event type, macro sensitivity, and correlation cluster.
 9. Risk manager reduces or rejects trades that would make the portfolio too concentrated in any configured risk factor.
 10. Paper portfolio shows positions, trades, exposure, and day PnL.
-11. Post-close reflection analyzes portfolio returns, selected trades, rejected candidates, macro constraints, factor concentration, and learning-factor impact.
-12. Active learning factors are visible in UI, injected into later trading decisions, and tracked through `learning_factor_applications`.
-13. `/today` shows current positions, today trades, strategy/horizon, risk factor exposure, reflection, learning factors, and macro regime without requiring the user to inspect raw JSON.
-14. Existing research run audit pages continue to work.
+11. Hourly intraday news scans create deduped positive/negative alerts for open positions, same-day trades, top candidates, and high-impact market/sector events.
+12. Critical/high alerts can trigger immediate risk-gated `hold/reduce/exit/add` rebalance decisions, with `open_new` disabled by default unless the ticker was already a morning candidate or override.
+13. Post-close reflection analyzes portfolio returns, selected trades, rejected candidates, intraday alerts, rebalance outcomes, macro constraints, factor concentration, and learning-factor impact.
+14. Strategy evolution can create new strategy proposals from repeated learning patterns without being limited to the initial 15 seed strategies.
+15. New strategies enter `candidate` or `shadow` status first, and cannot create paper orders until promoted to `experimental` or `active`.
+16. Active learning factors are visible in UI, injected into later trading decisions, and tracked through `learning_factor_applications`.
+17. `/today` shows live alerts, current positions, today trades, strategy/horizon, risk factor exposure, reflection, learning factors, strategy evolution, and macro regime without requiring the user to inspect raw JSON.
+18. Existing research run audit pages continue to work.
 
 ## 18. Open Questions
 
