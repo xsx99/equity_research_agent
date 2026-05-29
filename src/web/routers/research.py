@@ -125,13 +125,16 @@ def _normalize_indicators(global_indicators: dict) -> list[dict[str, Any]]:
     for key, item in global_indicators.items():
         if not isinstance(item, dict):
             continue
+        val = item.get("value")
+        if isinstance(val, float):
+            val = round(val, 2)
         normalized.append(
             {
                 "key": key,
                 "label": item.get("label") or key,
                 "source": item.get("source"),
                 "unit": item.get("unit"),
-                "value": item.get("value"),
+                "value": val,
                 "observed_on": item.get("observed_on"),
             }
         )
