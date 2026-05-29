@@ -303,7 +303,9 @@ class TestResearchList:
             gs.return_value.__exit__ = MagicMock(return_value=False)
             # Mock the query chain
             q = MagicMock()
+            q.join.return_value = q
             q.outerjoin.return_value = q
+            q.filter.return_value = q
             q.order_by.return_value = q
             q.all.return_value = [run]
             session.query.return_value = q
@@ -325,7 +327,9 @@ class TestResearchList:
             gs.return_value.__enter__ = MagicMock(return_value=session)
             gs.return_value.__exit__ = MagicMock(return_value=False)
             q = MagicMock()
+            q.join.return_value = q
             q.outerjoin.return_value = q
+            q.filter.return_value = q
             q.order_by.return_value = q
             q.all.return_value = [formal_run, manual_run]
             session.query.return_value = q
@@ -342,7 +346,9 @@ class TestResearchList:
             gs.return_value.__enter__ = MagicMock(return_value=session)
             gs.return_value.__exit__ = MagicMock(return_value=False)
             q = MagicMock()
+            q.join.return_value = q
             q.outerjoin.return_value = q
+            q.filter.return_value = q
             q.order_by.return_value = q
             q.all.return_value = []
             session.query.return_value = q

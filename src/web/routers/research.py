@@ -12,6 +12,7 @@ from fastapi.templating import Jinja2Templates
 from src.db.connection import get_session
 from src.db.models.evaluation import EvalResult
 from src.db.models.research import ResearchOutput, ResearchRun
+from src.db.models.watch_list import Watchlist
 from src.web.flash import get_flash
 
 router = APIRouter()
@@ -147,8 +148,10 @@ def research_list(request: Request):
     with get_session() as session:
         runs = (
             session.query(ResearchRun)
+            .join(Watchlist, ResearchRun.ticker == Watchlist.ticker)
             .outerjoin(ResearchOutput, ResearchRun.run_id == ResearchOutput.run_id)
             .outerjoin(EvalResult, ResearchRun.run_id == EvalResult.run_id)
+            .filter(Watchlist.is_active == True)
             .order_by(ResearchRun.created_at.desc())
             .all()
         )
