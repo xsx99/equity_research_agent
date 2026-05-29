@@ -3,6 +3,7 @@
 ## 2026-05-29
 
 - Fixed the self-hosted GitHub Actions deploy path so it reuses an existing persistent `postgres_db` container instead of attempting to recreate it during app deploys, treats `postgres_network` as an external Docker network consistently across compose files, verifies Postgres readiness plus persistent disk backing before restarting app services, and documents the conflict diagnosis commands.
+- Fixed follow-on deploy container-name conflicts for stale app containers by removing only `scheduler`, `web`, and `nginx` after image build and before compose recreate, while continuing to preserve and verify the persistent Postgres container/data mount.
 - Refreshed the app route tests for the current `src.web` app factory/router split and restored global context rendering on the research detail page so the existing route suite reflects the intended UI behavior.
 
 ## 2026-05-04

@@ -151,6 +151,7 @@ The GitHub Actions deploy job treats Postgres as a persistent external dependenc
 - It verifies Postgres is ready with `pg_isready`.
 - It verifies `SHOW data_directory;` returns `/var/lib/postgresql/data`.
 - It verifies that `/var/lib/postgresql/data` is backed by the host path `/data/postgres_data`.
+- It removes and recreates only the stateless app containers: `scheduler`, `web`, and `nginx`.
 
 If deploy fails with a container-name conflict, do not remove the container until you confirm where the data lives:
 

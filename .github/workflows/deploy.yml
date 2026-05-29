@@ -72,6 +72,7 @@ jobs:
           POSTGRES_NETWORK=postgres_network
           POSTGRES_DATA_HOST_PATH=/data/postgres_data
           POSTGRES_DATA_CONTAINER_PATH=/var/lib/postgresql/data
+          APP_CONTAINERS=(scheduler web nginx)
 
           sudo docker network inspect "$POSTGRES_NETWORK" >/dev/null 2>&1 || sudo docker network create "$POSTGRES_NETWORK"
 
@@ -116,5 +117,11 @@ jobs:
           fi
 
           sudo docker compose --env-file "$ENV_FILE" build --no-cache scheduler web
+          for container in "${APP_CONTAINERS[@]}"; do
+            if sudo docker container inspect "$container" >/dev/null 2>&1; then
+              echo "Removing existing app container $container before recreate."
+              sudo docker rm -f "$container"
+            fi
+          done
           sudo docker compose --env-file "$ENV_FILE" up -d --force-recreate scheduler web nginx
           echo "Deployment complete on local machine."

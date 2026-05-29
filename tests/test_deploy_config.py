@@ -35,3 +35,15 @@ def test_deploy_workflow_reuses_existing_postgres_container():
     assert "SHOW data_directory;" in deploy_script
     assert "/data/postgres_data" in deploy_script
     assert "/var/lib/postgresql/data" in deploy_script
+
+
+def test_deploy_workflow_removes_stale_app_containers_only():
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/deploy.yml").read_text())
+    deploy_steps = workflow["jobs"]["deploy"]["steps"]
+    deploy_script = next(
+        step["run"] for step in deploy_steps if step.get("name") == "Deploy locally"
+    )
+
+    assert "APP_CONTAINERS=(scheduler web nginx)" in deploy_script
+    assert 'docker rm -f "$container"' in deploy_script
+    assert "APP_CONTAINERS=(scheduler web nginx postgres_db)" not in deploy_script
