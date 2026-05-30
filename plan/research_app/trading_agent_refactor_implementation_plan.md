@@ -805,6 +805,7 @@ Implementation notes:
 - Load reflection prompts through `PromptRegistry`; no inline prompt strings.
 - Persist prompt run and usage records for reflection, including raw output and parsed output. Reflection failure must not mutate learning factors.
 - Reflection input includes portfolio outcome, candidates, manual ticker requests, accepted/rejected trades, intraday news alerts, intraday rebalance decisions, risk snapshots, factor concentration, benchmark/peer-basket returns, paper option decisions, worst-case assignment snapshots, and learning factors used.
+- Attribute trades against benchmarks and decision-time peer baskets over each selected strategy's configured holding horizon. Daily reflection should record interim mark-to-market for open trades and final horizon outcome when the trade closes or the intended horizon expires.
 - Analyze bullish catalyst trades separately from bearish/risk-off calls.
 - Evaluate confidence calibration by strategy bucket, direction, catalyst type, sector/theme, and market regime.
 - Evaluate whether `catalyst_watch` would have been more useful than ordinary neutral/watch.
@@ -866,7 +867,7 @@ Implementation notes:
 - Show benchmark/peer outperformance and confidence basis for selected and rejected candidates.
 - Show short-put strike, expiry, DTE, delta, IV rank, premium, breakeven, assignment notional, cash-secured amount, earnings date, roll/close plan, and assignment plan.
 - Show strategy proposals, shadow/experimental strategies, and promotion/retirement status.
-- Show strategy performance by win rate, PnL, alpha vs benchmarks/peer basket, drawdown, sample size, market regime, and bullish/bearish split.
+- Show strategy performance by win rate, PnL, alpha vs benchmarks/decision-time peer basket over each strategy's configured horizon, drawdown, sample size, market regime, and bullish/bearish split.
 - Show LLM/API usage and estimated cost by pipeline, model, provider, run, token count, latency, retry/error state, and prompt/schema version.
 - Keep `/research` intact as audit UI.
 - Avoid raw JSON as primary UX; use structured tables/cards.

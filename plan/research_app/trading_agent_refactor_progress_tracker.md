@@ -16,6 +16,7 @@
 - Clarified intraday loop: hourly refresh should scan material signal changes across price/volume, relative strength, options, news/events, and freshness checks for low-frequency sources, not news alone.
 - Updated UI design to a tabbed trading workstation: Overview, Portfolio, Trades, Risk & Macro, Candidates, Learning & Strategies, and Ops & Cost, with full trade drill-down audit trails.
 - Added prompt versioning and persistence requirement: every LLM pipeline must load version-controlled prompts through a prompt registry and persist prompt/template version, rendered prompt hash, input context, raw/parsed output, schema version, usage, cost, latency, and errors.
+- Clarified attribution policy: benchmark and peer-basket alpha must use the selected strategy's configured holding horizon, with interim marks for open trades, rather than assuming every strategy is a one-day trade.
 
 ## PR Slice Status
 
@@ -39,4 +40,5 @@
 - 2026-05-29: `git diff --check` passed after adding Manual Ticker Review / Pinned Review planning updates.
 - 2026-05-29: `git diff --check` passed after adding tabbed UI workstation planning updates.
 - 2026-05-29: `git diff --check` passed after adding prompt versioning and persistence planning updates.
+- 2026-05-30: `git diff --check` passed after clarifying strategy-horizon attribution wording.
 - No implementation tests run yet; documentation/planning update only.

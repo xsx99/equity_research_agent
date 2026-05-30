@@ -215,9 +215,9 @@ Performance evaluation must therefore compare each trade against:
 - `SPY`, for broad market context
 - `QQQ`, for growth/tech beta
 - sector/theme ETFs such as `SMH` or `SOXX` when relevant
-- same-day peer baskets built from sector, industry, theme, market cap, and catalyst type
+- decision-time peer baskets built from sector, industry, theme, market cap, catalyst type, and the alternative candidates available when the decision was made
 
-The key attribution question is not only whether the stock went up. It is whether the selected stock outperformed a reasonable basket of similar alternatives available the same day.
+The key attribution question is not only whether the stock went up over the selected strategy's intended holding period. It is whether the selected stock outperformed the appropriate benchmark and a reasonable peer basket from the same decision-time opportunity set, measured over that strategy horizon and any strategy-specific interim review checkpoints.
 
 ### Bearish Signal Policy
 
@@ -898,7 +898,7 @@ Reflection runs after the portfolio is marked to close. It receives:
 
 Reflection should evaluate the portfolio, not just individual research calls. The main questions are:
 
-- Did bullish catalyst trades outperform the relevant ETF and peer basket, or only ride a sector tailwind?
+- Did bullish catalyst trades outperform the relevant ETF and peer basket over their intended strategy horizon, or only ride a sector tailwind?
 - Did bearish or risk-off reasoning actually add value, or did it incorrectly suppress strong-trend names?
 - Were high-confidence calls calibrated by historical pattern quality, or did narrative completeness inflate confidence?
 - Did `neutral/watch` hide a catalyst-watch opportunity with large move potential?
@@ -1122,7 +1122,7 @@ Tabs:
      - trade count and sample size
      - win rate
      - total PnL and average PnL
-     - average alpha vs `SPY`, `QQQ`, sector/theme ETF, and peer basket where available
+     - average alpha vs `SPY`, `QQQ`, sector/theme ETF, and peer basket where available, measured over each strategy's configured holding horizon
      - max drawdown
      - performance by market regime
      - bullish vs bearish split
