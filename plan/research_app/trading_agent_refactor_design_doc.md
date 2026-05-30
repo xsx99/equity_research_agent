@@ -14,16 +14,16 @@ V2 的目标是把系统从“用户维护 watchlist 后生成研究结论”升
 2. 增加更系统的 quant signals，包括 momentum、mean reversion、volume/liquidity、volatility、gap、relative strength、event/fundamental/insider 等维度。
 3. 引入 versioned trading strategies，由策略层把 signals 转成候选交易意图。
 4. 允许系统从 reflection/learning 中归纳新的 trading strategy，并把新 strategy 加入 versioned strategy catalog；初始 15 个策略只是 seed set，不是上限。
-5. 引入 paper trading：每天根据策略和风险规则生成 orders，更新 paper portfolio、positions、trades、PnL。
+5. 引入 paper trading：每天根据策略和风险规则生成 orders，在同一个 simulated margin account 里更新 stock/options positions、trades、PnL、margin usage 和 buying power。
 6. 常规交易时段每小时扫描新闻，盘前和盘后再额外扫描一次，识别高影响正面/负面事件，并在风险约束下立即触发调仓或退出。
 7. 每天收盘后自动 reflection，归因当天交易表现，并生成结构化 learning factors 和 strategy proposals。
 8. 下一次 trading agent 决策时注入 active learning factors，并让 active/shadow strategies 参与下一轮扫描，但保留审计、版本和回滚能力。
 9. UI 首页改为交易工作台，重点显示当天持仓、当天 trades、live alerts、收盘反思、learning factors 和 strategy evolution。
 10. 明确分离 `Macro Engine` 与 `Stock Trading Strategy Engine`。
 11. 先验证相对行业、主题、同类股票和成交量/价格结构，再找明确个股，最后决定是否交易。
-12. 每个交易必须先归类为核心仓、实验性的卫星仓、卖put等等trade identity，并由这个身份决定仓位、持有周期、退出规则和反思口径。
-13. 增加 paper/simulation-only options strategy layer，至少支持 `sell_put`、`close_put`、`roll_put`、`avoid_earnings_put`、`put_assignment_plan`。
-14. Risk manager 必须用 worst-case assigned portfolio 评估 short put 风险，而不是只看当前股票仓位，同时注意宏观经济calendar和earnings calendar，防止event risk。
+12. 每个交易必须先归类为核心仓、tactical stock trade、tactical option trade、risk hedge overlay、watch-only 等 trade identity，并由这个身份决定仓位、持有周期、退出规则和反思口径。
+13. 增加 paper/simulation-only options strategy layer，支持单腿 call/put、short put、vertical spread、covered/collar-like overlay、其他可配置 multi-leg 组合；`sell_put` 只是其中一个策略类型。
+14. Risk manager 必须用 leg-based option risk 评估 delta/gamma/theta/vega、max loss、margin requirement、buying power effect、event risk；对 short put 或其他可能 assignment 的结构，额外用 worst-case assigned portfolio 评估风险，而不是只看当前股票仓位。
 15. Confidence 必须按历史 pattern 和策略桶校准，不能因为叙事完整或宏观理由多就给高分。
 16. 支持用户手动 pin ticker 让 trading bot 强制评估，但 manual request 只代表“必须评估”，不代表“允许交易”。
 
@@ -38,8 +38,8 @@ V2 的目标是把系统从“用户维护 watchlist 后生成研究结论”升
 - 不把宏观新闻直接混入每个 ticker prompt 里做随意推理。宏观只通过结构化 macro snapshot/regime 进入个股策略和交易 agent。
 - 不因为宏观 risk-off、估值高、RSI 高、VIX 上升等单独理由生成单票做空或高 confidence bearish trade。除非有直接公司级负面 catalyst 和价格/成交量确认，否则 bearish 结论只能作为风险提示、减仓或暂停加仓依据。
 - 不让短线 catalyst 信号直接驱动核心仓卖出。核心仓由独立的风险预算、加仓/暂停加仓规则和 thesis invalidation 管理。
-- Options layer 在 V2 只做 paper/simulation，不接入真实期权下单。默认假设可以用保证金sell naked put。
-- 不让手动 pin 的 ticker 绕过 liquidity、missing data、risk manager、short-put assignment risk 或 bearish gating。手动 pin 只是 evaluation source，不是 trade approval。
+- Stock 和 options 在 V2 共用同一个 simulated margin account。股票正股交易也消耗 margin/buying power，不单独假设 cash-only account；期权可以模拟 call、put、spread 和 multi-leg 组合，默认按 margin account / buying power 约束建模，不要求 cash-secured 或 security-secured；但必须记录每条 leg、组合级风险、max loss、margin requirement、buying power effect 和 event risk。
+- 不让手动 pin 的 ticker 绕过 liquidity、missing data、risk manager、option risk、assignment risk 或 bearish gating。手动 pin 只是 evaluation source，不是 trade approval。
 
 ## 4. Recommended Approach
 
@@ -93,7 +93,7 @@ OptionsStrategyLayer -> instrument plan, if option expression is eligible
 TradingPipeline -> proposed trading decisions + thesis + suggested sizing
       |
       v
-PositionSizer + RiskManager -> approved/reduced/rejected final action, including worst-case assignment checks
+PositionSizer + RiskManager -> approved/reduced/rejected final action, including option-risk and worst-case assignment checks
       |
       v
 PaperBroker -> paper_orders / paper_option_orders -> paper_executions
@@ -126,17 +126,18 @@ Next trading run receives active learning_factors
 | --- | --- | --- | --- |
 | `UniverseProvider` | Load daily tradable US equity universe from market data provider, normalize tickers, apply exchange/asset filters | No | `universe_symbols`, `universe_snapshots` |
 | `ManualTickerReviewPipeline` | Accept user-pinned tickers for forced evaluation, validate basic eligibility, attach request reason/mode, and merge them into signal/strategy evaluation without granting trade approval | No | `manual_ticker_requests`, `universe_symbols`, `signal_snapshots` |
-| `MacroPipeline` | Fetch rates, VIX, credit spreads, commodities, broad index trend, economic calendar; produce market regime | Optional bounded summary using Gemini Flash | `macro_snapshots` |
-| `SignalPipeline` | Build deterministic per-ticker signal snapshots from market bars plus normalized Postgres-backed insider, SEC, news, fundamentals, event/earnings calendar, options, and existing research context data; refresh provider data only through controlled adapters when needed | No | `signal_snapshots` |
+| `MacroPipeline` | Fetch rates, VIX, credit spreads, commodities, broad index trend, economic calendar; consume macro/sector/theme read-through context; produce market regime | Optional bounded summary using Gemini Flash | `macro_snapshots` |
+| `PortfolioEventCalendarPipeline` | Normalize future macro, economic, earnings, Fed, and company events; score relevance/risk against current holdings, candidates, option expiries, and strategy holding periods; hide irrelevant low-impact events from the UI | No | `calendar_events`, `portfolio_event_risk_assessments` |
+| `SignalPipeline` | Build deterministic per-ticker signal snapshots from market bars plus normalized Postgres-backed insider, SEC, news, fundamentals, event/earnings calendar, options, macro/sector/theme read-through source family, and existing research context data; refresh provider data only through controlled adapters when needed | No | `signal_snapshots` |
 | `StrategyPipeline` | Match each ticker to versioned strategy definitions, score every eligible `(ticker, strategy_id)` pair, attach strategy horizon/evidence, and create ranked candidate scores | Mostly no; optional strategy explanation | `strategy_runs`, `candidate_scores` |
 | `PrimaryStrategySelector` | Choose one primary tactical strategy and one expression bucket per ticker/action so attribution, trade identity, and risk budgeting stay clean | No | `trade_classifications`, `trading_decisions` context |
-| `TradeClassifier` | Assign portfolio-pool trade identity before candidate order decisions: core holding, tactical stock trade, tactical option income, or watch-only. `RiskManager` assigns `risk_hedge_overlay` for hedge actions | No | `trade_classifications` or embedded in `trading_decisions` |
-| `OptionsStrategyLayer` | Create paper-only instrument plans only when an option expression is eligible, including strike/expiry/DTE/delta/IV/premium/breakeven/assignment risk fields | Mostly no; optional explanation | `option_strategy_decisions`, `paper_option_orders`, `paper_option_positions` |
+| `TradeClassifier` | Assign portfolio-pool trade identity before candidate order decisions: core holding, tactical stock trade, tactical option trade, or watch-only. `RiskManager` assigns `risk_hedge_overlay` for hedge actions | No | `trade_classifications` or embedded in `trading_decisions` |
+| `OptionsStrategyLayer` | Create paper-only leg-based option plans only when an option expression is eligible, including single-leg calls/puts, short puts, spreads, multi-leg structures, Greeks, max loss, margin requirement, buying-power effect, and assignment risk when relevant | Mostly no; optional explanation | `option_strategy_decisions`, `paper_option_orders`, `paper_option_positions` |
 | `TradingPipeline` | Combine selected strategy, trade identity, instrument plan, macro regime, portfolio state, risk config, and learning factors; produce proposed trading decisions, thesis, invalidators, and suggested sizing | Yes, Gemini Flash bounded decision schema | `trading_decisions`, `paper_orders` |
 | `PositionSizer` | Convert approved trade intent into target quantity/weight using volatility, liquidity, strategy budget, macro budget, and factor exposure constraints | No | `position_sizing_decisions` |
-| `RiskManager` | Enforce portfolio-level risk limits, factor exposure concentration limits, correlation clusters, short-put assignment exposure, and hard reject/reduce rules | No | `portfolio_risk_snapshots`, `risk_factor_exposures`, `option_risk_snapshots` |
-| `PaperBroker` | Simulate fills, slippage, commissions, rejects, and order status transitions | No | `paper_orders`, `paper_executions` |
-| `PortfolioPipeline` | Maintain positions, cash, exposure, realized/unrealized PnL | No | `paper_positions`, `portfolio_snapshots` |
+| `RiskManager` | Enforce portfolio-level risk limits, factor exposure concentration limits, correlation clusters, leg-based option risk, assignment exposure when relevant, and hard reject/reduce rules | No | `portfolio_risk_snapshots`, `risk_factor_exposures`, `option_risk_snapshots` |
+| `PaperBroker` | Simulate stock and option fills, slippage, commissions, rejects, order status transitions, and margin/buying-power effects | No | `paper_orders`, `paper_executions` |
+| `PortfolioPipeline` | Maintain stock/options positions and one unified simulated margin account with cash balance, account equity, margin used, buying power, excess liquidity, exposure, and realized/unrealized PnL | No | `paper_positions`, `portfolio_snapshots` |
 | `HourlySignalRefreshPipeline` | Refresh intraday signal snapshots hourly for portfolio-relevant tickers, including price/volume, relative strength, VWAP/gap, option marks, news, and freshness checks for low-frequency sources | Optional Gemini Flash bounded classifier only for news/event classification after deterministic filters | `intraday_signal_scans`, `intraday_signal_snapshots`, `news_alerts` |
 | `IntradayRebalancePipeline` | Convert material signal changes and critical/high-impact alerts into reduce/exit/add/hold proposals for existing positions or active candidates | Yes, Gemini Flash bounded decision schema; risk manager remains final gate | `intraday_rebalance_decisions`, `paper_orders` |
 | `ReflectionPipeline` | Analyze day results, compare thesis vs outcome, extract learning factors | Yes, highest-quality configured model | `daily_reflections`, `learning_factors` |
@@ -183,8 +184,46 @@ Runs once per trading day before candidate scoring. It produces a market-level s
 - `blocked_strategy_tags`: e.g. block high beta long momentum during stressed risk-off sessions
 - `macro_summary`: short text for UI and LLM context
 - `macro_invalidators`: market-level conditions that should force risk reduction
+- `sector_theme_readthrough`: structured macro/sector/theme context from peer, customer, supplier, competitor, or sector-leader earnings
 
 Macro does not rank individual stocks. It can constrain risk, block strategy tags, reduce gross exposure, or annotate the day as unsuitable for certain strategies.
+
+Peer and sector-leader earnings belong in this macro/sector/theme context, even though they are assembled by `SignalPipeline` as a source family. They are not direct target-company signals. A peer earnings read-through can affect theme risk budget, strategy eligibility, required confirmation, and risk notes, but it must not set a target ticker's `fresh_catalyst_type` or `direct_negative_catalyst_type` unless the target company itself produced the catalyst.
+
+By contrast, the target company's own earnings release, guidance, earnings-call transcript, and post-earnings analyst revisions are ticker-level company signals. They belong in that ticker's `quant_signal_snapshot` and can set direct catalyst fields such as `fresh_catalyst_type = "own_earnings_beat_raise"` or `direct_negative_catalyst_type = "own_earnings_guide_down"` when the structured evidence supports it.
+
+### Portfolio-Aware Event Calendar
+
+Macro and earnings calendars should be normalized into a portfolio-aware event calendar rather than shown as a raw calendar feed. Source examples include economic calendars such as MarketWatch-style macro calendars and earnings calendars such as Nasdaq-style earnings calendars, but the implementation should use provider adapters and persist normalized rows before UI rendering.
+
+Supported event types:
+
+- macroeconomic releases: CPI, PCE, jobs, GDP, retail sales, ISM/PMI, claims, housing, consumer confidence
+- Fed and rates events: FOMC, minutes, Chair/governor speeches, Treasury auctions when available
+- market structure events: market holidays, index rebalances, major ETF/index changes when available
+- own-company earnings: earnings date/time, expected report window, guidance events, transcript availability
+- related-company earnings: peer, customer, supplier, competitor, or sector-leader earnings that can create sector/theme read-through
+- option-relevant events: earnings-through-expiry, macro events before expiry, known event dates inside the option holding window
+
+Every event shown in the UI must carry a portfolio relevance record:
+
+- `event_importance`: `critical`, `high`, `medium`, or `low`
+- `portfolio_risk_level`: `critical`, `high`, `medium`, `low`, or `none`
+- `affected_tickers`, `affected_positions`, `affected_option_strategies`
+- `affected_sector`, `affected_industry`, and `affected_theme`
+- `risk_mechanism`: e.g. direct earnings gap risk, rates sensitivity, inflation sensitivity, AI capex read-through, memory cycle, software multiple risk, option IV/event risk
+- `lookahead_reason`: why this event is inside the display window
+- `suggested_action_type`: `monitor`, `pause_adds`, `reduce_before_event`, `avoid_event_option`, `review_after_event`, or `none`
+
+The UI should not display every low-importance calendar item. Events with low global importance and no mapped portfolio/candidate/theme exposure should be hidden by default, while still remaining persisted for audit if ingested.
+
+Lookahead window policy:
+
+- intraday and 1-3 day tactical trades: show only same-day and next 5 trading days unless a `critical` macro or own-earnings event is known.
+- tactical stock trades up to 3 months: show relevant high/critical events through the intended holding horizon, plus medium events for affected tickers/themes.
+- tactical option trades: show all relevant events through expiry plus a small buffer, especially earnings-through-expiry and macro events that can move IV or assignment risk.
+- core holdings: show high/critical macro events and own/major-peer earnings for the next 3-6 months; hide routine low-impact releases unless they map to a concentrated risk factor.
+- watch-only and manual review tickers: show upcoming own earnings and high-relevance theme/peer events only while the review request or catalyst-watch window is active.
 
 ### Stock Trading Strategy Engine
 
@@ -246,7 +285,7 @@ Implementation ownership:
 
 This is also a learned constraint, not an independent strategy by itself. `trade_identity` means portfolio pool / exposure purpose. It answers: what role does this exposure play in the portfolio, which risk budget owns it, which holding-period and exit rules apply, and how should reflection grade it?
 
-`trading_strategy` is different. A strategy explains why a ticker is interesting and what signals/invalidation rules define the opportunity. A strategy can map to different trade identities depending on portfolio context. For example, `trend_pullback_v1` can support adding to an approved core holding, while `earnings_drift_v1` usually maps to a tactical stock trade. Risk-manager option hedges are not alpha strategies and should not be mixed into tactical option-income performance.
+`trading_strategy` is different. A strategy explains why a ticker is interesting and what signals/invalidation rules define the opportunity. A strategy can map to different trade identities depending on portfolio context. For example, `trend_pullback_v1` can support adding to an approved core holding, while `earnings_drift_v1` usually maps to a tactical stock trade. Risk-manager option hedges are not alpha strategies and should not be mixed into tactical option-trade performance.
 
 Every trade decision, watch decision, and risk hedge overlay must carry a `trade_identity` before sizing or order simulation:
 
@@ -254,66 +293,86 @@ Every trade decision, watch decision, and risk hedge overlay must carry a `trade
 | --- | --- | --- | --- | --- |
 | `core_holding` | Long-term ownership pool | Stock | Multi-month to multi-year | Managed by core portfolio rules and risk budget. Bot may recommend pause add, add on pullback, trim for risk budget, or thesis review; it should not liquidate core holdings because of one short-term signal. |
 | `tactical_stock_trade` | Intraday to 3-month alpha trade | Stock | Intraday to 3 months | Requires selected strategy, explicit catalyst or technical setup, relative strength, price/volume confirmation, and concrete invalidators. Evaluated against the selected strategy horizon. |
-| `tactical_option_income` | Paper option-income expression for tactical ideas | Paper/simulated cash-secured short put and lifecycle actions | 2-8 weeks | Used when underlying/theme is acceptable but common-stock timing is weak. Requires option metadata, assignment plan, and worst-case assignment fit. Evaluated separately from stock confidence. |
+| `tactical_option_trade` | Paper option expression for tactical ideas | Paper/simulated calls, puts, margin-backed short puts, spreads, and multi-leg option strategies | Intraday to 8 weeks unless strategy-specific rules override | Used when an option better expresses direction, convexity, income, defined risk, or entry timing than common stock. Requires leg-level metadata, Greeks, max loss, margin requirement, buying-power effect, event risk, and assignment plan when relevant. Evaluated separately from stock confidence. |
 | `risk_hedge_overlay` | Portfolio-level hedge owned by risk manager | Paper/simulated option hedge or other overlay | While the risk condition is active | Created by `RiskManager`, not by stock-picking strategies. Evaluated by risk reduction, hedge cost, and hedge PnL, not by strategy win rate. |
 | `watch_only` | No-order candidate or manual watch item | None by default | Event window or N/A | Used for `catalyst_watch` and `ordinary_watch` states. Reflection tracks missed opportunities and false alarms, but no order is created. |
 
-The trade identity decides which risk budget applies, which holding-period assumptions are valid, and which exit rules reflection should grade against. Core holdings must have a separate decision pool from tactical trades. Tactical option income must be separated from risk hedge overlays, even though both can use options, because the former is an alpha/income expression and the latter is portfolio insurance.
+The trade identity decides which risk budget applies, which holding-period assumptions are valid, and which exit rules reflection should grade against. Core holdings must have a separate decision pool from tactical trades. Tactical option trades must be separated from risk hedge overlays, even though both can use options, because the former is an alpha/expression choice and the latter is portfolio insurance.
 
 `catalyst_watch` and `ordinary_watch` should be stored as `watch_type` or result status under `trade_identity = "watch_only"`, not as separate trade identities.
 
-Strategy buckets such as `strong_theme_no_clear_near_term_sell_put`, `valuation_repair_quality_software_sell_put`, and `core_accumulation_on_pullback` are expression rules in the strategy catalog. They are not trade identities. They help decide whether the selected strategy should be expressed as `tactical_option_income`, `core_holding`, `tactical_stock_trade`, or `watch_only`.
+Do not encode the instrument choice inside the strategy name. A strategy should describe the edge, e.g. `strong_theme_no_clear_near_term_entry_v1` or `valuation_repair_quality_software_v1`. An expression bucket should describe the implementation, e.g. `margin_backed_short_put`, `defined_risk_directional_option`, or `long_stock`. Trade identity then decides which portfolio pool owns the exposure, e.g. `tactical_option_trade`, `core_holding`, `tactical_stock_trade`, or `watch_only`.
 
 Implementation ownership:
 
 - `TradeClassifier` assigns the field after primary strategy selection and before sizing.
 - `TradingPipeline` uses the field when proposing action, horizon, thesis, invalidators, and suggested size.
-- `OptionsStrategyLayer` only builds a paper tactical option-income expression when the selected expression bucket and `trade_identity = "tactical_option_income"` make that expression eligible.
-- `RiskManager` owns `risk_hedge_overlay` creation, adjustment, and closure. Hedge overlays can use the same paper option broker, but they are persisted and evaluated separately from tactical option-income trades.
+- `OptionsStrategyLayer` only builds a paper tactical option expression when the selected expression bucket and `trade_identity = "tactical_option_trade"` make that expression eligible.
+- `RiskManager` owns `risk_hedge_overlay` creation, adjustment, and closure. Hedge overlays can use the same paper option broker, but they are persisted and evaluated separately from tactical option trades.
 - `PositionSizer` and `RiskManager` apply the pool-specific budget, concentration, hedge, and exit constraints.
 - `PortfolioState` persists the identity with open positions, staged orders, paper option positions, and closed trades.
 - `ReflectionPipeline` grades each trade against the holding period and exit rules implied by its identity.
 
 ### Paper Options Strategy Layer
 
-The options layer is V2 paper/simulation-only. It serves two separate portfolio pools:
+The options layer is V2 paper/simulation-only. It is leg-based and must not be limited to puts. It serves two separate portfolio pools:
 
-- tactical option income, generated from selected strategies and `trade_identity = "tactical_option_income"`
+- tactical option trades, generated from selected strategies and `trade_identity = "tactical_option_trade"`
 - risk hedge overlays, generated by `RiskManager` and `trade_identity = "risk_hedge_overlay"`
 
-These must remain separate in attribution. Tactical option income is evaluated as an income/assignment strategy. Hedge overlays are evaluated by risk reduction, hedge cost, and hedge PnL.
+These must remain separate in attribution. Tactical option trades are evaluated by the selected option expression, e.g. directional long call/put, defined-risk spread, income trade, or assignment-acceptable short put. Hedge overlays are evaluated by risk reduction, hedge cost, and hedge PnL.
 
-For tactical option income, it must support these strategy actions:
+For tactical option trades, it must support these generic actions:
 
-- `sell_put`: open a cash-secured short put when assignment would be acceptable under the expression bucket and risk budget
-- `close_put`: close an existing paper short put when profit target, risk limit, catalyst invalidator, or earnings rule triggers
-- `roll_put`: close the current short put and open a replacement strike/expiry only when the new assignment risk is acceptable
-- `avoid_earnings_put`: block opening or rolling short puts through earnings when the event risk exceeds the strategy rule
-- `put_assignment_plan`: document what happens if assignment occurs, including whether shares become core, tactical stock trade, or immediate reduce/exit candidate
+- `open_option_strategy`: open a single-leg or multi-leg paper option strategy
+- `close_option_strategy`: close an existing paper option strategy
+- `roll_option_strategy`: close one or more existing legs and open replacement legs when the new risk is acceptable
+- `adjust_option_strategy`: add, remove, or resize legs while keeping the strategy inside risk limits
+- `avoid_event_option`: block opening, rolling, or holding an option strategy through earnings or another event when the event risk exceeds the strategy rule
 
-For risk hedge overlays, `RiskManager` may generate paper-only actions such as `open_hedge`, `close_hedge`, and `adjust_hedge`. These actions should use the same paper option order simulation layer but should not be counted in tactical strategy win rate.
+The first supported strategy types should include:
 
-Every short put decision must record:
+- `long_call`
+- `long_put`
+- `short_put`
+- `covered_call` or covered-call-like overlay when shares exist in the same simulated margin account
+- `bull_call_spread`
+- `bear_put_spread`
+- `put_credit_spread`
+- `call_credit_spread`
+- `collar`
 
+`sell_put`, `close_put`, `roll_put`, `avoid_earnings_put`, and `put_assignment_plan` remain allowed action aliases for the margin-backed `short_put` strategy type, but they are not the full option layer.
+
+Every option strategy decision must record:
+
+- `option_strategy_type`
 - `underlying_ticker`
-- `strike`
-- `expiry`
-- `dte`
-- `delta`
-- `iv_rank` or `iv_percentile`
-- `premium`
-- `breakeven`
-- `assignment_notional`
-- `cash_secured_amount`
-- `underlying_exposure`
-- `earnings_date`
-- `assignment_plan`
+- `legs`: array of option legs with `option_type`, `side`, `quantity`, `strike`, `expiry`, `dte`, `delta`, `gamma`, `theta`, `vega`, `iv_rank` or `iv_percentile`, `bid`, `ask`, `mid`, and chosen price
+- `net_debit_or_credit`
+- `max_loss`
+- `max_profit` when definable
+- `breakevens`
+- `margin_requirement`
+- `buying_power_effect`
+- `portfolio_delta`, `portfolio_gamma`, `portfolio_theta`, and `portfolio_vega`
+- `earnings_date` and event-through-expiry flags
 - `profit_target_pct`
 - `max_loss_or_adjustment_rule`
 - `roll_conditions`
 - `close_conditions`
 
-Options confidence should be calibrated separately from stock confidence. A strong theme without a near-term stock entry can justify `sell_put`, but it should not inherit the same confidence score as a confirmed catalyst stock breakout. Hedge overlays should not receive alpha confidence; they should carry risk-reduction rationale, expected hedge cost, and invalidation/closure conditions.
+For assignment-capable strategies, especially margin-backed short puts and credit spreads with short options, the decision must also record:
+
+- `assignment_notional`
+- `margin_requirement`
+- `buying_power_effect`
+- `underlying_exposure`
+- `assignment_plan`
+
+For risk hedge overlays, `RiskManager` may generate paper-only actions such as `open_hedge`, `close_hedge`, and `adjust_hedge`. These actions can be single-leg or multi-leg option strategies, should use the same paper option order simulation layer, and should not be counted in tactical strategy win rate.
+
+Options confidence should be calibrated separately from stock confidence. A strong theme without a near-term stock entry can justify an option expression, but a long call, call spread, put spread, or short put should not inherit the same confidence score as a confirmed common-stock breakout. Hedge overlays should not receive alpha confidence; they should carry risk-reduction rationale, expected hedge cost, and invalidation/closure conditions.
 
 ### Strategy Catalog
 
@@ -321,10 +380,10 @@ The first production strategy set should be stored as versioned strategy definit
 
 The seed catalog has two layers:
 
-- tactical pattern strategies that explain why a ticker is interesting
+- trading strategies that explain why a ticker is interesting, including broad tactical patterns and narrower learned playbooks
 - strategy expression buckets that decide how the system should express the idea
 
-The 15 tactical strategies below are the initial pattern catalog. They are not a fixed universe of possible strategies. Reflection and learning can create new strategy proposals when repeated evidence shows a pattern that is not well captured by the existing catalog.
+The 15 tactical strategies below are the initial broad pattern catalog. They are not a fixed universe of possible strategies. Reflection and learning can create new strategy proposals when repeated evidence shows a pattern that is not well captured by the existing catalog.
 
 | Strategy | Strategy ID | Core Signals To Check | Typical Horizon | Thesis |
 | --- | --- | --- | --- | --- |
@@ -344,14 +403,32 @@ The 15 tactical strategies below are the initial pattern catalog. They are not a
 | Oversold Bounce | `oversold_bounce_v1` | Extreme short-term oversold RSI/distance from mean; capitulation volume; stabilization/reclaim trigger; no unresolved major negative catalyst | 1 day-2 weeks | Short-term oversold move mean reverts. |
 | Short Squeeze Breakout | `short_squeeze_breakout_v1` | High short interest; rising borrow/fee if available; positive catalyst; volume surge; breakout through resistance; days-to-cover/liquidity risk | 1 day-2 weeks | Crowded short positioning is forced to cover. |
 
-The strategy expression buckets below are also stored in the strategy catalog so attribution and risk budgets are explicit. They are not trade identities; they map strategy evidence to the eligible portfolio pool and instrument expression.
+The eval-derived strategy playbooks below are also strategy-layer definitions. They keep thesis and expected edge separate from the instrument used to express the idea.
 
-| Strategy Expression Bucket | Strategy ID | Default Trade Identity | Required Context | Typical Horizon | Thesis |
+| Strategy Playbook | Strategy ID | Core Signals To Check | Typical Horizon | Thesis |
+| --- | --- | --- | --- | --- |
+| Strong Theme Catalyst Continuation | `strong_theme_catalyst_continuation_v1` | Clear bullish catalyst, theme alignment, relative strength vs benchmark/peers, volume/price confirmation | Intraday-3 months | Best candidates are theme leaders with fresh catalysts and confirmed near-term continuation. |
+| Strong Theme No Clear Near-Term Entry | `strong_theme_no_clear_near_term_entry_v1` | Strong theme, acceptable underlying quality/liquidity, relative strength still intact, but no clean common-stock trigger or poor entry timing | 2-8 weeks | The underlying is interesting, but the common-stock entry is not clean enough yet. |
+| Valuation Repair Quality Software | `valuation_repair_quality_software_v1` | Quality software name, improving valuation/margin/growth narrative, stabilizing estimates, relative strength improving from a depressed base | 2-12 weeks | Valuation repair can create positive drift, but timing and entry quality determine the expression. |
+| Core Accumulation On Pullback | `core_accumulation_on_pullback_v1` | Approved core holding, thesis intact, pullback into defined support or risk budget availability | Multi-month+ | Add to core only when the pullback improves risk/reward and portfolio concentration allows it. |
+
+The strategy expression buckets below are also stored in the strategy catalog so attribution and risk budgets are explicit. They are not trade identities and they should not contain the alpha thesis. They map selected strategy evidence to the eligible portfolio pool and instrument expression.
+
+| Strategy Expression Bucket | Expression Bucket ID | Default Trade Identity | Required Context | Typical Horizon | Expression Thesis |
 | --- | --- | --- | --- | --- | --- |
-| Strong Theme Catalyst Long Stock | `strong_theme_catalyst_long_stock` | `tactical_stock_trade` | Clear bullish catalyst, theme alignment, relative strength vs benchmark/peers, volume/price confirmation | Intraday-3 months | Best expression is common stock because near-term continuation is confirmed. |
-| Strong Theme No Clear Near-Term Sell Put | `strong_theme_no_clear_near_term_sell_put` | `tactical_option_income` | Strong theme and acceptable underlying, but no clean near-term stock entry; IV/premium attractive; assignment acceptable | 2-8 weeks | Get paid to wait for a strong theme at a better effective entry. |
-| Valuation Repair Quality Software Sell Put | `valuation_repair_quality_software_sell_put` | `tactical_option_income` | Quality software name, improving valuation/margin/growth narrative, no near-term common-stock trigger; assignment acceptable | 2-8 weeks | Valuation repair can support cash-secured put premium while avoiding weak timing. |
-| Core Accumulation On Pullback | `core_accumulation_on_pullback` | `core_holding` | Approved core holding, thesis intact, pullback into defined support or risk budget availability | Multi-month+ | Add to core only when the pullback improves risk/reward and portfolio concentration allows it. |
+| Long Stock | `long_stock` | `tactical_stock_trade` | Near-term continuation is confirmed; stock entry has acceptable risk/reward and liquidity | Intraday-3 months | Own the common stock when direct directional exposure is the cleanest expression. |
+| Margin-Backed Short Put | `margin_backed_short_put` | `tactical_option_trade` | Underlying is acceptable to own, put premium/IV is attractive, assignment and margin impact are acceptable | 2-8 weeks | Get paid to wait for a better effective entry while modeling margin and assignment risk. |
+| Defined-Risk Directional Option | `defined_risk_directional_option` | `tactical_option_trade` | Directional catalyst or setup exists, but option convexity or explicit max loss is preferable to common stock | Intraday-4 weeks | Express bullish or bearish views through long calls/puts or vertical spreads with explicit max loss. |
+| Defined-Risk Income Spread | `defined_risk_income_spread` | `tactical_option_trade` | Premium is attractive but naked short-option assignment or margin usage is not desirable | 2-8 weeks | Replace open-ended short-option exposure with a capped-risk credit spread. |
+| Core Stock Accumulation | `core_stock_accumulation` | `core_holding` | Approved core holding and portfolio risk budget allow adding stock exposure | Multi-month+ | Add to a core position through stock only when the core-pool rules approve it. |
+
+Example mapping:
+
+- `strong_theme_catalyst_continuation_v1` + `long_stock` -> `trade_identity = "tactical_stock_trade"`
+- `strong_theme_no_clear_near_term_entry_v1` + `margin_backed_short_put` -> `trade_identity = "tactical_option_trade"`
+- `strong_theme_no_clear_near_term_entry_v1` + `defined_risk_income_spread` -> `trade_identity = "tactical_option_trade"`
+- `valuation_repair_quality_software_v1` + `margin_backed_short_put` -> `trade_identity = "tactical_option_trade"`
+- `core_accumulation_on_pullback_v1` + `core_stock_accumulation` -> `trade_identity = "core_holding"`
 
 ### Strategy Lifecycle
 
@@ -452,10 +529,16 @@ Signals should be deterministic Python outputs and stored before any LLM call. E
 - normalized news, analyst rating, guidance, filing, and catalyst/event rows already stored in Postgres
 - fundamentals and valuation data already stored in Postgres
 - earnings calendar and known event data
+- target-company earnings release, guidance, transcript, and post-earnings analyst revision signals when the source ticker equals the snapshot ticker
 - option-chain derived fields when available
+- macro/sector/theme read-through events derived from peer, customer, supplier, competitor, or sector-leader earnings releases and transcripts
 - existing research/global-context artifacts when they are already persisted and have explicit freshness/source metadata
 
 Provider calls are allowed only as controlled refresh/fallback steps, not as hidden prompt-time lookups. If Postgres has stale or missing data, the snapshot must record the missing/stale status and the source that was attempted.
+
+Peer earnings read-through is a SignalPipeline source family, but it is classified with macro/sector/theme context rather than company-specific ticker signals. It can be attached to a ticker snapshot only as exposure context, e.g. "this ticker is exposed to a positive AI capex read-through from a peer/leader earnings call." It should not by itself become a target-company catalyst.
+
+Own-company earnings are different. If the snapshot ticker is the reporting company, the release/transcript/guidance data is direct company evidence and should populate the ticker's own catalyst, fundamental, event, and analyst-revision signals.
 
 ### Signal Groups
 
@@ -467,6 +550,8 @@ Provider calls are allowed only as controlled refresh/fallback steps, not as hid
 | Volatility / Risk | ATR%, realized volatility, gap size, intraday range, beta proxy, drawdown from recent high |
 | Relative Strength | return vs SPY, QQQ, sector ETF, theme ETF, peer basket; rank within sector/theme/peer group |
 | Event / Calendar | earnings date distance, post-earnings window, economic calendar risk day |
+| Own Earnings / Guidance | own earnings beat/miss, revenue/EPS surprise, guidance raise/cut, segment growth, margin change, transcript sentiment, post-earnings analyst revision |
+| Macro / Sector Read-through | peer or sector-leader earnings read-through direction, mechanism, source tickers, relationship type, affected theme, validity window, target confirmation requirement |
 | Insider / SEC | net insider value, cluster buys, sale concentration, officer/director weight, recent Form 4 freshness |
 | News / Sentiment | high-signal news count, analyst rating events, guidance, filing/news freshness, catalyst quality score, direct negative catalyst flags |
 | Fundamentals | valuation bands, growth/margin quality, short interest, market cap/liquidity quality filters |
@@ -478,7 +563,7 @@ Provider calls are allowed only as controlled refresh/fallback steps, not as hid
 Signal source rules:
 
 - Prefer normalized Postgres tables over ad hoc live fetches so every trading decision is replayable.
-- Preserve source provenance per signal, e.g. `market_bars`, `insider_transactions`, `sec_filings`, `news_articles`, `fundamental_snapshots`, `earnings_events`, `option_chain_snapshots`, or `research_context`.
+- Preserve source provenance per signal, e.g. `market_bars`, `insider_transactions`, `sec_filings`, `news_articles`, `fundamental_snapshots`, `earnings_events`, `earnings_transcripts`, `option_chain_snapshots`, or `research_context`.
 - Store `as_of`, `published_at`, `filing_date`, or equivalent freshness fields where relevant.
 - Separate raw inputs from derived scores. For example, persist raw insider transactions elsewhere, then store derived fields such as `insider_net_buy_value_90d` and `insider_cluster_buy_count_90d` in `signal_snapshots`.
 - Do not let the LLM infer missing insider/news/fundamental facts. Missing facts remain missing signals.
@@ -488,6 +573,7 @@ Signal source rules:
 The signal schema should explicitly support the strategy catalog above:
 
 - Catalyst signals: `fresh_catalyst_type`, `catalyst_published_at`, `catalyst_strength_score`, `beat_raise_flag`, `guidance_revision_score`, `analyst_revision_count`, `direct_negative_catalyst_type`.
+- Own earnings signals: `own_earnings_reported_at`, `own_earnings_event_type`, `own_eps_surprise_pct`, `own_revenue_surprise_pct`, `own_guidance_revision_score`, `own_segment_growth_score`, `own_margin_change_score`, `own_transcript_available`, `own_transcript_sentiment_score`, `own_earnings_call_key_topics`, `own_post_earnings_analyst_revision_count`.
 - Insider / SEC signals: `insider_net_buy_value_30d`, `insider_net_buy_value_90d`, `insider_cluster_buy_count_90d`, `officer_buy_flag`, `director_buy_flag`, `sale_concentration_score`, `recent_form4_filing_at`, `sec_filing_event_type`.
 - News / analyst signals: `high_signal_news_count_24h`, `high_signal_news_count_7d`, `analyst_upgrade_count_30d`, `analyst_downgrade_count_30d`, `price_target_revision_score`, `guidance_news_flag`, `customer_order_news_flag`, `regulatory_news_flag`, `news_freshness_minutes`.
 - Fundamental signals: `revenue_growth_score`, `margin_trend_score`, `valuation_percentile`, `ev_sales_percentile`, `fcf_margin_score`, `quality_score`, `short_interest_pct_float`, `market_cap_bucket`.
@@ -496,11 +582,12 @@ The signal schema should explicitly support the strategy catalog above:
 - Trend/pullback signals: `trend_slope_20d`, `price_vs_sma_20`, `price_vs_sma_50`, `pullback_depth_pct`, `support_reclaim_score`, `selling_volume_dry_up`.
 - Volatility compression signals: `atr_pct`, `realized_volatility_percentile`, `range_compression_percentile`, `squeeze_score`, `range_break_direction`.
 - Relative strength signals: `rs_vs_spy_20d`, `rs_vs_qqq_20d`, `rs_vs_sector_20d`, `rs_vs_theme_etf_20d`, `rs_vs_peer_basket_20d`, `sector_rank_percentile`, `peer_rank_percentile`, `rotation_score`.
+- Macro/sector/theme read-through signals: `readthrough_source_tickers`, `readthrough_scope`, `readthrough_direction`, `readthrough_strength_score`, `readthrough_mechanisms`, `readthrough_relationship_types`, `readthrough_affected_theme`, `readthrough_valid_until`, `needs_target_price_confirmation`, `target_confirmation_status`.
 - Mean reversion signals: `rsi_2`, `rsi_3`, `rsi_14`, `distance_from_sma_20_pct`, `capitulation_volume_score`, `reversal_triggered`.
 - Short squeeze signals: `short_interest_pct_float`, `days_to_cover`, `borrow_fee_proxy`, `float_rotation_proxy`, `squeeze_pressure_score`.
 - Sympathy signals: `leader_ticker`, `leader_catalyst_type`, `peer_link_strength`, `industry_move_pct`, `laggard_confirmation_score`.
 - Event timing signals: `earnings_in_days`, `known_event_date`, `pre_event_runup_score`, `event_risk_flag`.
-- Options signals: `put_strike`, `put_expiry`, `put_dte`, `put_delta`, `put_iv_rank`, `put_premium`, `put_breakeven`, `assignment_notional`, `cash_secured_amount`, `earnings_before_expiry`.
+- Options signals: option-chain availability; candidate `option_strategy_type`; per-leg call/put, side, strike, expiry, DTE, delta/gamma/theta/vega, IV rank/percentile, bid/ask/mid, volume/open interest; strategy-level net debit/credit, max loss, max profit, breakevens, margin requirement, buying-power effect, event-through-expiry flag, and assignment exposure when short options are present.
 - Confidence calibration signals: `historical_strategy_win_rate`, `historical_strategy_alpha_vs_benchmark`, `historical_direction_win_rate`, `historical_catalyst_type_alpha`, `confidence_calibration_bucket`.
 
 ## 8. Daily Workflow
@@ -510,8 +597,8 @@ All scheduled times are in `America/New_York`.
 | Time | Job | Output |
 | --- | --- | --- |
 | 07:00 | Universe refresh | tradable symbols and exclusions |
-| 07:15 | Macro snapshot | `macro_snapshots` with regime and risk budget multiplier |
-| 07:30 | Pre-market signal computation | `signal_snapshots` for the universe |
+| 07:15 | Macro snapshot + event calendar refresh | `macro_snapshots`, normalized `calendar_events`, portfolio-scored `portfolio_event_risk_assessments`, and prior-night/early-morning sector-theme read-through context |
+| 07:30 | Pre-market signal computation | `signal_snapshots` for the universe, including own-event timing and macro/sector/theme read-through exposure context |
 | 08:15 | Strategy matching and candidate scoring | `candidate_scores` with strategy, horizon, evidence, invalidators |
 | 08:45 | Trading decision generation | `trading_decisions` with selected action and staged `paper_orders` |
 | 09:30 | Paper open execution | `paper_executions`, open positions |
@@ -528,18 +615,28 @@ Manual runs remain available for debugging, but scheduled daily flow is the prim
 Morning workflow semantics:
 
 1. Scan the configured universe before the open and compute all available pre-market/daily signals.
-2. Match each symbol against tactical strategies and strategy expression buckets. Each match carries its own strategy horizon, required evidence, eligible trade identities, and invalidators.
-3. Build benchmark and peer-basket context for each candidate so relative strength is measured against the right opportunity set, not only `SPY`.
-4. Rank candidate scores by strategy fit, catalyst quality, relative strength, signal quality, macro compatibility, liquidity, confidence calibration, and learning-factor adjustments.
-5. Select one primary tactical strategy and one expression bucket for each ticker/action under consideration.
-6. Classify each selected candidate or existing position into a portfolio-pool trade identity before any order decision.
-7. Build a tactical option-income plan only when the selected expression bucket and `trade_identity = "tactical_option_income"` make an option expression eligible.
-8. Pass only the selected candidates plus current positions and paper short puts into `TradingPipeline`.
-9. `TradingPipeline` proposes an action, thesis, invalidators, suggested size, horizon, instrument expression, and trade identity.
-10. Deterministic risk constraints and portfolio budget decide whether the proposed action becomes a staged paper stock order, staged tactical paper option order, is reduced, or is rejected.
-11. Separately, `RiskManager` may generate paper-only `risk_hedge_overlay` actions when portfolio-level beta, concentration, or event risk should be hedged instead of handled only by sizing.
+2. Refresh the normalized event calendar and score each upcoming event against current positions, active candidates, manual review tickers, core holdings, option expiries, strategy horizons, and factor exposures.
+3. Match each symbol against tactical strategies and strategy expression buckets. Each match carries its own strategy horizon, required evidence, eligible trade identities, and invalidators.
+4. Build benchmark and peer-basket context for each candidate so relative strength is measured against the right opportunity set, not only `SPY`.
+5. Rank candidate scores by strategy fit, catalyst quality, relative strength, signal quality, macro compatibility, liquidity, event risk, confidence calibration, and learning-factor adjustments.
+6. Select one primary tactical strategy and one expression bucket for each ticker/action under consideration.
+7. Classify each selected candidate or existing position into a portfolio-pool trade identity before any order decision.
+8. Build a tactical option plan only when the selected expression bucket and `trade_identity = "tactical_option_trade"` make an option expression eligible.
+9. Pass only the selected candidates plus current positions and paper option positions into `TradingPipeline`.
+10. `TradingPipeline` proposes an action, thesis, invalidators, suggested size, horizon, instrument expression, and trade identity.
+11. Deterministic risk constraints and portfolio budget decide whether the proposed action becomes a staged paper stock order, staged tactical paper option order, is reduced, or is rejected.
+12. Separately, `RiskManager` may generate paper-only `risk_hedge_overlay` actions when portfolio-level beta, concentration, or event risk should be hedged instead of handled only by sizing.
 
 The final morning output is not just a ranked list. It is a trade plan: selected ticker, selected strategy, horizon, action, target exposure, risk budget used, and explicit reason if a high-scoring candidate was skipped.
+
+Peer earnings read-through reading policy:
+
+- Target-company earnings always stay in the target ticker's own signal snapshot. If the reporting ticker is the same as the evaluated ticker, the release, guidance, transcript, and post-earnings analyst revisions are direct company signals.
+- Before the open, check earnings calendar and prior-night releases for portfolio names, top candidates, active manual review tickers, core holdings, and their configured peer/customer/supplier/competitor/sector-leader relationships.
+- Read full transcripts only for high-value source tickers: direct peers, sector leaders, major customers/suppliers, or cases where the release and price reaction conflict. Otherwise, use structured release/headline/financial-table data first.
+- Store read-through as macro/sector/theme context with provenance. Do not treat another company's earnings as the target ticker's own catalyst.
+- Require target-ticker confirmation before converting read-through into a trade: relative strength vs peers/theme, price/volume confirmation, and no target-specific contradictory signal.
+- Bearish peer read-through should normally reduce size, pause adds, tighten option/event risk, or produce catalyst-watch/risk-review. It should not create a high-confidence single-name bearish trade without target-specific confirmation.
 
 ### Manual Ticker Review / Pinned Review
 
@@ -595,7 +692,7 @@ Manual tickers can bypass the scanner ranking threshold, but they cannot bypass:
 - relative-strength and catalyst quality scoring
 - bearish signal policy
 - paper options required metadata
-- short-put worst-case assignment risk
+- leg-based option risk and assignment risk when relevant
 - portfolio concentration limits
 
 Manual request outcomes are important reflection inputs. The system should later compare user-pinned tickers against bot-selected candidates to learn whether the scanner missed valid opportunities or correctly ignored weak ideas.
@@ -616,8 +713,8 @@ Hourly refresh should update:
 
 - intraday price/volume/liquidity signals: VWAP hold/reclaim, opening range break, relative volume, spread proxy, gap fade/fill, intraday range, ATR-relative move
 - relative strength signals: ticker vs `SPY`, `QQQ`, sector/theme ETF, and peer basket since open and since prior close
-- option signals for open paper puts and eligible candidates: mark, delta, IV move if available, DTE, breakeven distance, assignment-risk delta
-- news/event signals: new company news, analyst revisions, guidance, filings, direct negative catalyst flags, high-impact market/sector news
+- option signals for open paper option positions and eligible candidates: per-leg mark, Greeks, IV move if available, DTE, breakeven distance, max loss, spread width, margin requirement, buying-power effect, and assignment-risk delta when short options are present
+- news/event signals: new company news, target-company earnings releases/transcripts/guidance, analyst revisions, filings, direct negative catalyst flags, high-impact market/sector news, and peer/sector-leader earnings read-through updates
 - low-frequency source freshness: insider/SEC/fundamentals/earnings-calendar records should be checked for newly available rows or staleness, not blindly recomputed from scratch each hour
 
 Each hourly run stores an `intraday_signal_snapshot` with signal deltas vs the morning snapshot and previous intraday snapshot. Rebalance should trigger from material signal changes even when no new headline exists.
@@ -655,9 +752,10 @@ Allowed intraday rebalance actions:
 - `exit`: close position because invalidator triggered.
 - `add`: increase exposure only if positive news confirms the active strategy, risk budget remains available, and factor concentration stays within limits.
 - `open_new`: disabled by default for V2 unless the alert is critical/high and the ticker was already a morning candidate or approved override.
-- `close_put`: close paper short put because thesis, earnings risk, or assignment risk changed.
-- `roll_put`: roll paper short put only if the replacement contract improves risk and still passes worst-case assignment checks.
-- `avoid_earnings_put`: block any new or rolled short put when event risk is not explicitly acceptable.
+- `close_option_strategy`: close paper option strategy because thesis, event risk, option risk, or assignment risk changed.
+- `roll_option_strategy`: roll one or more option legs only if the replacement structure improves risk and still passes leg-based option checks.
+- `adjust_option_strategy`: add/remove/resize legs when it improves the risk profile and remains within max-loss/Greeks/margin/buying-power requirements.
+- `avoid_event_option`: block any new, rolled, or adjusted option strategy when event risk is not explicitly acceptable.
 
 Intraday rebalance is still gated:
 
@@ -676,7 +774,7 @@ The trading agent receives:
 - selected candidates with full signal snapshots, candidate score context, primary strategy, expression bucket, and portfolio-pool trade identity
 - manual request context for user-pinned tickers, including mode, reason, and source
 - macro snapshot/regime
-- current paper portfolio and open positions
+- current unified paper margin account and open stock/option positions
 - risk config
 - active learning factors relevant to strategy/ticker/sector/regime
 - recent trade outcomes for the same strategy or ticker
@@ -687,8 +785,8 @@ It returns one JSON object per candidate or position:
 {
   "ticker": "AAPL",
   "decision": "enter_long",
-  "strategy_id": "relative_strength_breakout_v1",
-  "expression_bucket_id": "strong_theme_catalyst_long_stock",
+  "strategy_id": "strong_theme_catalyst_continuation_v1",
+  "expression_bucket_id": "long_stock",
   "trade_identity": "tactical_stock_trade",
   "instrument_type": "stock",
   "selection_source": "scanner",
@@ -725,6 +823,11 @@ Allowed decisions:
 - `reduce`
 - `exit`
 - `no_trade`
+- `open_option_strategy`
+- `close_option_strategy`
+- `roll_option_strategy`
+- `adjust_option_strategy`
+- `avoid_event_option`
 - `sell_put`
 - `close_put`
 - `roll_put`
@@ -735,7 +838,7 @@ Risk checks run before order creation. If risk checks fail, no paper order is cr
 
 Risk hedge actions are not returned by `TradingPipeline`. If portfolio-level risk needs an option hedge, `RiskManager` generates `open_hedge`, `close_hedge`, or `adjust_hedge` under `trade_identity = "risk_hedge_overlay"` and sends approved paper-only hedge orders through the option simulation layer.
 
-For option decisions, the trading decision must include an `option_plan` object with strike, expiry, DTE, delta, IV rank/percentile, premium, breakeven, assignment notional, cash-secured amount, earnings date, roll/close conditions, and assignment plan. Missing option-chain data should produce `no_trade` or `catalyst_watch`, not a fabricated option plan.
+For option decisions, the trading decision must include a leg-based `option_plan` object with `option_strategy_type`, all legs, net debit/credit, Greeks, max loss, max profit where definable, breakevens, margin requirement, buying-power effect, earnings/event dates, roll/close/adjust conditions, and assignment plan when relevant. Missing option-chain data should produce `no_trade` or `catalyst_watch`, not a fabricated option plan.
 
 `time_horizon` should come from the selected strategy definition, not from a global default. The trading agent may shorten or skip a trade if risk conditions conflict with the strategy horizon, but it should not silently rewrite the strategy's typical horizon without recording a reason.
 
@@ -750,7 +853,13 @@ The final action is computed in two stages:
 
 Risk decision fields:
 
-- `portfolio_cash_available`
+- `account_equity`
+- `cash_balance`
+- `buying_power_before` and `buying_power_after`
+- `excess_liquidity_before` and `excess_liquidity_after`
+- `total_margin_requirement_before` and `total_margin_requirement_after`
+- `stock_margin_requirement_before` and `stock_margin_requirement_after`
+- `option_margin_requirement_before` and `option_margin_requirement_after`
 - `gross_exposure_before` and `gross_exposure_after`
 - `strategy_budget_remaining`
 - `macro_budget_multiplier`
@@ -759,7 +868,8 @@ Risk decision fields:
 - `remaining_factor_budget_by_type`
 - `binding_factor_limits`
 - `option_assignment_notional`
-- `cash_secured_requirement`
+- `margin_requirement`
+- `buying_power_effect`
 - `position_limit_check`
 - `liquidity_check`
 - `stale_signal_check`
@@ -768,6 +878,33 @@ Risk decision fields:
 - `risk_rejection_reason`
 
 ## 10. Paper Trading and Risk
+
+### Unified Paper Margin Account
+
+V2 should simulate one margin account shared by stock trades, option trades, hedge overlays, and assignment scenarios. There should not be a separate stock cash account and option margin account. Every proposed order must be evaluated against the same account-level buying power and margin constraints.
+
+The account snapshot should persist:
+
+- `cash_balance`
+- `account_equity`
+- `net_liquidation_value`
+- `buying_power`
+- `excess_liquidity`
+- `stock_market_value`
+- `option_market_value`
+- `stock_margin_requirement`
+- `option_margin_requirement`
+- `total_margin_requirement`
+- `initial_margin_requirement` and `maintenance_margin_requirement` when available or approximated
+- `day_pnl`, `realized_pnl`, and `unrealized_pnl`
+
+The margin model can be approximate in V2. It should be deterministic, configurable, and conservative enough for paper risk:
+
+- Long stock consumes buying power according to the configured stock margin rate, e.g. 50% initial margin unless overridden.
+- Short stock, if enabled later, uses stricter margin requirements and locate/borrow assumptions.
+- Long options consume premium paid plus fees.
+- Short options and credit spreads consume margin/buying power based on max loss when defined, or a conservative margin formula when max loss is undefined.
+- Assignment-capable option strategies must be checked against both margin requirement and worst-case assigned portfolio exposure.
 
 ### Paper Broker Rules
 
@@ -789,7 +926,7 @@ Position sizing is deterministic and happens after the trading agent proposes a 
 - macro risk budget multiplier
 - ticker volatility / ATR%
 - liquidity and dollar-volume capacity
-- current cash and gross/net exposure
+- unified margin-account equity, buying power, margin used, and gross/net exposure
 - current exposure to the same risk factors
 - active learning factors that tighten sizing rules
 
@@ -804,19 +941,25 @@ final_weight = min(liquidity_capped_weight, remaining_factor_budget, single_name
 
 The exact formula can evolve, but every sizing decision must persist inputs, caps applied, and final size. If a trade is reduced because of risk, the UI should show the binding constraint.
 
-### Short Put Assignment Risk
+### Option Strategy Risk and Assignment Risk
 
-For paper short puts, risk must be evaluated as if assignment can happen. The risk manager should calculate both:
+For every paper option strategy, risk must be evaluated at the strategy level and at the leg level. The risk manager should calculate:
+
+- per-leg option exposure: call/put, side, quantity, strike, expiry, DTE, Greeks, mark, and event-through-expiry status
+- strategy-level exposure: net debit/credit, max loss, max profit when definable, breakevens, margin requirement, buying-power effect, net Greeks, and liquidity/width quality
+- portfolio-level option exposure: aggregate delta/gamma/theta/vega, protected exposure, hedge cost, margin usage, buying-power usage, and concentration by ticker/theme/expiry/event
+
+For assignment-capable paper strategies, risk must also be evaluated as if assignment can happen. The risk manager should calculate both:
 
 - current portfolio exposure: stock positions plus marked option positions
-- worst-case assigned portfolio: current stock positions plus all short puts converted into long stock at their strikes
+- worst-case assigned portfolio: current stock positions plus assignment-capable short option legs converted into the resulting stock exposure at their strikes
 
-The worst-case assigned portfolio is the primary control for `sell_put` and `roll_put`. A trade is rejected or reduced if simultaneous assignment would create unacceptable concentration, even if current stock exposure looks safe.
+The worst-case assigned portfolio is the primary control for `short_put`, assignment-capable credit spreads, and any strategy with short option legs that can create stock exposure. A trade is rejected, reduced, or adjusted if simultaneous assignment would create unacceptable concentration, even if current stock exposure looks safe.
 
 Required assignment metrics:
 
 - assignment notional by ticker
-- cash-secured amount by contract and total portfolio
+- margin requirement and buying-power effect by strategy and total portfolio
 - breakeven exposure by ticker
 - sector/theme/industry exposure after assignment
 - high-beta AI/semis/space exposure after assignment
@@ -827,10 +970,10 @@ Required assignment metrics:
 Example assignment question the risk manager must answer:
 
 ```text
-If every open short put is assigned at strike, does the portfolio become an over-concentrated high-beta AI/semiconductor/space book?
+If every assignment-capable short option leg is assigned at strike, does the portfolio become an over-concentrated high-beta AI/semiconductor/space book?
 ```
 
-If yes, the system can propose `avoid_earnings_put`, `close_put`, `roll_put` to a lower-risk contract, reduce new common-stock exposure, or reject new short puts.
+If yes, the system can propose `avoid_event_option`, `close_option_strategy`, `roll_option_strategy`, `adjust_option_strategy` to a lower-risk structure, reduce new common-stock exposure, or reject new option strategies. For the margin-backed short-put subtype, the legacy aliases `avoid_earnings_put`, `close_put`, and `roll_put` are still valid.
 
 ### Portfolio Risk Factor Model
 
@@ -852,7 +995,8 @@ Risk factors to track:
 | Event/catalyst | earnings, analyst revision, regulatory, M&A, macro event | Avoid too many event-risk trades on the same day. |
 | Macro sensitivity | rates-sensitive, oil-sensitive, USD-sensitive, credit-sensitive | Keep macro factor exposure aligned with macro regime. |
 | Correlation cluster | rolling return correlation or sector/theme cluster | Catch hidden concentration across related tickers. |
-| Option assignment | short-put assignment notional, breakeven exposure, cash-secured requirement | Avoid hidden long exposure that appears only after assignment. |
+| Option strategy | per-leg Greeks, net Greeks, max loss, max profit, breakevens, margin requirement, buying-power effect, spread width, expiry/event exposure | Understand option risk beyond the underlying stock position. |
+| Option assignment | assignment-capable short-leg notional, breakeven exposure, margin requirement, buying-power effect | Avoid hidden stock exposure that appears only after assignment. |
 | Hedge overlay | hedge notional, hedge delta, hedge cost, protected exposure | Track whether paper option hedges reduce the intended risk without becoming a hidden speculative position. |
 
 Factor exposures should be approximate in V2. A robust simple model is better than a fragile complex one: start with sector/industry, strategy, horizon, direction, beta proxy, volatility bucket, liquidity bucket, and event type, then add rolling-correlation clusters once enough market data is available.
@@ -873,10 +1017,14 @@ Factor exposures should be approximate in V2. A robust simple model is better th
 - Low-liquidity bucket cap.
 - Market beta-adjusted exposure cap.
 - Correlation cluster cap so related tickers do not create hidden concentration.
-- Short-put assignment notional cap by ticker, sector/theme, expression bucket, and correlation cluster.
-- Cash-secured requirement cap so paper puts cannot overcommit available cash.
-- Earnings-through-expiry rule for short puts, with `avoid_earnings_put` as the default when event risk is not explicitly accepted.
-- Paper hedge overlay eligibility and budget caps. Hedges are owned by `RiskManager`, use `trade_identity = "risk_hedge_overlay"`, and are not counted as tactical option-income trades.
+- Unified margin-account buying power, total margin requirement, and excess-liquidity caps across stocks and options.
+- Stock margin requirement cap so common-stock positions cannot consume all buying power before option risk is considered.
+- Option max loss, net debit, net credit, margin requirement, and buying-power usage caps.
+- Per-strategy and portfolio-level Greeks caps for delta, gamma, theta, and vega.
+- Assignment-capable short-leg notional cap by ticker, sector/theme, expression bucket, and correlation cluster.
+- Margin requirement and buying-power usage caps so paper option strategies cannot overcommit the simulated margin account.
+- Earnings/event-through-expiry rule for option strategies, with `avoid_event_option` as the default when event risk is not explicitly accepted.
+- Paper hedge overlay eligibility and budget caps. Hedges are owned by `RiskManager`, use `trade_identity = "risk_hedge_overlay"`, and are not counted as tactical option trades.
 - No averaging down in V2 unless explicitly added later.
 - No trading around missing or stale signal snapshots.
 
@@ -910,13 +1058,22 @@ Example risk-limit config:
   "max_low_liquidity_weight": 0.10,
   "max_beta_adjusted_net_exposure": 0.80,
   "max_correlation_cluster_weight": 0.25,
-  "max_short_put_assignment_notional_pct": 0.35,
+  "max_total_margin_requirement_pct": 0.55,
+  "min_excess_liquidity_pct": 0.25,
+  "max_stock_margin_requirement_pct": 0.40,
+  "max_option_strategy_loss_pct": 0.02,
+  "max_total_option_max_loss_pct": 0.08,
+  "max_option_margin_requirement_pct": 0.20,
+  "max_portfolio_option_delta_abs": 0.30,
+  "max_portfolio_option_vega_abs": 0.20,
+  "max_assignment_capable_short_option_notional_pct": 0.35,
   "max_single_name_assigned_weight": 0.10,
   "max_theme_assigned_weight": {
     "ai_semis": 0.30,
     "space": 0.15
   },
-  "max_cash_secured_put_commitment_pct": 0.50
+  "max_option_buying_power_commitment_pct": 0.50,
+  "max_hedge_overlay_cost_pct": 0.01
 }
 ```
 
@@ -933,7 +1090,7 @@ Reflection runs after the portfolio is marked to close. It receives:
 - paper orders/executions
 - end-of-day PnL, benchmark return, sector return
 - peer-basket returns and relevant ETF returns, e.g. `QQQ`, `SMH`, `SOXX`
-- paper option positions, short-put lifecycle actions, and worst-case assignment snapshots
+- paper option positions, option strategy lifecycle actions, leg-level risk snapshots, hedge overlay decisions, and worst-case assignment snapshots when relevant
 - per-trade MFE/MAE if available
 - invalidators and whether they triggered
 - prior learning factors used
@@ -944,7 +1101,8 @@ Reflection should evaluate the portfolio, not just individual research calls. Th
 - Did bearish or risk-off reasoning actually add value, or did it incorrectly suppress strong-trend names?
 - Were high-confidence calls calibrated by historical pattern quality, or did narrative completeness inflate confidence?
 - Did `neutral/watch` hide a catalyst-watch opportunity with large move potential?
-- Did short-put trades have acceptable assignment risk, and would assignment have improved or damaged portfolio construction?
+- Did option trades have acceptable max loss, Greeks, event risk, liquidity, and assignment risk where relevant?
+- Did risk hedge overlays reduce portfolio risk enough to justify hedge cost?
 - Did the selected strategies perform as expected for their horizons?
 - Did risk constraints prevent losses or block profitable opportunities?
 - Were skipped candidates better than selected trades?
@@ -1024,6 +1182,9 @@ Proposed new tables:
 | `universe_symbols` | Symbols included/excluded in a universe snapshot with reason |
 | `manual_ticker_requests` | User-pinned tickers that must be evaluated, including reason, mode, expiry, status, and linked result |
 | `macro_snapshots` | One macro snapshot/regime per run/day |
+| `macro_readthrough_events` | Structured peer/sector-leader earnings read-through events with source ticker, scope, mechanism, direction, affected theme/relationship, transcript/release provenance, and validity window |
+| `calendar_events` | Normalized future macro, economic, Fed, earnings, market-structure, and option-relevant events with source/provider provenance, scheduled time, event type, global importance, affected ticker/theme metadata, and raw payload reference |
+| `portfolio_event_risk_assessments` | Per event portfolio relevance and risk score: affected positions/candidates/options, sector/theme mapping, holding-period lookahead reason, risk mechanism, suggested action type, and hide/show decision |
 | `signal_snapshots` | Per ticker per day quant features and normalized signal JSON |
 | `strategy_definitions` | Versioned strategy metadata, required signals, horizon, scoring config, invalidators |
 | `strategy_proposals` | Proposed new strategies or revisions derived from reflection/learning, including lifecycle status and evidence |
@@ -1032,23 +1193,24 @@ Proposed new tables:
 | `candidate_scores` | Ranked ticker candidates by strategy, horizon, evidence, macro compatibility |
 | `trade_classifications` | Portfolio-pool trade identity, expression bucket, watch type, intended horizon, and exit-policy metadata for each candidate/position decision |
 | `trading_decisions` | Trading agent decisions and context snapshot |
-| `option_strategy_decisions` | Paper-only option strategy actions such as sell/close/roll/avoid/assignment plan with required option metadata |
+| `option_strategy_decisions` | Paper-only option strategy actions such as open/close/roll/adjust/avoid-event, plus short-put aliases when relevant, with required strategy-level option metadata |
+| `option_strategy_legs` | Per-leg option details for single-leg and multi-leg paper option strategies, including call/put, side, quantity, strike, expiry, Greeks, price, and liquidity fields |
 | `risk_hedge_decisions` | Paper-only risk-manager hedge overlay decisions such as open/close/adjust hedge with risk-reduction rationale and hedge cost |
 | `paper_option_orders` | Staged/submitted/filled/rejected simulated option orders |
-| `paper_option_positions` | Current simulated option position state, including short puts |
-| `option_risk_snapshots` | Current and worst-case-assigned short-put exposure snapshots |
+| `paper_option_positions` | Current simulated option strategy and leg state, including calls, puts, spreads, multi-leg structures, and assignment-capable short options |
+| `option_risk_snapshots` | Current leg-based option exposure, portfolio Greeks, max loss, margin requirement, buying-power effect, hedge overlay risk, and worst-case-assigned exposure snapshots when relevant |
 | `intraday_signal_scans` | Hourly intraday refresh metadata, status, provider coverage, ticker scope, and error state |
 | `intraday_signal_snapshots` | Per ticker intraday signal values and deltas vs morning/previous snapshot |
 | `news_alerts` | Normalized positive/negative news alerts with severity, sentiment, dedupe key, affected tickers/positions |
 | `intraday_rebalance_decisions` | Alert-driven hold/reduce/exit/add/open_new proposals and final risk-gated outcome |
 | `risk_limit_configs` | Versioned portfolio risk limits and factor exposure caps |
 | `position_sizing_decisions` | Deterministic sizing inputs, applied caps, final target weight/quantity |
-| `portfolio_risk_snapshots` | Portfolio-level gross/net exposure and factor exposures before/after proposed trades and after fills |
+| `portfolio_risk_snapshots` | Portfolio-level gross/net exposure, unified margin-account risk, and factor exposures before/after proposed trades and after fills |
 | `risk_factor_exposures` | Normalized per-position and portfolio exposures by factor type/name |
 | `paper_orders` | Staged/submitted/filled/rejected paper orders |
 | `paper_executions` | Simulated fills |
 | `paper_positions` | Current position state |
-| `portfolio_snapshots` | Daily portfolio NAV, exposure, cash, PnL |
+| `portfolio_snapshots` | Daily unified margin account state: NAV/net liquidation value, account equity, cash balance, buying power, excess liquidity, margin requirements, exposure, and PnL |
 | `daily_reflections` | Post-close reflection JSON |
 | `learning_factors` | Structured lessons with status/version/scope |
 | `learning_factor_applications` | Join table showing which decision used which learning factor |
@@ -1091,7 +1253,7 @@ This keeps strategy identity, horizon, and signal requirements in data. Python s
 
 Discovered strategies use the same `strategy_definitions` shape once promoted from proposal to catalog entry. They differ only by `source`, `lifecycle_status`, parent/revision metadata, and risk budget limits.
 
-Strategy expression buckets use the same table with `strategy_layer = "expression_bucket"` and include fields such as `default_trade_identity`, `allowed_trade_identities`, `allowed_instruments`, `required_assignment_fields`, `earnings_policy`, and `default_exit_policy`. They should not duplicate portfolio-pool semantics; they only describe which expression is eligible for a selected strategy.
+Strategy expression buckets use the same table with `strategy_layer = "expression_bucket"` and include fields such as `default_trade_identity`, `allowed_trade_identities`, `allowed_instruments`, `allowed_option_strategy_types`, `required_option_leg_fields`, `required_assignment_fields`, `earnings_policy`, and `default_exit_policy`. They should not duplicate portfolio-pool semantics or strategy thesis. Names such as `strong_theme_no_clear_near_term_sell_put` are intentionally avoided because they mix the alpha pattern with the instrument expression.
 
 ## 13. UI Design
 
@@ -1114,7 +1276,7 @@ Default page should become a tabbed daily trading workstation instead of a resea
 The `/today` page should be the main workstation with top-level tabs. Above the tabs, show a compact status header:
 
 - trade date and job status timeline
-- current NAV, day PnL, benchmark return, gross exposure, cash
+- current NAV, day PnL, benchmark return, gross exposure, cash balance, buying power, margin used, and excess liquidity
 - critical/high alerts and material signal-change count
 - macro regime, clearly labeled as macro-only
 - risk budget, factor exposure usage, and blocked strategy tags
@@ -1123,15 +1285,15 @@ The `/today` page should be the main workstation with top-level tabs. Above the 
 Tabs:
 
 1. `Overview`
-   - Compact operator summary: NAV, day PnL, cash, gross/net exposure, risk budget used, critical alerts, material signal changes, open action items, and job status.
+   - Compact operator summary: NAV, day PnL, cash balance, buying power, margin used, excess liquidity, gross/net exposure, risk budget used, critical alerts, material signal changes, open action items, and job status.
    - This tab should answer: “Do I need to pay attention right now?”
 
 2. `Portfolio`
-   - Current stock positions, paper short puts, core vs tactical pools, cash, exposure, unrealized/realized PnL.
-   - Include trade identity, selected strategy, holding age, invalidator status, current risk tags, and worst-case assigned exposure for paper short puts.
+   - Current stock positions, paper option strategies/legs, core vs tactical pools, hedge overlays, unified margin-account state, exposure, unrealized/realized PnL.
+   - Include trade identity, selected strategy, holding age, invalidator status, current risk tags, option Greeks/max loss/margin requirement/buying-power effect, and worst-case assigned exposure for assignment-capable option strategies.
 
 3. `Trades`
-   - Every same-day trade decision, including executed trades, rejected trades, reductions, exits, `sell_put`, `close_put`, `roll_put`, and no-trade decisions that reached `TradingPipeline`.
+   - Every same-day trade decision, including executed trades, rejected trades, reductions, exits, option strategy opens/closes/rolls/adjustments, short-put aliases, and no-trade decisions that reached `TradingPipeline`.
    - Each row shows time, ticker, action, instrument, trade identity, selected strategy, expression bucket, proposed size, final size, fill/order status, confidence, and reject/reduction reason.
    - Every trade row must open a detail view with the complete audit trail:
      - multi-source signal snapshot
@@ -1148,8 +1310,12 @@ Tabs:
 
 4. `Risk & Macro`
    - Macro regime, macro risk budget multiplier, blocked strategy tags, macro invalidators, and economic-calendar risk.
+   - Upcoming portfolio-relevant events: macro releases, Fed/rates events, own-company earnings, related-company earnings read-through, option expiry/event-through-expiry risks, and market-structure events.
+   - Each event row shows date/time, event type, importance, portfolio risk level, affected ticker/position/option strategy, affected sector/theme, risk mechanism, lookahead reason, and suggested action type.
+   - Hide low-importance events by default when they do not map to current holdings, top candidates, manual review tickers, option expiries, or concentrated sector/theme exposures.
+   - The event lookahead window is dynamic: it extends through each position's intended holding period or option expiry, and farther for high/critical macro or core-holding events.
    - Portfolio risk exposures by sector/industry, theme, strategy, horizon, direction, beta, volatility, liquidity, event/catalyst type, macro sensitivity, and correlation cluster.
-   - Paper options assignment view: if all short puts are assigned, show resulting ticker, sector/theme, high-beta AI/semis/space, correlation-cluster, and cash-secured exposure.
+   - Paper options risk view: show option strategies, legs, Greeks, max loss, margin requirement, buying-power effect, hedge overlays, and assignment view for assignment-capable short option legs.
    - Show binding limits and which proposed trades were reduced or rejected by each limit.
 
 5. `Candidates`
@@ -1180,7 +1346,7 @@ Tabs:
 The old section-level dashboard cards should become tab contents:
 
 - Live alerts and material signal changes appear in `Overview`, with drill-down links into `Trades`, `Candidates`, or `Risk & Macro`.
-- Current positions and paper short puts appear in `Portfolio`.
+- Current positions, paper option strategies, option legs, and hedge overlays appear in `Portfolio`.
 - Today's trades and complete trade audit trails appear in `Trades`.
 - Candidate scanner and pinned review appear in `Candidates`.
 - Risk exposure and macro regime appear in `Risk & Macro`.
@@ -1211,12 +1377,12 @@ Keep the current research run UI for drill-down and audit, but make it secondary
 - `review_only` manual requests must never create paper orders even when the trading decision is actionable.
 - Strategy proposals must not mutate active strategy definitions directly. They create candidate/shadow strategy definitions through explicit lifecycle transitions.
 - Macro-only bearish context must not create single-name bearish trades; if it affects a candidate, the persisted decision should show risk-budget reduction or no-trade reason.
-- Short-put decisions with missing option-chain, earnings date, or assignment-risk inputs must be rejected or downgraded to watch.
+- Option decisions with missing option-chain, leg pricing, Greeks, earnings/event date, max-loss/margin-requirement/buying-power, or assignment-risk inputs where relevant must be rejected or downgraded to watch.
 - Intraday signal snapshots must preserve deltas vs the morning signal snapshot and previous hourly snapshot.
 - News alerts must be deduped by ticker/event/source/time window so repeated headlines do not trigger repeated rebalances.
 - Intraday rebalance decisions must persist the triggering `news_alert_id`, proposed action, final action, and risk decision.
 - Trading decisions must persist full context snapshots: candidate signals, macro snapshot id, portfolio snapshot id, risk config version, strategy version, learning factors used.
-- Option decisions must persist full option metadata and assignment-risk snapshot used at decision time.
+- Option decisions must persist full option strategy metadata, per-leg metadata, option-risk snapshot, and assignment-risk snapshot where relevant.
 - Paper orders must be idempotent per `trade_date + ticker + strategy_id + decision_type`.
 - A failed ticker must not abort the whole universe scan.
 - Reflection failure must not mutate learning factors.
@@ -1237,7 +1403,7 @@ Unit tests:
 - bearish signal gating so macro-only bearish evidence cannot create a single-name short
 - risk checks
 - paper option strategy decision validation
-- short-put assignment exposure calculation
+- leg-based option risk and assignment exposure calculation
 - news alert dedupe and severity classification
 - intraday signal delta detection and material-change thresholds
 - intraday rebalance action gating
@@ -1258,7 +1424,7 @@ Smoke tests:
 - standalone intraday signal/news refresh smoke for a tiny fixed ticker set or fixture mode
 - standalone DB smoke for writing signal/candidate/order/portfolio rows
 - standalone DB smoke for writing portfolio risk snapshots and risk factor exposures
-- standalone DB smoke for writing paper option decisions and assignment-risk snapshots
+- standalone DB smoke for writing paper option decisions, option legs, strategy-level option risk, and assignment-risk snapshots
 - optional live paper-trade dry run that uses a tiny ticker set and does not consume large API quota
 
 Implementation must continue to use `source ~/.venv/bin/activate` before Python commands and must verify Postgres data directory is on persistent disk for deployment work.
@@ -1278,8 +1444,8 @@ Implementation must continue to use `source ~/.venv/bin/activate` before Python 
 
 - Add trading decisions, paper orders, executions, positions, portfolio snapshots.
 - Implement position sizing, risk checks, factor exposure caps, budget allocation, and paper broker.
-- Add paper/simulation-only option strategy decisions and paper short-put lifecycle state.
-- Evaluate current and worst-case assigned portfolio before approving any short put.
+- Add paper/simulation-only option strategy decisions, option legs, paper option positions, and lifecycle state for single-leg and multi-leg option strategies.
+- Evaluate leg-based option risk for every option strategy, and current plus worst-case assigned portfolio before approving assignment-capable short-option structures.
 - Replace homepage with `/today` trading dashboard.
 
 ### Phase 3: Intraday Signal Refresh, News Alerts, and Rebalance
@@ -1296,7 +1462,7 @@ Implementation must continue to use `source ~/.venv/bin/activate` before Python 
 - Add post-close reflection agent and `daily_reflections`.
 - Generate learning factors with lifecycle statuses.
 - Reflect on benchmark/peer-basket outperformance, bullish vs bearish signal quality, and confidence calibration.
-- Reflect on paper options outcomes and assignment-risk decisions.
+- Reflect on paper option outcomes, leg-based option risk decisions, hedge overlay effectiveness, and assignment-risk decisions.
 - Show reflection and learning factors in UI.
 
 ### Phase 5: Learning Injection
@@ -1332,10 +1498,10 @@ Implementation must continue to use `source ~/.venv/bin/activate` before Python 
 8. The morning trade plan selects ticker, strategy, expression bucket, trade identity, horizon, action, target exposure, and risk budget used before the market opens.
 9. Trading pipeline creates paper orders only after risk checks and budget allocation pass.
 10. Position sizing records base size, volatility adjustment, liquidity cap, remaining factor budget, final size, and binding constraints.
-11. Portfolio risk snapshots show factor exposure by sector, strategy, horizon, beta, volatility, liquidity, event type, macro sensitivity, correlation cluster, and short-put assignment exposure.
-12. Risk manager reduces or rejects trades that would make the current or worst-case assigned portfolio too concentrated in any configured risk factor.
+11. Portfolio risk snapshots show factor exposure by sector, strategy, horizon, beta, volatility, liquidity, event type, macro sensitivity, correlation cluster, leg-based option risk, and assignment exposure where relevant.
+12. Risk manager reduces or rejects trades that would make current portfolio risk, option strategy risk, or worst-case assigned portfolio too concentrated in any configured risk factor.
 13. Paper portfolio shows positions, trades, exposure, and day PnL.
-14. Paper options layer records `sell_put`, `close_put`, `roll_put`, `avoid_earnings_put`, and `put_assignment_plan` actions with strike, expiry, DTE, delta, IV rank, premium, breakeven, assignment notional, cash secured amount, underlying exposure, and earnings date.
+14. Paper options layer records generic `open_option_strategy`, `close_option_strategy`, `roll_option_strategy`, `adjust_option_strategy`, and `avoid_event_option` actions with strategy type, per-leg call/put side, strike, expiry, DTE, Greeks, IV rank, price, net debit/credit, max loss, breakevens, margin requirement, buying-power effect, event dates, and assignment data when relevant. Short-put aliases remain supported for the margin-backed short-put subtype.
 15. Macro-only bearish context cannot create high-confidence single-name bearish trades; it can only reduce size, block strategy tags, or add risk warnings unless direct company-level negative evidence exists.
 16. Confidence displays and persistence distinguish historically strong bullish catalyst patterns from weak bearish/macro narratives.
 17. Watch output distinguishes `ordinary_watch` from `catalyst_watch` as `watch_type` under `trade_identity = "watch_only"`.
