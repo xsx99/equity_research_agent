@@ -129,8 +129,8 @@ Next trading run receives active learning_factors
 | `MacroPipeline` | Fetch rates, VIX, credit spreads, commodities, broad index trend, economic calendar; produce market regime | Optional bounded summary using Gemini Flash | `macro_snapshots` |
 | `SignalPipeline` | Build deterministic per-ticker signal snapshots from market bars plus normalized Postgres-backed insider, SEC, news, fundamentals, event/earnings calendar, options, and existing research context data; refresh provider data only through controlled adapters when needed | No | `signal_snapshots` |
 | `StrategyPipeline` | Match each ticker to versioned strategy definitions, score every eligible `(ticker, strategy_id)` pair, attach strategy horizon/evidence, and create ranked candidate scores | Mostly no; optional strategy explanation | `strategy_runs`, `candidate_scores` |
-| `PrimaryStrategySelector` | Choose one primary tactical strategy and one strategy bucket per ticker/action so attribution, trade identity, and risk budgeting stay clean | No | `trade_classifications`, `trading_decisions` context |
-| `TradeClassifier` | Assign trade identity before any order decision: core holding, catalyst stock, theme sell-put, valuation repair sell-put, or watch/catalyst-watch | No | `trade_classifications` or embedded in `trading_decisions` |
+| `PrimaryStrategySelector` | Choose one primary tactical strategy and one expression bucket per ticker/action so attribution, trade identity, and risk budgeting stay clean | No | `trade_classifications`, `trading_decisions` context |
+| `TradeClassifier` | Assign portfolio-pool trade identity before candidate order decisions: core holding, tactical stock trade, tactical option income, or watch-only. `RiskManager` assigns `risk_hedge_overlay` for hedge actions | No | `trade_classifications` or embedded in `trading_decisions` |
 | `OptionsStrategyLayer` | Create paper-only instrument plans only when an option expression is eligible, including strike/expiry/DTE/delta/IV/premium/breakeven/assignment risk fields | Mostly no; optional explanation | `option_strategy_decisions`, `paper_option_orders`, `paper_option_positions` |
 | `TradingPipeline` | Combine selected strategy, trade identity, instrument plan, macro regime, portfolio state, risk config, and learning factors; produce proposed trading decisions, thesis, invalidators, and suggested sizing | Yes, Gemini Flash bounded decision schema | `trading_decisions`, `paper_orders` |
 | `PositionSizer` | Convert approved trade intent into target quantity/weight using volatility, liquidity, strategy budget, macro budget, and factor exposure constraints | No | `position_sizing_decisions` |
@@ -219,9 +219,11 @@ Performance evaluation must therefore compare each trade against:
 
 The key attribution question is not only whether the stock went up over the selected strategy's intended holding period. It is whether the selected stock outperformed the appropriate benchmark and a reasonable peer basket from the same decision-time opportunity set, measured over that strategy horizon and any strategy-specific interim review checkpoints.
 
-### Bearish Signal Policy
+### Pipeline-Embedded Bearish Evidence Handling
 
-Bearish output is lower trust than bullish catalyst output until proven otherwise. The system should treat bearish evidence in tiers:
+This is a learned constraint that must be embedded across the normal trading workflow, not a standalone bearish-trading function. Bearish evidence affects strategy eligibility, confidence calibration, sizing, risk approval, reflection, and UI explanations at the points where those decisions already happen.
+
+Bearish output is lower trust than bullish catalyst output until proven otherwise. The normal pipelines should treat bearish evidence in tiers:
 
 | Bearish Evidence Type | Allowed Use |
 | --- | --- |
@@ -232,30 +234,64 @@ Bearish output is lower trust than bullish catalyst output until proven otherwis
 
 This policy directly addresses the eval failure mode where the model built a long macro chain from “risk-off” to “high-beta semiconductor likely down tomorrow” even while the industry and stock trend stayed strong.
 
-### Trade Identity and Portfolio Pools
+Implementation ownership:
 
-Every trade decision must carry a `trade_identity` before sizing:
+- `StrategyPipeline` downgrades or rejects macro-only bearish strategy matches before they become tradable candidates.
+- `PrimaryStrategySelector` and confidence calibration keep macro-only bearish narratives from becoming high-confidence single-name trades.
+- `TradingPipeline` may include bearish context in the thesis and invalidators, but cannot convert macro-only context into a standalone short proposal.
+- `PositionSizer` and `RiskManager` use bearish context to reduce, block, or tighten exposure.
+- `ReflectionPipeline` measures whether bearish/risk-off handling improved outcomes or suppressed strong-trend names.
 
-| Trade Identity | Instrument | Typical Horizon | Sizing / Exit Policy |
-| --- | --- | --- | --- |
-| `core_holding` | Stock | Multi-month to multi-year | Managed outside the short-term catalyst pool. Bot may recommend pause add, add on pullback, trim for risk budget, or thesis review; it should not liquidate core holdings because of one short-term signal. |
-| `catalyst_common_stock` | Stock | Intraday to 1-3 months | Requires explicit catalyst, relative strength, volume/price confirmation, and concrete invalidators. |
-| `strong_theme_sell_put` | Cash-secured short put | 2-8 weeks | Used when theme/stock is strong but near-term entry is unclear; requires acceptable assignment plan and worst-case portfolio fit. |
-| `valuation_repair_sell_put` | Cash-secured short put | 2-8 weeks | Used for quality software or similar names where valuation repair is plausible but common-stock timing is weak. |
-| `catalyst_watch` | No order by default | Event window | Direction uncertain but big move potential is high; shown for human review and later reflection. |
-| `ordinary_watch` | No order | N/A | Insufficient actionability; stored for context only. |
+### Portfolio Pools and Trade Identity
 
-The trade identity decides which risk budget applies, which holding-period assumptions are valid, and which exit rules reflection should grade against. Core holdings must have a separate decision pool from short-term catalyst trades.
+This is also a learned constraint, not an independent strategy by itself. `trade_identity` means portfolio pool / exposure purpose. It answers: what role does this exposure play in the portfolio, which risk budget owns it, which holding-period and exit rules apply, and how should reflection grade it?
+
+`trading_strategy` is different. A strategy explains why a ticker is interesting and what signals/invalidation rules define the opportunity. A strategy can map to different trade identities depending on portfolio context. For example, `trend_pullback_v1` can support adding to an approved core holding, while `earnings_drift_v1` usually maps to a tactical stock trade. Risk-manager option hedges are not alpha strategies and should not be mixed into tactical option-income performance.
+
+Every trade decision, watch decision, and risk hedge overlay must carry a `trade_identity` before sizing or order simulation:
+
+| Trade Identity | Portfolio Role | Allowed Instruments | Typical Horizon | Owner / Evaluation Policy |
+| --- | --- | --- | --- | --- |
+| `core_holding` | Long-term ownership pool | Stock | Multi-month to multi-year | Managed by core portfolio rules and risk budget. Bot may recommend pause add, add on pullback, trim for risk budget, or thesis review; it should not liquidate core holdings because of one short-term signal. |
+| `tactical_stock_trade` | Intraday to 3-month alpha trade | Stock | Intraday to 3 months | Requires selected strategy, explicit catalyst or technical setup, relative strength, price/volume confirmation, and concrete invalidators. Evaluated against the selected strategy horizon. |
+| `tactical_option_income` | Paper option-income expression for tactical ideas | Paper/simulated cash-secured short put and lifecycle actions | 2-8 weeks | Used when underlying/theme is acceptable but common-stock timing is weak. Requires option metadata, assignment plan, and worst-case assignment fit. Evaluated separately from stock confidence. |
+| `risk_hedge_overlay` | Portfolio-level hedge owned by risk manager | Paper/simulated option hedge or other overlay | While the risk condition is active | Created by `RiskManager`, not by stock-picking strategies. Evaluated by risk reduction, hedge cost, and hedge PnL, not by strategy win rate. |
+| `watch_only` | No-order candidate or manual watch item | None by default | Event window or N/A | Used for `catalyst_watch` and `ordinary_watch` states. Reflection tracks missed opportunities and false alarms, but no order is created. |
+
+The trade identity decides which risk budget applies, which holding-period assumptions are valid, and which exit rules reflection should grade against. Core holdings must have a separate decision pool from tactical trades. Tactical option income must be separated from risk hedge overlays, even though both can use options, because the former is an alpha/income expression and the latter is portfolio insurance.
+
+`catalyst_watch` and `ordinary_watch` should be stored as `watch_type` or result status under `trade_identity = "watch_only"`, not as separate trade identities.
+
+Strategy buckets such as `strong_theme_no_clear_near_term_sell_put`, `valuation_repair_quality_software_sell_put`, and `core_accumulation_on_pullback` are expression rules in the strategy catalog. They are not trade identities. They help decide whether the selected strategy should be expressed as `tactical_option_income`, `core_holding`, `tactical_stock_trade`, or `watch_only`.
+
+Implementation ownership:
+
+- `TradeClassifier` assigns the field after primary strategy selection and before sizing.
+- `TradingPipeline` uses the field when proposing action, horizon, thesis, invalidators, and suggested size.
+- `OptionsStrategyLayer` only builds a paper tactical option-income expression when the selected expression bucket and `trade_identity = "tactical_option_income"` make that expression eligible.
+- `RiskManager` owns `risk_hedge_overlay` creation, adjustment, and closure. Hedge overlays can use the same paper option broker, but they are persisted and evaluated separately from tactical option-income trades.
+- `PositionSizer` and `RiskManager` apply the pool-specific budget, concentration, hedge, and exit constraints.
+- `PortfolioState` persists the identity with open positions, staged orders, paper option positions, and closed trades.
+- `ReflectionPipeline` grades each trade against the holding period and exit rules implied by its identity.
 
 ### Paper Options Strategy Layer
 
-The options layer is V2 paper/simulation-only. It must support these strategy actions:
+The options layer is V2 paper/simulation-only. It serves two separate portfolio pools:
 
-- `sell_put`: open a cash-secured short put when assignment would be acceptable under the strategy bucket and risk budget
+- tactical option income, generated from selected strategies and `trade_identity = "tactical_option_income"`
+- risk hedge overlays, generated by `RiskManager` and `trade_identity = "risk_hedge_overlay"`
+
+These must remain separate in attribution. Tactical option income is evaluated as an income/assignment strategy. Hedge overlays are evaluated by risk reduction, hedge cost, and hedge PnL.
+
+For tactical option income, it must support these strategy actions:
+
+- `sell_put`: open a cash-secured short put when assignment would be acceptable under the expression bucket and risk budget
 - `close_put`: close an existing paper short put when profit target, risk limit, catalyst invalidator, or earnings rule triggers
 - `roll_put`: close the current short put and open a replacement strike/expiry only when the new assignment risk is acceptable
 - `avoid_earnings_put`: block opening or rolling short puts through earnings when the event risk exceeds the strategy rule
-- `put_assignment_plan`: document what happens if assignment occurs, including whether shares become core, catalyst stock, or immediate reduce/exit candidate
+- `put_assignment_plan`: document what happens if assignment occurs, including whether shares become core, tactical stock trade, or immediate reduce/exit candidate
+
+For risk hedge overlays, `RiskManager` may generate paper-only actions such as `open_hedge`, `close_hedge`, and `adjust_hedge`. These actions should use the same paper option order simulation layer but should not be counted in tactical strategy win rate.
 
 Every short put decision must record:
 
@@ -277,16 +313,16 @@ Every short put decision must record:
 - `roll_conditions`
 - `close_conditions`
 
-Options confidence should be calibrated separately from stock confidence. A strong theme without a near-term stock entry can justify `sell_put`, but it should not inherit the same confidence score as a confirmed catalyst stock breakout.
+Options confidence should be calibrated separately from stock confidence. A strong theme without a near-term stock entry can justify `sell_put`, but it should not inherit the same confidence score as a confirmed catalyst stock breakout. Hedge overlays should not receive alpha confidence; they should carry risk-reduction rationale, expected hedge cost, and invalidation/closure conditions.
 
 ### Strategy Catalog
 
-The first production strategy set should be stored as versioned strategy definitions. The morning scanner evaluates every eligible universe symbol against these definitions, then emits `(ticker, strategy_id, horizon, score, evidence)` candidates. A ticker can match multiple strategies, but `PrimaryStrategySelector` must choose one primary tactical strategy and one strategy bucket before any trade decision so attribution and learning remain clean.
+The first production strategy set should be stored as versioned strategy definitions. The morning scanner evaluates every eligible universe symbol against these definitions, then emits `(ticker, strategy_id, horizon, score, evidence)` candidates. A ticker can match multiple strategies, but `PrimaryStrategySelector` must choose one primary tactical strategy and one expression bucket before any trade decision so attribution and learning remain clean.
 
 The seed catalog has two layers:
 
 - tactical pattern strategies that explain why a ticker is interesting
-- portfolio/option strategy buckets that decide how the system should express the idea
+- strategy expression buckets that decide how the system should express the idea
 
 The 15 tactical strategies below are the initial pattern catalog. They are not a fixed universe of possible strategies. Reflection and learning can create new strategy proposals when repeated evidence shows a pattern that is not well captured by the existing catalog.
 
@@ -308,14 +344,14 @@ The 15 tactical strategies below are the initial pattern catalog. They are not a
 | Oversold Bounce | `oversold_bounce_v1` | Extreme short-term oversold RSI/distance from mean; capitulation volume; stabilization/reclaim trigger; no unresolved major negative catalyst | 1 day-2 weeks | Short-term oversold move mean reverts. |
 | Short Squeeze Breakout | `short_squeeze_breakout_v1` | High short interest; rising borrow/fee if available; positive catalyst; volume surge; breakout through resistance; days-to-cover/liquidity risk | 1 day-2 weeks | Crowded short positioning is forced to cover. |
 
-The portfolio/option strategy buckets below are also stored in the strategy catalog so attribution and risk budgets are explicit:
+The strategy expression buckets below are also stored in the strategy catalog so attribution and risk budgets are explicit. They are not trade identities; they map strategy evidence to the eligible portfolio pool and instrument expression.
 
-| Strategy Bucket | Strategy ID | Required Context | Typical Horizon | Thesis |
-| --- | --- | --- | --- | --- |
-| Strong Theme Catalyst Long Stock | `strong_theme_catalyst_long_stock` | Clear bullish catalyst, theme alignment, relative strength vs benchmark/peers, volume/price confirmation | Intraday-3 months | Best expression is common stock because near-term continuation is confirmed. |
-| Strong Theme No Clear Near-Term Sell Put | `strong_theme_no_clear_near_term_sell_put` | Strong theme and acceptable underlying, but no clean near-term stock entry; IV/premium attractive; assignment acceptable | 2-8 weeks | Get paid to wait for a strong theme at a better effective entry. |
-| Valuation Repair Quality Software Sell Put | `valuation_repair_quality_software_sell_put` | Quality software name, improving valuation/margin/growth narrative, no near-term common-stock trigger; assignment acceptable | 2-8 weeks | Valuation repair can support cash-secured put premium while avoiding weak timing. |
-| Core Accumulation On Pullback | `core_accumulation_on_pullback` | Approved core holding, thesis intact, pullback into defined support or risk budget availability | Multi-month+ | Add to core only when the pullback improves risk/reward and portfolio concentration allows it. |
+| Strategy Expression Bucket | Strategy ID | Default Trade Identity | Required Context | Typical Horizon | Thesis |
+| --- | --- | --- | --- | --- | --- |
+| Strong Theme Catalyst Long Stock | `strong_theme_catalyst_long_stock` | `tactical_stock_trade` | Clear bullish catalyst, theme alignment, relative strength vs benchmark/peers, volume/price confirmation | Intraday-3 months | Best expression is common stock because near-term continuation is confirmed. |
+| Strong Theme No Clear Near-Term Sell Put | `strong_theme_no_clear_near_term_sell_put` | `tactical_option_income` | Strong theme and acceptable underlying, but no clean near-term stock entry; IV/premium attractive; assignment acceptable | 2-8 weeks | Get paid to wait for a strong theme at a better effective entry. |
+| Valuation Repair Quality Software Sell Put | `valuation_repair_quality_software_sell_put` | `tactical_option_income` | Quality software name, improving valuation/margin/growth narrative, no near-term common-stock trigger; assignment acceptable | 2-8 weeks | Valuation repair can support cash-secured put premium while avoiding weak timing. |
+| Core Accumulation On Pullback | `core_accumulation_on_pullback` | `core_holding` | Approved core holding, thesis intact, pullback into defined support or risk budget availability | Multi-month+ | Add to core only when the pullback improves risk/reward and portfolio concentration allows it. |
 
 ### Strategy Lifecycle
 
@@ -435,7 +471,7 @@ Provider calls are allowed only as controlled refresh/fallback steps, not as hid
 | News / Sentiment | high-signal news count, analyst rating events, guidance, filing/news freshness, catalyst quality score, direct negative catalyst flags |
 | Fundamentals | valuation bands, growth/margin quality, short interest, market cap/liquidity quality filters |
 | Options | option chain availability, delta, IV rank/percentile, premium, breakeven, DTE, earnings-through-expiry flag |
-| Confidence Calibration | historical win rate/alpha by strategy bucket, direction, catalyst type, sector/theme, and market regime |
+| Confidence Calibration | historical win rate/alpha by strategy, expression bucket, trade identity, direction, catalyst type, sector/theme, and market regime |
 
 首版不需要一次实现所有信号，但 schema 要允许增量添加。缺失信号必须显式保存为 `null` 或 `status=missing`，不能在 prompt 中伪造。
 
@@ -492,15 +528,16 @@ Manual runs remain available for debugging, but scheduled daily flow is the prim
 Morning workflow semantics:
 
 1. Scan the configured universe before the open and compute all available pre-market/daily signals.
-2. Match each symbol against tactical strategies and portfolio/option strategy buckets. Each match carries its own strategy horizon, required evidence, and invalidators.
+2. Match each symbol against tactical strategies and strategy expression buckets. Each match carries its own strategy horizon, required evidence, eligible trade identities, and invalidators.
 3. Build benchmark and peer-basket context for each candidate so relative strength is measured against the right opportunity set, not only `SPY`.
 4. Rank candidate scores by strategy fit, catalyst quality, relative strength, signal quality, macro compatibility, liquidity, confidence calibration, and learning-factor adjustments.
-5. Select one primary tactical strategy and one strategy bucket for each ticker/action under consideration.
-6. Classify each selected candidate or existing position into a trade identity before any order decision.
-7. Build an option instrument plan only when the selected strategy bucket and trade identity make an option expression eligible.
+5. Select one primary tactical strategy and one expression bucket for each ticker/action under consideration.
+6. Classify each selected candidate or existing position into a portfolio-pool trade identity before any order decision.
+7. Build a tactical option-income plan only when the selected expression bucket and `trade_identity = "tactical_option_income"` make an option expression eligible.
 8. Pass only the selected candidates plus current positions and paper short puts into `TradingPipeline`.
 9. `TradingPipeline` proposes an action, thesis, invalidators, suggested size, horizon, instrument expression, and trade identity.
-10. Deterministic risk constraints and portfolio budget decide whether the proposed action becomes a staged paper stock order, staged paper option order, is reduced, or is rejected.
+10. Deterministic risk constraints and portfolio budget decide whether the proposed action becomes a staged paper stock order, staged tactical paper option order, is reduced, or is rejected.
+11. Separately, `RiskManager` may generate paper-only `risk_hedge_overlay` actions when portfolio-level beta, concentration, or event risk should be hedged instead of handled only by sizing.
 
 The final morning output is not just a ranked list. It is a trade plan: selected ticker, selected strategy, horizon, action, target exposure, risk budget used, and explicit reason if a high-scoring candidate was skipped.
 
@@ -533,10 +570,10 @@ SignalPipeline computes same signal snapshot schema
 StrategyPipeline scores against the same strategy catalog
       |
       v
-PrimaryStrategySelector chooses selected strategy and strategy bucket
+PrimaryStrategySelector chooses selected strategy and expression bucket
       |
       v
-TradeClassifier assigns trade identity
+TradeClassifier assigns portfolio-pool trade identity
       |
       v
 TradingPipeline returns trade / catalyst_watch / ordinary_watch / no_trade / blocked_by_risk
@@ -636,7 +673,7 @@ This loop must persist rejected and no-action alerts. They are important for ref
 
 The trading agent receives:
 
-- selected candidates with full signal snapshots, candidate score context, primary strategy, strategy bucket, and trade identity
+- selected candidates with full signal snapshots, candidate score context, primary strategy, expression bucket, and portfolio-pool trade identity
 - manual request context for user-pinned tickers, including mode, reason, and source
 - macro snapshot/regime
 - current paper portfolio and open positions
@@ -651,8 +688,8 @@ It returns one JSON object per candidate or position:
   "ticker": "AAPL",
   "decision": "enter_long",
   "strategy_id": "relative_strength_breakout_v1",
-  "strategy_bucket_id": "strong_theme_catalyst_long_stock",
-  "trade_identity": "catalyst_common_stock",
+  "expression_bucket_id": "strong_theme_catalyst_long_stock",
+  "trade_identity": "tactical_stock_trade",
   "instrument_type": "stock",
   "selection_source": "scanner",
   "manual_request_id": null,
@@ -695,6 +732,8 @@ Allowed decisions:
 - `put_assignment_plan`
 
 Risk checks run before order creation. If risk checks fail, no paper order is created even if the LLM decision is actionable.
+
+Risk hedge actions are not returned by `TradingPipeline`. If portfolio-level risk needs an option hedge, `RiskManager` generates `open_hedge`, `close_hedge`, or `adjust_hedge` under `trade_identity = "risk_hedge_overlay"` and sends approved paper-only hedge orders through the option simulation layer.
 
 For option decisions, the trading decision must include an `option_plan` object with strike, expiry, DTE, delta, IV rank/percentile, premium, breakeven, assignment notional, cash-secured amount, earnings date, roll/close conditions, and assignment plan. Missing option-chain data should produce `no_trade` or `catalyst_watch`, not a fabricated option plan.
 
@@ -781,7 +820,7 @@ Required assignment metrics:
 - breakeven exposure by ticker
 - sector/theme/industry exposure after assignment
 - high-beta AI/semis/space exposure after assignment
-- strategy bucket exposure after assignment
+- expression bucket exposure after assignment
 - correlation-cluster exposure after assignment
 - earnings-through-expiry flag and event-risk exposure
 
@@ -814,6 +853,7 @@ Risk factors to track:
 | Macro sensitivity | rates-sensitive, oil-sensitive, USD-sensitive, credit-sensitive | Keep macro factor exposure aligned with macro regime. |
 | Correlation cluster | rolling return correlation or sector/theme cluster | Catch hidden concentration across related tickers. |
 | Option assignment | short-put assignment notional, breakeven exposure, cash-secured requirement | Avoid hidden long exposure that appears only after assignment. |
+| Hedge overlay | hedge notional, hedge delta, hedge cost, protected exposure | Track whether paper option hedges reduce the intended risk without becoming a hidden speculative position. |
 
 Factor exposures should be approximate in V2. A robust simple model is better than a fragile complex one: start with sector/industry, strategy, horizon, direction, beta proxy, volatility bucket, liquidity bucket, and event type, then add rolling-correlation clusters once enough market data is available.
 
@@ -833,9 +873,10 @@ Factor exposures should be approximate in V2. A robust simple model is better th
 - Low-liquidity bucket cap.
 - Market beta-adjusted exposure cap.
 - Correlation cluster cap so related tickers do not create hidden concentration.
-- Short-put assignment notional cap by ticker, sector/theme, strategy bucket, and correlation cluster.
+- Short-put assignment notional cap by ticker, sector/theme, expression bucket, and correlation cluster.
 - Cash-secured requirement cap so paper puts cannot overcommit available cash.
 - Earnings-through-expiry rule for short puts, with `avoid_earnings_put` as the default when event risk is not explicitly accepted.
+- Paper hedge overlay eligibility and budget caps. Hedges are owned by `RiskManager`, use `trade_identity = "risk_hedge_overlay"`, and are not counted as tactical option-income trades.
 - No averaging down in V2 unless explicitly added later.
 - No trading around missing or stale signal snapshots.
 
@@ -847,6 +888,7 @@ Risk limits should distinguish soft warnings from hard blocks:
 - Size reduction: reduce order until exposure fits the remaining factor budget.
 - Hard reject: no order is created.
 - Forced reduce/exit: only for existing positions that violate hard limits after market movement or stale risk data.
+- Paper hedge overlay: open, close, or adjust a simulated option hedge when portfolio-level risk should be reduced without changing the underlying tactical/core position. This is a risk action, not a trading strategy signal.
 
 Example risk-limit config:
 
@@ -988,9 +1030,10 @@ Proposed new tables:
 | `strategy_evaluation_results` | Shadow/experimental performance and promotion/retirement evidence for strategy definitions |
 | `strategy_runs` | One candidate-scoring batch per day |
 | `candidate_scores` | Ranked ticker candidates by strategy, horizon, evidence, macro compatibility |
-| `trade_classifications` | Trade identity, portfolio pool, strategy bucket, intended horizon, and exit-policy metadata for each candidate/position decision |
+| `trade_classifications` | Portfolio-pool trade identity, expression bucket, watch type, intended horizon, and exit-policy metadata for each candidate/position decision |
 | `trading_decisions` | Trading agent decisions and context snapshot |
 | `option_strategy_decisions` | Paper-only option strategy actions such as sell/close/roll/avoid/assignment plan with required option metadata |
+| `risk_hedge_decisions` | Paper-only risk-manager hedge overlay decisions such as open/close/adjust hedge with risk-reduction rationale and hedge cost |
 | `paper_option_orders` | Staged/submitted/filled/rejected simulated option orders |
 | `paper_option_positions` | Current simulated option position state, including short puts |
 | `option_risk_snapshots` | Current and worst-case-assigned short-put exposure snapshots |
@@ -1048,7 +1091,7 @@ This keeps strategy identity, horizon, and signal requirements in data. Python s
 
 Discovered strategies use the same `strategy_definitions` shape once promoted from proposal to catalog entry. They differ only by `source`, `lifecycle_status`, parent/revision metadata, and risk budget limits.
 
-Portfolio/option strategy buckets use the same table with `strategy_layer = "expression_bucket"` and include fields such as `allowed_trade_identities`, `allowed_instruments`, `required_assignment_fields`, `earnings_policy`, and `default_exit_policy`.
+Strategy expression buckets use the same table with `strategy_layer = "expression_bucket"` and include fields such as `default_trade_identity`, `allowed_trade_identities`, `allowed_instruments`, `required_assignment_fields`, `earnings_policy`, and `default_exit_policy`. They should not duplicate portfolio-pool semantics; they only describe which expression is eligible for a selected strategy.
 
 ## 13. UI Design
 
@@ -1089,12 +1132,12 @@ Tabs:
 
 3. `Trades`
    - Every same-day trade decision, including executed trades, rejected trades, reductions, exits, `sell_put`, `close_put`, `roll_put`, and no-trade decisions that reached `TradingPipeline`.
-   - Each row shows time, ticker, action, instrument, trade identity, selected strategy, strategy bucket, proposed size, final size, fill/order status, confidence, and reject/reduction reason.
+   - Each row shows time, ticker, action, instrument, trade identity, selected strategy, expression bucket, proposed size, final size, fill/order status, confidence, and reject/reduction reason.
    - Every trade row must open a detail view with the complete audit trail:
      - multi-source signal snapshot
      - intraday signal deltas if relevant
      - multi-strategy candidate scores
-     - selected primary strategy and strategy bucket
+     - selected primary strategy and expression bucket
      - trade identity and instrument plan
      - LLM decision JSON and prompt/schema version
      - confidence basis and calibration bucket
@@ -1163,7 +1206,7 @@ Keep the current research run UI for drill-down and audit, but make it secondary
 - Every pipeline run stores `started_at`, `finished_at`, `status`, and `error_message`.
 - Missing provider data should degrade the relevant signal to missing, not fabricate values.
 - Candidate scoring skips tickers without minimum required signals.
-- Candidate scoring must separate `ordinary_watch` from `catalyst_watch` so high-volatility catalyst opportunities are not lost in neutral output.
+- Candidate scoring must separate `ordinary_watch` from `catalyst_watch` as a watch type under `trade_identity = "watch_only"` so high-volatility catalyst opportunities are not lost in neutral output.
 - Manual ticker requests that fail ticker validation, data availability, or liquidity checks should return `blocked_by_missing_data` or `no_trade`; they should not create partial fabricated snapshots.
 - `review_only` manual requests must never create paper orders even when the trading decision is actionable.
 - Strategy proposals must not mutate active strategy definitions directly. They create candidate/shadow strategy definitions through explicit lifecycle transitions.
@@ -1190,7 +1233,7 @@ Unit tests:
 - strategy candidate scoring
 - trade identity classification
 - relative-strength benchmark and peer-basket attribution
-- confidence calibration by strategy bucket and direction
+- confidence calibration by strategy, expression bucket, trade identity, and direction
 - bearish signal gating so macro-only bearish evidence cannot create a single-name short
 - risk checks
 - paper option strategy decision validation
@@ -1227,7 +1270,7 @@ Implementation must continue to use `source ~/.venv/bin/activate` before Python 
 - Add data model for universe, signals, macro snapshots, strategy definitions, candidate scores.
 - Implement universe refresh and deterministic signal snapshots.
 - Add manual ticker request ingestion and pinned-review signal snapshots.
-- Seed the initial strategy catalog with tactical strategies plus portfolio/option strategy buckets.
+- Seed the initial strategy catalog with tactical strategies plus strategy expression buckets.
 - Add trade identity taxonomy and confidence-calibration fields.
 - Add candidate scanner UI.
 
@@ -1286,7 +1329,7 @@ Implementation must continue to use `source ~/.venv/bin/activate` before Python 
 5. `review_only` manual requests never create paper orders, and `paper_trade_eligible` requests only create paper orders after normal risk checks pass.
 6. Macro snapshot/regime is stored separately from stock strategy inputs.
 7. Strategy pipeline evaluates the initial strategy catalog and stores strategy-specific candidate score, evidence, invalidators, and typical horizon.
-8. The morning trade plan selects ticker, strategy, strategy bucket, trade identity, horizon, action, target exposure, and risk budget used before the market opens.
+8. The morning trade plan selects ticker, strategy, expression bucket, trade identity, horizon, action, target exposure, and risk budget used before the market opens.
 9. Trading pipeline creates paper orders only after risk checks and budget allocation pass.
 10. Position sizing records base size, volatility adjustment, liquidity cap, remaining factor budget, final size, and binding constraints.
 11. Portfolio risk snapshots show factor exposure by sector, strategy, horizon, beta, volatility, liquidity, event type, macro sensitivity, correlation cluster, and short-put assignment exposure.
@@ -1295,7 +1338,7 @@ Implementation must continue to use `source ~/.venv/bin/activate` before Python 
 14. Paper options layer records `sell_put`, `close_put`, `roll_put`, `avoid_earnings_put`, and `put_assignment_plan` actions with strike, expiry, DTE, delta, IV rank, premium, breakeven, assignment notional, cash secured amount, underlying exposure, and earnings date.
 15. Macro-only bearish context cannot create high-confidence single-name bearish trades; it can only reduce size, block strategy tags, or add risk warnings unless direct company-level negative evidence exists.
 16. Confidence displays and persistence distinguish historically strong bullish catalyst patterns from weak bearish/macro narratives.
-17. Watch output distinguishes `ordinary_watch` from `catalyst_watch`.
+17. Watch output distinguishes `ordinary_watch` from `catalyst_watch` as `watch_type` under `trade_identity = "watch_only"`.
 18. Hourly intraday refresh creates signal snapshots, material signal-change deltas, and deduped positive/negative alerts for open positions, same-day trades, top candidates, active manual review tickers, and high-impact market/sector events.
 19. Critical/high alerts can trigger immediate risk-gated `hold/reduce/exit/add` rebalance decisions, with `open_new` disabled by default unless the ticker was already a morning candidate or override.
 20. Post-close reflection analyzes portfolio returns, benchmark/peer-basket returns, selected trades, rejected candidates, manual ticker requests, intraday alerts, rebalance outcomes, macro constraints, factor concentration, paper option decisions, confidence calibration, and learning-factor impact.

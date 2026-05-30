@@ -23,13 +23,13 @@
 ## PR Slice Overview
 
 1. **PR 1: Trading Foundation Schema + Strategy Catalog**
-   Add ORM/Alembic foundation tables, manual ticker request schema, prompt registry schema, trade identity enums, and a versioned in-code seed catalog for the 15 tactical strategies plus 4 portfolio/option strategy buckets from the design doc. No scheduler, API calls, or trading behavior yet.
+   Add ORM/Alembic foundation tables, manual ticker request schema, prompt registry schema, portfolio-pool trade identity enums, and a versioned in-code seed catalog for the 15 tactical strategies plus 4 strategy expression buckets from the design doc. No scheduler, API calls, or trading behavior yet.
 2. **PR 2: Universe Scan + Signal Snapshots**
    Add universe provider/pipeline, manual ticker request ingestion, and deterministic signal snapshot persistence from market bars plus Postgres-backed insider, SEC, news, fundamentals, event/calendar, options, and existing research context sources.
 3. **PR 3: Strategy Matching + Candidate Scoring**
    Match scanner and manual-request symbols to strategy definitions and persist ranked candidates with strategy horizon/evidence, source attribution, primary strategy selection, trade identity classification, catalyst-watch vs ordinary-watch distinction, and confidence-calibration inputs.
 4. **PR 4: Position Sizing + Portfolio Risk Manager**
-   Add deterministic sizing, risk factor exposure calculation, concentration caps, bearish-signal gating, and reduce/reject decisions.
+   Add deterministic sizing, risk factor exposure calculation, concentration caps, embedded bearish-evidence gating, and reduce/reject decisions.
 5. **PR 5: Trading Decisions + Paper Stock Broker + Portfolio State**
    Add bounded trading agent output, manual request mode gating, paper stock orders/executions, positions, and portfolio snapshots.
 6. **PR 6: Paper Options Strategy Layer + Assignment Risk**
@@ -127,7 +127,7 @@ Expected: fail because `src.trading.strategy_catalog` does not exist.
 Create `src/trading/strategy_catalog.py`:
 
 - Use a frozen dataclass `StrategyCatalogItem`.
-- Include all 15 tactical strategies and the 4 portfolio/option strategy buckets from the design doc.
+- Include all 15 tactical strategies and the 4 strategy expression buckets from the design doc.
 - Provide `get_initial_strategy_definitions() -> list[dict[str, object]]`.
 - Keep thresholds in `config_json` and avoid provider-specific code.
 - Include `strategy_layer`, `allowed_trade_identities`, `allowed_instruments`, and option policy fields where relevant.
@@ -155,11 +155,10 @@ from src.trading.trade_taxonomy import TRADE_IDENTITIES, get_trade_identity_poli
 
 def test_trade_identities_include_required_pools():
     assert "core_holding" in TRADE_IDENTITIES
-    assert "catalyst_common_stock" in TRADE_IDENTITIES
-    assert "strong_theme_sell_put" in TRADE_IDENTITIES
-    assert "valuation_repair_sell_put" in TRADE_IDENTITIES
-    assert "catalyst_watch" in TRADE_IDENTITIES
-    assert "ordinary_watch" in TRADE_IDENTITIES
+    assert "tactical_stock_trade" in TRADE_IDENTITIES
+    assert "tactical_option_income" in TRADE_IDENTITIES
+    assert "risk_hedge_overlay" in TRADE_IDENTITIES
+    assert "watch_only" in TRADE_IDENTITIES
 
 
 def test_core_holding_is_separate_from_short_term_pool():
@@ -169,12 +168,19 @@ def test_core_holding_is_separate_from_short_term_pool():
     assert policy.can_be_sold_by_short_term_signal is False
 
 
-def test_sell_put_identities_require_assignment_plan():
-    for identity in ["strong_theme_sell_put", "valuation_repair_sell_put"]:
-        policy = get_trade_identity_policy(identity)
-        assert policy.instrument == "cash_secured_short_put"
-        assert policy.requires_assignment_plan is True
-        assert policy.requires_worst_case_assignment_check is True
+def test_tactical_option_income_requires_assignment_plan():
+    policy = get_trade_identity_policy("tactical_option_income")
+    assert policy.instrument == "paper_option_income"
+    assert policy.requires_assignment_plan is True
+    assert policy.requires_worst_case_assignment_check is True
+
+
+def test_risk_hedge_overlay_is_risk_manager_owned():
+    policy = get_trade_identity_policy("risk_hedge_overlay")
+    assert policy.instrument == "paper_option_hedge"
+    assert policy.portfolio_pool == "risk_hedge"
+    assert policy.generated_by == "risk_manager"
+    assert policy.counts_toward_strategy_win_rate is False
 ```
 
 - [ ] **Step 2: Run the failing taxonomy test**
@@ -193,8 +199,8 @@ Expected: fail because `src.trading.trade_taxonomy` does not exist.
 Create `src/trading/trade_taxonomy.py` with:
 
 - frozen dataclass `TradeIdentityPolicy`
-- identities: `core_holding`, `catalyst_common_stock`, `strong_theme_sell_put`, `valuation_repair_sell_put`, `catalyst_watch`, `ordinary_watch`
-- fields for instrument, portfolio pool, default horizon, sizing policy, exit policy, assignment requirements, and whether short-term signals can sell the position
+- identities: `core_holding`, `tactical_stock_trade`, `tactical_option_income`, `risk_hedge_overlay`, `watch_only`
+- fields for instrument, portfolio pool, default horizon, sizing policy, exit policy, assignment requirements, hedge ownership, whether the identity counts toward strategy win rate, and whether short-term signals can sell the position
 
 - [ ] **Step 4: Verify taxonomy tests pass**
 
@@ -436,8 +442,9 @@ Create focused SQLAlchemy models:
   - `candidate_id fk candidate_scores` nullable for current-position classifications
   - `ticker String(16)`
   - `trade_date Date index`
-  - `trade_identity String(64)` with `core_holding/catalyst_common_stock/strong_theme_sell_put/valuation_repair_sell_put/catalyst_watch/ordinary_watch`
-  - `strategy_bucket_id String(64)` nullable
+  - `trade_identity String(64)` with `core_holding/tactical_stock_trade/tactical_option_income/risk_hedge_overlay/watch_only`
+  - `expression_bucket_id String(64)` nullable
+  - `watch_type String(32)` nullable with `catalyst_watch/ordinary_watch`
   - `instrument_type String(32)`
   - `portfolio_pool String(32)`
   - `horizon_policy String(64)`
@@ -647,12 +654,14 @@ Implementation notes:
 - Score only deterministic evidence available in `signals_json`.
 - Persist one `CandidateScore` per `(ticker, strategy_id)` that passes basic eligibility.
 - Persist `selection_source` as `scanner`, `manual_request`, or `watchlist_pin`, and link `manual_request_id` when applicable.
-- Select one primary tactical strategy and one strategy bucket per ticker/action before trade classification.
+- Select one primary tactical strategy and one expression bucket per ticker/action before trade classification.
 - Persist selected primary strategy context in `TradeClassification` and later `TradingDecision` context so attribution does not drift.
-- Classify each candidate into `core_holding`, `catalyst_common_stock`, `strong_theme_sell_put`, `valuation_repair_sell_put`, `catalyst_watch`, or `ordinary_watch`.
-- Distinguish `catalyst_watch` from ordinary neutral/watch output when direction is uncertain but move potential is high.
-- Compute confidence calibration inputs by strategy bucket, direction, catalyst type, benchmark/peer outperformance, and available historical outcomes.
+- Classify each candidate into portfolio-pool trade identities: `core_holding`, `tactical_stock_trade`, `tactical_option_income`, or `watch_only`. `risk_hedge_overlay` is generated by `RiskManager`, not candidate scoring.
+- Treat trade identity as a required field consumed by trading, sizing, risk, options, reflection, and UI; do not implement it as a separate strategy or standalone trade generator.
+- Distinguish `catalyst_watch` from ordinary neutral/watch output as `watch_type` under `trade_identity = "watch_only"` when direction is uncertain but move potential is high.
+- Compute confidence calibration inputs by strategy, expression bucket, trade identity, direction, catalyst type, benchmark/peer outperformance, and available historical outcomes.
 - Downgrade macro-only bearish candidates to risk warnings or no-trade; do not create single-name bearish candidates from macro alone.
+- Apply bearish evidence as an embedded gating rule in candidate scoring and confidence calibration; do not create a separate bearish signal function that bypasses the normal strategy/risk flow.
 - Preserve rejected candidates with `rejection_reason` when they are useful for later reflection.
 - Update manual request `result_status` to `catalyst_watch`, `ordinary_watch`, `no_trade`, or `blocked_by_missing_data` when no trading decision will be requested.
 - Do not call `TradingPipeline` yet.
@@ -663,7 +672,7 @@ Stop after PR 3 for review/merge.
 
 ## PR 4: Position Sizing + Portfolio Risk Manager
 
-**Goal:** Add deterministic sizing, portfolio factor concentration controls, and bearish-signal gating.
+**Goal:** Add deterministic sizing, portfolio factor concentration controls, and embedded bearish-evidence gating.
 
 **Files:**
 - Create: `src/trading/risk.py`
@@ -677,6 +686,7 @@ Implementation notes:
 - Implement `RiskLimitConfig` loader with default config.
 - Calculate factor exposure by sector, strategy, horizon, direction, beta bucket, volatility bucket, liquidity bucket, event type, and macro sensitivity.
 - Include explicit risk rules that prevent macro-only bearish evidence from creating high-confidence single-name shorts.
+- Apply bearish evidence through existing sizing/reduce/reject paths, not through a standalone bearish trading module.
 - Keep core-holding risk rules separate from short-term catalyst trade rules.
 - Implement reduce/reject behavior for concentration caps.
 - Persist `position_sizing_decisions`, `portfolio_risk_snapshots`, and `risk_factor_exposures`.
@@ -707,7 +717,7 @@ Implementation notes:
 - Use `TRADING_MODEL_NAME` defaulting to `DEFAULT_FAST_MODEL_NAME`.
 - Load trading prompts through `PromptRegistry`; no inline prompt strings.
 - Persist `LlmPromptTemplate`, `LlmPromptRun`, and `LlmUsageEvent` records for every trading-agent call, including rendered prompt hash/redacted prompt, input context, raw output, parsed output, prompt/schema version, model, token usage, cost, latency, retries, and errors.
-- Persist the full decision context snapshot, including trade identity, strategy bucket, benchmark/peer context, confidence basis, `selection_source`, and `manual_request_id`.
+- Persist the full decision context snapshot, including trade identity, expression bucket, benchmark/peer context, confidence basis, `selection_source`, and `manual_request_id`.
 - Enforce manual request mode: `review_only` can produce an actionable explanation but must not create a paper order; `paper_trade_eligible` can create a paper order only after normal risk approval.
 - Update linked manual request `result_status` to `actionable_trade`, `blocked_by_risk`, `no_trade`, `catalyst_watch`, or `ordinary_watch`.
 - Risk manager is the final gate before paper order creation.
@@ -729,7 +739,7 @@ Stop after PR 5 for review/merge.
 - Modify: `src/trading/portfolio.py`
 - Modify: `src/trading/risk.py`
 - Modify: `src/agents/trading_schemas.py`
-- Add ORM models/migration for `option_strategy_decisions`, `paper_option_orders`, `paper_option_positions`, `option_risk_snapshots`
+- Add ORM models/migration for `option_strategy_decisions`, `risk_hedge_decisions`, `paper_option_orders`, `paper_option_positions`, `option_risk_snapshots`
 - Test: `tests/trading/test_options_strategy.py`
 - Test: `tests/trading/test_option_risk.py`
 - Test: `tests/trading/test_paper_option_broker.py`
@@ -741,8 +751,9 @@ Implementation notes:
 - Require every short-put plan to include strike, expiry, DTE, delta, IV rank/percentile, premium, breakeven, assignment notional, cash-secured amount, underlying exposure, earnings date, roll/close conditions, and assignment plan.
 - Reject or downgrade to watch when required option metadata is missing.
 - Calculate current portfolio exposure and worst-case assigned exposure where all paper short puts convert to long stock at strike.
-- Apply assignment caps by ticker, sector/theme, strategy bucket, high-beta AI/semis/space cluster, correlation cluster, and available cash-secured commitment.
+- Apply assignment caps by ticker, sector/theme, expression bucket, high-beta AI/semis/space cluster, correlation cluster, and available cash-secured commitment.
 - Keep the options layer paper/simulation-only; no real broker integration.
+- Support paper-only risk hedge overlay orders generated by `RiskManager` with `trade_identity = "risk_hedge_overlay"`. Persist them separately from tactical option-income decisions and exclude them from strategy win-rate attribution.
 - Persist option decisions and rejected plans because reflection needs to evaluate missed premium vs avoided assignment risk.
 
 Stop after PR 6 for review/merge.
@@ -807,7 +818,7 @@ Implementation notes:
 - Reflection input includes portfolio outcome, candidates, manual ticker requests, accepted/rejected trades, intraday news alerts, intraday rebalance decisions, risk snapshots, factor concentration, benchmark/peer-basket returns, paper option decisions, worst-case assignment snapshots, and learning factors used.
 - Attribute trades against benchmarks and decision-time peer baskets over each selected strategy's configured holding horizon. Daily reflection should record interim mark-to-market for open trades and final horizon outcome when the trade closes or the intended horizon expires.
 - Analyze bullish catalyst trades separately from bearish/risk-off calls.
-- Evaluate confidence calibration by strategy bucket, direction, catalyst type, sector/theme, and market regime.
+- Evaluate confidence calibration by strategy, expression bucket, trade identity, direction, catalyst type, sector/theme, and market regime.
 - Evaluate whether `catalyst_watch` would have been more useful than ordinary neutral/watch.
 - Evaluate whether user-pinned tickers exposed scanner misses or mostly confirmed no-trade discipline.
 - Learning factors start as `candidate`, `active`, `suppressed`, or `retired`.
@@ -860,7 +871,7 @@ Stop after PR 9 for review/merge.
 Implementation notes:
 
 - Build `/today` as tabs: `Overview`, `Portfolio`, `Trades`, `Risk & Macro`, `Candidates`, `Learning & Strategies`, and `Ops & Cost`.
-- Show live alerts, material signal changes, positions, trades, trade identity, strategy bucket, paper options, candidates, risk exposure, post-close reflection, learning factors, and macro regime.
+- Show live alerts, material signal changes, positions, trades, trade identity, expression bucket, paper options, hedge overlays, candidates, risk exposure, post-close reflection, learning factors, and macro regime.
 - Add trade detail drill-down with signal snapshots, strategy scores, selected strategy, trade identity, LLM decision JSON, risk decision, order/fill state, exit plan, invalidators, and post-close outcome.
 - Add a pinned-review form for ticker, reason, mode (`review_only` / `paper_trade_eligible`), priority, and expiry.
 - Show pinned-review results with request status, result status, strategy match, trade identity, confidence basis, risk result, and linked trading decision if any.
