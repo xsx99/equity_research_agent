@@ -31,6 +31,7 @@ V2 的目标是把系统从“用户维护 watchlist 后生成研究结论”升
 
 - 不接入真实券商下单，V2 只做 paper trading。
 - 不做高频或分钟级自动交易。首版以 daily pre-market plan、market-open execution simulation、post-close reflection 为主。
+- 不做 direct short common-stock paper trades。V2 common-stock orders are long-only; bearish evidence can reduce, block, downgrade to watch, or support paper option/risk-hedge expressions where explicitly allowed by strategy and risk rules.
 - 不让 LLM 直接执行 broker/order/database side effects。Python orchestration 仍然拥有状态流转和持久化。
 - 不把 reflection 生成的数值调参无条件自动应用到生产策略。首版只自动注入已激活的 learning factors，并对高风险变更保留人工批准或阈值门槛。
 - 不让新生成的 strategy 直接扩大组合风险。自动发现的 strategy 必须先进入 candidate/shadow lifecycle，并受更小的 strategy/risk budget 约束。
@@ -127,7 +128,7 @@ Next trading run receives active learning_factors
 
 | Component | Responsibility | LLM? | Persistence |
 | --- | --- | --- | --- |
-| `UniverseProvider` | Load daily tradable US equity universe from market data provider, normalize tickers, apply exchange/asset filters | No | `universe_symbols`, `universe_snapshots` |
+| `UniverseProvider` | Load daily tradable US equity universe from market data provider, normalize tickers, and apply user-editable liquidity, sector, exchange, and asset filters | No | `universe_filter_configs`, `universe_symbols`, `universe_snapshots` |
 | `ManualTickerReviewPipeline` | Accept user-pinned tickers for forced evaluation, validate basic eligibility, attach request reason/mode, and merge them into signal/strategy evaluation without granting trade approval | No | `manual_ticker_requests`, `universe_symbols`, `signal_snapshots` |
 | `SourceIngestionJobs` | Supporting scheduled/targeted data ingestion layer that keeps normalized Postgres source tables fresh for insider/Form 4, SEC filings, news/analyst events, fundamentals, market data, option chains, earnings/events, and macro calendars. These jobs do not make trading decisions; they only provide replayable source rows and freshness metadata for downstream pipelines | No | source-specific tables, `source_ingestion_runs` |
 | `MacroPipeline` | Fetch rates, VIX, credit spreads, commodities, broad index trend, economic calendar; consume macro/sector/theme read-through context; produce market regime | Optional bounded summary using Gemini Flash | `macro_snapshots` |
@@ -682,9 +683,23 @@ All scheduled times are in `America/New_York`.
 
 Manual runs remain available for debugging, but scheduled daily flow is the primary product path.
 
+### Universe Filter Policy
+
+The scanned universe should be a configurable subset of US listed common stocks, not every listed name by default. The active universe filter should be user-editable from the UI and persisted as a versioned config.
+
+Default filter dimensions:
+
+- minimum price, e.g. `min_price`
+- minimum average dollar volume, e.g. `min_avg_dollar_volume`
+- allowed or excluded sectors/industries
+- exchange and asset-type eligibility, with common stock as the default asset type
+- optional manual include/exclude ticker overrides
+
+`UniverseProvider` should persist both included and excluded symbols with explicit exclusion reasons such as `below_min_price`, `below_min_dollar_volume`, `sector_excluded`, `not_common_stock`, or `manual_exclude`. Manual ticker requests can force evaluation outside scanner selection, but they still cannot bypass data availability, liquidity/tradability, or risk checks unless a future explicit override mode is designed.
+
 Morning workflow semantics:
 
-1. Scan the configured universe before the open and compute all available pre-market/daily signals.
+1. Scan the configured universe before the open using the active liquidity and sector filter, then compute all available pre-market/daily signals.
 2. Refresh the normalized event calendar and score each upcoming event against current positions, active candidates, manual review tickers, core holdings, option expiries, strategy horizons, and factor exposures.
 3. Match each symbol against tactical strategies and strategy expression buckets. Each match carries its own strategy horizon, required evidence, eligible trade identities, and invalidators.
 4. Build benchmark and peer-basket context for each candidate so relative strength is measured against the right opportunity set, not only `SPY`.
@@ -755,6 +770,8 @@ Manual tickers can bypass the scanner ranking threshold, but they cannot bypass:
 - paper options required metadata
 - leg-based option risk and assignment risk when relevant
 - portfolio concentration limits
+
+Manual ticker requests should stay active across trading days until the user dismisses them. They should be re-evaluated in each relevant pre-open run and intraday active-manual-request refresh. The default request should not expire at end of day.
 
 Manual request outcomes are important reflection inputs. The system should later compare user-pinned tickers against bot-selected candidates to learn whether the scanner missed valid opportunities or correctly ignored weak ideas.
 
@@ -1292,8 +1309,8 @@ The next trading run must adapt to active learning factors by injecting them int
 
 Initial policy:
 
-- Textual reminders and candidate filters can become `active` automatically if confidence is high enough and no risk rule is weakened.
-- Numeric sizing/risk changes require explicit approval or repeated evidence over multiple days.
+- New learning factors should become `active` immediately by default so the next trading run can adapt without waiting for manual approval.
+- Learning factors still cannot weaken hard safety rails. If reflection suggests a looser risk rule, broader universe rule, or larger strategy budget, the change should become a strategy/config proposal rather than an automatically active learning factor.
 - Every trading decision stores which learning factors were injected so impact can be evaluated later.
 
 ## 12. Data Model Additions
@@ -1303,9 +1320,10 @@ Proposed new tables:
 | Table | Purpose |
 | --- | --- |
 | `source_ingestion_runs` | Audit metadata for scheduled/targeted source refreshes: source family, run type, scope, provider, coverage, as-of time, status, latency, and error metadata |
+| `universe_filter_configs` | User-editable active universe filter profile, including liquidity thresholds, sector/industry include/exclude lists, exchange/asset filters, manual include/exclude overrides, version, and active flag |
 | `universe_snapshots` | One row per daily universe refresh |
 | `universe_symbols` | Symbols included/excluded in a universe snapshot with reason |
-| `manual_ticker_requests` | User-pinned tickers that must be evaluated, including reason, mode, expiry, status, and linked result |
+| `manual_ticker_requests` | User-pinned tickers that must be evaluated until dismissed, including reason, mode, status, last evaluation metadata, and linked result |
 | `macro_snapshots` | One macro snapshot/regime per run/day |
 | `macro_readthrough_events` | Structured peer/sector-leader earnings read-through events with source ticker, scope, mechanism, direction, affected theme/relationship, transcript/release provenance, and validity window |
 | `calendar_events` | Normalized future macro, economic, Fed, earnings, market-structure, and option-relevant events with source/provider provenance, scheduled time, event type, global importance, affected ticker/theme metadata, and raw payload reference |
@@ -1437,6 +1455,7 @@ Tabs:
 
 4. `Risk & Macro`
    - Macro regime, macro risk budget multiplier, blocked strategy tags, macro invalidators, and economic-calendar risk.
+   - Active risk appetite preset, generated risk config version, and binding constraints, with detailed generated limits hidden behind an advanced/debug view.
    - Upcoming portfolio-relevant events: macro releases, Fed/rates events, own-company earnings, related-company earnings read-through, option expiry/event-through-expiry risks, and market-structure events.
    - Each event row shows date/time, event type, importance, portfolio risk level, affected ticker/position/option strategy, affected sector/theme, risk mechanism, lookahead reason, and suggested action type.
    - Hide low-importance events by default when they do not map to current holdings, top candidates, manual review tickers, option expiries, or concentrated sector/theme exposures.
@@ -1446,8 +1465,10 @@ Tabs:
    - Show binding limits and which proposed trades were reduced or rejected by each limit.
 
 5. `Candidates`
+   - Active universe filter controls: min price, min average dollar volume, included/excluded sectors or industries, exchange/asset eligibility, and manual include/exclude ticker overrides.
    - Bot-selected candidates that were not traded, manually pinned tickers, `catalyst_watch`, and `ordinary_watch`.
    - Split scanner-selected from manual-only candidates.
+   - Manual ticker requests stay active until dismissed; show a dismiss action and latest evaluation timestamp/result.
    - Show why skipped: missing/stale data, no catalyst, weak relative strength, poor price/volume confirmation, macro size reduction, risk block, `review_only` mode, or options metadata missing.
    - Each candidate should be drillable to the same signal/strategy/risk context used by the trade detail view, even when no order was created.
 
@@ -1501,6 +1522,7 @@ Keep the current research run UI for drill-down and audit, but make it secondary
 - Candidate scoring skips tickers without minimum required signals.
 - Candidate scoring must separate `ordinary_watch` from `catalyst_watch` as a watch type under `trade_identity = "watch_only"` so high-volatility catalyst opportunities are not lost in neutral output.
 - Manual ticker requests that fail ticker validation, data availability, or liquidity checks should return `blocked_by_missing_data` or `no_trade`; they should not create partial fabricated snapshots.
+- Active manual ticker requests should continue to be evaluated until dismissed by the user; dismissal should stop future scheduled evaluations but preserve historical results.
 - `review_only` manual requests must never create paper orders even when the trading decision is actionable.
 - Strategy proposals must not mutate active strategy definitions directly. They create candidate/shadow strategy definitions through explicit lifecycle transitions.
 - Macro-only bearish context must not create single-name bearish trades; if it affects a candidate, the persisted decision should show risk-budget reduction or no-trade reason.
@@ -1521,7 +1543,7 @@ Unit tests:
 
 - signal computations
 - universe filters
-- manual ticker request validation, expiry, mode handling, and source attribution
+- manual ticker request validation, dismissal, active-request loading, mode handling, and source attribution
 - macro regime classification
 - strategy candidate scoring
 - trade identity classification
@@ -1561,8 +1583,8 @@ Implementation must continue to use `source ~/.venv/bin/activate` before Python 
 ### Phase 1: Foundation
 
 - Add data model for universe, signals, macro snapshots, strategy definitions, candidate scores.
-- Implement universe refresh and deterministic signal snapshots.
-- Add manual ticker request ingestion and pinned-review signal snapshots.
+- Implement user-editable liquidity/sector universe filters, universe refresh, and deterministic signal snapshots.
+- Add manual ticker request ingestion, dismissal handling, and pinned-review signal snapshots.
 - Seed the initial strategy catalog with tactical strategies plus strategy expression buckets.
 - Add trade identity taxonomy and confidence-calibration fields.
 - Add candidate scanner UI.
@@ -1615,13 +1637,13 @@ Implementation must continue to use `source ~/.venv/bin/activate` before Python 
 
 ## 17. Acceptance Criteria
 
-1. A scheduled run can scan a configured US equity universe without relying on watchlist entries.
+1. A scheduled run can scan a configured US common-stock universe using user-editable liquidity and sector filters without relying on watchlist entries.
 2. The system stores replayable quant signal snapshots for every scanned candidate.
 3. A user can pin a ticker for `review_only` or `paper_trade_eligible` manual evaluation even if the scanner did not select it.
 4. Manual ticker review uses the same signal snapshot, strategy matching, trade classification, confidence calibration, and risk path as scanner candidates.
 5. `review_only` manual requests never create paper orders, and `paper_trade_eligible` requests only create paper orders after normal risk checks pass.
 6. Macro snapshot/regime is stored separately from stock strategy inputs.
-7. Strategy pipeline evaluates the initial strategy catalog and stores strategy-specific candidate score, evidence, invalidators, and typical horizon.
+7. Strategy pipeline evaluates the initial strategy catalog and stores strategy-specific candidate score, evidence, invalidators, and strategy-determined holding horizon.
 8. The morning trade plan selects ticker, strategy, expression bucket, trade identity, horizon, action, target exposure, and risk budget used before the market opens.
 9. Trading pipeline creates paper orders only after risk checks and budget allocation pass.
 10. Position sizing records base size, volatility adjustment, liquidity cap, remaining factor budget, final size, and binding constraints.
@@ -1637,16 +1659,16 @@ Implementation must continue to use `source ~/.venv/bin/activate` before Python 
 20. Post-close reflection analyzes portfolio returns, benchmark/peer-basket returns, selected trades, rejected candidates, manual ticker requests, intraday alerts, rebalance outcomes, macro constraints, factor concentration, paper option decisions, confidence calibration, and learning-factor impact.
 21. Strategy evolution can create new strategy proposals from repeated learning patterns without being limited to the initial seed strategies.
 22. New strategies enter `candidate` or `shadow` status first, and cannot create paper orders until promoted to `experimental` or `active`.
-23. Active learning factors are visible in UI, injected into later trading decisions, and tracked through `learning_factor_applications`.
+23. New learning factors become active immediately by default, are visible in UI, injected into later trading decisions, and tracked through `learning_factor_applications`.
 24. `/today` is a tabbed trading workstation with `Overview`, `Portfolio`, `Trades`, `Risk & Macro`, `Candidates`, `Learning & Strategies`, and `Ops & Cost` tabs.
 25. Trade detail views show complete audit trails: signal snapshots, strategy scores, selected strategy, trade identity, LLM decision JSON, risk decision, order/fill state, exit plan, invalidators, and post-close outcome.
 26. `Ops & Cost` shows LLM/API usage, model/provider, tokens, estimated cost, latency, retry/error state, and prompt/schema version by pipeline and run.
 27. Existing research run audit pages continue to work.
 
-## 18. Open Questions
+## 18. Resolved Design Decisions
 
-1. Universe scope: all US listed common stocks, or only a liquidity-filtered subset such as price > $5 and dollar volume > configurable threshold?
-2. Long-only common stock first, or include direct short paper trades from V2 behind a disabled-by-default flag?
-3. Holding period: strictly intraday close-out, 1-5 day swing paper trades, or both with separate strategy tags?
-4. Should learning factors auto-activate immediately, or require approval for the first few weeks?
-5. Should manual ticker requests expire at end of day by default, or stay active until manually dismissed?
+1. Universe scope: use a user-editable US common-stock universe with liquidity filters and sector/industry include/exclude filters. Do not scan every listed name by default.
+2. Common-stock paper trading is long-only in V2. Do not add direct short-stock paper trades behind a flag.
+3. Holding period is determined automatically by the selected trading strategy definition. There is no global intraday-only or swing-only horizon.
+4. New learning factors become active immediately by default, while changes that would weaken hard safety rails must be represented as explicit strategy/config proposals instead.
+5. Manual ticker requests stay active until manually dismissed. They do not expire at end of day by default.

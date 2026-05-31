@@ -31,13 +31,14 @@
 - Added source-ingestion freshness and signal coordination design: pre-open snapshots are the daily baseline, intraday snapshots reuse the same canonical schema as scoped deltas, and hourly refresh runs targeted freshness-gated source updates instead of full pipeline reruns.
 - Clarified legacy table policy: `research_runs`, `research_outputs`, and `eval_results` are optional archival/compatibility artifacts, not required V2 trading-path dependencies or trade/portfolio scoring tables.
 - Simplified risk configuration into `conservative`, `balanced`, and `aggressive` risk appetite presets; `RiskConfigResolver` generates detailed effective risk configs for audit/replay while hard safety rails remain invariant across presets.
+- Resolved initial design questions: universe uses user-editable liquidity/sector filters, common-stock paper trading is long-only, holding period comes from strategy definitions, learning factors activate immediately by default, and manual ticker requests stay active until dismissed.
 
 ## PR Slice Status
 
 | Slice | Scope | Status | Notes |
 | --- | --- | --- | --- |
-| PR 1 | Trading foundation schema + strategy catalog | Pending | Adds 15 broad tactical strategies, 4 eval-derived playbooks, 5 pure expression buckets including defined-risk options, manual ticker request schema, prompt registry/schema, and portfolio-pool trade identity taxonomy. |
-| PR 2 | Universe scan + signal snapshots | Pending | Adds relative-strength benchmark/peer fields, manual request ingestion, own-company earnings signals, macro/sector/theme read-through, portfolio-aware event calendar risk scoring, source-ingestion freshness metadata, Postgres-backed insider/news/fundamental/context signals, and explicit missing/stale signal handling. |
+| PR 1 | Trading foundation schema + strategy catalog | Pending | Adds universe filter config schema, 15 broad tactical strategies, 4 eval-derived playbooks, 5 pure expression buckets including defined-risk options, manual ticker request schema, prompt registry/schema, and portfolio-pool trade identity taxonomy. |
+| PR 2 | Universe scan + signal snapshots | Pending | Adds user-editable liquidity/sector universe filters, relative-strength benchmark/peer fields, persistent manual request ingestion until dismissal, own-company earnings signals, macro/sector/theme read-through, portfolio-aware event calendar risk scoring, source-ingestion freshness metadata, Postgres-backed insider/news/fundamental/context signals, and explicit missing/stale signal handling. |
 | PR 3 | Strategy matching + candidate scoring | Pending | Adds source attribution, primary strategy selection, trade classification, catalyst-watch split, bearish gating, and confidence calibration inputs. |
 | PR 4 | Position sizing + portfolio risk manager | Pending | Depends on candidates and risk tables; adds simple risk appetite presets, generated risk configs, invariant hard safety rails, and conservative broker-profile margin estimates. |
 | PR 5 | Trading decisions + paper stock broker + portfolio state | Pending | Depends on stock risk gate; adds unified simulated margin account, margin model/source metadata, and enforces `review_only` vs `paper_trade_eligible` manual request mode. |
@@ -69,4 +70,5 @@
 - 2026-05-30: `git diff --check` passed after refining the default estimated margin model into a conservative broker-profile model with margin model/source metadata.
 - 2026-05-30: `git diff --check` passed after clarifying legacy research/eval tables as optional non-critical-path artifacts.
 - 2026-05-30: `git diff --check` passed after simplifying risk configuration into risk appetite presets and generated effective risk configs.
+- 2026-05-30: `git diff --check` passed after resolving initial design questions for universe filters, long-only common stock, strategy-defined horizons, immediate learning activation, and manual request dismissal.
 - No implementation tests run yet; documentation/planning update only.

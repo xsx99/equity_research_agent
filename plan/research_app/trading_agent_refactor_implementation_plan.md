@@ -23,9 +23,9 @@
 ## PR Slice Overview
 
 1. **PR 1: Trading Foundation Schema + Strategy Catalog**
-   Add ORM/Alembic foundation tables, manual ticker request schema, prompt registry schema, portfolio-pool trade identity enums, and a versioned in-code seed catalog for the 15 broad tactical strategies, 4 eval-derived playbook strategies, and 5 initial strategy expression buckets from the design doc, including defined-risk option expressions. No scheduler, API calls, or trading behavior yet.
+   Add ORM/Alembic foundation tables, universe filter config schema, manual ticker request schema, prompt registry schema, portfolio-pool trade identity enums, and a versioned in-code seed catalog for the 15 broad tactical strategies, 4 eval-derived playbook strategies, and 5 initial strategy expression buckets from the design doc, including defined-risk option expressions. No scheduler, API calls, or trading behavior yet.
 2. **PR 2: Universe Scan + Signal Snapshots**
-   Add universe provider/pipeline, manual ticker request ingestion, normalized future event calendar ingestion/risk scoring, and deterministic signal snapshot persistence from market bars plus Postgres-backed insider, SEC, news, fundamentals, event/calendar, options, macro/sector/theme read-through, and existing research context sources.
+   Add user-editable liquidity/sector universe filters, universe provider/pipeline, manual ticker request ingestion, normalized future event calendar ingestion/risk scoring, and deterministic signal snapshot persistence from market bars plus Postgres-backed insider, SEC, news, fundamentals, event/calendar, options, macro/sector/theme read-through, and existing research context sources.
 3. **PR 3: Strategy Matching + Candidate Scoring**
    Match scanner and manual-request symbols to strategy definitions and persist ranked candidates with strategy horizon/evidence, source attribution, primary strategy selection, trade identity classification, catalyst-watch vs ordinary-watch distinction, and confidence-calibration inputs.
 4. **PR 4: Position Sizing + Portfolio Risk Manager**
@@ -356,6 +356,7 @@ def test_strategy_definition_defaults():
         display_name="Gap-and-Go",
         strategy_layer="tactical_pattern",
         typical_horizon="intraday-3d",
+        allowed_common_stock_direction="long_only",
         config_json={"required_signals": ["opening_gap_pct"]},
         lifecycle_status="active",
         source="seed",
@@ -363,6 +364,7 @@ def test_strategy_definition_defaults():
     )
     assert row.strategy_id == "gap_and_go_v1"
     assert row.lifecycle_status == "active"
+    assert row.allowed_common_stock_direction == "long_only"
     assert row.source == "seed"
     assert row.is_active is True
 ```
@@ -384,9 +386,25 @@ Expected: fail because `src.db.models.trading` does not exist.
 
 Create focused SQLAlchemy models:
 
+- `UniverseFilterConfig`
+  - `universe_filter_config_id UUID pk`
+  - `name String(128)`
+  - `version String(32)`
+  - `min_price Numeric` nullable
+  - `min_avg_dollar_volume Numeric` nullable
+  - `included_sectors_json JSONB` nullable
+  - `excluded_sectors_json JSONB` nullable
+  - `included_industries_json JSONB` nullable
+  - `excluded_industries_json JSONB` nullable
+  - `included_exchanges_json JSONB` nullable
+  - `asset_types_json JSONB` defaulting to common stock
+  - `manual_include_tickers_json JSONB` nullable
+  - `manual_exclude_tickers_json JSONB` nullable
+  - `is_active Bool`
 - `UniverseSnapshot`
   - `snapshot_id UUID pk`
   - `trade_date Date index`
+  - `universe_filter_config_id fk universe_filter_configs`
   - `source String(64)`
   - `filters_json JSONB`
   - `status queued/running/succeeded/failed`
@@ -480,6 +498,7 @@ Create focused SQLAlchemy models:
   - `display_name String(128)`
   - `strategy_layer String(32)` with values such as `tactical_pattern`, `expression_bucket`
   - `typical_horizon String(32)`
+  - `allowed_common_stock_direction String(16)` defaulting to `long_only`
   - `config_json JSONB`
   - `lifecycle_status String(16)` with `candidate/shadow/experimental/active/retired`
   - `source String(32)` with values such as `seed`, `reflection_learning`, `manual`
@@ -513,8 +532,9 @@ Create focused SQLAlchemy models:
   - `reason Text`
   - `priority String(16)` with values such as `normal`, `high`
   - `mode String(32)` with values `review_only`, `paper_trade_eligible`
-  - `expires_at DateTime`
-  - `status String(32)` with values `pending/running/completed/failed/expired/cancelled`
+  - `last_evaluated_at DateTime` nullable
+  - `dismissed_at DateTime` nullable
+  - `status String(32)` with values `active/running/failed/dismissed/cancelled`
   - `result_status String(32)` nullable with values `actionable_trade/catalyst_watch/ordinary_watch/no_trade/blocked_by_risk/blocked_by_missing_data`
   - `result_decision_id UUID` nullable
   - `source_context_json JSONB`
@@ -630,7 +650,7 @@ Create `alembic/versions/005_trading_foundation_tables.py` with:
 - indexes for date, ticker, strategy, status
 - check constraints for status fields and `candidate_score between 0 and 1`
 - check constraints for strategy lifecycle status fields
-- check constraints for manual ticker request mode/status/result status fields
+- check constraints for manual ticker request mode/status/result status fields, including `active/running/failed/dismissed/cancelled`
 - check constraints for trade identity fields
 - check constraints for prompt lifecycle, parse status, and usage status fields
 
@@ -675,7 +695,7 @@ Stop after PR 1. Do not implement PR 2 until the user has reviewed and merged.
 
 ## PR 2: Universe Scan + Signal Snapshots
 
-**Goal:** Build a deterministic pre-market universe, normalized future event calendar, portfolio event-risk scoring, and full signal snapshot pipeline with benchmark/peer relative-strength inputs plus Postgres-backed insider, SEC, news, fundamentals, event/calendar, options, macro/sector/theme read-through, and existing research context signals. No strategy matching or trading decisions yet.
+**Goal:** Build a deterministic pre-market universe using user-editable liquidity and sector filters, normalized future event calendar, portfolio event-risk scoring, and full signal snapshot pipeline with benchmark/peer relative-strength inputs plus Postgres-backed insider, SEC, news, fundamentals, event/calendar, options, macro/sector/theme read-through, and existing research context signals. No strategy matching or trading decisions yet.
 
 **Files:**
 - Create: `src/trading/manual_requests.py`
@@ -699,9 +719,12 @@ Implementation notes:
 
 - Add a `UniverseProvider` interface with a test fake and an Alpaca implementation.
 - Include a config fallback `TRADING_UNIVERSE_SYMBOLS` for local/dev tests.
+- Implement active `UniverseFilterConfig` loading and updates with user-editable liquidity thresholds, sector/industry include/exclude lists, exchange/asset filters, and manual include/exclude ticker overrides.
+- Default to common stocks with configurable minimum price and minimum average dollar volume filters; persist excluded symbols with reasons such as `below_min_price`, `below_min_dollar_volume`, `sector_excluded`, `not_common_stock`, or `manual_exclude`.
 - Persist included and excluded symbols with exclusion reasons.
-- Add `ManualTickerRequestService` for creating, expiring, cancelling, and loading active manual requests.
+- Add `ManualTickerRequestService` for creating, dismissing, cancelling, and loading active manual requests.
 - Merge active manual requests into the signal snapshot job even when the ticker did not pass the scanner ranking threshold.
+- Manual requests stay active across trading days until dismissed by the user; update `last_evaluated_at` and latest result fields on each evaluation.
 - Manual requests can bypass scanner selection threshold, but not ticker validation, market-data availability, liquidity rules, or later risk checks.
 - Support `review_only` and `paper_trade_eligible` request modes.
 - Build signal snapshots from existing daily bars/context where possible.
@@ -824,6 +847,7 @@ Implementation notes:
 - Load trading prompts through `PromptRegistry`; no inline prompt strings.
 - Persist `LlmPromptTemplate`, `LlmPromptRun`, and `LlmUsageEvent` records for every trading-agent call, including rendered prompt hash/redacted prompt, input context, raw output, parsed output, prompt/schema version, model, token usage, cost, latency, retries, and errors.
 - Persist the full decision context snapshot, including trade identity, expression bucket, benchmark/peer context, confidence basis, `selection_source`, and `manual_request_id`.
+- Enforce long-only common-stock paper orders in V2. Bearish evidence may reduce/reject/downgrade, but direct short-stock paper orders should be rejected before paper order creation.
 - Model stocks and options in one simulated margin account. Stock fills must update cash balance, stock market value, account equity, stock margin requirement, total margin requirement, buying power, excess liquidity, margin model profile/version, and margin requirement source in `portfolio_snapshots`.
 - Implement `estimated_fidelity_like_conservative_v1` as the default estimated model: long marginable stock uses a 50% initial requirement, maintenance uses at least a 30% base plus configured house/concentration/volatility/liquidity add-ons, and unknown/non-marginable/restricted/low-priced securities fall back to a 100% requirement. Do not claim exact Fidelity matching unless broker-observed values are imported.
 - Reject or reduce stock orders when unified account buying power, total margin requirement, or excess-liquidity limits would be violated.
@@ -942,7 +966,7 @@ Implementation notes:
 - Evaluate whether `catalyst_watch` would have been more useful than ordinary neutral/watch.
 - Evaluate whether user-pinned tickers exposed scanner misses or mostly confirmed no-trade discipline.
 - Learning factors start as `candidate`, `active`, `suppressed`, or `retired`.
-- Only tightening risk or context reminders can auto-activate initially.
+- New learning factors default to `active` immediately so the next trading run can adapt; any reflection output that would weaken hard safety rails, widen universe filters, or increase risk budgets must become a strategy/config proposal instead of an automatically active learning factor.
 - Reflection may emit `strategy_proposal_hints`, but PR 8 should not add them to the strategy catalog directly.
 
 Stop after PR 8 for review/merge.
@@ -992,12 +1016,13 @@ Implementation notes:
 
 - Build `/today` as tabs: `Overview`, `Portfolio`, `Trades`, `Risk & Macro`, `Candidates`, `Learning & Strategies`, and `Ops & Cost`.
 - Show live alerts, material signal changes, positions, trades, trade identity, expression bucket, paper options, hedge overlays, candidates, risk exposure, post-close reflection, learning factors, and macro regime.
+- In `Candidates`, show and edit the active universe filter: min price, min average dollar volume, included/excluded sectors or industries, exchange/asset eligibility, and manual include/exclude ticker overrides.
 - In `Risk & Macro`, show the active risk appetite preset (`conservative`, `balanced`, or `aggressive`), generated risk config version, and binding constraints; hide detailed generated limits behind an advanced/debug view.
 - In `Risk & Macro`, show a portfolio-aware upcoming event calendar: future macro events, Fed/rates events, own-company earnings, related-company earnings read-through, option-relevant events, and market-structure events that pass the display threshold.
 - Each event row should show scheduled date/time, event type, global importance, portfolio risk level, affected ticker/position/option strategy, affected sector/theme, risk mechanism, lookahead reason, suggested action type, and source/provider.
 - Do not show irrelevant low-importance events by default. The display window must be dynamic by holding period and event importance rather than a fixed "next N months" list.
 - Add trade detail drill-down with signal snapshots, strategy scores, selected strategy, trade identity, LLM decision JSON, risk decision, order/fill state, exit plan, invalidators, and post-close outcome.
-- Add a pinned-review form for ticker, reason, mode (`review_only` / `paper_trade_eligible`), priority, and expiry.
+- Add a pinned-review form for ticker, reason, mode (`review_only` / `paper_trade_eligible`), and priority. Manual requests stay active until dismissed, so the UI should provide a dismiss action instead of default end-of-day expiry.
 - Show pinned-review results with request status, result status, strategy match, trade identity, confidence basis, risk result, and linked trading decision if any.
 - Show benchmark/peer outperformance and confidence basis for selected and rejected candidates.
 - Show option strategy type, per-leg call/put side, buy/sell side, strike, expiry, DTE, Greeks, IV rank, bid/ask/mark, net debit/credit, max loss, breakevens, margin requirement, buying-power effect, earnings/event date, roll/close/adjust plan, and assignment plan when relevant.
@@ -1034,7 +1059,7 @@ Implementation notes:
 
 - Keep schedule in `America/New_York`.
 - Add standalone smoke modes for universe/signal DB writes and paper-trade dry run.
-- Add standalone smoke mode for a fixture-backed manual ticker request in `review_only` mode.
+- Add standalone smoke mode for active universe filter loading plus a fixture-backed manual ticker request in `review_only` mode that remains active until dismissed.
 - Add standalone smoke mode for paper option decisions, option legs, option-risk snapshots, and assignment-risk snapshots using fixture data.
 - Add standalone smoke mode for hourly intraday signal/news refresh using a fixed tiny ticker set or fixture mode.
 - Add standalone smoke mode for strategy proposal creation from a fixed reflection fixture.
