@@ -33,7 +33,7 @@
 5. **PR 5: Trading Decisions + Paper Stock Broker + Portfolio State**
    Add bounded trading agent output, manual request mode gating, paper stock orders/executions, positions, and unified simulated margin-account portfolio snapshots with margin model profile/source metadata.
 6. **PR 6: Paper Options Strategy Layer + Assignment Risk**
-   Add paper-only leg-based option strategy decisions, option legs, option orders/positions, open/close/roll/adjust/avoid-event actions, short-put aliases, strategy-level option risk, conservative option margin requirements, and worst-case assigned-portfolio risk checks when assignment is possible.
+   Add paper-only leg-based option strategy decisions, option legs, option orders/positions, open/close/roll/adjust/avoid-event actions, an initial whitelist of long call/put, credit spread, long straddle, and long strangle strategies, strategy-level option risk, conservative option margin requirements, and worst-case assigned-portfolio risk checks when assignment is possible.
 7. **PR 7: Intraday Signal Refresh + News Alerts + Rebalance**
    Add hourly intraday signal refresh, normalized alerts, material signal-change detection, and risk-gated intraday rebalance decisions for stocks, paper option strategies, and hedge overlays.
 8. **PR 8: Reflection + Learning Factors**
@@ -97,9 +97,9 @@ def test_initial_catalog_contains_expected_strategies():
     assert "valuation_repair_quality_software_v1" in strategy_layer_ids
     assert "core_accumulation_on_pullback_v1" in strategy_layer_ids
     assert "long_stock" in expression_bucket_ids
-    assert "margin_backed_short_put" in expression_bucket_ids
     assert "defined_risk_directional_option" in expression_bucket_ids
     assert "defined_risk_income_spread" in expression_bucket_ids
+    assert "volatility_event_option" in expression_bucket_ids
     assert "core_stock_accumulation" in expression_bucket_ids
     assert "strong_theme_catalyst_long_stock" not in strategy_ids
     assert "strong_theme_no_clear_near_term_sell_put" not in strategy_ids
@@ -881,15 +881,15 @@ Stop after PR 5 for review/merge.
 Implementation notes:
 
 - Support generic option actions: `open_option_strategy`, `close_option_strategy`, `roll_option_strategy`, `adjust_option_strategy`, and `avoid_event_option`.
-- Support initial option strategy types: `long_call`, `long_put`, `short_put`, `covered_call`, `bull_call_spread`, `bear_put_spread`, `put_credit_spread`, `call_credit_spread`, and `collar`.
-- Keep `sell_put`, `close_put`, `roll_put`, `avoid_earnings_put`, and `put_assignment_plan` as aliases for the margin-backed `short_put` subtype, not as the whole option layer.
+- Support only the initial V2 option strategy whitelist: `long_call`, `long_put`, `put_credit_spread`, `call_credit_spread`, `long_straddle`, and `long_strangle`.
+- Reject or downgrade any non-whitelisted `option_strategy_type`, including standalone `short_put`, `covered_call`, `collar`, debit spreads, naked short options, short straddles, short strangles, and custom multi-leg structures.
 - Require every option plan to include `option_strategy_type`, legs with call/put side, buy/sell side, quantity, strike, expiry, DTE, Greeks, IV rank/percentile, bid/ask/mid/chosen price, net debit/credit, max loss, max profit when definable, breakevens, margin requirement, buying-power effect, margin model profile/version/source, deterministic `strategy_pairing_method` for multi-leg strategies, event-through-expiry flags, roll/close/adjust conditions, and assignment plan when short options are present.
 - Reject or downgrade to watch when required option chain, leg pricing, Greeks, max-loss, margin, buying-power, event, or assignment metadata is missing.
 - Calculate strategy-level option risk and current portfolio exposure for all option strategies.
 - Calculate worst-case assigned exposure where assignment-capable short option legs convert into stock exposure at strike.
 - Apply option risk caps by max loss, margin requirement, buying-power effect, Greeks, ticker, sector/theme, expression bucket, high-beta AI/semis/space cluster, correlation cluster, and assignment-capable notional.
 - Apply option margin requirements and buying-power effects to the same simulated margin account used by paper stock positions; do not maintain a separate option buying-power pool.
-- Implement option margin with conservative broker-profile behavior: long options consume premium plus fees, debit spreads consume net debit plus fees, defined-risk credit spreads consume max loss or the broker-profile requirement if higher, covered calls/collars evaluate same-account stock coverage, naked short equity calls use `max(25% * underlying_notional - OTM + premium, 15% * underlying_notional + premium)` plus add-ons, naked short equity puts use `max(25% * underlying_notional - OTM + premium, 15% * strike_notional + premium)` plus add-ons, and undefined-risk structures are blocked when required inputs are missing.
+- Implement option margin with conservative broker-profile behavior for the whitelist: long calls, long puts, long straddles, and long strangles consume full net premium plus fees; defined-risk credit spreads consume max loss or the broker-profile requirement if higher; structures outside the whitelist are blocked before margin approval.
 - Persist broker-observed margin fields separately if a future broker feed or calculator import exists; until then, mark all requirements as `simulated_formula` and use the conservative estimate.
 - Keep the options layer paper/simulation-only; no real broker integration.
 - Support paper-only risk hedge overlay orders generated by `RiskManager` with `trade_identity = "risk_hedge_overlay"`. Persist them separately from tactical option trades and exclude them from strategy win-rate attribution.
@@ -931,7 +931,7 @@ Implementation notes:
 - Load intraday classification/rebalance prompts through `PromptRegistry` and persist prompt run/usage records for every LLM call.
 - Normalize alert fields: ticker or source ticker, event type, sentiment, severity, source, published time, summary, strategy relevance, affected positions/candidates/themes, read-through relationship when applicable, and action-required flag.
 - Severity levels are `critical`, `high`, `medium`, `low`.
-- Critical/high alerts can propose `hold`, `reduce`, `exit`, `add`, `close_option_strategy`, `roll_option_strategy`, `adjust_option_strategy`, or `avoid_event_option`. Cash-secured short-put aliases remain supported.
+- Critical/high alerts can propose `hold`, `reduce`, `exit`, `add`, `close_option_strategy`, `roll_option_strategy`, `adjust_option_strategy`, or `avoid_event_option` for whitelisted paper option strategies.
 - `open_new` is disabled by default unless the ticker was already a morning candidate or manual override.
 - Every proposed action must pass `PositionSizer`, `RiskManager`, and the relevant paper broker.
 - Persist no-action and rejected signal/news triggers so post-close reflection can evaluate missed or noisy signals.

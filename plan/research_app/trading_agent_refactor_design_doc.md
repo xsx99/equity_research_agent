@@ -22,8 +22,8 @@ V2 的目标是把系统从“用户维护 watchlist 后生成研究结论”升
 10. 明确分离 `Macro Engine` 与 `Stock Trading Strategy Engine`。
 11. 先验证相对行业、主题、同类股票和成交量/价格结构，再找明确个股，最后决定是否交易。
 12. 每个交易必须先归类为核心仓、tactical stock trade、tactical option trade、risk hedge overlay、watch-only 等 trade identity，并由这个身份决定仓位、持有周期、退出规则和反思口径。
-13. 增加 paper/simulation-only options strategy layer，支持单腿 call/put、short put、vertical spread、covered/collar-like overlay、其他可配置 multi-leg 组合；`sell_put` 只是其中一个策略类型。
-14. Risk manager 必须用 leg-based option risk 评估 delta/gamma/theta/vega、max loss、margin requirement、buying power effect、event risk；对 short put 或其他可能 assignment 的结构，额外用 worst-case assigned portfolio 评估风险，而不是只看当前股票仓位。
+13. 增加 paper/simulation-only options strategy layer，但 V2 初始白名单先限制在 long call、long put、call/put credit spread、long straddle 和 long strangle。Standalone short put、covered/collar、debit spread 和其他 multi-leg 组合先不进入初始交易范围。
+14. Risk manager 必须用 leg-based option risk 评估 delta/gamma/theta/vega、max loss、margin requirement、buying power effect、event risk；对 credit spread 或未来其他可能 assignment 的结构，额外用 worst-case assigned portfolio 评估风险，而不是只看当前股票仓位。
 15. Confidence 必须按历史 pattern 和策略桶校准，不能因为叙事完整或宏观理由多就给高分。
 16. 支持用户手动 pin ticker 让 trading bot 强制评估，但 manual request 只代表“必须评估”，不代表“允许交易”。
 
@@ -39,7 +39,7 @@ V2 的目标是把系统从“用户维护 watchlist 后生成研究结论”升
 - 不把宏观新闻直接混入每个 ticker prompt 里做随意推理。宏观只通过结构化 macro snapshot/regime 进入个股策略和交易 agent。
 - 不因为宏观 risk-off、估值高、RSI 高、VIX 上升等单独理由生成单票做空或高 confidence bearish trade。除非有直接公司级负面 catalyst 和价格/成交量确认，否则 bearish 结论只能作为风险提示、减仓或暂停加仓依据。
 - 不让短线 catalyst 信号直接驱动核心仓卖出。核心仓由独立的风险预算、加仓/暂停加仓规则和 thesis invalidation 管理。
-- Stock 和 options 在 V2 共用同一个 simulated margin account。股票正股交易也消耗 margin/buying power，不单独假设 cash-only account；期权可以模拟 call、put、spread 和 multi-leg 组合，默认按 margin account / buying power 约束建模，不要求 cash-secured 或 security-secured；但必须记录每条 leg、组合级风险、max loss、margin requirement、buying power effect 和 event risk。
+- Stock 和 options 在 V2 共用同一个 simulated margin account。股票正股交易也消耗 margin/buying power，不单独假设 cash-only account；期权初始只模拟 long call、long put、call/put credit spread、long straddle 和 long strangle，默认按 margin account / buying power 约束建模，不要求 cash-secured 或 security-secured；但必须记录每条 leg、组合级风险、max loss、margin requirement、buying power effect 和 event risk。
 - 不让手动 pin 的 ticker 绕过 liquidity、missing data、risk manager、option risk、assignment risk 或 bearish gating。手动 pin 只是 evaluation source，不是 trade approval。
 
 ## 4. Recommended Approach
@@ -137,7 +137,7 @@ Next trading run receives active learning_factors
 | `StrategyPipeline` | Match each ticker to versioned strategy definitions, score every eligible `(ticker, strategy_id)` pair, attach strategy horizon/evidence, and create ranked candidate scores | Mostly no; optional strategy explanation | `strategy_runs`, `candidate_scores` |
 | `PrimaryStrategySelector` | Choose one primary tactical strategy and one expression bucket per ticker/action so attribution, trade identity, and risk budgeting stay clean | No | `trade_classifications`, `trading_decisions` context |
 | `TradeClassifier` | Assign portfolio-pool trade identity before candidate order decisions: core holding, tactical stock trade, tactical option trade, or watch-only. `RiskManager` assigns `risk_hedge_overlay` for hedge actions | No | `trade_classifications` or embedded in `trading_decisions` |
-| `OptionsStrategyLayer` | Create paper-only leg-based option plans only when an option expression is eligible, including single-leg calls/puts, short puts, spreads, multi-leg structures, Greeks, max loss, margin requirement, buying-power effect, and assignment risk when relevant | Mostly no; optional explanation | `option_strategy_decisions`, `paper_option_orders`, `paper_option_positions` |
+| `OptionsStrategyLayer` | Create paper-only leg-based option plans only when an option expression is eligible, limited initially to long calls, long puts, call/put credit spreads, long straddles, and long strangles, with Greeks, max loss, margin requirement, buying-power effect, and assignment risk when relevant | Mostly no; optional explanation | `option_strategy_decisions`, `paper_option_orders`, `paper_option_positions` |
 | `TradingPipeline` | Combine selected strategy, trade identity, instrument plan, macro regime, portfolio state, risk appetite/effective risk config, and learning factors; produce proposed trading decisions, thesis, invalidators, and suggested sizing | Yes, Gemini Flash bounded decision schema | `trading_decisions`, `paper_orders` |
 | `RiskConfigResolver` | Convert the user-facing `risk_appetite` preset into a deterministic generated risk config using account state, macro regime, portfolio composition, trade identity, and hard safety rails | No | `risk_appetite_profiles`, `risk_limit_configs` |
 | `PositionSizer` | Convert approved trade intent into target quantity/weight using volatility, liquidity, strategy budget, macro budget, and factor exposure constraints | No | `position_sizing_decisions` |
@@ -308,7 +308,7 @@ Every trade decision, watch decision, and risk hedge overlay must carry a `trade
 | --- | --- | --- | --- | --- |
 | `core_holding` | Long-term ownership pool | Stock | Multi-month to multi-year | Managed by core portfolio rules and risk budget. Bot may recommend pause add, add on pullback, trim for risk budget, or thesis review; it should not liquidate core holdings because of one short-term signal. |
 | `tactical_stock_trade` | Intraday to 3-month alpha trade | Stock | Intraday to 3 months | Requires selected strategy, explicit catalyst or technical setup, relative strength, price/volume confirmation, and concrete invalidators. Evaluated against the selected strategy horizon. |
-| `tactical_option_trade` | Paper option expression for tactical ideas | Paper/simulated calls, puts, margin-backed short puts, spreads, and multi-leg option strategies | Intraday to 8 weeks unless strategy-specific rules override | Used when an option better expresses direction, convexity, income, defined risk, or entry timing than common stock. Requires leg-level metadata, Greeks, max loss, margin requirement, buying-power effect, event risk, and assignment plan when relevant. Evaluated separately from stock confidence. |
+| `tactical_option_trade` | Paper option expression for tactical ideas | Paper/simulated long calls, long puts, call/put credit spreads, long straddles, and long strangles | Intraday to 8 weeks unless strategy-specific rules override | Used when an option better expresses direction, convexity, income, defined risk, volatility, or entry timing than common stock. Requires leg-level metadata, Greeks, max loss, margin requirement, buying-power effect, event risk, and assignment plan when relevant. Evaluated separately from stock confidence. |
 | `risk_hedge_overlay` | Portfolio-level hedge owned by risk manager | Paper/simulated option hedge or other overlay | While the risk condition is active | Created by `RiskManager`, not by stock-picking strategies. Evaluated by risk reduction, hedge cost, and hedge PnL, not by strategy win rate. |
 | `watch_only` | No-order candidate or manual watch item | None by default | Event window or N/A | Used for `catalyst_watch` and `ordinary_watch` states. Reflection tracks missed opportunities and false alarms, but no order is created. |
 
@@ -316,7 +316,7 @@ The trade identity decides which risk budget applies, which holding-period assum
 
 `catalyst_watch` and `ordinary_watch` should be stored as `watch_type` or result status under `trade_identity = "watch_only"`, not as separate trade identities.
 
-Do not encode the instrument choice inside the strategy name. A strategy should describe the edge, e.g. `strong_theme_no_clear_near_term_entry_v1` or `valuation_repair_quality_software_v1`. An expression bucket should describe the implementation, e.g. `margin_backed_short_put`, `defined_risk_directional_option`, or `long_stock`. Trade identity then decides which portfolio pool owns the exposure, e.g. `tactical_option_trade`, `core_holding`, `tactical_stock_trade`, or `watch_only`.
+Do not encode the instrument choice inside the strategy name. A strategy should describe the edge, e.g. `strong_theme_no_clear_near_term_entry_v1` or `valuation_repair_quality_software_v1`. An expression bucket should describe the implementation, e.g. `defined_risk_directional_option`, `defined_risk_income_spread`, `volatility_event_option`, or `long_stock`. Trade identity then decides which portfolio pool owns the exposure, e.g. `tactical_option_trade`, `core_holding`, `tactical_stock_trade`, or `watch_only`.
 
 Implementation ownership:
 
@@ -335,7 +335,7 @@ The options layer is V2 paper/simulation-only. It is leg-based and must not be l
 - tactical option trades, generated from selected strategies and `trade_identity = "tactical_option_trade"`
 - risk hedge overlays, generated by `RiskManager` and `trade_identity = "risk_hedge_overlay"`
 
-These must remain separate in attribution. Tactical option trades are evaluated by the selected option expression, e.g. directional long call/put, defined-risk spread, income trade, or assignment-acceptable short put. Hedge overlays are evaluated by risk reduction, hedge cost, and hedge PnL.
+These must remain separate in attribution. Tactical option trades are evaluated by the selected option expression, e.g. directional long call/put, defined-risk credit spread, or long straddle/strangle. Hedge overlays are evaluated by risk reduction, hedge cost, and hedge PnL.
 
 For tactical option trades, it must support these generic actions:
 
@@ -345,19 +345,16 @@ For tactical option trades, it must support these generic actions:
 - `adjust_option_strategy`: add, remove, or resize legs while keeping the strategy inside risk limits
 - `avoid_event_option`: block opening, rolling, or holding an option strategy through earnings or another event when the event risk exceeds the strategy rule
 
-The first supported strategy types should include:
+The initial V2 option strategy whitelist should include only:
 
 - `long_call`
 - `long_put`
-- `short_put`
-- `covered_call` or covered-call-like overlay when shares exist in the same simulated margin account
-- `bull_call_spread`
-- `bear_put_spread`
 - `put_credit_spread`
 - `call_credit_spread`
-- `collar`
+- `long_straddle`
+- `long_strangle`
 
-`sell_put`, `close_put`, `roll_put`, `avoid_earnings_put`, and `put_assignment_plan` remain allowed action aliases for the margin-backed `short_put` strategy type, but they are not the full option layer.
+Standalone short puts, covered calls, collars, debit spreads, naked short options, short straddles, short strangles, and custom multi-leg structures are outside the initial whitelist. If the LLM or strategy layer proposes a non-whitelisted `option_strategy_type`, the option layer must reject it or downgrade the candidate to `catalyst_watch`.
 
 Every option strategy decision must record:
 
@@ -379,7 +376,7 @@ Every option strategy decision must record:
 - `roll_conditions`
 - `close_conditions`
 
-For assignment-capable strategies, especially margin-backed short puts and credit spreads with short options, the decision must also record:
+For assignment-capable strategies, especially credit spreads with short option legs, the decision must also record:
 
 - `assignment_notional`
 - `margin_requirement`
@@ -389,7 +386,7 @@ For assignment-capable strategies, especially margin-backed short puts and credi
 
 For risk hedge overlays, `RiskManager` may generate paper-only actions such as `open_hedge`, `close_hedge`, and `adjust_hedge`. These actions can be single-leg or multi-leg option strategies, should use the same paper option order simulation layer, and should not be counted in tactical strategy win rate.
 
-Options confidence should be calibrated separately from stock confidence. A strong theme without a near-term stock entry can justify an option expression, but a long call, call spread, put spread, or short put should not inherit the same confidence score as a confirmed common-stock breakout. Hedge overlays should not receive alpha confidence; they should carry risk-reduction rationale, expected hedge cost, and invalidation/closure conditions.
+Options confidence should be calibrated separately from stock confidence. A strong theme without a near-term stock entry can justify an option expression, but a long call, long put, credit spread, long straddle, or long strangle should not inherit the same confidence score as a confirmed common-stock breakout. Hedge overlays should not receive alpha confidence; they should carry risk-reduction rationale, expected hedge cost, and invalidation/closure conditions.
 
 ### Strategy Catalog
 
@@ -434,17 +431,17 @@ The strategy expression buckets below are also stored in the strategy catalog so
 | Strategy Expression Bucket | Expression Bucket ID | Default Trade Identity | Required Context | Typical Horizon | Expression Thesis |
 | --- | --- | --- | --- | --- | --- |
 | Long Stock | `long_stock` | `tactical_stock_trade` | Near-term continuation is confirmed; stock entry has acceptable risk/reward and liquidity | Intraday-3 months | Own the common stock when direct directional exposure is the cleanest expression. |
-| Margin-Backed Short Put | `margin_backed_short_put` | `tactical_option_trade` | Underlying is acceptable to own, put premium/IV is attractive, assignment and margin impact are acceptable | 2-8 weeks | Get paid to wait for a better effective entry while modeling margin and assignment risk. |
-| Defined-Risk Directional Option | `defined_risk_directional_option` | `tactical_option_trade` | Directional catalyst or setup exists, but option convexity or explicit max loss is preferable to common stock | Intraday-4 weeks | Express bullish or bearish views through long calls/puts or vertical spreads with explicit max loss. |
-| Defined-Risk Income Spread | `defined_risk_income_spread` | `tactical_option_trade` | Premium is attractive but naked short-option assignment or margin usage is not desirable | 2-8 weeks | Replace open-ended short-option exposure with a capped-risk credit spread. |
+| Directional Long Option | `defined_risk_directional_option` | `tactical_option_trade` | Directional catalyst or setup exists, and option convexity or explicit premium-defined max loss is preferable to common stock | Intraday-4 weeks | Express directional views through long calls or long puts only. |
+| Credit Spread | `defined_risk_income_spread` | `tactical_option_trade` | Premium is attractive, direction/range thesis is clear, and capped-risk short premium is preferable to standalone short options | 2-8 weeks | Express short-premium views only through put credit spreads or call credit spreads with explicit max loss. |
+| Volatility Event Option | `volatility_event_option` | `tactical_option_trade` | Direction is uncertain, event volatility is material, and long-vol premium risk is acceptable | Intraday-4 weeks | Express event volatility through long straddles or long strangles only. |
 | Core Stock Accumulation | `core_stock_accumulation` | `core_holding` | Approved core holding and portfolio risk budget allow adding stock exposure | Multi-month+ | Add to a core position through stock only when the core-pool rules approve it. |
 
 Example mapping:
 
 - `strong_theme_catalyst_continuation_v1` + `long_stock` -> `trade_identity = "tactical_stock_trade"`
-- `strong_theme_no_clear_near_term_entry_v1` + `margin_backed_short_put` -> `trade_identity = "tactical_option_trade"`
 - `strong_theme_no_clear_near_term_entry_v1` + `defined_risk_income_spread` -> `trade_identity = "tactical_option_trade"`
-- `valuation_repair_quality_software_v1` + `margin_backed_short_put` -> `trade_identity = "tactical_option_trade"`
+- event-driven uncertain direction setup + `volatility_event_option` -> `trade_identity = "tactical_option_trade"`
+- `valuation_repair_quality_software_v1` + `defined_risk_income_spread` -> `trade_identity = "tactical_option_trade"`
 - `core_accumulation_on_pullback_v1` + `core_stock_accumulation` -> `trade_identity = "core_holding"`
 
 ### Strategy Lifecycle
@@ -916,11 +913,6 @@ Allowed decisions:
 - `roll_option_strategy`
 - `adjust_option_strategy`
 - `avoid_event_option`
-- `sell_put`
-- `close_put`
-- `roll_put`
-- `avoid_earnings_put`
-- `put_assignment_plan`
 
 Risk checks run before order creation. If risk checks fail, no paper order is created even if the LLM decision is actionable.
 
@@ -1013,11 +1005,10 @@ Default estimated rules:
 - Unknown, non-marginable, very low-priced, highly volatile, hard-to-borrow, concentrated, or manually restricted securities should fall back to a 100% requirement unless a stricter override is configured.
 - Short stock is disabled in V2 by default. If enabled later, it must use stricter initial and maintenance requirements, locate/borrow assumptions, and conservative house add-ons.
 - Long options consume full premium paid plus fees as buying-power effect.
-- Defined-risk debit spreads consume the net debit plus fees. Defined-risk credit spreads consume max loss when max loss is known; if a configured broker profile requires a higher value, use the higher value.
-- Covered calls and collars must evaluate both the option payoff and the same-account stock position/margin state.
-- Naked short equity calls should default to `max(25% * underlying_notional - out_of_the_money_amount + premium, 15% * underlying_notional + premium)` plus configured add-ons.
-- Naked short equity puts should default to `max(25% * underlying_notional - out_of_the_money_amount + premium, 15% * strike_notional + premium)` plus configured add-ons.
-- Undefined-risk option structures must use conservative uncovered-option formulas and may be blocked entirely when inputs are missing. The model must not treat short-option premium as sufficient collateral.
+- Defined-risk credit spreads consume max loss when max loss is known; if a configured broker profile requires a higher value, use the higher value.
+- Long straddles and long strangles consume full net premium paid plus fees as buying-power effect.
+- Standalone naked short options, short straddles, short strangles, standalone short puts, covered calls, collars, debit spreads, and custom multi-leg structures are outside the initial V2 option whitelist. They should be rejected or downgraded unless explicitly enabled in a later design revision.
+- If naked or undefined-risk structures are enabled later, they must use conservative uncovered-option formulas and may be blocked entirely when inputs are missing. The model must not treat short-option premium as sufficient collateral.
 - Multi-leg option strategies must persist a deterministic `strategy_pairing_method`. If legs cannot be paired unambiguously into a defined-risk structure, margin should fall back to the more conservative naked-leg estimate or the trade should be rejected.
 - Assignment-capable strategies must pass both current margin/buying-power checks and a worst-case assigned portfolio check at strike-level stock exposure.
 - If required data is missing, stale, or internally inconsistent, the risk manager should use the more conservative requirement, reduce size, or reject the paper order.
@@ -1072,7 +1063,7 @@ For assignment-capable paper strategies, risk must also be evaluated as if assig
 - current portfolio exposure: stock positions plus marked option positions
 - worst-case assigned portfolio: current stock positions plus assignment-capable short option legs converted into the resulting stock exposure at their strikes
 
-The worst-case assigned portfolio is the primary control for `short_put`, assignment-capable credit spreads, and any strategy with short option legs that can create stock exposure. A trade is rejected, reduced, or adjusted if simultaneous assignment would create unacceptable concentration, even if current stock exposure looks safe.
+The worst-case assigned portfolio is the primary control for assignment-capable credit spreads and any future strategy with short option legs that can create stock exposure. Standalone short puts are not part of the initial V2 option whitelist. A trade is rejected, reduced, or adjusted if simultaneous assignment would create unacceptable concentration, even if current stock exposure looks safe.
 
 Required assignment metrics:
 
@@ -1091,7 +1082,7 @@ Example assignment question the risk manager must answer:
 If every assignment-capable short option leg is assigned at strike, does the portfolio become an over-concentrated high-beta AI/semiconductor/space book?
 ```
 
-If yes, the system can propose `avoid_event_option`, `close_option_strategy`, `roll_option_strategy`, `adjust_option_strategy` to a lower-risk structure, reduce new common-stock exposure, or reject new option strategies. For the margin-backed short-put subtype, the legacy aliases `avoid_earnings_put`, `close_put`, and `roll_put` are still valid.
+If yes, the system can propose `avoid_event_option`, `close_option_strategy`, `roll_option_strategy`, `adjust_option_strategy` to a lower-risk whitelisted structure, reduce new common-stock exposure, or reject new option strategies.
 
 ### Portfolio Risk Factor Model
 
@@ -1336,7 +1327,7 @@ Proposed new tables:
 | `candidate_scores` | Ranked ticker candidates by strategy, horizon, evidence, macro compatibility |
 | `trade_classifications` | Portfolio-pool trade identity, expression bucket, watch type, intended horizon, and exit-policy metadata for each candidate/position decision |
 | `trading_decisions` | Trading agent decisions and context snapshot |
-| `option_strategy_decisions` | Paper-only option strategy actions such as open/close/roll/adjust/avoid-event, plus short-put aliases when relevant, with required strategy-level option metadata |
+| `option_strategy_decisions` | Paper-only option strategy actions such as open/close/roll/adjust/avoid-event for whitelisted long call, long put, credit spread, long straddle, and long strangle strategies, with required strategy-level option metadata |
 | `option_strategy_legs` | Per-leg option details for single-leg and multi-leg paper option strategies, including call/put, side, quantity, strike, expiry, Greeks, price, and liquidity fields |
 | `risk_hedge_decisions` | Paper-only risk-manager hedge overlay decisions such as open/close/adjust hedge with risk-reduction rationale and hedge cost |
 | `paper_option_orders` | Staged/submitted/filled/rejected simulated option orders |
@@ -1438,7 +1429,7 @@ Tabs:
    - Include trade identity, selected strategy, holding age, invalidator status, current risk tags, option Greeks/max loss/margin requirement/buying-power effect, and worst-case assigned exposure for assignment-capable option strategies.
 
 3. `Trades`
-   - Every same-day trade decision, including executed trades, rejected trades, reductions, exits, option strategy opens/closes/rolls/adjustments, short-put aliases, and no-trade decisions that reached `TradingPipeline`.
+   - Every same-day trade decision, including executed trades, rejected trades, reductions, exits, whitelisted option strategy opens/closes/rolls/adjustments, and no-trade decisions that reached `TradingPipeline`.
    - Each row shows time, ticker, action, instrument, trade identity, selected strategy, expression bucket, proposed size, final size, fill/order status, confidence, and reject/reduction reason.
    - Every trade row must open a detail view with the complete audit trail:
      - multi-source signal snapshot
@@ -1650,7 +1641,7 @@ Implementation must continue to use `source ~/.venv/bin/activate` before Python 
 11. Portfolio risk snapshots show factor exposure by sector, strategy, horizon, beta, volatility, liquidity, event type, macro sensitivity, correlation cluster, leg-based option risk, and assignment exposure where relevant.
 12. Risk manager reduces or rejects trades that would make current portfolio risk, option strategy risk, or worst-case assigned portfolio too concentrated in any configured risk factor.
 13. Paper portfolio shows positions, trades, exposure, and day PnL.
-14. Paper options layer records generic `open_option_strategy`, `close_option_strategy`, `roll_option_strategy`, `adjust_option_strategy`, and `avoid_event_option` actions with strategy type, per-leg call/put side, strike, expiry, DTE, Greeks, IV rank, price, net debit/credit, max loss, breakevens, margin requirement, buying-power effect, event dates, and assignment data when relevant. Short-put aliases remain supported for the margin-backed short-put subtype.
+14. Paper options layer is initially limited to `long_call`, `long_put`, `put_credit_spread`, `call_credit_spread`, `long_straddle`, and `long_strangle`, and records generic `open_option_strategy`, `close_option_strategy`, `roll_option_strategy`, `adjust_option_strategy`, and `avoid_event_option` actions with strategy type, per-leg call/put side, strike, expiry, DTE, Greeks, IV rank, price, net debit/credit, max loss, breakevens, margin requirement, buying-power effect, event dates, and assignment data when relevant.
 15. Macro-only bearish context cannot create high-confidence single-name bearish trades; it can only reduce size, block strategy tags, or add risk warnings unless direct company-level negative evidence exists.
 16. Confidence displays and persistence distinguish historically strong bullish catalyst patterns from weak bearish/macro narratives.
 17. Watch output distinguishes `ordinary_watch` from `catalyst_watch` as `watch_type` under `trade_identity = "watch_only"`.
