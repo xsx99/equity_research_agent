@@ -327,6 +327,7 @@ Create `tests/db/test_trading_models.py` to instantiate:
 - `UniverseSnapshot`
 - `UniverseSymbol`
 - `ManualTickerRequest`
+- `SourceIngestionRun`
 - `MacroSnapshot`
 - `MacroReadthroughEvent`
 - `CalendarEvent`
@@ -398,6 +399,18 @@ Create focused SQLAlchemy models:
   - `is_included Bool`
   - `exclusion_reason`
   - `metadata_json JSONB`
+- `SourceIngestionRun`
+  - `source_ingestion_run_id UUID pk`
+  - `source_family String(64)` with values such as `market_data`, `news`, `sec_filings`, `insider_form4`, `fundamentals`, `earnings_calendar`, `option_chain`, `macro_calendar`
+  - `run_type String(32)` with values such as `scheduled_pre_open`, `scheduled_post_close`, `intraday_inline`, `intraday_targeted`, `manual_smoke`
+  - `scope_json JSONB`
+  - `provider String(64)` nullable
+  - `coverage_json JSONB`
+  - `as_of DateTime`
+  - `started_at DateTime`
+  - `completed_at DateTime` nullable
+  - `status`
+  - `error_message Text`
 - `MacroSnapshot`
   - `macro_snapshot_id UUID pk`
   - `trade_date Date index`
@@ -454,8 +467,11 @@ Create focused SQLAlchemy models:
   - `universe_snapshot_id fk`
   - `ticker String(16)`
   - `trade_date Date index`
+  - `snapshot_type String(32)` with values such as `pre_open`
   - `signals_json JSONB`
   - `missing_signals_json JSONB`
+  - `stale_signals_json JSONB`
+  - `source_freshness_json JSONB`
   - `status`
 - `StrategyDefinition`
   - `strategy_definition_id UUID pk`
@@ -683,6 +699,7 @@ Implementation notes:
 - Manual requests can bypass scanner selection threshold, but not ticker validation, market-data availability, liquidity rules, or later risk checks.
 - Support `review_only` and `paper_trade_eligible` request modes.
 - Build signal snapshots from existing daily bars/context where possible.
+- Add source-ingestion run metadata for every scheduled or targeted refresh so freshness decisions are replayable.
 - Add `SignalSourceRepository` or equivalent adapters that read normalized Postgres-backed sources for insider transactions/Form 4/SEC filings, news and analyst events, fundamentals/valuation, earnings/event calendar, option-chain snapshots, macro/sector/theme read-through events, and existing research/global-context artifacts.
 - Add an `EventCalendarService` that normalizes future macro/economic/Fed events and earnings calendar rows from configured providers into `calendar_events`.
 - Add a deterministic `PortfolioEventRiskScorer` that maps events to current positions, core holdings, top candidates, active manual requests, paper option expiries, sectors/themes, and strategy holding periods.
@@ -690,6 +707,8 @@ Implementation notes:
 - Implement dynamic event lookahead: intraday/1-3 day trades show same-day plus next 5 trading days; tactical stock trades show relevant events through intended horizon; option trades show events through expiry plus buffer; core holdings show high/critical macro and own/major-peer earnings 3-6 months out.
 - Prefer normalized Postgres rows over ad hoc live provider calls. Provider calls are allowed only through controlled refresh/fallback adapters and must record attempted source and freshness.
 - Store source provenance for each signal, including `source`, `source_table` or provider name, `as_of` / `published_at` / `filing_date` where relevant, and missing/stale status.
+- Store pre-open signal snapshots as the daily baseline with `snapshot_type = "pre_open"`, `source_freshness_json`, `missing_signals_json`, and `stale_signals_json`.
+- Implement source freshness SLA config for each source family. Low-frequency fields can be carried forward when inside SLA; stale required fields must downgrade or block candidate outputs.
 - Add derived insider/SEC signals such as net buy value, cluster buy count, officer/director buy flags, sale concentration, and recent filing freshness.
 - Add derived news/fundamental signals such as high-signal news count, analyst revision score, guidance/customer/regulatory flags, valuation percentile, margin trend, quality score, and market-cap/liquidity quality.
 - Add own-company earnings signals when the reporting ticker equals the snapshot ticker: earnings event type, reported time, EPS/revenue surprise, guidance revision, segment growth, margin change, transcript availability/sentiment/key topics, and post-earnings analyst revisions. These may populate target-company catalyst fields when evidence supports it.
@@ -844,7 +863,7 @@ Stop after PR 6 for review/merge.
 
 ## PR 7: Intraday Signal Refresh + News Alerts + Rebalance
 
-**Goal:** Refresh intraday signals and news hourly during regular trading hours, then trigger risk-gated intraday rebalance actions for material signal changes or high-impact positive/negative events.
+**Goal:** Refresh intraday signals and news hourly during regular trading hours using the pre-open baseline snapshot, source freshness gates, and targeted source refreshes, then trigger risk-gated intraday rebalance actions for material signal changes or high-impact positive/negative events.
 
 **Files:**
 - Create: `src/trading/intraday_signals.py`
@@ -865,6 +884,11 @@ Implementation notes:
 - Refresh intraday price/volume/liquidity signals, VWAP/opening-range/gap signals, relative strength vs benchmarks/peers, option marks, per-leg Greeks, max-loss/margin/buying-power changes, assignment-risk deltas when relevant, news/event signals, target-company earnings release/transcript/guidance updates, peer/sector-leader earnings read-through updates, and freshness checks for low-frequency insider/SEC/fundamental/event sources.
 - Persist intraday signal snapshots with deltas vs the morning snapshot and previous hourly snapshot.
 - Define material-change thresholds that can trigger rebalance even without a new headline.
+- Load the pre-open baseline `signal_snapshot_id` and previous hourly snapshot for every ticker in the intraday scope.
+- Before building each intraday snapshot, compute a freshness plan by source family and ticker/event scope. Run inline required refreshes for price/volume, intraday relative strength, scoped news/events, and open option marks; run targeted refreshes for SEC filings, own earnings transcripts, or peer read-through only when relevant.
+- Do not rerun the full universe scan or full source-ingestion set during hourly refresh. Carry forward low-frequency baseline fields when they remain inside freshness SLA and mark them as `carried_forward_from_baseline`.
+- Persist intraday snapshot fields for `baseline_signal_snapshot_id`, `previous_intraday_snapshot_id`, `refreshed_signals_json`, `carried_forward_signals_json`, `delta_vs_baseline_json`, `delta_vs_previous_json`, and `source_freshness_json`.
+- Block or downgrade actions when required source freshness is insufficient: no new add when high-frequency price/news is stale, no option open/roll when option data is stale/missing, and no high-confidence bearish action when direct-negative-catalyst checks are missing.
 - Use deterministic dedupe keys so repeated headlines do not trigger repeated rebalances.
 - Load intraday classification/rebalance prompts through `PromptRegistry` and persist prompt run/usage records for every LLM call.
 - Normalize alert fields: ticker or source ticker, event type, sentiment, severity, source, published time, summary, strategy relevance, affected positions/candidates/themes, read-through relationship when applicable, and action-required flag.

@@ -126,9 +126,10 @@ Next trading run receives active learning_factors
 | --- | --- | --- | --- |
 | `UniverseProvider` | Load daily tradable US equity universe from market data provider, normalize tickers, apply exchange/asset filters | No | `universe_symbols`, `universe_snapshots` |
 | `ManualTickerReviewPipeline` | Accept user-pinned tickers for forced evaluation, validate basic eligibility, attach request reason/mode, and merge them into signal/strategy evaluation without granting trade approval | No | `manual_ticker_requests`, `universe_symbols`, `signal_snapshots` |
+| `SourceIngestionJobs` | Supporting scheduled/targeted data ingestion layer that keeps normalized Postgres source tables fresh for insider/Form 4, SEC filings, news/analyst events, fundamentals, market data, option chains, earnings/events, and macro calendars. These jobs do not make trading decisions; they only provide replayable source rows and freshness metadata for downstream pipelines | No | source-specific tables, `source_ingestion_runs` |
 | `MacroPipeline` | Fetch rates, VIX, credit spreads, commodities, broad index trend, economic calendar; consume macro/sector/theme read-through context; produce market regime | Optional bounded summary using Gemini Flash | `macro_snapshots` |
 | `PortfolioEventCalendarPipeline` | Normalize future macro, economic, earnings, Fed, and company events; score relevance/risk against current holdings, candidates, option expiries, and strategy holding periods; hide irrelevant low-impact events from the UI | No | `calendar_events`, `portfolio_event_risk_assessments` |
-| `SignalPipeline` | Build deterministic per-ticker signal snapshots from market bars plus normalized Postgres-backed insider, SEC, news, fundamentals, event/earnings calendar, options, macro/sector/theme read-through source family, and existing research context data; refresh provider data only through controlled adapters when needed | No | `signal_snapshots` |
+| `SignalPipeline` | Build deterministic pre-open per-ticker baseline signal snapshots from market bars plus normalized Postgres-backed insider, SEC, news, fundamentals, event/earnings calendar, options, macro/sector/theme read-through source family, and existing research context data; refresh provider data only through controlled adapters when needed | No | `signal_snapshots` |
 | `StrategyPipeline` | Match each ticker to versioned strategy definitions, score every eligible `(ticker, strategy_id)` pair, attach strategy horizon/evidence, and create ranked candidate scores | Mostly no; optional strategy explanation | `strategy_runs`, `candidate_scores` |
 | `PrimaryStrategySelector` | Choose one primary tactical strategy and one expression bucket per ticker/action so attribution, trade identity, and risk budgeting stay clean | No | `trade_classifications`, `trading_decisions` context |
 | `TradeClassifier` | Assign portfolio-pool trade identity before candidate order decisions: core holding, tactical stock trade, tactical option trade, or watch-only. `RiskManager` assigns `risk_hedge_overlay` for hedge actions | No | `trade_classifications` or embedded in `trading_decisions` |
@@ -138,7 +139,7 @@ Next trading run receives active learning_factors
 | `RiskManager` | Enforce portfolio-level risk limits, factor exposure concentration limits, correlation clusters, leg-based option risk, assignment exposure when relevant, and hard reject/reduce rules | No | `portfolio_risk_snapshots`, `risk_factor_exposures`, `option_risk_snapshots` |
 | `PaperBroker` | Simulate stock and option fills, slippage, commissions, rejects, order status transitions, and margin/buying-power effects | No | `paper_orders`, `paper_executions` |
 | `PortfolioPipeline` | Maintain stock/options positions and one unified simulated margin account with cash balance, account equity, margin used, buying power, excess liquidity, exposure, and realized/unrealized PnL | No | `paper_positions`, `portfolio_snapshots` |
-| `HourlySignalRefreshPipeline` | Refresh intraday signal snapshots hourly for portfolio-relevant tickers, including price/volume, relative strength, VWAP/gap, option marks, news, and freshness checks for low-frequency sources | Optional Gemini Flash bounded classifier only for news/event classification after deterministic filters | `intraday_signal_scans`, `intraday_signal_snapshots`, `news_alerts` |
+| `HourlySignalRefreshPipeline` | Build scoped intraday delta snapshots using the same canonical signal schema as pre-open snapshots. It runs freshness-gated targeted refreshes for portfolio-relevant tickers, updates price/volume, relative strength, VWAP/gap, option marks, news/events, and checks low-frequency source freshness without full re-ingestion | Optional Gemini Flash bounded classifier only for news/event classification after deterministic filters | `intraday_signal_scans`, `intraday_signal_snapshots`, `news_alerts` |
 | `IntradayRebalancePipeline` | Convert material signal changes and critical/high-impact alerts into reduce/exit/add/hold proposals for existing positions or active candidates | Yes, Gemini Flash bounded decision schema; risk manager remains final gate | `intraday_rebalance_decisions`, `paper_orders` |
 | `ReflectionPipeline` | Analyze day results, compare thesis vs outcome, extract learning factors | Yes, highest-quality configured model | `daily_reflections`, `learning_factors` |
 | `StrategyEvolutionPipeline` | Convert repeated learning patterns into new strategy proposals, shadow-test them, and promote/retire strategy definitions | Yes for proposal synthesis; deterministic lifecycle gates | `strategy_proposals`, `strategy_definitions`, `strategy_evaluation_results` |
@@ -204,6 +205,15 @@ Supported event types:
 - own-company earnings: earnings date/time, expected report window, guidance events, transcript availability
 - related-company earnings: peer, customer, supplier, competitor, or sector-leader earnings that can create sector/theme read-through
 - option-relevant events: earnings-through-expiry, macro events before expiry, known event dates inside the option holding window
+
+Earnings handling is embedded in the normal event-calendar refresh and signal snapshot assembly:
+
+- Target-company earnings always stay in the target ticker's own signal snapshot. If the reporting ticker is the same as the evaluated ticker, the release, guidance, transcript, and post-earnings analyst revisions are direct company signals.
+- The event calendar checks prior-night and upcoming releases for portfolio names, top candidates, active manual review tickers, core holdings, and their configured peer/customer/supplier/competitor/sector-leader relationships.
+- Full transcripts are only required for high-value source tickers: direct peers, sector leaders, major customers/suppliers, or cases where the release and price reaction conflict. Otherwise, use structured release/headline/financial-table data first.
+- Related-company earnings are stored as macro/sector/theme context with provenance. They must not be treated as the target ticker's own catalyst.
+- Target-ticker confirmation is required before read-through affects trade eligibility: relative strength vs peers/theme, price/volume confirmation, and no target-specific contradictory signal.
+- Bearish peer read-through should normally reduce size, pause adds, tighten option/event risk, or produce catalyst-watch/risk-review. It should not create a high-confidence single-name bearish trade without target-specific confirmation.
 
 Every event shown in the UI must carry a portfolio relevance record:
 
@@ -568,6 +578,60 @@ Signal source rules:
 - Separate raw inputs from derived scores. For example, persist raw insider transactions elsewhere, then store derived fields such as `insider_net_buy_value_90d` and `insider_cluster_buy_count_90d` in `signal_snapshots`.
 - Do not let the LLM infer missing insider/news/fundamental facts. Missing facts remain missing signals.
 
+### Source Ingestion, Baseline, and Freshness
+
+Source ingestion jobs are part of the system data layer, not separate trading functions. Their job is to keep raw/normalized Postgres rows fresh enough for `SignalPipeline` and `HourlySignalRefreshPipeline` to build replayable snapshots. Each ingestion run should persist source name, run type, scope, coverage, `started_at`, `completed_at`, `as_of`, status, attempted provider, and error metadata.
+
+Recommended source cadence:
+
+| Source Family | Normal Cadence | Intraday Treatment |
+| --- | --- | --- |
+| Insider / Form 4 | Daily early-morning plus post-close catch-up | Usually freshness check only; no hourly full refresh unless a targeted filing source supports it. |
+| SEC material filings | Pre-open and post-close catch-up | Targeted hourly check for open positions, top candidates, and manual requests. |
+| Fundamentals / raw valuation | Daily pre-open for active universe; broader universe weekly or rolling | Carry forward if within freshness SLA; do not hourly refresh full fundamentals. |
+| Valuation derived from price | Pre-open from latest price and fundamentals | Recompute only if price move materially changes valuation band and strategy needs it. |
+| Earnings calendar / event calendar | Daily pre-open and post-close | Refresh same-day event status and relevant portfolio events; do not rescrape irrelevant calendar rows hourly. |
+| Own earnings release / transcript | Event/news ingestion around expected report time | Targeted polling when a portfolio/candidate/manual ticker is expected to report or has just reported. |
+| Peer / sector-leader read-through | Event-calendar and news/transcript ingestion for mapped relationships | Targeted refresh only for relevant peer/customer/supplier/competitor/leader events. |
+| News / analyst events | Pre-open, hourly intraday, post-close | Hourly scoped refresh for positions, same-day trades, top candidates, manual requests, and high-impact sector/macro news. |
+| Market bars / quotes | Daily bars after close; current quotes during trading day | Required for hourly intraday snapshots and relative-strength deltas. |
+| Technical signals | Computed by `SignalPipeline` from market data | Pre-open full universe; intraday scoped recompute only for portfolio-relevant tickers. |
+| Option chains / marks | Pre-open/after open where available; mark open option positions | Hourly for open option positions and option-eligible candidates; missing required option data blocks option opens/rolls. |
+
+Pre-open snapshots are the daily baseline. They should be persisted as `snapshot_type = "pre_open"` and include all available source families, source freshness status, missing/stale fields, and the universe/manual-request context that caused the ticker to be evaluated.
+
+Intraday snapshots must not overwrite the pre-open baseline. They reuse the same canonical signal schema, but store only refreshed intraday values, carried-forward baseline values, and deltas:
+
+```text
+signal_snapshots
+  snapshot_type = "pre_open"
+  signal_snapshot_id = baseline_signal_snapshot_id
+
+intraday_signal_snapshots
+  baseline_signal_snapshot_id
+  previous_intraday_snapshot_id
+  refreshed_signals
+  carried_forward_from_baseline
+  delta_vs_baseline
+  delta_vs_previous
+  source_freshness
+```
+
+Intraday source precedence:
+
+- High-frequency fields override the baseline when refreshed: price, volume, VWAP/opening range, gap state, intraday relative strength, option marks/Greeks/IV, and fresh news/events.
+- Low-frequency fields are carried forward from baseline unless a new row is detected: insider, most fundamentals, most SEC-derived summaries, and routine event-calendar fields.
+- Any carried-forward field must be explicitly marked as `carried_forward_from_baseline` so the UI and rebalance logic do not mistake it for newly refreshed data.
+- New target-company events, e.g. own earnings release, transcript, analyst action, or material SEC filing, become intraday deltas and can invalidate or upgrade the morning thesis.
+- Related-company events remain macro/sector/theme read-through context and require target-ticker confirmation before affecting trade eligibility.
+
+Freshness gates:
+
+- Required high-frequency data missing or stale for an open position should block new adds and may limit actions to `hold`, `reduce`, or `exit`.
+- Missing option chain, leg pricing, Greeks, max-loss, margin, or buying-power data should block opening or rolling paper option strategies.
+- Low-frequency data within its SLA may be carried forward; outside its SLA it must be marked stale and can downgrade candidates to `catalyst_watch`, `ordinary_watch`, or `blocked_by_missing_data`.
+- Missing direct-negative-catalyst checks should prevent high-confidence bearish actions.
+
 ### Required Signal Families For Strategy Matching
 
 The signal schema should explicitly support the strategy catalog above:
@@ -628,15 +692,6 @@ Morning workflow semantics:
 12. Separately, `RiskManager` may generate paper-only `risk_hedge_overlay` actions when portfolio-level beta, concentration, or event risk should be hedged instead of handled only by sizing.
 
 The final morning output is not just a ranked list. It is a trade plan: selected ticker, selected strategy, horizon, action, target exposure, risk budget used, and explicit reason if a high-scoring candidate was skipped.
-
-Peer earnings read-through reading policy:
-
-- Target-company earnings always stay in the target ticker's own signal snapshot. If the reporting ticker is the same as the evaluated ticker, the release, guidance, transcript, and post-earnings analyst revisions are direct company signals.
-- Before the open, check earnings calendar and prior-night releases for portfolio names, top candidates, active manual review tickers, core holdings, and their configured peer/customer/supplier/competitor/sector-leader relationships.
-- Read full transcripts only for high-value source tickers: direct peers, sector leaders, major customers/suppliers, or cases where the release and price reaction conflict. Otherwise, use structured release/headline/financial-table data first.
-- Store read-through as macro/sector/theme context with provenance. Do not treat another company's earnings as the target ticker's own catalyst.
-- Require target-ticker confirmation before converting read-through into a trade: relative strength vs peers/theme, price/volume confirmation, and no target-specific contradictory signal.
-- Bearish peer read-through should normally reduce size, pause adds, tighten option/event risk, or produce catalyst-watch/risk-review. It should not create a high-confidence single-name bearish trade without target-specific confirmation.
 
 ### Manual Ticker Review / Pinned Review
 
@@ -709,6 +764,16 @@ During regular trading hours, the system runs an hourly intraday refresh. It sho
 
 If provider limits allow, the scan can also query broader universe signals/news, but the first production path should prioritize portfolio-relevant names so it can react quickly without excessive API usage.
 
+Hourly refresh starts with a freshness plan rather than a full rerun of all source pipelines:
+
+1. Determine the intraday scope: open positions, same-day trades, staged orders, top morning candidates, manual requests, option positions, and critical/high event exposures.
+2. Load each ticker's pre-open baseline `signal_snapshot_id` and previous intraday snapshot if available.
+3. Evaluate source freshness requirements by source family and ticker/event scope.
+4. Run required inline refreshes within a time budget: market price/volume, intraday relative strength, latest scoped news/events, and open option marks.
+5. Run targeted on-demand refreshes only when relevant: SEC filings for positions/candidates, own earnings transcript when expected/reported, peer read-through for mapped relationships.
+6. Carry forward low-frequency baseline fields when the source is still inside its freshness SLA.
+7. Persist explicit `fresh`, `stale`, `missing`, `failed`, or `not_required` source status for every signal family used in the intraday snapshot.
+
 Hourly refresh should update:
 
 - intraday price/volume/liquidity signals: VWAP hold/reclaim, opening range break, relative volume, spread proxy, gap fade/fill, intraday range, ATR-relative move
@@ -717,7 +782,7 @@ Hourly refresh should update:
 - news/event signals: new company news, target-company earnings releases/transcripts/guidance, analyst revisions, filings, direct negative catalyst flags, high-impact market/sector news, and peer/sector-leader earnings read-through updates
 - low-frequency source freshness: insider/SEC/fundamentals/earnings-calendar records should be checked for newly available rows or staleness, not blindly recomputed from scratch each hour
 
-Each hourly run stores an `intraday_signal_snapshot` with signal deltas vs the morning snapshot and previous intraday snapshot. Rebalance should trigger from material signal changes even when no new headline exists.
+Each hourly run stores an `intraday_signal_snapshot` with signal deltas vs the morning snapshot and previous intraday snapshot. Rebalance should trigger from material signal changes even when no new headline exists. Intraday refresh should not recompute the full morning candidate ranking by default; it should preserve the morning score and add current state, material-change flags, and rebalance reasons.
 
 Each scan also produces normalized `news_alerts` when new events are detected:
 
@@ -1178,6 +1243,7 @@ Proposed new tables:
 
 | Table | Purpose |
 | --- | --- |
+| `source_ingestion_runs` | Audit metadata for scheduled/targeted source refreshes: source family, run type, scope, provider, coverage, as-of time, status, latency, and error metadata |
 | `universe_snapshots` | One row per daily universe refresh |
 | `universe_symbols` | Symbols included/excluded in a universe snapshot with reason |
 | `manual_ticker_requests` | User-pinned tickers that must be evaluated, including reason, mode, expiry, status, and linked result |
@@ -1185,7 +1251,7 @@ Proposed new tables:
 | `macro_readthrough_events` | Structured peer/sector-leader earnings read-through events with source ticker, scope, mechanism, direction, affected theme/relationship, transcript/release provenance, and validity window |
 | `calendar_events` | Normalized future macro, economic, Fed, earnings, market-structure, and option-relevant events with source/provider provenance, scheduled time, event type, global importance, affected ticker/theme metadata, and raw payload reference |
 | `portfolio_event_risk_assessments` | Per event portfolio relevance and risk score: affected positions/candidates/options, sector/theme mapping, holding-period lookahead reason, risk mechanism, suggested action type, and hide/show decision |
-| `signal_snapshots` | Per ticker per day quant features and normalized signal JSON |
+| `signal_snapshots` | Per ticker per day pre-open baseline quant features and normalized signal JSON, including source freshness, missing/stale fields, and `snapshot_type` |
 | `strategy_definitions` | Versioned strategy metadata, required signals, horizon, scoring config, invalidators |
 | `strategy_proposals` | Proposed new strategies or revisions derived from reflection/learning, including lifecycle status and evidence |
 | `strategy_evaluation_results` | Shadow/experimental performance and promotion/retirement evidence for strategy definitions |
@@ -1200,7 +1266,7 @@ Proposed new tables:
 | `paper_option_positions` | Current simulated option strategy and leg state, including calls, puts, spreads, multi-leg structures, and assignment-capable short options |
 | `option_risk_snapshots` | Current leg-based option exposure, portfolio Greeks, max loss, margin requirement, buying-power effect, hedge overlay risk, and worst-case-assigned exposure snapshots when relevant |
 | `intraday_signal_scans` | Hourly intraday refresh metadata, status, provider coverage, ticker scope, and error state |
-| `intraday_signal_snapshots` | Per ticker intraday signal values and deltas vs morning/previous snapshot |
+| `intraday_signal_snapshots` | Per ticker intraday refreshed values, carried-forward baseline fields, source freshness status, and deltas vs pre-open baseline and previous intraday snapshot |
 | `news_alerts` | Normalized positive/negative news alerts with severity, sentiment, dedupe key, affected tickers/positions |
 | `intraday_rebalance_decisions` | Alert-driven hold/reduce/exit/add/open_new proposals and final risk-gated outcome |
 | `risk_limit_configs` | Versioned portfolio risk limits and factor exposure caps |

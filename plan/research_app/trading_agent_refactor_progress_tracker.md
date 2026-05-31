@@ -26,18 +26,20 @@
 - Added peer/sector-leader earnings read-through as a `SignalPipeline` source family classified with macro/sector/theme context, not as a target-company signal.
 - Clarified that target-company earnings releases, guidance, transcripts, and post-earnings analyst revisions remain ticker-level company signals in that ticker's own `quant_signal_snapshot`.
 - Added portfolio-aware future event calendar requirements: normalize macro/earnings/Fed/company events, score relevance against current holdings/candidates/options/horizons, and show only material upcoming risks in the UI.
+- Reframed peer earnings read-through rules as embedded event-calendar and signal-snapshot behavior, not a standalone function.
+- Added source-ingestion freshness and signal coordination design: pre-open snapshots are the daily baseline, intraday snapshots reuse the same canonical schema as scoped deltas, and hourly refresh runs targeted freshness-gated source updates instead of full pipeline reruns.
 
 ## PR Slice Status
 
 | Slice | Scope | Status | Notes |
 | --- | --- | --- | --- |
 | PR 1 | Trading foundation schema + strategy catalog | Pending | Adds 15 broad tactical strategies, 4 eval-derived playbooks, 5 pure expression buckets including defined-risk options, manual ticker request schema, prompt registry/schema, and portfolio-pool trade identity taxonomy. |
-| PR 2 | Universe scan + signal snapshots | Pending | Adds relative-strength benchmark/peer fields, manual request ingestion, own-company earnings signals, macro/sector/theme read-through, portfolio-aware event calendar risk scoring, Postgres-backed insider/news/fundamental/context signals, and explicit missing signal handling. |
+| PR 2 | Universe scan + signal snapshots | Pending | Adds relative-strength benchmark/peer fields, manual request ingestion, own-company earnings signals, macro/sector/theme read-through, portfolio-aware event calendar risk scoring, source-ingestion freshness metadata, Postgres-backed insider/news/fundamental/context signals, and explicit missing/stale signal handling. |
 | PR 3 | Strategy matching + candidate scoring | Pending | Adds source attribution, primary strategy selection, trade classification, catalyst-watch split, bearish gating, and confidence calibration inputs. |
 | PR 4 | Position sizing + portfolio risk manager | Pending | Depends on candidates and risk tables; keeps core holdings separate from short-term catalyst trades. |
 | PR 5 | Trading decisions + paper stock broker + portfolio state | Pending | Depends on stock risk gate; adds unified simulated margin account and enforces `review_only` vs `paper_trade_eligible` manual request mode. |
 | PR 6 | Paper options strategy layer + assignment risk | Pending | Paper/simulation-only leg-based option strategies, short-put aliases, RiskManager-owned hedge overlays, option-risk snapshots, and worst-case assignment checks when relevant. |
-| PR 7 | Intraday signal refresh + news alerts + rebalance | Pending | Hourly signal/news refresh during market hours; material signal changes or critical/high alerts can trigger risk-gated stock and paper-option actions. |
+| PR 7 | Intraday signal refresh + news alerts + rebalance | Pending | Hourly freshness-gated signal/news refresh during market hours; intraday snapshots are scoped deltas vs pre-open baseline and previous hourly snapshot before risk-gated stock/paper-option actions. |
 | PR 8 | Reflection + learning factors | Pending | Uses highest-quality configured reflection model; includes peer benchmarks, manual request attribution, bullish/bearish calibration, and option attribution. |
 | PR 9 | Strategy evolution + dynamic strategy catalog | Pending | Converts repeated learning into candidate/shadow strategies beyond the initial seeds. |
 | PR 10 | Today dashboard UI | Pending | Tabbed workstation with trade audit drill-downs, strategy performance, and LLM/API cost telemetry. |
@@ -59,4 +61,6 @@
 - 2026-05-30: `git diff --check` passed after classifying peer earnings read-through as macro/sector/theme context in the signal pipeline.
 - 2026-05-30: `git diff --check` passed after clarifying target-company earnings as ticker-level company signals.
 - 2026-05-30: `git diff --check` passed after adding portfolio-aware upcoming event calendar design and UI requirements.
+- 2026-05-30: `git diff --check` passed after embedding peer earnings read-through rules into event-calendar and signal-snapshot workflow text.
+- 2026-05-30: `git diff --check` passed after adding source-ingestion freshness, pre-open baseline, and intraday delta snapshot coordination.
 - No implementation tests run yet; documentation/planning update only.
