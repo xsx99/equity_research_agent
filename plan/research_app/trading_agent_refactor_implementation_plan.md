@@ -29,11 +29,11 @@
 3. **PR 3: Strategy Matching + Candidate Scoring**
    Match scanner and manual-request symbols to strategy definitions and persist ranked candidates with strategy horizon/evidence, source attribution, primary strategy selection, trade identity classification, catalyst-watch vs ordinary-watch distinction, and confidence-calibration inputs.
 4. **PR 4: Position Sizing + Portfolio Risk Manager**
-   Add deterministic sizing, risk factor exposure calculation, unified margin-account buying-power caps, concentration caps, embedded bearish-evidence gating, and reduce/reject decisions.
+   Add deterministic sizing, risk factor exposure calculation, unified margin-account buying-power caps, conservative broker-profile margin estimates, concentration caps, embedded bearish-evidence gating, and reduce/reject decisions.
 5. **PR 5: Trading Decisions + Paper Stock Broker + Portfolio State**
-   Add bounded trading agent output, manual request mode gating, paper stock orders/executions, positions, and unified simulated margin-account portfolio snapshots.
+   Add bounded trading agent output, manual request mode gating, paper stock orders/executions, positions, and unified simulated margin-account portfolio snapshots with margin model profile/source metadata.
 6. **PR 6: Paper Options Strategy Layer + Assignment Risk**
-   Add paper-only leg-based option strategy decisions, option legs, option orders/positions, open/close/roll/adjust/avoid-event actions, short-put aliases, strategy-level option risk, and worst-case assigned-portfolio risk checks when assignment is possible.
+   Add paper-only leg-based option strategy decisions, option legs, option orders/positions, open/close/roll/adjust/avoid-event actions, short-put aliases, strategy-level option risk, conservative option margin requirements, and worst-case assigned-portfolio risk checks when assignment is possible.
 7. **PR 7: Intraday Signal Refresh + News Alerts + Rebalance**
    Add hourly intraday signal refresh, normalized alerts, material signal-change detection, and risk-gated intraday rebalance decisions for stocks, paper option strategies, and hedge overlays.
 8. **PR 8: Reflection + Learning Factors**
@@ -535,7 +535,7 @@ Create focused SQLAlchemy models:
 - `RiskLimitConfig`
   - versioned JSON config and `is_active`
 - `PortfolioRiskSnapshot`
-  - portfolio-level exposure JSON before/after decisions/fills, including unified margin-account equity, buying power, excess liquidity, stock/option margin requirements, and total margin requirement
+  - portfolio-level exposure JSON before/after decisions/fills, including unified margin-account equity, buying power, excess liquidity, stock/option margin requirements, total margin requirement, margin model profile/version, margin requirement source, estimated initial/maintenance requirements, and broker-reported requirements when available
 - `RiskFactorExposure`
   - normalized exposure rows by `factor_type`, `factor_name`, `exposure_value`
 - `StrategyProposal`
@@ -779,7 +779,8 @@ Implementation notes:
 
 - Implement `RiskLimitConfig` loader with default config.
 - Calculate factor exposure by sector, strategy, horizon, direction, beta bucket, volatility bucket, liquidity bucket, event type, and macro sensitivity.
-- Add unified margin-account risk fields and limits: account equity, cash balance, buying power, excess liquidity, stock margin requirement, option margin requirement, total margin requirement, and buying-power effect.
+- Add unified margin-account risk fields and limits: account equity, cash balance, buying power, excess liquidity, stock margin requirement, option margin requirement, total margin requirement, buying-power effect, margin model profile/version, margin requirement source, estimated initial/maintenance requirement, and broker-reported requirement when imported.
+- Add default conservative broker-profile margin settings: `estimated_fidelity_like_conservative_v1`, Reg T style stock initial requirement, house maintenance requirement assumptions, unknown-marginability fallback, concentration/volatility/liquidity add-ons, and conservative option margin rules.
 - Include explicit risk rules that prevent macro-only bearish evidence from creating high-confidence single-name shorts.
 - Apply bearish evidence through existing sizing/reduce/reject paths, not through a standalone bearish trading module.
 - Keep core-holding risk rules separate from short-term catalyst trade rules.
@@ -813,7 +814,8 @@ Implementation notes:
 - Load trading prompts through `PromptRegistry`; no inline prompt strings.
 - Persist `LlmPromptTemplate`, `LlmPromptRun`, and `LlmUsageEvent` records for every trading-agent call, including rendered prompt hash/redacted prompt, input context, raw output, parsed output, prompt/schema version, model, token usage, cost, latency, retries, and errors.
 - Persist the full decision context snapshot, including trade identity, expression bucket, benchmark/peer context, confidence basis, `selection_source`, and `manual_request_id`.
-- Model stocks and options in one simulated margin account. Stock fills must update cash balance, stock market value, account equity, stock margin requirement, total margin requirement, buying power, and excess liquidity in `portfolio_snapshots`.
+- Model stocks and options in one simulated margin account. Stock fills must update cash balance, stock market value, account equity, stock margin requirement, total margin requirement, buying power, excess liquidity, margin model profile/version, and margin requirement source in `portfolio_snapshots`.
+- Implement `estimated_fidelity_like_conservative_v1` as the default estimated model: long marginable stock uses a 50% initial requirement, maintenance uses at least a 30% base plus configured house/concentration/volatility/liquidity add-ons, and unknown/non-marginable/restricted/low-priced securities fall back to a 100% requirement. Do not claim exact Fidelity matching unless broker-observed values are imported.
 - Reject or reduce stock orders when unified account buying power, total margin requirement, or excess-liquidity limits would be violated.
 - Enforce manual request mode: `review_only` can produce an actionable explanation but must not create a paper order; `paper_trade_eligible` can create a paper order only after normal risk approval.
 - Update linked manual request `result_status` to `actionable_trade`, `blocked_by_risk`, `no_trade`, `catalyst_watch`, or `ordinary_watch`.
@@ -847,12 +849,14 @@ Implementation notes:
 - Support generic option actions: `open_option_strategy`, `close_option_strategy`, `roll_option_strategy`, `adjust_option_strategy`, and `avoid_event_option`.
 - Support initial option strategy types: `long_call`, `long_put`, `short_put`, `covered_call`, `bull_call_spread`, `bear_put_spread`, `put_credit_spread`, `call_credit_spread`, and `collar`.
 - Keep `sell_put`, `close_put`, `roll_put`, `avoid_earnings_put`, and `put_assignment_plan` as aliases for the margin-backed `short_put` subtype, not as the whole option layer.
-- Require every option plan to include `option_strategy_type`, legs with call/put side, buy/sell side, quantity, strike, expiry, DTE, Greeks, IV rank/percentile, bid/ask/mid/chosen price, net debit/credit, max loss, max profit when definable, breakevens, margin requirement, buying-power effect, event-through-expiry flags, roll/close/adjust conditions, and assignment plan when short options are present.
+- Require every option plan to include `option_strategy_type`, legs with call/put side, buy/sell side, quantity, strike, expiry, DTE, Greeks, IV rank/percentile, bid/ask/mid/chosen price, net debit/credit, max loss, max profit when definable, breakevens, margin requirement, buying-power effect, margin model profile/version/source, deterministic `strategy_pairing_method` for multi-leg strategies, event-through-expiry flags, roll/close/adjust conditions, and assignment plan when short options are present.
 - Reject or downgrade to watch when required option chain, leg pricing, Greeks, max-loss, margin, buying-power, event, or assignment metadata is missing.
 - Calculate strategy-level option risk and current portfolio exposure for all option strategies.
 - Calculate worst-case assigned exposure where assignment-capable short option legs convert into stock exposure at strike.
 - Apply option risk caps by max loss, margin requirement, buying-power effect, Greeks, ticker, sector/theme, expression bucket, high-beta AI/semis/space cluster, correlation cluster, and assignment-capable notional.
 - Apply option margin requirements and buying-power effects to the same simulated margin account used by paper stock positions; do not maintain a separate option buying-power pool.
+- Implement option margin with conservative broker-profile behavior: long options consume premium plus fees, debit spreads consume net debit plus fees, defined-risk credit spreads consume max loss or the broker-profile requirement if higher, covered calls/collars evaluate same-account stock coverage, naked short equity calls use `max(25% * underlying_notional - OTM + premium, 15% * underlying_notional + premium)` plus add-ons, naked short equity puts use `max(25% * underlying_notional - OTM + premium, 15% * strike_notional + premium)` plus add-ons, and undefined-risk structures are blocked when required inputs are missing.
+- Persist broker-observed margin fields separately if a future broker feed or calculator import exists; until then, mark all requirements as `simulated_formula` and use the conservative estimate.
 - Keep the options layer paper/simulation-only; no real broker integration.
 - Support paper-only risk hedge overlay orders generated by `RiskManager` with `trade_identity = "risk_hedge_overlay"`. Persist them separately from tactical option trades and exclude them from strategy win-rate attribution.
 - Persist option decisions and rejected plans because reflection needs to evaluate missed option trades, avoided max-loss risk, hedge effectiveness, and avoided assignment risk.

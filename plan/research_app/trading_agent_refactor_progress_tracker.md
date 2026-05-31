@@ -22,6 +22,7 @@
 - Generalized the options layer beyond puts: tactical option trades can be single-leg calls/puts, margin-backed short puts, spreads, collars, or configurable multi-leg structures, with leg-based risk and short-option assignment checks.
 - Clarified option simulation collateral model: V2 assumes a margin account / buying-power model for option trades, not cash-secured or security-secured requirements, while still tracking assignment exposure for short-option structures.
 - Clarified account model: paper stock and option trades share one simulated margin account with unified account equity, margin requirement, buying power, excess liquidity, and assignment-risk checks.
+- Refined the default estimated margin model: V2 should use a more realistic `estimated_fidelity_like_conservative_v1` broker-profile estimate with Reg T style initial requirements, house maintenance assumptions, conservative add-ons, explicit margin model/source metadata, and a future path for broker-observed requirement imports.
 - Split mixed strategy/expression names: strong-theme, valuation-repair, and core-accumulation ideas are strategy playbooks, while `long_stock`, `margin_backed_short_put`, `defined_risk_directional_option`, `defined_risk_income_spread`, and `core_stock_accumulation` are pure expression buckets.
 - Added peer/sector-leader earnings read-through as a `SignalPipeline` source family classified with macro/sector/theme context, not as a target-company signal.
 - Clarified that target-company earnings releases, guidance, transcripts, and post-earnings analyst revisions remain ticker-level company signals in that ticker's own `quant_signal_snapshot`.
@@ -36,9 +37,9 @@
 | PR 1 | Trading foundation schema + strategy catalog | Pending | Adds 15 broad tactical strategies, 4 eval-derived playbooks, 5 pure expression buckets including defined-risk options, manual ticker request schema, prompt registry/schema, and portfolio-pool trade identity taxonomy. |
 | PR 2 | Universe scan + signal snapshots | Pending | Adds relative-strength benchmark/peer fields, manual request ingestion, own-company earnings signals, macro/sector/theme read-through, portfolio-aware event calendar risk scoring, source-ingestion freshness metadata, Postgres-backed insider/news/fundamental/context signals, and explicit missing/stale signal handling. |
 | PR 3 | Strategy matching + candidate scoring | Pending | Adds source attribution, primary strategy selection, trade classification, catalyst-watch split, bearish gating, and confidence calibration inputs. |
-| PR 4 | Position sizing + portfolio risk manager | Pending | Depends on candidates and risk tables; keeps core holdings separate from short-term catalyst trades. |
-| PR 5 | Trading decisions + paper stock broker + portfolio state | Pending | Depends on stock risk gate; adds unified simulated margin account and enforces `review_only` vs `paper_trade_eligible` manual request mode. |
-| PR 6 | Paper options strategy layer + assignment risk | Pending | Paper/simulation-only leg-based option strategies, short-put aliases, RiskManager-owned hedge overlays, option-risk snapshots, and worst-case assignment checks when relevant. |
+| PR 4 | Position sizing + portfolio risk manager | Pending | Depends on candidates and risk tables; keeps core holdings separate from short-term catalyst trades and adds conservative broker-profile margin estimates. |
+| PR 5 | Trading decisions + paper stock broker + portfolio state | Pending | Depends on stock risk gate; adds unified simulated margin account, margin model/source metadata, and enforces `review_only` vs `paper_trade_eligible` manual request mode. |
+| PR 6 | Paper options strategy layer + assignment risk | Pending | Paper/simulation-only leg-based option strategies, short-put aliases, conservative option margin formulas, RiskManager-owned hedge overlays, option-risk snapshots, and worst-case assignment checks when relevant. |
 | PR 7 | Intraday signal refresh + news alerts + rebalance | Pending | Hourly freshness-gated signal/news refresh during market hours; intraday snapshots are scoped deltas vs pre-open baseline and previous hourly snapshot before risk-gated stock/paper-option actions. |
 | PR 8 | Reflection + learning factors | Pending | Uses highest-quality configured reflection model; includes peer benchmarks, manual request attribution, bullish/bearish calibration, and option attribution. |
 | PR 9 | Strategy evolution + dynamic strategy catalog | Pending | Converts repeated learning into candidate/shadow strategies beyond the initial seeds. |
@@ -63,4 +64,5 @@
 - 2026-05-30: `git diff --check` passed after adding portfolio-aware upcoming event calendar design and UI requirements.
 - 2026-05-30: `git diff --check` passed after embedding peer earnings read-through rules into event-calendar and signal-snapshot workflow text.
 - 2026-05-30: `git diff --check` passed after adding source-ingestion freshness, pre-open baseline, and intraday delta snapshot coordination.
+- 2026-05-30: `git diff --check` passed after refining the default estimated margin model into a conservative broker-profile model with margin model/source metadata.
 - No implementation tests run yet; documentation/planning update only.

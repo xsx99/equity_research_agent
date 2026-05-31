@@ -365,6 +365,8 @@ Every option strategy decision must record:
 - `breakevens`
 - `margin_requirement`
 - `buying_power_effect`
+- `margin_model_profile`, `margin_model_version`, and `margin_requirement_source`
+- `strategy_pairing_method` for multi-leg strategies
 - `portfolio_delta`, `portfolio_gamma`, `portfolio_theta`, and `portfolio_vega`
 - `earnings_date` and event-through-expiry flags
 - `profit_target_pct`
@@ -934,6 +936,13 @@ Risk decision fields:
 - `binding_factor_limits`
 - `option_assignment_notional`
 - `margin_requirement`
+- `margin_model_profile`
+- `margin_model_version`
+- `margin_requirement_source`: `simulated_formula`, `broker_observed`, or `manual_override`
+- `estimated_initial_margin_requirement` and `estimated_maintenance_margin_requirement`
+- `broker_reported_margin_requirement` when imported from a broker or broker calculator
+- `house_requirement_pct`, `reg_t_requirement_pct`, and conservative add-ons when applicable
+- `strategy_pairing_method` for multi-leg options when margin depends on paired legs
 - `buying_power_effect`
 - `position_limit_check`
 - `liquidity_check`
@@ -961,15 +970,35 @@ The account snapshot should persist:
 - `option_margin_requirement`
 - `total_margin_requirement`
 - `initial_margin_requirement` and `maintenance_margin_requirement` when available or approximated
+- `margin_model_profile`, `margin_model_version`, and `margin_requirement_source`
 - `day_pnl`, `realized_pnl`, and `unrealized_pnl`
 
-The margin model can be approximate in V2. It should be deterministic, configurable, and conservative enough for paper risk:
+The default estimated margin model should be more realistic than a flat toy model while still being explicit that it is an estimate. V2 should default to `estimated_fidelity_like_conservative_v1`: a broker-profile model inspired by public Reg T, exchange, and Fidelity-style house/RBR concepts. It must not claim to exactly reproduce Fidelity's internal margin engine unless broker-observed margin requirements are imported and stored.
 
-- Long stock consumes buying power according to the configured stock margin rate, e.g. 50% initial margin unless overridden.
-- Short stock, if enabled later, uses stricter margin requirements and locate/borrow assumptions.
-- Long options consume premium paid plus fees.
-- Short options and credit spreads consume margin/buying power based on max loss when defined, or a conservative margin formula when max loss is undefined.
-- Assignment-capable option strategies must be checked against both margin requirement and worst-case assigned portfolio exposure.
+Supported margin model profiles:
+
+- `reg_t_base_conservative_v1`: simple Reg T style fallback.
+- `estimated_fidelity_like_conservative_v1`: default paper model with Reg T initial requirements, broker-house maintenance assumptions, option-spread treatment, and conservative add-ons.
+- `broker_observed_margin_v1`: optional future mode that uses imported broker-reported requirements or broker-calculator outputs as the authoritative requirement, while still storing the simulated estimate for comparison.
+
+Every margin computation should persist `margin_model_profile`, `margin_model_version`, `margin_requirement_source`, and whether the requirement is estimated, broker-observed, or manually overridden. If broker-observed values are unavailable, the system should use the conservative estimate and label it as such.
+
+Default estimated rules:
+
+- Long marginable US stock starts with a Reg T style 50% initial requirement. Maintenance uses the maximum of the configured base maintenance requirement and any security, house, concentration, volatility, liquidity, leveraged-ETF, or unknown-marginability add-on. The default base maintenance requirement should be at least 30% for fully marginable diversified common stock.
+- Unknown, non-marginable, very low-priced, highly volatile, hard-to-borrow, concentrated, or manually restricted securities should fall back to a 100% requirement unless a stricter override is configured.
+- Short stock is disabled in V2 by default. If enabled later, it must use stricter initial and maintenance requirements, locate/borrow assumptions, and conservative house add-ons.
+- Long options consume full premium paid plus fees as buying-power effect.
+- Defined-risk debit spreads consume the net debit plus fees. Defined-risk credit spreads consume max loss when max loss is known; if a configured broker profile requires a higher value, use the higher value.
+- Covered calls and collars must evaluate both the option payoff and the same-account stock position/margin state.
+- Naked short equity calls should default to `max(25% * underlying_notional - out_of_the_money_amount + premium, 15% * underlying_notional + premium)` plus configured add-ons.
+- Naked short equity puts should default to `max(25% * underlying_notional - out_of_the_money_amount + premium, 15% * strike_notional + premium)` plus configured add-ons.
+- Undefined-risk option structures must use conservative uncovered-option formulas and may be blocked entirely when inputs are missing. The model must not treat short-option premium as sufficient collateral.
+- Multi-leg option strategies must persist a deterministic `strategy_pairing_method`. If legs cannot be paired unambiguously into a defined-risk structure, margin should fall back to the more conservative naked-leg estimate or the trade should be rejected.
+- Assignment-capable strategies must pass both current margin/buying-power checks and a worst-case assigned portfolio check at strike-level stock exposure.
+- If required data is missing, stale, or internally inconsistent, the risk manager should use the more conservative requirement, reduce size, or reject the paper order.
+
+This keeps paper risk close enough to real margin-account behavior for planning, while preserving a clear audit trail between estimated requirements and any future broker-observed values.
 
 ### Paper Broker Rules
 
@@ -1123,6 +1152,11 @@ Example risk-limit config:
   "max_low_liquidity_weight": 0.10,
   "max_beta_adjusted_net_exposure": 0.80,
   "max_correlation_cluster_weight": 0.25,
+  "margin_model_profile": "estimated_fidelity_like_conservative_v1",
+  "default_stock_initial_margin_requirement_pct": 0.50,
+  "default_stock_maintenance_margin_requirement_pct": 0.30,
+  "unknown_marginability_requirement_pct": 1.00,
+  "concentrated_position_margin_addon_pct": 0.20,
   "max_total_margin_requirement_pct": 0.55,
   "min_excess_liquidity_pct": 0.25,
   "max_stock_margin_requirement_pct": 0.40,
@@ -1264,7 +1298,7 @@ Proposed new tables:
 | `risk_hedge_decisions` | Paper-only risk-manager hedge overlay decisions such as open/close/adjust hedge with risk-reduction rationale and hedge cost |
 | `paper_option_orders` | Staged/submitted/filled/rejected simulated option orders |
 | `paper_option_positions` | Current simulated option strategy and leg state, including calls, puts, spreads, multi-leg structures, and assignment-capable short options |
-| `option_risk_snapshots` | Current leg-based option exposure, portfolio Greeks, max loss, margin requirement, buying-power effect, hedge overlay risk, and worst-case-assigned exposure snapshots when relevant |
+| `option_risk_snapshots` | Current leg-based option exposure, portfolio Greeks, max loss, margin requirement, buying-power effect, margin model profile/source, hedge overlay risk, and worst-case-assigned exposure snapshots when relevant |
 | `intraday_signal_scans` | Hourly intraday refresh metadata, status, provider coverage, ticker scope, and error state |
 | `intraday_signal_snapshots` | Per ticker intraday refreshed values, carried-forward baseline fields, source freshness status, and deltas vs pre-open baseline and previous intraday snapshot |
 | `news_alerts` | Normalized positive/negative news alerts with severity, sentiment, dedupe key, affected tickers/positions |
@@ -1276,7 +1310,7 @@ Proposed new tables:
 | `paper_orders` | Staged/submitted/filled/rejected paper orders |
 | `paper_executions` | Simulated fills |
 | `paper_positions` | Current position state |
-| `portfolio_snapshots` | Daily unified margin account state: NAV/net liquidation value, account equity, cash balance, buying power, excess liquidity, margin requirements, exposure, and PnL |
+| `portfolio_snapshots` | Daily unified margin account state: NAV/net liquidation value, account equity, cash balance, buying power, excess liquidity, margin requirements, margin model profile/source, exposure, and PnL |
 | `daily_reflections` | Post-close reflection JSON |
 | `learning_factors` | Structured lessons with status/version/scope |
 | `learning_factor_applications` | Join table showing which decision used which learning factor |
