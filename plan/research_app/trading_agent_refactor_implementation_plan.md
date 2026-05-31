@@ -29,7 +29,7 @@
 3. **PR 3: Strategy Matching + Candidate Scoring**
    Match scanner and manual-request symbols to strategy definitions and persist ranked candidates with strategy horizon/evidence, source attribution, primary strategy selection, trade identity classification, catalyst-watch vs ordinary-watch distinction, and confidence-calibration inputs.
 4. **PR 4: Position Sizing + Portfolio Risk Manager**
-   Add deterministic sizing, risk factor exposure calculation, unified margin-account buying-power caps, conservative broker-profile margin estimates, concentration caps, embedded bearish-evidence gating, and reduce/reject decisions.
+   Add deterministic sizing, risk appetite presets, generated risk configs, risk factor exposure calculation, unified margin-account buying-power caps, conservative broker-profile margin estimates, concentration caps, embedded bearish-evidence gating, and reduce/reject decisions.
 5. **PR 5: Trading Decisions + Paper Stock Broker + Portfolio State**
    Add bounded trading agent output, manual request mode gating, paper stock orders/executions, positions, and unified simulated margin-account portfolio snapshots with margin model profile/source metadata.
 6. **PR 6: Paper Options Strategy Layer + Assignment Risk**
@@ -532,10 +532,16 @@ Create focused SQLAlchemy models:
   - `horizon_policy String(64)`
   - `exit_policy_json JSONB`
   - `classification_reason Text`
+- `RiskAppetiteProfile`
+  - `risk_appetite_profile_id UUID pk`
+  - `risk_appetite String(32)` with `conservative/balanced/aggressive`
+  - `profile_version String(32)`
+  - optional `advanced_overrides_json JSONB`
+  - `is_active Boolean`
 - `RiskLimitConfig`
-  - versioned JSON config and `is_active`
+  - generated versioned JSON config, source `risk_appetite_profile_id`, resolver version, and `is_active`
 - `PortfolioRiskSnapshot`
-  - portfolio-level exposure JSON before/after decisions/fills, including unified margin-account equity, buying power, excess liquidity, stock/option margin requirements, total margin requirement, margin model profile/version, margin requirement source, estimated initial/maintenance requirements, and broker-reported requirements when available
+  - portfolio-level exposure JSON before/after decisions/fills, including active risk appetite, generated risk config id/version, unified margin-account equity, buying power, excess liquidity, stock/option margin requirements, total margin requirement, margin model profile/version, margin requirement source, estimated initial/maintenance requirements, and broker-reported requirements when available
 - `RiskFactorExposure`
   - normalized exposure rows by `factor_type`, `factor_name`, `exposure_value`
 - `StrategyProposal`
@@ -766,10 +772,11 @@ Stop after PR 3 for review/merge.
 
 ## PR 4: Position Sizing + Portfolio Risk Manager
 
-**Goal:** Add deterministic sizing, portfolio factor concentration controls, and embedded bearish-evidence gating.
+**Goal:** Add deterministic sizing, simple risk appetite presets, generated effective risk configs, portfolio factor concentration controls, and embedded bearish-evidence gating.
 
 **Files:**
 - Create: `src/trading/risk.py`
+- Create: `src/trading/risk_config.py`
 - Create: `src/trading/position_sizing.py`
 - Modify: `src/trading/repository.py`
 - Test: `tests/trading/test_position_sizing.py`
@@ -777,10 +784,13 @@ Stop after PR 3 for review/merge.
 
 Implementation notes:
 
-- Implement `RiskLimitConfig` loader with default config.
+- Implement `RiskAppetiteProfile` with three presets: `conservative`, `balanced`, and `aggressive`; default to `balanced`.
+- Implement deterministic `RiskConfigResolver` that converts the active risk appetite preset into a generated `RiskLimitConfig`. Persist both the user-facing preset and the generated config with resolver version for audit/replay.
+- Keep detailed risk-limit numbers out of the default UI/operator config. Allow optional advanced overrides only as explicit metadata, not as the normal workflow.
 - Calculate factor exposure by sector, strategy, horizon, direction, beta bucket, volatility bucket, liquidity bucket, event type, and macro sensitivity.
 - Add unified margin-account risk fields and limits: account equity, cash balance, buying power, excess liquidity, stock margin requirement, option margin requirement, total margin requirement, buying-power effect, margin model profile/version, margin requirement source, estimated initial/maintenance requirement, and broker-reported requirement when imported.
 - Add default conservative broker-profile margin settings: `estimated_fidelity_like_conservative_v1`, Reg T style stock initial requirement, house maintenance requirement assumptions, unknown-marginability fallback, concentration/volatility/liquidity add-ons, and conservative option margin rules.
+- Enforce invariant hard safety rails across all presets: missing/stale signals, missing option risk metadata, unestimable margin, assignment over-concentration, macro-only bearish single-name shorts, and core-holding tactical exits must still reduce/reject/downgrade even under `aggressive`.
 - Include explicit risk rules that prevent macro-only bearish evidence from creating high-confidence single-name shorts.
 - Apply bearish evidence through existing sizing/reduce/reject paths, not through a standalone bearish trading module.
 - Keep core-holding risk rules separate from short-term catalyst trade rules.
@@ -982,6 +992,7 @@ Implementation notes:
 
 - Build `/today` as tabs: `Overview`, `Portfolio`, `Trades`, `Risk & Macro`, `Candidates`, `Learning & Strategies`, and `Ops & Cost`.
 - Show live alerts, material signal changes, positions, trades, trade identity, expression bucket, paper options, hedge overlays, candidates, risk exposure, post-close reflection, learning factors, and macro regime.
+- In `Risk & Macro`, show the active risk appetite preset (`conservative`, `balanced`, or `aggressive`), generated risk config version, and binding constraints; hide detailed generated limits behind an advanced/debug view.
 - In `Risk & Macro`, show a portfolio-aware upcoming event calendar: future macro events, Fed/rates events, own-company earnings, related-company earnings read-through, option-relevant events, and market-structure events that pass the display threshold.
 - Each event row should show scheduled date/time, event type, global importance, portfolio risk level, affected ticker/position/option strategy, affected sector/theme, risk mechanism, lookahead reason, suggested action type, and source/provider.
 - Do not show irrelevant low-importance events by default. The display window must be dynamic by holding period and event importance rather than a fixed "next N months" list.

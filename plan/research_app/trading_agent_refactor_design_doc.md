@@ -93,6 +93,9 @@ OptionsStrategyLayer -> instrument plan, if option expression is eligible
 TradingPipeline -> proposed trading decisions + thesis + suggested sizing
       |
       v
+RiskConfigResolver -> generated effective risk config from risk_appetite preset
+      |
+      v
 PositionSizer + RiskManager -> approved/reduced/rejected final action, including option-risk and worst-case assignment checks
       |
       v
@@ -134,7 +137,8 @@ Next trading run receives active learning_factors
 | `PrimaryStrategySelector` | Choose one primary tactical strategy and one expression bucket per ticker/action so attribution, trade identity, and risk budgeting stay clean | No | `trade_classifications`, `trading_decisions` context |
 | `TradeClassifier` | Assign portfolio-pool trade identity before candidate order decisions: core holding, tactical stock trade, tactical option trade, or watch-only. `RiskManager` assigns `risk_hedge_overlay` for hedge actions | No | `trade_classifications` or embedded in `trading_decisions` |
 | `OptionsStrategyLayer` | Create paper-only leg-based option plans only when an option expression is eligible, including single-leg calls/puts, short puts, spreads, multi-leg structures, Greeks, max loss, margin requirement, buying-power effect, and assignment risk when relevant | Mostly no; optional explanation | `option_strategy_decisions`, `paper_option_orders`, `paper_option_positions` |
-| `TradingPipeline` | Combine selected strategy, trade identity, instrument plan, macro regime, portfolio state, risk config, and learning factors; produce proposed trading decisions, thesis, invalidators, and suggested sizing | Yes, Gemini Flash bounded decision schema | `trading_decisions`, `paper_orders` |
+| `TradingPipeline` | Combine selected strategy, trade identity, instrument plan, macro regime, portfolio state, risk appetite/effective risk config, and learning factors; produce proposed trading decisions, thesis, invalidators, and suggested sizing | Yes, Gemini Flash bounded decision schema | `trading_decisions`, `paper_orders` |
+| `RiskConfigResolver` | Convert the user-facing `risk_appetite` preset into a deterministic generated risk config using account state, macro regime, portfolio composition, trade identity, and hard safety rails | No | `risk_appetite_profiles`, `risk_limit_configs` |
 | `PositionSizer` | Convert approved trade intent into target quantity/weight using volatility, liquidity, strategy budget, macro budget, and factor exposure constraints | No | `position_sizing_decisions` |
 | `RiskManager` | Enforce portfolio-level risk limits, factor exposure concentration limits, correlation clusters, leg-based option risk, assignment exposure when relevant, and hard reject/reduce rules | No | `portfolio_risk_snapshots`, `risk_factor_exposures`, `option_risk_snapshots` |
 | `PaperBroker` | Simulate stock and option fills, slippage, commissions, rejects, order status transitions, and margin/buying-power effects | No | `paper_orders`, `paper_executions` |
@@ -936,6 +940,9 @@ Risk decision fields:
 - `binding_factor_limits`
 - `option_assignment_notional`
 - `margin_requirement`
+- `risk_appetite`
+- `effective_risk_config_id`
+- `risk_config_resolver_version`
 - `margin_model_profile`
 - `margin_model_version`
 - `margin_requirement_source`: `simulated_formula`, `broker_observed`, or `manual_override`
@@ -1095,36 +1102,66 @@ Risk factors to track:
 
 Factor exposures should be approximate in V2. A robust simple model is better than a fragile complex one: start with sector/industry, strategy, horizon, direction, beta proxy, volatility bucket, liquidity bucket, and event type, then add rolling-correlation clusters once enough market data is available.
 
-### Initial Risk Rules
+### Risk Appetite Presets
 
-- Max position weight per ticker.
-- Max daily new positions.
-- Max gross exposure and max long/short exposure.
-- Minimum dollar volume and price filters.
-- Macro risk budget multiplier applies before sizing.
-- Strategy-level caps, e.g. max 3 trades per strategy per day.
-- Sector and industry exposure caps.
-- Strategy exposure caps, e.g. max total exposure in `gap_and_go_v1` or all gap strategies.
-- Horizon bucket caps, especially for longer horizon swing trades.
-- Event exposure caps, e.g. max earnings-related exposure per day.
-- High-volatility bucket cap.
-- Low-liquidity bucket cap.
-- Market beta-adjusted exposure cap.
-- Correlation cluster cap so related tickers do not create hidden concentration.
-- Unified margin-account buying power, total margin requirement, and excess-liquidity caps across stocks and options.
-- Stock margin requirement cap so common-stock positions cannot consume all buying power before option risk is considered.
-- Option max loss, net debit, net credit, margin requirement, and buying-power usage caps.
-- Per-strategy and portfolio-level Greeks caps for delta, gamma, theta, and vega.
-- Assignment-capable short-leg notional cap by ticker, sector/theme, expression bucket, and correlation cluster.
-- Margin requirement and buying-power usage caps so paper option strategies cannot overcommit the simulated margin account.
-- Earnings/event-through-expiry rule for option strategies, with `avoid_event_option` as the default when event risk is not explicitly accepted.
-- Paper hedge overlay eligibility and budget caps. Hedges are owned by `RiskManager`, use `trade_identity = "risk_hedge_overlay"`, and are not counted as tactical option trades.
+The operator-facing risk configuration should be intentionally small. In V2, all trading is paper-only, so there is no need to expose fields such as `allowed_paper_only`. The primary user setting should be:
+
+```json
+{
+  "risk_appetite": "balanced"
+}
+```
+
+Supported presets:
+
+| Preset | Intended behavior |
+| --- | --- |
+| `conservative` | Smaller paper position sizes, lower margin usage, stricter assignment exposure, stricter theme/sector concentration, more frequent downgrade to watch, and preference for defined-risk option structures. |
+| `balanced` | Default profile. Allows normal paper position sizes and moderate margin usage while still enforcing all hard safety rails. |
+| `aggressive` | Larger paper position sizes, wider concentration and margin budgets, and more willingness to use option expressions when data is complete. It still cannot bypass hard safety rails. |
+
+`RiskConfigResolver` owns the conversion from `risk_appetite` to an effective generated `RiskLimitConfig`. The resolver must be deterministic and versioned. Inputs should include:
+
+- selected `risk_appetite`
+- account equity, buying power, margin usage, and excess liquidity
+- current portfolio composition and trade identities
+- macro regime and macro budget multiplier
+- strategy horizon and expression bucket
+- option assignment exposure and Greeks
+- event risk and source freshness state
+
+The generated config is persisted for audit/debug/replay, but it is not the primary user-facing object. The UI should show the active preset and a short explanation of binding constraints. Full generated limits can live behind an advanced/debug view.
+
+### Hard Safety Rails
+
+Hard safety rails do not change across `conservative`, `balanced`, and `aggressive`:
+
+- Missing, stale, or internally inconsistent signal snapshots block trading or downgrade to watch.
+- Missing option-chain, leg pricing, Greeks, margin, buying-power, event, or assignment metadata blocks option trades or downgrades to watch.
+- If margin requirement cannot be estimated, use the conservative fallback, reduce size, or reject.
+- Worst-case assignment cannot create an over-concentrated portfolio by ticker, sector/theme, expression bucket, or correlation cluster.
+- Macro-only bearish evidence cannot create a high-confidence single-name short or bearish trade.
+- Core holdings cannot be sold solely because of a short-term tactical signal.
+- Risk hedge overlays remain paper-only `RiskManager` actions and are excluded from tactical strategy win-rate attribution.
 - No averaging down in V2 unless explicitly added later.
-- No trading around missing or stale signal snapshots.
 
-### Risk Limits and Actions
+### Generated Risk Limits and Actions
 
-Risk limits should distinguish soft warnings from hard blocks:
+The effective generated risk config should cover these categories without exposing dozens of knobs in the default UI:
+
+- max position weight per ticker
+- max daily new positions
+- gross/net/beta-adjusted exposure
+- macro budget multiplier
+- strategy, horizon, event, sector, industry, theme, and correlation-cluster caps
+- high-volatility and low-liquidity caps
+- unified margin-account buying power, total margin requirement, and excess-liquidity caps
+- stock margin and option margin/buying-power usage caps
+- option max loss, net debit/credit, assignment notional, and portfolio Greeks caps
+- event-through-expiry restrictions for option strategies
+- paper hedge overlay eligibility and budget caps
+
+Risk actions should distinguish soft warnings from hard blocks:
 
 - Soft warning: allow order but mark the portfolio as near limit.
 - Size reduction: reduce order until exposure fits the remaining factor budget.
@@ -1132,47 +1169,35 @@ Risk limits should distinguish soft warnings from hard blocks:
 - Forced reduce/exit: only for existing positions that violate hard limits after market movement or stale risk data.
 - Paper hedge overlay: open, close, or adjust a simulated option hedge when portfolio-level risk should be reduced without changing the underlying tactical/core position. This is a risk action, not a trading strategy signal.
 
-Example risk-limit config:
+Example high-level config:
 
 ```json
 {
-  "max_single_name_weight": 0.08,
-  "max_sector_weight": 0.30,
-  "max_strategy_weight": 0.25,
-  "max_horizon_bucket_weight": {
-    "intraday": 0.35,
-    "1d-2w": 0.45,
-    "2w-3m": 0.35
-  },
-  "max_event_type_weight": {
-    "earnings": 0.20,
-    "short_squeeze": 0.15
-  },
-  "max_high_vol_bucket_weight": 0.25,
-  "max_low_liquidity_weight": 0.10,
-  "max_beta_adjusted_net_exposure": 0.80,
-  "max_correlation_cluster_weight": 0.25,
+  "risk_appetite": "conservative",
+  "profile_version": "v1"
+}
+```
+
+Example generated config snapshot:
+
+```json
+{
+  "risk_appetite": "conservative",
+  "resolver_version": "risk_config_resolver_v1",
   "margin_model_profile": "estimated_fidelity_like_conservative_v1",
-  "default_stock_initial_margin_requirement_pct": 0.50,
-  "default_stock_maintenance_margin_requirement_pct": 0.30,
-  "unknown_marginability_requirement_pct": 1.00,
-  "concentrated_position_margin_addon_pct": 0.20,
-  "max_total_margin_requirement_pct": 0.55,
-  "min_excess_liquidity_pct": 0.25,
-  "max_stock_margin_requirement_pct": 0.40,
-  "max_option_strategy_loss_pct": 0.02,
-  "max_total_option_max_loss_pct": 0.08,
-  "max_option_margin_requirement_pct": 0.20,
-  "max_portfolio_option_delta_abs": 0.30,
-  "max_portfolio_option_vega_abs": 0.20,
-  "max_assignment_capable_short_option_notional_pct": 0.35,
-  "max_single_name_assigned_weight": 0.10,
-  "max_theme_assigned_weight": {
-    "ai_semis": 0.30,
-    "space": 0.15
+  "risk_tiers": {
+    "position_size": "small",
+    "margin_usage": "low",
+    "theme_concentration": "strict",
+    "assignment_exposure": "strict",
+    "option_expression": "defined_risk_preferred"
   },
-  "max_option_buying_power_commitment_pct": 0.50,
-  "max_hedge_overlay_cost_pct": 0.01
+  "binding_limits": [
+    "missing_data",
+    "margin_usage",
+    "assignment_exposure",
+    "theme_concentration"
+  ]
 }
 ```
 
@@ -1303,9 +1328,10 @@ Proposed new tables:
 | `intraday_signal_snapshots` | Per ticker intraday refreshed values, carried-forward baseline fields, source freshness status, and deltas vs pre-open baseline and previous intraday snapshot |
 | `news_alerts` | Normalized positive/negative news alerts with severity, sentiment, dedupe key, affected tickers/positions |
 | `intraday_rebalance_decisions` | Alert-driven hold/reduce/exit/add/open_new proposals and final risk-gated outcome |
-| `risk_limit_configs` | Versioned portfolio risk limits and factor exposure caps |
+| `risk_appetite_profiles` | User-facing risk preset selection such as `conservative`, `balanced`, or `aggressive`, with profile version and optional advanced override metadata |
+| `risk_limit_configs` | Versioned generated risk limits and factor exposure caps produced by `RiskConfigResolver` from a risk appetite preset; persisted for audit/replay rather than edited as the primary UI config |
 | `position_sizing_decisions` | Deterministic sizing inputs, applied caps, final target weight/quantity |
-| `portfolio_risk_snapshots` | Portfolio-level gross/net exposure, unified margin-account risk, and factor exposures before/after proposed trades and after fills |
+| `portfolio_risk_snapshots` | Portfolio-level gross/net exposure, active risk appetite, generated risk config id/version, unified margin-account risk, and factor exposures before/after proposed trades and after fills |
 | `risk_factor_exposures` | Normalized per-position and portfolio exposures by factor type/name |
 | `paper_orders` | Staged/submitted/filled/rejected paper orders |
 | `paper_executions` | Simulated fills |
@@ -1316,12 +1342,13 @@ Proposed new tables:
 | `learning_factor_applications` | Join table showing which decision used which learning factor |
 | `llm_usage_events` | Per LLM/API call telemetry: provider, model, pipeline, run id, token counts, estimated cost, latency, retry/error state, prompt/schema version |
 
-Existing tables remain useful:
+Legacy tables are optional:
 
 - `watchlists` becomes a manual override list, not the source of truth for daily scan.
 - Manual watchlist/pinned symbols create `manual_ticker_requests`; they are evaluated through the same signal/strategy/risk path as scanner candidates.
-- `research_runs` and `research_outputs` can remain as explanatory research artifacts, but trading decisions should use dedicated `trading_decisions` rows so research/eval history does not get overloaded.
-- `eval_results` remains for research output scoring; trade/portfolio scoring should move to paper trading tables.
+- `research_runs` and `research_outputs` are not required in the V2 trading critical path. If they still provide useful UI explanation, audit, or legacy compatibility value, keep them as optional archival research artifacts. Otherwise they can be deprecated after migration.
+- `eval_results` is not required for trade/portfolio scoring. If retained, it should only score research-output quality, prompt quality, or legacy evals. Strategy win rate, alpha, PnL, drawdown, option attribution, and portfolio risk outcomes should live in the paper trading and strategy evaluation tables.
+- New V2 tables are the source of truth for trading behavior. Do not add compatibility writes to legacy research/eval tables unless a current UI or migration task explicitly needs them.
 
 ### Strategy Definition Shape
 
