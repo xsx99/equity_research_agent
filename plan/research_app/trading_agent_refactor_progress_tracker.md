@@ -31,23 +31,36 @@
 - Added source-ingestion freshness and signal coordination design: pre-open snapshots are the daily baseline, intraday snapshots reuse the same canonical schema as scoped deltas, and hourly refresh runs targeted freshness-gated source updates instead of full pipeline reruns.
 - Clarified legacy table policy: `research_runs`, `research_outputs`, and `eval_results` are optional archival/compatibility artifacts, not required V2 trading-path dependencies or trade/portfolio scoring tables.
 - Simplified risk configuration into `conservative`, `balanced`, and `aggressive` risk appetite presets; `RiskConfigResolver` generates detailed effective risk configs for audit/replay while hard safety rails remain invariant across presets.
-- Resolved initial design questions: universe uses user-editable liquidity/sector filters, common-stock paper trading is long-only, holding period comes from strategy definitions, learning factors activate immediately by default, and manual ticker requests stay active until dismissed.
+- Resolved initial design questions: universe uses user-editable liquidity/sector filters, common-stock paper trading is long-only, holding period comes from strategy definitions, and manual ticker requests stay active until dismissed. Superseded on 2026-05-31: learning factors no longer activate immediately by default.
+
+## 2026-05-31
+
+- Updated the design and implementation plan to add point-in-time / no-lookahead data constraints. Source records and signal snapshots now require `event_time`, `published_at`, `ingested_at`, and `available_for_decision_at`, and replay/decision paths must filter by decision-time availability.
+- Added `HistoricalReplayOutcomeEvaluator` before reflection so trades, rejected candidates, watch items, manual requests, and shadow strategies are evaluated over strategy horizons against `SPY`, `QQQ`, sector/theme ETF, and decision-time peer baskets.
+- Changed learning factor lifecycle policy: new factors default to `candidate` or `observation`; only risk-tightening factors may become automatically active, while score/risk expansion requires shadow/test evidence or explicit promotion.
+- Added LLM output safety requirements: trading, intraday, reflection, learning extraction, and strategy proposal JSON must pass Pydantic validation with bounded retry and safe fallback.
+- Added provider resilience requirements: rate limit, batch fetch, exponential backoff, request budget, cache/freshness gate, circuit breaker, persisted provider request telemetry, and degraded mode.
+- Shrank the MVP/PR blast radius: first prove universe -> point-in-time signal snapshot -> strategy scoring -> replay/outcome evaluator before paper trading, options, intraday, reflection, or strategy evolution.
+- Added `portfolio_intents` for approved core holdings, target/max weight, add/trim rules, thesis invalidators, and allowed tactical interactions.
+- Added structured relationship data requirements: `ticker_relationships`, `peer_baskets`, and `theme_taxonomy` for peer/theme read-through, relative strength, and attribution.
+- Added deterministic testing policy: unit tests use fake providers, provider integration tests use `vcrpy`/recorded cassettes, and live API smoke tests are opt-in and non-blocking for normal CI.
 
 ## PR Slice Status
 
 | Slice | Scope | Status | Notes |
 | --- | --- | --- | --- |
-| PR 1 | Trading foundation schema + strategy catalog | Pending | Adds universe filter config schema, 15 broad tactical strategies, 4 eval-derived playbooks, 5 pure expression buckets including defined-risk options, manual ticker request schema, prompt registry/schema, and portfolio-pool trade identity taxonomy. |
-| PR 2 | Universe scan + signal snapshots | Pending | Adds user-editable liquidity/sector universe filters, relative-strength benchmark/peer fields, persistent manual request ingestion until dismissal, own-company earnings signals, macro/sector/theme read-through, portfolio-aware event calendar risk scoring, source-ingestion freshness metadata, Postgres-backed insider/news/fundamental/context signals, and explicit missing/stale signal handling. |
-| PR 3 | Strategy matching + candidate scoring | Pending | Adds source attribution, primary strategy selection, trade classification, catalyst-watch split, bearish gating, and confidence calibration inputs. |
+| PR 1 | Trading foundation schema + strategy catalog | Pending | Adds PIT metadata fields, universe filter config schema, portfolio intents, relationship/peer/theme schemas, 15 broad tactical strategies, 4 eval-derived playbooks, 5 expression buckets, manual ticker request schema, prompt registry/schema, and trade identity taxonomy. |
+| PR 2 | Provider resilience + universe + point-in-time signal MVP | Pending | Adds provider guardrails, fake-provider test path, request telemetry, user-editable universe filters, persistent manual requests, minimal market/relative-strength signal snapshots, source availability metadata, portfolio-intent eligibility, and peer basket construction. |
+| PR 3 | Strategy matching + historical replay outcome evaluator | Pending | Adds source attribution, primary strategy selection, trade classification, catalyst-watch split, bearish gating, confidence calibration inputs, and deterministic outcome evaluation vs benchmarks/decision-time peer baskets. |
 | PR 4 | Position sizing + portfolio risk manager | Pending | Depends on candidates and risk tables; adds simple risk appetite presets, generated risk configs, invariant hard safety rails, and conservative broker-profile margin estimates. |
-| PR 5 | Trading decisions + paper stock broker + portfolio state | Pending | Depends on stock risk gate; adds unified simulated margin account, margin model/source metadata, and enforces `review_only` vs `paper_trade_eligible` manual request mode. |
-| PR 6 | Paper options strategy layer + assignment risk | Pending | Paper/simulation-only whitelisted option strategies: long call/put, call/put credit spread, long straddle, and long strangle; includes conservative option margin formulas, RiskManager-owned hedge overlays, option-risk snapshots, and worst-case assignment checks when relevant. |
-| PR 7 | Intraday signal refresh + news alerts + rebalance | Pending | Hourly freshness-gated signal/news refresh during market hours; intraday snapshots are scoped deltas vs pre-open baseline and previous hourly snapshot before risk-gated stock/paper-option actions. |
-| PR 8 | Reflection + learning factors | Pending | Uses highest-quality configured reflection model; includes peer benchmarks, manual request attribution, bullish/bearish calibration, and option attribution. |
-| PR 9 | Strategy evolution + dynamic strategy catalog | Pending | Converts repeated learning into candidate/shadow strategies beyond the initial seeds. |
-| PR 10 | Today dashboard UI | Pending | Tabbed workstation with trade audit drill-downs, strategy performance, and LLM/API cost telemetry. |
-| PR 11 | Scheduler, smoke tests, deploy docs | Pending | Final operational wiring, including manual ticker review job, intraday signal refresh job, and smoke mode. |
+| PR 5 | Trading decision agent guardrails | Pending | Adds bounded LLM trading output with Pydantic validation, retry, safe fallback, prompt/schema persistence, full context snapshot, and no paper order side effects yet. |
+| PR 6 | Paper stock broker + portfolio state | Pending | Adds stock paper orders/executions/positions, unified simulated margin account, margin model/source metadata, and order idempotency. |
+| PR 7 | Paper options strategy layer + assignment risk | Pending | Paper/simulation-only whitelisted option strategies: long call/put, call/put credit spread, long straddle, and long strangle; includes conservative option margin formulas, RiskManager-owned hedge overlays, option-risk snapshots, and worst-case assignment checks when relevant. |
+| PR 8 | Intraday signal refresh + news alerts + rebalance | Pending | Hourly freshness-gated signal/news refresh during market hours; intraday snapshots are scoped deltas vs pre-open baseline and previous hourly snapshot before risk-gated stock/paper-option actions. |
+| PR 9 | Reflection + learning factors | Pending | Uses highest-quality configured reflection model with Pydantic fallback; consumes replay outcomes; new learning factors default to candidate/observation unless risk-tightening. |
+| PR 10 | Strategy evolution + dynamic strategy catalog | Pending | Converts repeated learning into candidate/shadow strategies beyond the initial seeds after replay evidence and schema-validated proposals. |
+| PR 11 | Today dashboard UI | Pending | Tabbed workstation with PIT audit, trade drill-downs, strategy performance, relationship/core-intent views, and LLM/API/provider telemetry. |
+| PR 12 | Scheduler, smoke tests, deploy docs | Pending | Final operational wiring, including manual ticker review job, intraday signal refresh job, replay smoke, fixture/cassette tests, opt-in live smoke, and deploy docs. |
 
 ## Verification Log
 
@@ -72,4 +85,5 @@
 - 2026-05-30: `git diff --check` passed after simplifying risk configuration into risk appetite presets and generated effective risk configs.
 - 2026-05-30: `git diff --check` passed after resolving initial design questions for universe filters, long-only common stock, strategy-defined horizons, immediate learning activation, and manual request dismissal.
 - 2026-05-30: `git diff --check` passed after restricting the initial paper options whitelist to long call/put, call/put credit spreads, long straddles, and long strangles.
+- 2026-05-31: `git diff --check` passed after adding PIT/no-lookahead constraints, historical replay evaluator, safer learning-factor lifecycle, LLM validation/fallback, provider resilience, smaller PR slices, portfolio intents, relationship graph, and deterministic testing policy.
 - No implementation tests run yet; documentation/planning update only.

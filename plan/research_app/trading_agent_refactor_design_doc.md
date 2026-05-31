@@ -16,16 +16,18 @@ V2 的目标是把系统从“用户维护 watchlist 后生成研究结论”升
 4. 允许系统从 reflection/learning 中归纳新的 trading strategy，并把新 strategy 加入 versioned strategy catalog；初始 15 个策略只是 seed set，不是上限。
 5. 引入 paper trading：每天根据策略和风险规则生成 orders，在同一个 simulated margin account 里更新 stock/options positions、trades、PnL、margin usage 和 buying power。
 6. 常规交易时段每小时扫描新闻，盘前和盘后再额外扫描一次，识别高影响正面/负面事件，并在风险约束下立即触发调仓或退出。
-7. 每天收盘后自动 reflection，归因当天交易表现，并生成结构化 learning factors 和 strategy proposals。
-8. 下一次 trading agent 决策时注入 active learning factors，并让 active/shadow strategies 参与下一轮扫描，但保留审计、版本和回滚能力。
-9. UI 首页改为交易工作台，重点显示当天持仓、当天 trades、live alerts、收盘反思、learning factors 和 strategy evolution。
-10. 明确分离 `Macro Engine` 与 `Stock Trading Strategy Engine`。
-11. 先验证相对行业、主题、同类股票和成交量/价格结构，再找明确个股，最后决定是否交易。
-12. 每个交易必须先归类为核心仓、tactical stock trade、tactical option trade、risk hedge overlay、watch-only 等 trade identity，并由这个身份决定仓位、持有周期、退出规则和反思口径。
-13. 增加 paper/simulation-only options strategy layer，但 V2 初始白名单先限制在 long call、long put、call/put credit spread、long straddle 和 long strangle。Standalone short put、covered/collar、debit spread 和其他 multi-leg 组合先不进入初始交易范围。
-14. Risk manager 必须用 leg-based option risk 评估 delta/gamma/theta/vega、max loss、margin requirement、buying power effect、event risk；对 credit spread 或未来其他可能 assignment 的结构，额外用 worst-case assigned portfolio 评估风险，而不是只看当前股票仓位。
-15. Confidence 必须按历史 pattern 和策略桶校准，不能因为叙事完整或宏观理由多就给高分。
-16. 支持用户手动 pin ticker 让 trading bot 强制评估，但 manual request 只代表“必须评估”，不代表“允许交易”。
+7. 在 reflection 之前运行 historical replay / outcome evaluator，按策略 horizon 评估候选和已交易标的相对 `SPY`、`QQQ`、sector/theme ETF、decision-time peer basket 的表现。
+8. 每天收盘后自动 reflection，归因当天交易表现，并生成结构化 learning factors 和 strategy proposals。
+9. 下一次 trading agent 决策时只注入经过验证或只会收紧风险的 active learning factors；reflection 新生成的扩大仓位、提高分数或放宽准入规则默认进入 candidate/shadow/test，不直接改变交易行为。
+10. UI 首页改为交易工作台，重点显示当天持仓、当天 trades、live alerts、收盘反思、learning factors 和 strategy evolution。
+11. 明确分离 `Macro Engine` 与 `Stock Trading Strategy Engine`。
+12. 先验证相对行业、主题、同类股票和成交量/价格结构，再找明确个股，最后决定是否交易。
+13. 每个交易必须先归类为核心仓、tactical stock trade、tactical option trade、risk hedge overlay、watch-only 等 trade identity，并由这个身份决定仓位、持有周期、退出规则和反思口径。
+14. 核心仓必须由上游 `portfolio_intents` 配置批准，包含 approved core tickers、target/max weight、add/trim rules 和 thesis invalidators；`core_holding` trade identity 只说明 exposure purpose，不负责决定哪些股票可以成为核心仓。
+15. 增加 paper/simulation-only options strategy layer，但 V2 初始白名单先限制在 long call、long put、call/put credit spread、long straddle 和 long strangle。Standalone short put、covered/collar、debit spread 和其他 multi-leg 组合先不进入初始交易范围。
+16. Risk manager 必须用 leg-based option risk 评估 delta/gamma/theta/vega、max loss、margin requirement、buying power effect、event risk；对 credit spread 或未来其他可能 assignment 的结构，额外用 worst-case assigned portfolio 评估风险，而不是只看当前股票仓位。
+17. Confidence 必须按 historical replay/outcome evaluator 的 pattern 和策略桶校准，不能因为叙事完整或宏观理由多就给高分。
+18. 支持用户手动 pin ticker 让 trading bot 强制评估，但 manual request 只代表“必须评估”，不代表“允许交易”。
 
 ## 3. Non-Goals
 
@@ -33,7 +35,7 @@ V2 的目标是把系统从“用户维护 watchlist 后生成研究结论”升
 - 不做高频或分钟级自动交易。首版以 daily pre-market plan、market-open execution simulation、post-close reflection 为主。
 - 不做 direct short common-stock paper trades。V2 common-stock orders are long-only; bearish evidence can reduce, block, downgrade to watch, or support paper option/risk-hedge expressions where explicitly allowed by strategy and risk rules.
 - 不让 LLM 直接执行 broker/order/database side effects。Python orchestration 仍然拥有状态流转和持久化。
-- 不把 reflection 生成的数值调参无条件自动应用到生产策略。首版只自动注入已激活的 learning factors，并对高风险变更保留人工批准或阈值门槛。
+- 不把 reflection 生成的 learning factors 默认当作 active trading rules。扩大仓位、提高分数、放宽准入、扩大 universe 或提高风险预算的学习结果必须先进入 candidate/shadow/test；只有收紧风险、降低仓位、增加 blocked condition 的规则可以自动 active。
 - 不让新生成的 strategy 直接扩大组合风险。自动发现的 strategy 必须先进入 candidate/shadow lifecycle，并受更小的 strategy/risk budget 约束。
 - 不让新闻情绪单独绕过风险管理。Intraday 新闻只能触发有审计的 rebalance proposal，最终仍由 `RiskManager` 和 `PaperBroker` 执行。
 - 不把宏观新闻直接混入每个 ticker prompt 里做随意推理。宏观只通过结构化 macro snapshot/regime 进入个股策略和交易 agent。
@@ -62,7 +64,7 @@ V2 的目标是把系统从“用户维护 watchlist 后生成研究结论”升
 
 优点：最可测、最稳定。缺点：没有充分利用当前 research agent 的结构化 reasoning 能力，learning loop 的表达力也弱。
 
-结论：采用 Option A。保留当前“Python owns orchestration, LLM owns bounded reasoning”的原则，把系统拆成可审计的 daily trading layers。
+结论：采用 Option A，但首版 MVP 不直接实现完整交易平台。先跑通 universe -> point-in-time signal snapshot -> strategy scoring -> historical replay/outcome evaluator，证明候选生成和策略评分能被无未来数据地回放和评估；再逐步加入 paper trading、options、intraday refresh、reflection 和 strategy evolution。保留当前“Python owns orchestration, LLM owns bounded reasoning”的原则，把系统拆成可审计的 daily trading layers。
 
 ## 5. Target Architecture
 
@@ -115,13 +117,16 @@ PositionSizer + RiskManager -> approved/reduced/rejected intraday actions
 PaperBroker -> intraday paper_orders -> paper_executions
       |
       v
+HistoricalReplayOutcomeEvaluator -> candidate/trade outcomes by strategy horizon
+      |
+      v
 ReflectionPipeline -> daily_reflections -> learning_factors
       |
       v
 StrategyEvolutionPipeline -> strategy_proposals -> strategy_definitions
       |
       v
-Next trading run receives active learning_factors
+Next trading run receives validated active learning_factors
 ```
 
 ### Component Boundaries
@@ -130,7 +135,7 @@ Next trading run receives active learning_factors
 | --- | --- | --- | --- |
 | `UniverseProvider` | Load daily tradable US equity universe from market data provider, normalize tickers, and apply user-editable liquidity, sector, exchange, and asset filters | No | `universe_filter_configs`, `universe_symbols`, `universe_snapshots` |
 | `ManualTickerReviewPipeline` | Accept user-pinned tickers for forced evaluation, validate basic eligibility, attach request reason/mode, and merge them into signal/strategy evaluation without granting trade approval | No | `manual_ticker_requests`, `universe_symbols`, `signal_snapshots` |
-| `SourceIngestionJobs` | Supporting scheduled/targeted data ingestion layer that keeps normalized Postgres source tables fresh for insider/Form 4, SEC filings, news/analyst events, fundamentals, market data, option chains, earnings/events, and macro calendars. These jobs do not make trading decisions; they only provide replayable source rows and freshness metadata for downstream pipelines | No | source-specific tables, `source_ingestion_runs` |
+| `SourceIngestionJobs` | Supporting scheduled/targeted data ingestion layer that keeps normalized Postgres source tables fresh for insider/Form 4, SEC filings, news/analyst events, fundamentals, market data, option chains, earnings/events, and macro calendars. These jobs do not make trading decisions; they only provide point-in-time replayable source rows, provider health, request-budget, and freshness metadata for downstream pipelines | No | source-specific tables, `source_ingestion_runs`, `provider_request_runs` |
 | `MacroPipeline` | Fetch rates, VIX, credit spreads, commodities, broad index trend, economic calendar; consume macro/sector/theme read-through context; produce market regime | Optional bounded summary using Gemini Flash | `macro_snapshots` |
 | `PortfolioEventCalendarPipeline` | Normalize future macro, economic, earnings, Fed, and company events; score relevance/risk against current holdings, candidates, option expiries, and strategy holding periods; hide irrelevant low-impact events from the UI | No | `calendar_events`, `portfolio_event_risk_assessments` |
 | `SignalPipeline` | Build deterministic pre-open per-ticker baseline signal snapshots from market bars plus normalized Postgres-backed insider, SEC, news, fundamentals, event/earnings calendar, options, macro/sector/theme read-through source family, and existing research context data; refresh provider data only through controlled adapters when needed | No | `signal_snapshots` |
@@ -146,6 +151,7 @@ Next trading run receives active learning_factors
 | `PortfolioPipeline` | Maintain stock/options positions and one unified simulated margin account with cash balance, account equity, margin used, buying power, excess liquidity, exposure, and realized/unrealized PnL | No | `paper_positions`, `portfolio_snapshots` |
 | `HourlySignalRefreshPipeline` | Build scoped intraday delta snapshots using the same canonical signal schema as pre-open snapshots. It runs freshness-gated targeted refreshes for portfolio-relevant tickers, updates price/volume, relative strength, VWAP/gap, option marks, news/events, and checks low-frequency source freshness without full re-ingestion | Optional Gemini Flash bounded classifier only for news/event classification after deterministic filters | `intraday_signal_scans`, `intraday_signal_snapshots`, `news_alerts` |
 | `IntradayRebalancePipeline` | Convert material signal changes and critical/high-impact alerts into reduce/exit/add/hold proposals for existing positions or active candidates | Yes, Gemini Flash bounded decision schema; risk manager remains final gate | `intraday_rebalance_decisions`, `paper_orders` |
+| `HistoricalReplayOutcomeEvaluator` | Replay prior decision-time snapshots without lookahead, evaluate candidates/trades/watch items over each strategy horizon, and compute alpha vs `SPY`, `QQQ`, sector/theme ETF, and decision-time peer basket before reflection or strategy promotion uses the evidence | No | `historical_replay_runs`, `candidate_outcome_evaluations`, `strategy_evaluation_results` |
 | `ReflectionPipeline` | Analyze day results, compare thesis vs outcome, extract learning factors | Yes, highest-quality configured model | `daily_reflections`, `learning_factors` |
 | `StrategyEvolutionPipeline` | Convert repeated learning patterns into new strategy proposals, shadow-test them, and promote/retire strategy definitions | Yes for proposal synthesis; deterministic lifecycle gates | `strategy_proposals`, `strategy_definitions`, `strategy_evaluation_results` |
 
@@ -219,6 +225,22 @@ Earnings handling is embedded in the normal event-calendar refresh and signal sn
 - Related-company earnings are stored as macro/sector/theme context with provenance. They must not be treated as the target ticker's own catalyst.
 - Target-ticker confirmation is required before read-through affects trade eligibility: relative strength vs peers/theme, price/volume confirmation, and no target-specific contradictory signal.
 - Bearish peer read-through should normally reduce size, pause adds, tighten option/event risk, or produce catalyst-watch/risk-review. It should not create a high-confidence single-name bearish trade without target-specific confirmation.
+
+### Peer and Theme Relationship Graph
+
+Read-through relationships must come from structured data, not free-form LLM inference. V2 should add a lightweight relationship graph with:
+
+- `ticker_relationships`: directed relationships such as peer, customer, supplier, competitor, sector leader, ETF/component, theme leader, or theme constituent
+- `peer_baskets`: versioned baskets used for relative strength, attribution, and decision-time peer comparison
+- `theme_taxonomy`: AI infrastructure, memory, networking, cloud software, cyber, obesity drugs, energy, aerospace/defense, and other user-maintained themes
+
+Each relationship should store source, confidence, valid date range, relation strength, and whether it can be used for read-through, benchmark attribution, candidate generation, or UI grouping. Examples:
+
+- `NVDA` as AI accelerator/AI capex leader for semiconductor and AI infrastructure baskets
+- `MU` and `SNDK` as memory/storage peers or theme constituents
+- `LITE` and `AAOI` as optical/networking read-through names
+
+The relationship graph is only an input to deterministic relative-strength and read-through logic. It should not let the LLM freely decide that any headline on one company is a catalyst for another company.
 
 Every event shown in the UI must carry a portfolio relevance record:
 
@@ -317,6 +339,18 @@ The trade identity decides which risk budget applies, which holding-period assum
 `catalyst_watch` and `ordinary_watch` should be stored as `watch_type` or result status under `trade_identity = "watch_only"`, not as separate trade identities.
 
 Do not encode the instrument choice inside the strategy name. A strategy should describe the edge, e.g. `strong_theme_no_clear_near_term_entry_v1` or `valuation_repair_quality_software_v1`. An expression bucket should describe the implementation, e.g. `defined_risk_directional_option`, `defined_risk_income_spread`, `volatility_event_option`, or `long_stock`. Trade identity then decides which portfolio pool owns the exposure, e.g. `tactical_option_trade`, `core_holding`, `tactical_stock_trade`, or `watch_only`.
+
+Core holdings need a separate upstream intent config. `core_holding` is a trade identity, not permission to invent a long-term holding. A ticker can be classified as `core_holding` only when an active `portfolio_intent` approves it. The intent config should store:
+
+- approved ticker or ETF, e.g. `GOOGL`, `SMH`, `VOO`
+- intent type, e.g. `core_growth`, `core_index`, `core_theme`, or `core_cash_like`
+- target weight and max weight
+- add rules, such as add-on-pullback, add-on-thesis-confirmation, or scheduled contribution
+- trim rules, such as overweight, thesis deterioration, concentration cap, or risk-budget pressure
+- thesis invalidators that trigger review or forced de-risking
+- whether tactical signals may add, pause adds, trim, or only produce review notes
+
+This prevents the bot from guessing core holdings from the current portfolio or from LLM preference. Tactical trades can still use the same ticker, but they must remain in a separate `tactical_stock_trade` or `tactical_option_trade` pool with separate sizing, exit, and reflection.
 
 Implementation ownership:
 
@@ -534,7 +568,7 @@ Required candidate fields:
 
 ## 7. Signal Snapshots
 
-Signals should be deterministic Python outputs and stored before any LLM call. Each signal includes `value`, `direction`, `z_score/percentile` when available, `lookback`, `source`, `source_table` or provider name, freshness metadata, and `computed_at`.
+Signals should be deterministic Python outputs and stored before any LLM call. Each signal includes `value`, `direction`, `z_score/percentile` when available, `lookback`, `source`, `source_table` or provider name, freshness metadata, `computed_at`, and point-in-time availability metadata.
 
 `SignalPipeline` is the V2 replacement for the current version's per-ticker research context assembly. It should not be limited to price/technical indicators. For each ticker it should assemble a replayable `quant_signal_snapshot` from:
 
@@ -578,9 +612,35 @@ Signal source rules:
 
 - Prefer normalized Postgres tables over ad hoc live fetches so every trading decision is replayable.
 - Preserve source provenance per signal, e.g. `market_bars`, `insider_transactions`, `sec_filings`, `news_articles`, `fundamental_snapshots`, `earnings_events`, `earnings_transcripts`, `option_chain_snapshots`, or `research_context`.
-- Store `as_of`, `published_at`, `filing_date`, or equivalent freshness fields where relevant.
+- Store `event_time`, `published_at`, `ingested_at`, and `available_for_decision_at` where relevant. Use `filing_date`, `as_of`, or provider observation time as source-specific supporting fields, not as substitutes for decision availability.
 - Separate raw inputs from derived scores. For example, persist raw insider transactions elsewhere, then store derived fields such as `insider_net_buy_value_90d` and `insider_cluster_buy_count_90d` in `signal_snapshots`.
 - Do not let the LLM infer missing insider/news/fundamental facts. Missing facts remain missing signals.
+
+### Point-In-Time and No-Lookahead Contract
+
+Every source record and every derived signal snapshot must be replayable as of a specific decision time. The system must distinguish:
+
+- `event_time`: when the underlying market/company/economic event happened
+- `published_at`: when the source made the event public
+- `ingested_at`: when the system stored the source row
+- `available_for_decision_at`: the earliest time this row or signal was eligible to influence a trading decision after publication delay, ingestion delay, provider delay, and freshness gates
+
+Pre-market decisions may only use source rows and derived signals where `available_for_decision_at <= decision_time`. Intraday rebalance decisions use the same rule with the rebalance timestamp. Backtests, replay, reflection, and strategy evolution must load snapshots through this decision-time filter instead of querying the latest normalized source tables.
+
+Derived signals inherit the maximum `available_for_decision_at` of their required inputs. If any required input is missing, stale, or not yet decision-available, the derived signal must be marked missing/stale/unavailable rather than computed from future information. This applies especially to earnings, analyst revisions, SEC filings, news, option chains, and revised macro/economic data.
+
+Each `signal_snapshot` should persist:
+
+- `decision_time`
+- `available_for_decision_at`
+- `snapshot_type`
+- `source_record_refs`
+- `source_available_times`
+- `max_input_available_for_decision_at`
+- `excluded_future_source_count`
+- `point_in_time_passed`
+
+Historical replay must be able to rebuild or verify the same candidate set from these fields without using later corrections, revised datasets, or post-decision source rows.
 
 ### Source Ingestion, Baseline, and Freshness
 
@@ -601,6 +661,18 @@ Recommended source cadence:
 | Market bars / quotes | Daily bars after close; current quotes during trading day | Required for hourly intraday snapshots and relative-strength deltas. |
 | Technical signals | Computed by `SignalPipeline` from market data | Pre-open full universe; intraday scoped recompute only for portfolio-relevant tickers. |
 | Option chains / marks | Pre-open/after open where available; mark open option positions | Hourly for open option positions and option-eligible candidates; missing required option data blocks option opens/rolls. |
+
+Every provider adapter must run behind a resilience wrapper:
+
+- per-provider and per-endpoint rate limiter
+- batch fetch API where available
+- exponential backoff with jitter for transient failures
+- request budget per run and per trading day
+- cache/freshness gate before making external calls
+- circuit breaker that opens after repeated provider failures or rate-limit responses
+- degraded mode that marks affected source families stale/missing while allowing unrelated pipeline stages to continue
+
+The wrapper should persist `provider_request_runs` with provider, endpoint/source family, scope, cache hit/miss, request count, budget remaining, latency, retry count, status, error code, and circuit-breaker state. A provider outage should not block the whole universe scan when required minimum data from other sources remains available.
 
 Pre-open snapshots are the daily baseline. They should be persisted as `snapshot_type = "pre_open"` and include all available source families, source freshness status, missing/stale fields, and the universe/manual-request context that caused the ticker to be evaluated.
 
@@ -861,7 +933,7 @@ The trading agent receives:
 - macro snapshot/regime
 - current unified paper margin account and open stock/option positions
 - risk config
-- active learning factors relevant to strategy/ticker/sector/regime
+- active risk-tightening or validated learning factors relevant to strategy/ticker/sector/regime, plus non-behavior-changing candidate/observation lessons as labeled soft context
 - recent trade outcomes for the same strategy or ticker
 
 It returns one JSON object per candidate or position:
@@ -923,6 +995,38 @@ For option decisions, the trading decision must include a leg-based `option_plan
 `time_horizon` should come from the selected strategy definition, not from a global default. The trading agent may shorten or skip a trade if risk conditions conflict with the strategy horizon, but it should not silently rewrite the strategy's typical horizon without recording a reason.
 
 Confidence must be calibrated by historical pattern quality. Bullish catalyst plus relative strength can earn high confidence when past evidence supports it. Macro-only bearish, valuation-only bearish, RSI-only bearish, or “stock is extended” reasoning must remain low confidence and should normally map to risk warning, smaller size, no trade, or watch.
+
+### LLM Output Validation and Safe Fallback
+
+Every LLM output that can affect trading state must pass Pydantic validation before any downstream write or state transition. This applies to:
+
+- trading decisions
+- intraday news/event classifications when they can trigger a rebalance proposal
+- intraday rebalance decisions
+- reflection JSON
+- learning factor extraction
+- strategy proposal synthesis
+
+The orchestrator owns the retry and fallback policy:
+
+1. Render prompt with a versioned schema id/version.
+2. Call the model and persist raw output.
+3. Parse and validate through the matching Pydantic schema.
+4. If validation fails, retry with the validation error and a compact repair prompt.
+5. If retry still fails, persist the failure and return a safe fallback.
+
+Safe fallbacks:
+
+| Pipeline | Fallback |
+| --- | --- |
+| Trading decision | `no_trade` for new exposure; `hold` or deterministic risk-manager action for existing positions |
+| Intraday classification | `classification_failed`, no rebalance trigger unless deterministic hard-risk rules fire |
+| Intraday rebalance | `hold` or deterministic reduce/exit if hard risk rails require it |
+| Reflection | `reflection_failed`; do not create or mutate learning factors |
+| Learning factor extraction | persist observation text only, no active factor |
+| Strategy proposal synthesis | `proposal_failed`; do not create strategy definitions |
+
+Validated parsed output, raw output, validation errors, retry count, fallback action, schema id/version, and prompt id/version must be persisted for audit. A parse error must never mutate portfolio state, strategy definitions, or learning factors.
 
 ### Risk Constraint and Budget Decision
 
@@ -1211,9 +1315,50 @@ Example generated config snapshot:
 
 The risk manager must persist both accepted and rejected decisions. Rejected trades are important training data for reflection because the system should learn whether risk constraints protected the portfolio or blocked good opportunities.
 
-## 11. Reflection and Learning Loop
+## 11. Historical Replay, Reflection, and Learning Loop
 
-Reflection runs after the portfolio is marked to close. It receives:
+### Historical Replay and Outcome Evaluator
+
+Reflection should not be the first component to judge whether a strategy worked. Before reflection runs, `HistoricalReplayOutcomeEvaluator` must compute deterministic outcomes from point-in-time snapshots:
+
+- every selected trade
+- every rejected candidate that reached candidate scoring
+- every `catalyst_watch` and ordinary `watch_only` item
+- active and shadow strategy candidates
+- manual ticker requests
+
+The evaluator measures each item over the selected strategy's configured horizon and any interim checkpoints. It compares absolute return and risk-adjusted return against:
+
+- `SPY`
+- `QQQ`
+- configured sector ETF
+- configured theme ETF
+- decision-time peer basket
+- decision-time opportunity set when available
+
+It should persist interim marks for open trades and final outcome rows only when the trade closes or the configured horizon expires. The evaluator must use only data that was available at each decision time for candidate reconstruction, and only subsequent market data for outcome measurement. It must not use future knowledge to change the original candidate set, peer basket, strategy assignment, confidence bucket, or trade identity.
+
+Outcome records should include:
+
+- `strategy_id` and version
+- `trade_identity`
+- `expression_bucket_id`
+- `decision_time`
+- `horizon_start_at` and `horizon_end_at`
+- benchmark returns
+- peer basket return and basket membership snapshot id
+- candidate/trade return
+- alpha vs each comparator
+- MFE/MAE
+- drawdown and volatility where available
+- regime, sector/theme, catalyst type, and confidence bucket
+- whether the row is interim or final
+
+Reflection and strategy evolution consume these outcome rows rather than recomputing attribution ad hoc.
+
+### Reflection Input and Output
+
+Reflection runs after the portfolio is marked to close and after historical replay/outcome evaluation has produced the relevant interim or final outcome rows. It receives:
 
 - morning macro snapshot
 - strategy candidates and scores
@@ -1223,6 +1368,7 @@ Reflection runs after the portfolio is marked to close. It receives:
 - end-of-day PnL, benchmark return, sector return
 - peer-basket returns and relevant ETF returns, e.g. `QQQ`, `SMH`, `SOXX`
 - paper option positions, option strategy lifecycle actions, leg-level risk snapshots, hedge overlay decisions, and worst-case assignment snapshots when relevant
+- historical replay/outcome evaluator rows for selected trades, rejected candidates, watch items, and shadow strategies
 - per-trade MFE/MAE if available
 - invalidators and whether they triggered
 - prior learning factors used
@@ -1281,27 +1427,32 @@ The reflection output is structured:
 
 Reflection may also emit `strategy_proposal_hints`: partial observations that are not yet complete strategy definitions. `StrategyEvolutionPipeline` owns converting those hints into concrete strategy proposals so reflection stays focused on evidence and attribution.
 
-The next trading run must adapt to active learning factors by injecting them into candidate scoring and trading decision context. Adaptation means:
+The next trading run adapts only to learning factors that are active under the lifecycle policy below. Adaptation means:
 
-- candidate scores can be adjusted by strategy-scoped learning factors
-- trading prompt context includes relevant active lessons for strategy/ticker/sector/regime
-- risk manager can apply approved learning factors that tighten constraints
+- candidate scores can be adjusted only by active, validated strategy-scoped learning factors
+- trading prompt context may include candidate/observation lessons as soft context, but the prompt must label them as not behavior-changing
+- risk manager can automatically apply learning factors that tighten constraints, lower size, add blocked conditions, or increase required confirmation
+- learning factors that raise score, expand eligibility, increase size, loosen risk, or promote a new setup must remain candidate/shadow/test until outcome evidence supports promotion
 - every applied learning factor is persisted through `learning_factor_applications`
-- later reflections evaluate whether the learning factor helped, hurt, or should be retired
+- later reflections evaluate whether the learning factor helped, hurt, overfit, or should be retired
 
 ### Learning Factor Lifecycle
 
 | Status | Meaning |
 | --- | --- |
-| `candidate` | Newly generated by reflection, not used yet |
-| `active` | Injected into trading agent context |
+| `candidate` | Newly generated by reflection; may appear as soft context, but does not change scoring, sizing, or risk approval |
+| `observation` | Informational lesson shown in UI or prompt context for analyst review; no behavioral effect |
+| `shadow` | Evaluated against historical/live paper outcomes without changing orders or sizes |
+| `active` | Allowed to affect candidate scoring, trading prompt context, or risk rules under its approved scope |
 | `suppressed` | Stored but not injected |
 | `retired` | No longer relevant |
 
 Initial policy:
 
-- New learning factors should become `active` immediately by default so the next trading run can adapt without waiting for manual approval.
-- Learning factors still cannot weaken hard safety rails. If reflection suggests a looser risk rule, broader universe rule, or larger strategy budget, the change should become a strategy/config proposal rather than an automatically active learning factor.
+- New learning factors default to `candidate` or `observation`, not `active`.
+- Risk-tightening factors may become `active` automatically when they only reduce exposure, add required confirmation, block stale-data scenarios, lower confidence, or tighten exit rules.
+- Any learning factor that increases score, expands eligibility, increases position size, weakens hard safety rails, broadens universe rules, or increases strategy/risk budget must go through shadow/test evidence and explicit promotion.
+- If reflection suggests a looser risk rule, broader universe rule, larger strategy budget, or new alpha pattern, the change should become a strategy/config proposal rather than an automatically active learning factor.
 - Every trading decision stores which learning factors were injected so impact can be evaluated later.
 
 ## 12. Data Model Additions
@@ -1311,15 +1462,20 @@ Proposed new tables:
 | Table | Purpose |
 | --- | --- |
 | `source_ingestion_runs` | Audit metadata for scheduled/targeted source refreshes: source family, run type, scope, provider, coverage, as-of time, status, latency, and error metadata |
+| `provider_request_runs` | Per-provider request budget, cache/freshness gate, rate-limit, retry/backoff, circuit-breaker, degraded-mode, latency, and error metadata |
 | `universe_filter_configs` | User-editable active universe filter profile, including liquidity thresholds, sector/industry include/exclude lists, exchange/asset filters, manual include/exclude overrides, version, and active flag |
 | `universe_snapshots` | One row per daily universe refresh |
 | `universe_symbols` | Symbols included/excluded in a universe snapshot with reason |
 | `manual_ticker_requests` | User-pinned tickers that must be evaluated until dismissed, including reason, mode, status, last evaluation metadata, and linked result |
+| `portfolio_intents` | User-approved core holding and portfolio-intent config: approved ticker/ETF, target/max weight, add/trim rules, thesis invalidators, allowed tactical interactions, lifecycle status |
+| `ticker_relationships` | Directed source ticker to target ticker relationships such as peer, customer, supplier, competitor, sector leader, ETF/component, theme leader, or theme constituent, with source/confidence/validity metadata |
+| `peer_baskets` | Versioned decision-time peer baskets used for relative strength, attribution, and outcome evaluation |
+| `theme_taxonomy` | User-maintained theme hierarchy used for read-through, risk exposure, peer basket construction, and UI grouping |
 | `macro_snapshots` | One macro snapshot/regime per run/day |
 | `macro_readthrough_events` | Structured peer/sector-leader earnings read-through events with source ticker, scope, mechanism, direction, affected theme/relationship, transcript/release provenance, and validity window |
 | `calendar_events` | Normalized future macro, economic, Fed, earnings, market-structure, and option-relevant events with source/provider provenance, scheduled time, event type, global importance, affected ticker/theme metadata, and raw payload reference |
 | `portfolio_event_risk_assessments` | Per event portfolio relevance and risk score: affected positions/candidates/options, sector/theme mapping, holding-period lookahead reason, risk mechanism, suggested action type, and hide/show decision |
-| `signal_snapshots` | Per ticker per day pre-open baseline quant features and normalized signal JSON, including source freshness, missing/stale fields, and `snapshot_type` |
+| `signal_snapshots` | Per ticker per day pre-open baseline quant features and normalized signal JSON, including source freshness, missing/stale fields, `snapshot_type`, `decision_time`, `source_record_refs`, `available_for_decision_at`, and no-lookahead audit fields |
 | `strategy_definitions` | Versioned strategy metadata, required signals, horizon, scoring config, invalidators |
 | `strategy_proposals` | Proposed new strategies or revisions derived from reflection/learning, including lifecycle status and evidence |
 | `strategy_evaluation_results` | Shadow/experimental performance and promotion/retirement evidence for strategy definitions |
@@ -1346,10 +1502,12 @@ Proposed new tables:
 | `paper_executions` | Simulated fills |
 | `paper_positions` | Current position state |
 | `portfolio_snapshots` | Daily unified margin account state: NAV/net liquidation value, account equity, cash balance, buying power, excess liquidity, margin requirements, margin model profile/source, exposure, and PnL |
+| `historical_replay_runs` | Deterministic replay batches with decision-time filters, snapshot version, outcome horizon policy, and replay status |
+| `candidate_outcome_evaluations` | Per candidate/trade/watch/strategy outcome rows with horizon, benchmarks, peer basket snapshot, alpha, MFE/MAE, regime, catalyst type, and interim/final status |
 | `daily_reflections` | Post-close reflection JSON |
-| `learning_factors` | Structured lessons with status/version/scope |
+| `learning_factors` | Structured lessons with status/version/scope, defaulting to candidate/observation unless risk-tightening or explicitly promoted |
 | `learning_factor_applications` | Join table showing which decision used which learning factor |
-| `llm_usage_events` | Per LLM/API call telemetry: provider, model, pipeline, run id, token counts, estimated cost, latency, retry/error state, prompt/schema version |
+| `llm_usage_events` | Per LLM/API call telemetry: provider, model, pipeline, run id, token counts, estimated cost, latency, retry/error state, validation/fallback state, prompt/schema version |
 
 Legacy tables are optional:
 
@@ -1509,7 +1667,10 @@ Keep the current research run UI for drill-down and audit, but make it secondary
 ## 14. Error Handling and Replayability
 
 - Every pipeline run stores `started_at`, `finished_at`, `status`, and `error_message`.
+- Every source record and signal snapshot stores `event_time`, `published_at`, `ingested_at`, and `available_for_decision_at` where applicable; decisions may only use rows whose availability time is at or before the decision timestamp.
+- Replay, backtest, reflection, and strategy evolution must load decision-time snapshots instead of latest source rows.
 - Missing provider data should degrade the relevant signal to missing, not fabricate values.
+- Provider adapters must enforce rate limits, cache/freshness gates, request budgets, exponential backoff, and circuit breakers; provider outages should enter degraded mode instead of blocking unrelated source families.
 - Candidate scoring skips tickers without minimum required signals.
 - Candidate scoring must separate `ordinary_watch` from `catalyst_watch` as a watch type under `trade_identity = "watch_only"` so high-volatility catalyst opportunities are not lost in neutral output.
 - Manual ticker requests that fail ticker validation, data availability, or liquidity checks should return `blocked_by_missing_data` or `no_trade`; they should not create partial fabricated snapshots.
@@ -1521,19 +1682,31 @@ Keep the current research run UI for drill-down and audit, but make it secondary
 - Intraday signal snapshots must preserve deltas vs the morning signal snapshot and previous hourly snapshot.
 - News alerts must be deduped by ticker/event/source/time window so repeated headlines do not trigger repeated rebalances.
 - Intraday rebalance decisions must persist the triggering `news_alert_id`, proposed action, final action, and risk decision.
-- Trading decisions must persist full context snapshots: candidate signals, macro snapshot id, portfolio snapshot id, risk config version, strategy version, learning factors used.
+- Trading decisions must persist full context snapshots: candidate signals, macro snapshot id, portfolio snapshot id, risk config version, strategy version, decision timestamp, source availability metadata, and learning factors used.
 - Option decisions must persist full option strategy metadata, per-leg metadata, option-risk snapshot, and assignment-risk snapshot where relevant.
 - Paper orders must be idempotent per `trade_date + ticker + strategy_id + decision_type`.
 - A failed ticker must not abort the whole universe scan.
+- Invalid LLM JSON, Pydantic validation failure, or schema drift must trigger bounded retry and then safe fallback; failed parsing must not mutate portfolio state, strategy definitions, or learning factors.
 - Reflection failure must not mutate learning factors.
 - Intraday signal/news refresh failure must not block portfolio marking or post-close reflection.
 
 ## 15. Testing and Smoke Tests
 
+Testing must be deterministic by default:
+
+- Unit tests use fake providers and fixture source rows. They must not hit live market/news/LLM APIs.
+- Integration tests that exercise provider adapters use `vcrpy` cassettes or equivalent recorded fixtures.
+- Live API smoke tests are separate, opt-in, tiny-scope, and must not block ordinary CI.
+- Historical replay tests should run offline from fixture snapshots and verify that future source rows are excluded by `available_for_decision_at`.
+
 Unit tests:
 
 - signal computations
+- point-in-time/no-lookahead availability filtering
+- provider rate limit, backoff, circuit breaker, cache/freshness gate, and degraded-mode behavior
 - universe filters
+- portfolio intent loading and core-holding eligibility
+- ticker relationship graph, peer basket construction, and theme taxonomy lookups
 - manual ticker request validation, dismissal, active-request loading, mode handling, and source attribution
 - macro regime classification
 - strategy candidate scoring
@@ -1552,6 +1725,8 @@ Unit tests:
 - position sizing and size-reduction reasons
 - paper order state transitions
 - portfolio PnL calculations
+- historical replay and outcome evaluator horizon attribution
+- LLM Pydantic validation, retry, and safe fallback behavior
 - learning factor activation rules
 - strategy proposal validation and duplicate detection
 - strategy lifecycle transition rules
@@ -1562,33 +1737,44 @@ Smoke tests:
 - standalone market data smoke for universe + signal computation
 - standalone smoke for a tiny manual ticker request in `review_only` mode
 - standalone intraday signal/news refresh smoke for a tiny fixed ticker set or fixture mode
+- standalone historical replay smoke from fixed fixture snapshots
 - standalone DB smoke for writing signal/candidate/order/portfolio rows
 - standalone DB smoke for writing portfolio risk snapshots and risk factor exposures
 - standalone DB smoke for writing paper option decisions, option legs, strategy-level option risk, and assignment-risk snapshots
+- optional live provider/API smoke tests for market/news/options providers using tiny ticker sets, request budgets, and explicit opt-in flags
 - optional live paper-trade dry run that uses a tiny ticker set and does not consume large API quota
 
 Implementation must continue to use `source ~/.venv/bin/activate` before Python commands and must verify Postgres data directory is on persistent disk for deployment work.
 
 ## 16. Phased Delivery
 
-### Phase 1: Foundation
+### Phase 1: Verifiable Signal and Replay MVP
 
-- Add data model for universe, signals, macro snapshots, strategy definitions, candidate scores.
+- Add data model for universe, point-in-time source records, signals, macro snapshots, strategy definitions, candidate scores, portfolio intents, relationships, and outcome evaluation.
+- Add provider resilience wrappers, fake-provider test adapters, and source availability metadata.
 - Implement user-editable liquidity/sector universe filters, universe refresh, and deterministic signal snapshots.
 - Add manual ticker request ingestion, dismissal handling, and pinned-review signal snapshots.
 - Seed the initial strategy catalog with tactical strategies plus strategy expression buckets.
 - Add trade identity taxonomy and confidence-calibration fields.
-- Add candidate scanner UI.
+- Add core-holding eligibility from `portfolio_intents`.
+- Add peer/theme relationship graph for read-through and benchmark attribution.
+- Add strategy matching and candidate scoring.
+- Add historical replay/outcome evaluator before paper trading.
 
-### Phase 2: Paper Trading
+### Phase 2: Paper Stock Trading
 
 - Add trading decisions, paper orders, executions, positions, portfolio snapshots.
-- Implement position sizing, risk checks, factor exposure caps, budget allocation, and paper broker.
+- Implement Pydantic-validated LLM output, retry, and safe fallback.
+- Implement position sizing, risk checks, factor exposure caps, budget allocation, and paper stock broker.
+- Replace homepage with a minimal `/today` candidate/trade dashboard.
+
+### Phase 3: Paper Options and Assignment Risk
+
 - Add paper/simulation-only option strategy decisions, option legs, paper option positions, and lifecycle state for single-leg and multi-leg option strategies.
 - Evaluate leg-based option risk for every option strategy, and current plus worst-case assigned portfolio before approving assignment-capable short-option structures.
-- Replace homepage with `/today` trading dashboard.
+- Extend `/today` with option risk, legs, and assignment-risk views.
 
-### Phase 3: Intraday Signal Refresh, News Alerts, and Rebalance
+### Phase 4: Intraday Signal Refresh, News Alerts, and Rebalance
 
 - Add hourly intraday signal scan metadata, intraday signal snapshots, and normalized alert tables.
 - Refresh intraday price/volume/relative-strength/options/news signals for open positions, top candidates, and pinned review tickers.
@@ -1597,7 +1783,7 @@ Implementation must continue to use `source ~/.venv/bin/activate` before Python 
 - Gate every alert-driven action through `PositionSizer`, `RiskManager`, and `PaperBroker`.
 - Persist no-action/rejected alerts for post-close reflection.
 
-### Phase 4: Reflection
+### Phase 5: Reflection
 
 - Add post-close reflection agent and `daily_reflections`.
 - Generate learning factors with lifecycle statuses.
@@ -1605,13 +1791,14 @@ Implementation must continue to use `source ~/.venv/bin/activate` before Python 
 - Reflect on paper option outcomes, leg-based option risk decisions, hedge overlay effectiveness, and assignment-risk decisions.
 - Show reflection and learning factors in UI.
 
-### Phase 5: Learning Injection
+### Phase 6: Learning Injection
 
-- Inject active learning factors into `TradingPipeline`.
+- Inject only active, validated or risk-tightening learning factors into `TradingPipeline`.
+- Keep candidate/observation learning factors as soft context only.
 - Persist learning factor applications.
 - Evaluate whether factors improved strategy outcomes.
 
-### Phase 6: Strategy Evolution
+### Phase 7: Strategy Evolution
 
 - Generate new strategy proposals from repeated reflection/learning patterns.
 - Add candidate/shadow strategy lifecycle states.
@@ -1619,7 +1806,7 @@ Implementation must continue to use `source ~/.venv/bin/activate` before Python 
 - Promote strategies to experimental/active only when evidence and risk checks pass.
 - Show strategy proposals and lifecycle status in UI.
 
-### Phase 7: Strategy Expansion
+### Phase 8: Strategy Expansion
 
 - Add more strategy definitions and signal groups.
 - Add macro-aware strategy blocking and risk-budget adjustment.
@@ -1629,37 +1816,43 @@ Implementation must continue to use `source ~/.venv/bin/activate` before Python 
 ## 17. Acceptance Criteria
 
 1. A scheduled run can scan a configured US common-stock universe using user-editable liquidity and sector filters without relying on watchlist entries.
-2. The system stores replayable quant signal snapshots for every scanned candidate.
-3. A user can pin a ticker for `review_only` or `paper_trade_eligible` manual evaluation even if the scanner did not select it.
-4. Manual ticker review uses the same signal snapshot, strategy matching, trade classification, confidence calibration, and risk path as scanner candidates.
-5. `review_only` manual requests never create paper orders, and `paper_trade_eligible` requests only create paper orders after normal risk checks pass.
-6. Macro snapshot/regime is stored separately from stock strategy inputs.
-7. Strategy pipeline evaluates the initial strategy catalog and stores strategy-specific candidate score, evidence, invalidators, and strategy-determined holding horizon.
-8. The morning trade plan selects ticker, strategy, expression bucket, trade identity, horizon, action, target exposure, and risk budget used before the market opens.
-9. Trading pipeline creates paper orders only after risk checks and budget allocation pass.
-10. Position sizing records base size, volatility adjustment, liquidity cap, remaining factor budget, final size, and binding constraints.
-11. Portfolio risk snapshots show factor exposure by sector, strategy, horizon, beta, volatility, liquidity, event type, macro sensitivity, correlation cluster, leg-based option risk, and assignment exposure where relevant.
-12. Risk manager reduces or rejects trades that would make current portfolio risk, option strategy risk, or worst-case assigned portfolio too concentrated in any configured risk factor.
-13. Paper portfolio shows positions, trades, exposure, and day PnL.
-14. Paper options layer is initially limited to `long_call`, `long_put`, `put_credit_spread`, `call_credit_spread`, `long_straddle`, and `long_strangle`, and records generic `open_option_strategy`, `close_option_strategy`, `roll_option_strategy`, `adjust_option_strategy`, and `avoid_event_option` actions with strategy type, per-leg call/put side, strike, expiry, DTE, Greeks, IV rank, price, net debit/credit, max loss, breakevens, margin requirement, buying-power effect, event dates, and assignment data when relevant.
-15. Macro-only bearish context cannot create high-confidence single-name bearish trades; it can only reduce size, block strategy tags, or add risk warnings unless direct company-level negative evidence exists.
-16. Confidence displays and persistence distinguish historically strong bullish catalyst patterns from weak bearish/macro narratives.
-17. Watch output distinguishes `ordinary_watch` from `catalyst_watch` as `watch_type` under `trade_identity = "watch_only"`.
-18. Hourly intraday refresh creates signal snapshots, material signal-change deltas, and deduped positive/negative alerts for open positions, same-day trades, top candidates, active manual review tickers, and high-impact market/sector events.
-19. Critical/high alerts can trigger immediate risk-gated `hold/reduce/exit/add` rebalance decisions, with `open_new` disabled by default unless the ticker was already a morning candidate or override.
-20. Post-close reflection analyzes portfolio returns, benchmark/peer-basket returns, selected trades, rejected candidates, manual ticker requests, intraday alerts, rebalance outcomes, macro constraints, factor concentration, paper option decisions, confidence calibration, and learning-factor impact.
-21. Strategy evolution can create new strategy proposals from repeated learning patterns without being limited to the initial seed strategies.
-22. New strategies enter `candidate` or `shadow` status first, and cannot create paper orders until promoted to `experimental` or `active`.
-23. New learning factors become active immediately by default, are visible in UI, injected into later trading decisions, and tracked through `learning_factor_applications`.
-24. `/today` is a tabbed trading workstation with `Overview`, `Portfolio`, `Trades`, `Risk & Macro`, `Candidates`, `Learning & Strategies`, and `Ops & Cost` tabs.
-25. Trade detail views show complete audit trails: signal snapshots, strategy scores, selected strategy, trade identity, LLM decision JSON, risk decision, order/fill state, exit plan, invalidators, and post-close outcome.
-26. `Ops & Cost` shows LLM/API usage, model/provider, tokens, estimated cost, latency, retry/error state, and prompt/schema version by pipeline and run.
-27. Existing research run audit pages continue to work.
+2. The system stores point-in-time replayable quant signal snapshots for every scanned candidate, including source refs, decision timestamp, and `available_for_decision_at` audit fields.
+3. Provider access uses rate limits, cache/freshness gates, request budgets, backoff, circuit breakers, and degraded mode.
+4. A user can pin a ticker for `review_only` or `paper_trade_eligible` manual evaluation even if the scanner did not select it.
+5. Manual ticker review uses the same signal snapshot, strategy matching, trade classification, confidence calibration, and risk path as scanner candidates.
+6. `review_only` manual requests never create paper orders, and `paper_trade_eligible` requests only create paper orders after normal risk checks pass.
+7. Macro snapshot/regime is stored separately from stock strategy inputs.
+8. Core-holding classification requires an approved `portfolio_intent`; the bot does not infer core holdings from current positions or LLM preference.
+9. Peer/theme read-through and peer-basket attribution use structured `ticker_relationships`, `peer_baskets`, and `theme_taxonomy`.
+10. Strategy pipeline evaluates the initial strategy catalog and stores strategy-specific candidate score, evidence, invalidators, and strategy-determined holding horizon.
+11. Historical replay/outcome evaluator measures trades, rejected candidates, watch items, and shadow strategies over each strategy horizon against `SPY`, `QQQ`, sector/theme ETF, and decision-time peer basket.
+12. The morning trade plan selects ticker, strategy, expression bucket, trade identity, horizon, action, target exposure, and risk budget used before the market opens.
+13. Trading pipeline creates paper orders only after Pydantic-validated LLM output, retry/fallback handling, risk checks, and budget allocation pass.
+14. Position sizing records base size, volatility adjustment, liquidity cap, remaining factor budget, final size, and binding constraints.
+15. Portfolio risk snapshots show factor exposure by sector, strategy, horizon, beta, volatility, liquidity, event type, macro sensitivity, correlation cluster, leg-based option risk, and assignment exposure where relevant.
+16. Risk manager reduces or rejects trades that would make current portfolio risk, option strategy risk, or worst-case assigned portfolio too concentrated in any configured risk factor.
+17. Paper portfolio shows positions, trades, exposure, and day PnL.
+18. Paper options layer is initially limited to `long_call`, `long_put`, `put_credit_spread`, `call_credit_spread`, `long_straddle`, and `long_strangle`, and records generic `open_option_strategy`, `close_option_strategy`, `roll_option_strategy`, `adjust_option_strategy`, and `avoid_event_option` actions with strategy type, per-leg call/put side, strike, expiry, DTE, Greeks, IV rank, price, net debit/credit, max loss, breakevens, margin requirement, buying-power effect, event dates, and assignment data when relevant.
+19. Macro-only bearish context cannot create high-confidence single-name bearish trades; it can only reduce size, block strategy tags, or add risk warnings unless direct company-level negative evidence exists.
+20. Confidence displays and persistence distinguish historically strong bullish catalyst patterns from weak bearish/macro narratives.
+21. Watch output distinguishes `ordinary_watch` from `catalyst_watch` as `watch_type` under `trade_identity = "watch_only"`.
+22. Hourly intraday refresh creates signal snapshots, material signal-change deltas, and deduped positive/negative alerts for open positions, same-day trades, top candidates, active manual review tickers, and high-impact market/sector events.
+23. Critical/high alerts can trigger immediate risk-gated `hold/reduce/exit/add` rebalance decisions, with `open_new` disabled by default unless the ticker was already a morning candidate or override.
+24. Post-close reflection analyzes portfolio returns, replay outcome rows, benchmark/peer-basket returns, selected trades, rejected candidates, manual ticker requests, intraday alerts, rebalance outcomes, macro constraints, factor concentration, paper option decisions, confidence calibration, and learning-factor impact.
+25. Strategy evolution can create new strategy proposals from repeated learning patterns without being limited to the initial seed strategies.
+26. New strategies enter `candidate` or `shadow` status first, and cannot create paper orders until promoted to `experimental` or `active`.
+27. New learning factors default to `candidate` or `observation`; only risk-tightening factors may become automatically active, and expansionary factors require shadow/test evidence before promotion.
+28. Unit tests run against fake providers, integration tests use recorded cassettes, and live provider smoke tests are opt-in and non-blocking for ordinary CI.
+29. `/today` is a tabbed trading workstation with `Overview`, `Portfolio`, `Trades`, `Risk & Macro`, `Candidates`, `Learning & Strategies`, and `Ops & Cost` tabs.
+30. Trade detail views show complete audit trails: signal snapshots, strategy scores, selected strategy, trade identity, LLM decision JSON, risk decision, order/fill state, exit plan, invalidators, and post-close outcome.
+31. `Ops & Cost` shows LLM/API usage, model/provider, tokens, estimated cost, latency, retry/error state, validation/fallback state, prompt/schema version, and provider request budget/circuit-breaker state by pipeline and run.
+32. Existing research run audit pages continue to work.
 
 ## 18. Resolved Design Decisions
 
 1. Universe scope: use a user-editable US common-stock universe with liquidity filters and sector/industry include/exclude filters. Do not scan every listed name by default.
 2. Common-stock paper trading is long-only in V2. Do not add direct short-stock paper trades behind a flag.
 3. Holding period is determined automatically by the selected trading strategy definition. There is no global intraday-only or swing-only horizon.
-4. New learning factors become active immediately by default, while changes that would weaken hard safety rails must be represented as explicit strategy/config proposals instead.
+4. New learning factors default to `candidate` or `observation`; only risk-tightening factors may become automatically active, while expansionary changes must be represented as strategy/config proposals or promoted after shadow/test evidence.
 5. Manual ticker requests stay active until manually dismissed. They do not expire at end of day by default.
+6. The first verifiable MVP is universe -> point-in-time signal snapshot -> strategy scoring -> historical replay/outcome evaluator; paper trading, options, intraday, reflection, and strategy evolution follow after that edge-validation path exists.
