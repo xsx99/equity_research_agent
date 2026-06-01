@@ -46,6 +46,7 @@ SEC_ATOM_PAGE_SIZE = int(os.getenv("SEC_ATOM_PAGE_SIZE", "100"))
 
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 RESEARCH_MODEL_NAME = os.getenv("RESEARCH_MODEL_NAME", "gemini-2.5-flash-lite")
+TRADING_UNIVERSE_SYMBOLS = os.getenv("TRADING_UNIVERSE_SYMBOLS", "")
 
 # Research scheduler settings (weekdays only; pre-open batch)
 RESEARCH_SCHEDULE_HOUR = int(os.getenv("RESEARCH_SCHEDULE_HOUR", "9"))

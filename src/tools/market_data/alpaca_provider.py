@@ -20,6 +20,7 @@ from src.tools.market_data.helpers import (
 from src.tools.market_data.types import DailyBar
 
 DEFAULT_ALPACA_DATA_BASE_URL = "https://data.alpaca.markets"
+DEFAULT_ALPACA_TRADING_BASE_URL = "https://paper-api.alpaca.markets"
 
 
 class AlpacaMarketDataProvider:
@@ -31,6 +32,7 @@ class AlpacaMarketDataProvider:
         api_key: Optional[str] = None,
         secret_key: Optional[str] = None,
         data_base_url: Optional[str] = None,
+        trading_base_url: Optional[str] = None,
         finnhub_api_key: Optional[str] = None,
         client: Optional[httpx.Client] = None,
         timeout: float = 10.0,
@@ -40,6 +42,7 @@ class AlpacaMarketDataProvider:
             secret_key or os.getenv("ALPACA_SECRET_KEY") or os.getenv("ALPACA_API_SECRET")
         )
         self.data_base_url = _resolve_alpaca_data_base_url(data_base_url, DEFAULT_ALPACA_DATA_BASE_URL)
+        self.trading_base_url = (trading_base_url or os.getenv("ALPACA_TRADING_BASE_URL") or DEFAULT_ALPACA_TRADING_BASE_URL).rstrip("/")
         self.finnhub_api_key = finnhub_api_key or os.getenv("FINNHUB_API_KEY")
         self._client = client or httpx.Client(timeout=timeout)
         self._owns_client = client is None
@@ -236,6 +239,42 @@ class AlpacaMarketDataProvider:
             "ps_ratio": self._extract_metric_value(metrics, "psTTM", "psAnnual", "priceToSalesAnnual"),
             "short_interest_pct_float": self._extract_metric_value(metrics, "shortPercentOfFloat", "shortInterestPercent", "shortRatio"),
         }
+
+    def fetch_universe_assets(self) -> list[dict[str, Any]]:
+        """Return active Alpaca US equity assets as provider-neutral rows.
+
+        Liquidity fields are left empty here; callers should enrich them from
+        market bars/quote data before applying liquidity thresholds.
+        """
+        response = self._client.get(
+            f"{self.trading_base_url}/v2/assets",
+            params={"status": "active", "asset_class": "us_equity"},
+            headers=self._auth_headers(),
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, list):
+            return []
+        assets: list[dict[str, Any]] = []
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            symbol = item.get("symbol")
+            if not isinstance(symbol, str) or not symbol.strip():
+                continue
+            assets.append(
+                {
+                    "symbol": symbol.upper(),
+                    "company_name": item.get("name") if isinstance(item.get("name"), str) else None,
+                    "asset_type": "common_stock" if item.get("class") == "us_equity" else str(item.get("class") or ""),
+                    "exchange": item.get("exchange") if isinstance(item.get("exchange"), str) else None,
+                    "sector": None,
+                    "industry": None,
+                    "price": None,
+                    "avg_dollar_volume": None,
+                }
+            )
+        return assets
 
     def _fetch_profile_from_finnhub(self, ticker: str) -> dict[str, Any]:
         if not self.finnhub_api_key:

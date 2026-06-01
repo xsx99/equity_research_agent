@@ -57,6 +57,19 @@ class DailyBar(TypedDict):
     volume: Optional[int]
 
 
+class UniverseAssetPayload(TypedDict):
+    """Provider-neutral universe/asset row."""
+
+    symbol: str
+    company_name: Optional[str]
+    asset_type: str
+    exchange: Optional[str]
+    sector: Optional[str]
+    industry: Optional[str]
+    price: Optional[float]
+    avg_dollar_volume: Optional[float]
+
+
 class MarketDataProvider(Protocol):
     """Contract for pluggable market data providers."""
 
@@ -77,3 +90,10 @@ class MarketDataProvider(Protocol):
 
     def fetch_context(self, ticker: str) -> dict[str, Any]:
         """Return optional context fields such as sector and earnings distance."""
+
+
+class UniverseDataProvider(Protocol):
+    """Contract for market providers that can list tradable assets."""
+
+    def fetch_universe_assets(self) -> list[UniverseAssetPayload]:
+        """Return provider-neutral tradable asset rows."""
