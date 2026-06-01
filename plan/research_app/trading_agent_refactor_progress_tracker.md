@@ -44,15 +44,20 @@
 - Added `portfolio_intents` for approved core holdings, target/max weight, add/trim rules, thesis invalidators, and allowed tactical interactions.
 - Added structured relationship data requirements: `ticker_relationships`, `peer_baskets`, and `theme_taxonomy` for peer/theme read-through, relative strength, and attribution.
 - Added deterministic testing policy: unit tests use fake providers, provider integration tests use `vcrpy`/recorded cassettes, and live API smoke tests are opt-in and non-blocking for normal CI.
+- Split the original oversized PR 1 into PR 1a minimal strategy/prompt/taxonomy foundation and PR 1b portfolio-intent/relationship graph schema, leaving universe/signal/replay operational tables for later PRs.
+- Clarified PR 4 risk manager sequencing: PR 4 consumes fixture-backed `PortfolioContext` / `RiskContext`; PR 6 wires real paper portfolio snapshots into the same contract.
+- Clarified historical replay v0 scope: PR 3 evaluates the three deterministic MVP signal families available after PR 2 and marks deeper transcript, SEC/insider, options, and macro/read-through strategies as unsupported/missing instead of pretending full-strategy replay exists.
+- Expanded the PR 2 MVP signal surface from mostly market/relative-strength signals to three required families: technical, fundamental, and events/news, with point-in-time `FundamentalSnapshot` and `EventNewsItem` source rows.
 
 ## PR Slice Status
 
 | Slice | Scope | Status | Notes |
 | --- | --- | --- | --- |
-| PR 1 | Trading foundation schema + strategy catalog | Pending | Adds PIT metadata fields, universe filter config schema, portfolio intents, relationship/peer/theme schemas, 15 broad tactical strategies, 4 eval-derived playbooks, 5 expression buckets, manual ticker request schema, prompt registry/schema, and trade identity taxonomy. |
-| PR 2 | Provider resilience + universe + point-in-time signal MVP | Pending | Adds provider guardrails, fake-provider test path, request telemetry, user-editable universe filters, persistent manual requests, minimal market/relative-strength signal snapshots, source availability metadata, portfolio-intent eligibility, and peer basket construction. |
-| PR 3 | Strategy matching + historical replay outcome evaluator | Pending | Adds source attribution, primary strategy selection, trade classification, catalyst-watch split, bearish gating, confidence calibration inputs, and deterministic outcome evaluation vs benchmarks/decision-time peer baskets. |
-| PR 4 | Position sizing + portfolio risk manager | Pending | Depends on candidates and risk tables; adds simple risk appetite presets, generated risk configs, invariant hard safety rails, and conservative broker-profile margin estimates. |
+| PR 1a | Minimal trading foundation | Pending | Adds strategy definitions, prompt registry/schema, 15 broad tactical strategies, 4 eval-derived playbooks, 5 expression buckets, and trade identity taxonomy. No universe/signal/relationship tables. |
+| PR 1b | Portfolio intents + relationship graph schema | Pending | Adds portfolio intents, ticker relationships, peer baskets, theme taxonomy, and pure helpers for core-holding eligibility and structured peer/theme data. |
+| PR 2 | Provider resilience + three-family point-in-time signal MVP | Pending | Adds provider guardrails, fake-provider test path, request telemetry, user-editable universe filters, persistent manual requests, technical/fundamental/events-news signal snapshots, `FundamentalSnapshot`/`EventNewsItem` source rows, and source availability metadata. |
+| PR 3 | Strategy matching + historical replay outcome evaluator | Pending | Adds source attribution, primary strategy selection, trade classification, catalyst-watch split, bearish gating, confidence calibration inputs, and replay v0 for the PR 2 technical/fundamental/events-news MVP signal families. |
+| PR 4 | Position sizing + portfolio risk manager | Pending | Depends on candidates and risk tables; adds fixture-backed `PortfolioContext` / `RiskContext`, simple risk appetite presets, generated risk configs, invariant hard safety rails, and conservative broker-profile margin estimates. |
 | PR 5 | Trading decision agent guardrails | Pending | Adds bounded LLM trading output with Pydantic validation, retry, safe fallback, prompt/schema persistence, full context snapshot, and no paper order side effects yet. |
 | PR 6 | Paper stock broker + portfolio state | Pending | Adds stock paper orders/executions/positions, unified simulated margin account, margin model/source metadata, and order idempotency. |
 | PR 7 | Paper options strategy layer + assignment risk | Pending | Paper/simulation-only whitelisted option strategies: long call/put, call/put credit spread, long straddle, and long strangle; includes conservative option margin formulas, RiskManager-owned hedge overlays, option-risk snapshots, and worst-case assignment checks when relevant. |
@@ -86,4 +91,6 @@
 - 2026-05-30: `git diff --check` passed after resolving initial design questions for universe filters, long-only common stock, strategy-defined horizons, immediate learning activation, and manual request dismissal.
 - 2026-05-30: `git diff --check` passed after restricting the initial paper options whitelist to long call/put, call/put credit spreads, long straddles, and long strangles.
 - 2026-05-31: `git diff --check` passed after adding PIT/no-lookahead constraints, historical replay evaluator, safer learning-factor lifecycle, LLM validation/fallback, provider resilience, smaller PR slices, portfolio intents, relationship graph, and deterministic testing policy.
+- 2026-05-31: `git diff --check` passed after splitting PR 1 into PR 1a/1b, clarifying PR 4 `PortfolioContext` sequencing, and limiting PR 3 replay v0 to PR 2 deterministic signal families.
+- 2026-05-31: `git diff --check` passed after expanding PR 2/PR 3 planning to three MVP signal families: technical, fundamental, and events/news.
 - No implementation tests run yet; documentation/planning update only.

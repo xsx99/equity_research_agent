@@ -23,41 +23,43 @@
 
 ## PR Slice Overview
 
-1. **PR 1: Trading Foundation Schema + Strategy Catalog**
-   Add ORM/Alembic foundation tables, point-in-time metadata fields, universe filter config schema, manual ticker request schema, portfolio intent schema, relationship/peer/theme schema, prompt registry schema, portfolio-pool trade identity enums, and a versioned in-code seed catalog for the 15 broad tactical strategies, 4 eval-derived playbook strategies, and 5 initial strategy expression buckets from the design doc, including defined-risk option expressions. No scheduler, API calls, or trading behavior yet.
-2. **PR 2: Provider Resilience + Universe + Point-in-Time Signal MVP**
-   Add provider adapter guardrails, fake providers, request budgeting/rate-limit/backoff/circuit-breaker metadata, user-editable liquidity/sector universe filters, manual ticker request ingestion, and deterministic pre-open signal snapshots from minimum market/relative-strength data plus explicit missing/stale source fields.
-3. **PR 3: Strategy Matching + Historical Replay Outcome Evaluator**
+1. **PR 1a: Minimal Trading Foundation**
+   Add only the minimum durable foundation: strategy definition schema, prompt registry/schema, portfolio-pool trade identity enums, and a versioned in-code seed catalog for the 15 broad tactical strategies, 4 eval-derived playbook strategies, and 5 initial strategy expression buckets from the design doc, including defined-risk option expressions. No universe, source ingestion, relationship graph, scheduler, API calls, or trading behavior yet.
+2. **PR 1b: Portfolio Intents + Relationship Graph Schema**
+   Add `portfolio_intents`, `ticker_relationships`, `peer_baskets`, and `theme_taxonomy` plus focused services/tests for core-holding eligibility and structured peer/theme read-through inputs. No signal pipeline or strategy scoring yet.
+3. **PR 2: Provider Resilience + Three-Family Point-in-Time Signal MVP**
+   Add provider adapter guardrails, fake providers, request budgeting/rate-limit/backoff/circuit-breaker metadata, user-editable liquidity/sector universe filters, manual ticker request ingestion, and deterministic pre-open signal snapshots across MVP technical, fundamental, and events/news signal families.
+4. **PR 3: Strategy Matching + Historical Replay Outcome Evaluator**
    Match scanner and manual-request symbols to strategy definitions and persist ranked candidates with strategy horizon/evidence, source attribution, primary strategy selection, trade identity classification, catalyst-watch vs ordinary-watch distinction, confidence-calibration inputs, and deterministic replay/outcome evaluation against `SPY`, `QQQ`, sector/theme ETF, and decision-time peer baskets.
-4. **PR 4: Position Sizing + Portfolio Risk Manager**
+5. **PR 4: Position Sizing + Portfolio Risk Manager**
    Add deterministic sizing, risk appetite presets, generated risk configs, risk factor exposure calculation, unified margin-account buying-power caps, conservative broker-profile margin estimates, concentration caps, embedded bearish-evidence gating, and reduce/reject decisions.
-5. **PR 5: Trading Decision Agent Guardrails**
+6. **PR 5: Trading Decision Agent Guardrails**
    Add bounded trading agent output with Pydantic schema validation, retry, safe fallback, manual request mode gating, prompt/schema persistence, and no paper order side effects yet.
-6. **PR 6: Paper Stock Broker + Portfolio State**
+7. **PR 6: Paper Stock Broker + Portfolio State**
    Add paper stock orders/executions, positions, and unified simulated margin-account portfolio snapshots with margin model profile/source metadata.
-7. **PR 7: Paper Options Strategy Layer + Assignment Risk**
+8. **PR 7: Paper Options Strategy Layer + Assignment Risk**
    Add paper-only leg-based option strategy decisions, option legs, option orders/positions, open/close/roll/adjust/avoid-event actions, an initial whitelist of long call/put, credit spread, long straddle, and long strangle strategies, strategy-level option risk, conservative option margin requirements, and worst-case assigned-portfolio risk checks when assignment is possible.
-8. **PR 8: Intraday Signal Refresh + News Alerts + Rebalance**
+9. **PR 8: Intraday Signal Refresh + News Alerts + Rebalance**
    Add hourly intraday signal refresh, normalized alerts, material signal-change detection, and risk-gated intraday rebalance decisions for stocks, paper option strategies, and hedge overlays.
-9. **PR 9: Reflection + Learning Factors**
+10. **PR 9: Reflection + Learning Factors**
    Add post-close reflection with highest-quality model routing, Pydantic validation/fallback, learning factor lifecycle defaulting to candidate/observation, replay outcome consumption, benchmark/peer attribution, bullish/bearish calibration, paper options attribution, and strategy proposal hints.
-10. **PR 10: Strategy Evolution + Dynamic Strategy Catalog**
+11. **PR 10: Strategy Evolution + Dynamic Strategy Catalog**
    Convert repeated learning patterns into proposed strategies, shadow-test them, and promote/retire strategy definitions.
-11. **PR 11: Today Dashboard UI**
+12. **PR 11: Today Dashboard UI**
    Add `/today`, pinned review, candidate, trade, options, risk exposure, reflection, and learning views.
-12. **PR 12: Scheduler, Smoke Tests, Deploy Docs**
+13. **PR 12: Scheduler, Smoke Tests, Deploy Docs**
    Wire daily jobs, standalone smoke scripts, and deployment/runbook docs.
 
 ---
 
-## PR 1: Trading Foundation Schema + Strategy Catalog
+## PR 1a: Minimal Trading Foundation
 
-**Goal:** Add the durable database and strategy-definition foundation without changing runtime behavior.
+**Goal:** Add the smallest durable strategy/prompt foundation without changing runtime behavior.
 
 **Files:**
 - Create: `src/db/models/trading.py`
 - Modify: `src/db/models/__init__.py`
-- Create: `alembic/versions/005_trading_foundation_tables.py`
+- Create: `alembic/versions/005_trading_minimal_foundation_tables.py`
 - Create: `src/agents/prompt_registry.py`
 - Create: `src/agents/prompts/README.md`
 - Create: `src/trading/__init__.py`
@@ -321,37 +323,13 @@ pytest tests/agents/test_prompt_registry.py -q
 
 Expected: pass.
 
-### Task 1.4: ORM Models
+### Task 1.4: Minimal ORM Models
 
 - [ ] **Step 1: Write failing model tests**
 
-Create `tests/db/test_trading_models.py` to instantiate:
+Create `tests/db/test_trading_models.py` to instantiate only the PR 1a schema:
 
-- `UniverseSnapshot`
-- `UniverseSymbol`
-- `ManualTickerRequest`
-- `SourceIngestionRun`
-- `ProviderRequestRun`
-- `PortfolioIntent`
-- `TickerRelationship`
-- `PeerBasket`
-- `ThemeTaxonomy`
-- `MacroSnapshot`
-- `MacroReadthroughEvent`
-- `CalendarEvent`
-- `PortfolioEventRiskAssessment`
-- `SignalSnapshot`
 - `StrategyDefinition`
-- `StrategyRun`
-- `CandidateScore`
-- `RiskLimitConfig`
-- `PortfolioRiskSnapshot`
-- `RiskFactorExposure`
-- `HistoricalReplayRun`
-- `CandidateOutcomeEvaluation`
-- `StrategyProposal`
-- `StrategyEvaluationResult`
-- `TradeClassification`
 - `LlmPromptTemplate`
 - `LlmPromptRun`
 - `LlmUsageEvent`
@@ -396,170 +374,6 @@ Expected: fail because `src.db.models.trading` does not exist.
 
 Create focused SQLAlchemy models:
 
-- `UniverseFilterConfig`
-  - `universe_filter_config_id UUID pk`
-  - `name String(128)`
-  - `version String(32)`
-  - `min_price Numeric` nullable
-  - `min_avg_dollar_volume Numeric` nullable
-  - `included_sectors_json JSONB` nullable
-  - `excluded_sectors_json JSONB` nullable
-  - `included_industries_json JSONB` nullable
-  - `excluded_industries_json JSONB` nullable
-  - `included_exchanges_json JSONB` nullable
-  - `asset_types_json JSONB` defaulting to common stock
-  - `manual_include_tickers_json JSONB` nullable
-  - `manual_exclude_tickers_json JSONB` nullable
-  - `is_active Bool`
-- `UniverseSnapshot`
-  - `snapshot_id UUID pk`
-  - `trade_date Date index`
-  - `universe_filter_config_id fk universe_filter_configs`
-  - `source String(64)`
-  - `filters_json JSONB`
-  - `status queued/running/succeeded/failed`
-  - timestamps and `error_message`
-- `UniverseSymbol`
-  - `id UUID pk`
-  - `snapshot_id fk universe_snapshots`
-  - `ticker String(16)`
-  - `name`, `exchange`, `asset_type`
-  - `is_included Bool`
-  - `exclusion_reason`
-  - `metadata_json JSONB`
-- `SourceIngestionRun`
-  - `source_ingestion_run_id UUID pk`
-  - `source_family String(64)` with values such as `market_data`, `news`, `sec_filings`, `insider_form4`, `fundamentals`, `earnings_calendar`, `option_chain`, `macro_calendar`
-  - `run_type String(32)` with values such as `scheduled_pre_open`, `scheduled_post_close`, `intraday_inline`, `intraday_targeted`, `manual_smoke`
-  - `scope_json JSONB`
-  - `provider String(64)` nullable
-  - `coverage_json JSONB`
-  - `as_of DateTime`
-  - `started_at DateTime`
-  - `completed_at DateTime` nullable
-  - `status`
-  - `error_message Text`
-- `ProviderRequestRun`
-  - `provider_request_run_id UUID pk`
-  - `source_ingestion_run_id fk source_ingestion_runs` nullable
-  - `provider String(64)`
-  - `endpoint_or_source_family String(128)`
-  - `scope_json JSONB`
-  - `cache_status String(32)` with `hit/miss/bypass`
-  - `request_count Integer`
-  - `request_budget_remaining Integer`
-  - `retry_count Integer`
-  - `backoff_ms Integer`
-  - `latency_ms Integer`
-  - `status String(32)` with `succeeded/failed/degraded/rate_limited/circuit_open`
-  - `error_code String(64)` nullable
-  - `circuit_state String(32)` with `closed/open/half_open`
-- `PortfolioIntent`
-  - `portfolio_intent_id UUID pk`
-  - `ticker String(16) index`
-  - `intent_type String(64)` with values such as `core_growth`, `core_index`, `core_theme`, `core_cash_like`
-  - `target_weight Numeric`
-  - `max_weight Numeric`
-  - `add_rules_json JSONB`
-  - `trim_rules_json JSONB`
-  - `thesis_invalidators_json JSONB`
-  - `allowed_tactical_interactions_json JSONB`
-  - `lifecycle_status String(32)` with `active/paused/retired`
-- `TickerRelationship`
-  - `ticker_relationship_id UUID pk`
-  - `source_ticker String(16) index`
-  - `target_ticker String(16) index`
-  - `relationship_type String(64)` with values such as `peer`, `customer`, `supplier`, `competitor`, `sector_leader`, `etf_component`, `theme_leader`, `theme_constituent`
-  - `theme_id String(64)` nullable
-  - `confidence Numeric`
-  - `strength_score Numeric`
-  - `valid_from DateTime`
-  - `valid_until DateTime` nullable
-  - `source_refs_json JSONB`
-  - `allowed_uses_json JSONB`
-- `PeerBasket`
-  - `peer_basket_id UUID pk`
-  - `basket_key String(128)`
-  - `version String(32)`
-  - `trade_date Date index`
-  - `members_json JSONB`
-  - `construction_method String(64)`
-  - `source_refs_json JSONB`
-- `ThemeTaxonomy`
-  - `theme_id String(64) pk`
-  - `display_name String(128)`
-  - `parent_theme_id String(64)` nullable
-  - `description Text` nullable
-  - `lifecycle_status String(32)` with `active/retired`
-- `MacroSnapshot`
-  - `macro_snapshot_id UUID pk`
-  - `trade_date Date index`
-  - `as_of DateTime`
-  - `regime_json JSONB`
-  - `indicators_json JSONB`
-  - `status`
-- `MacroReadthroughEvent`
-  - `readthrough_event_id UUID pk`
-  - `macro_snapshot_id fk macro_snapshots` nullable
-  - `trade_date Date index`
-  - `source_ticker String(16) index`
-  - `source_event_type String(64)` with values such as `earnings_release`, `earnings_transcript`, `guidance`, `customer_commentary`
-  - `readthrough_scope String(64)` with values such as `sector`, `theme`, `peer_group`, `supply_chain`, `customer_chain`
-  - `readthrough_direction String(16)` with values `positive/negative/mixed/neutral`
-  - `strength_score Numeric`
-  - `mechanisms_json JSONB`
-  - `affected_themes_json JSONB`
-  - `relationship_types_json JSONB`
-  - `source_refs_json JSONB`
-  - `valid_until DateTime`
-  - `requires_target_confirmation Bool`
-- `CalendarEvent`
-  - `calendar_event_id UUID pk`
-  - `source_provider String(64)`
-  - `source_url Text` nullable
-  - `event_type String(64)` with values such as `macro_release`, `fed_event`, `treasury_auction`, `own_earnings`, `related_company_earnings`, `market_structure`, `option_expiry`
-  - `event_name String(255)`
-  - `scheduled_at DateTime index`
-  - `timezone String(64)`
-  - `global_importance String(16)` with `critical/high/medium/low`
-  - `source_ticker String(16)` nullable
-  - `affected_tickers_json JSONB`
-  - `affected_sectors_json JSONB`
-  - `affected_themes_json JSONB`
-  - `raw_payload_json JSONB`
-  - `dedupe_key String(255)` unique
-- `PortfolioEventRiskAssessment`
-  - `event_risk_assessment_id UUID pk`
-  - `calendar_event_id fk calendar_events`
-  - `trade_date Date index`
-  - `portfolio_snapshot_id UUID` nullable
-  - `portfolio_risk_level String(16)` with `critical/high/medium/low/none`
-  - `relevance_score Numeric`
-  - `affected_positions_json JSONB`
-  - `affected_candidates_json JSONB`
-  - `affected_option_strategies_json JSONB`
-  - `risk_mechanisms_json JSONB`
-  - `lookahead_reason Text`
-  - `suggested_action_type String(64)` nullable
-  - `is_displayed Bool`
-- `SignalSnapshot`
-  - `signal_snapshot_id UUID pk`
-  - `universe_snapshot_id fk`
-  - `ticker String(16)`
-  - `trade_date Date index`
-  - `snapshot_type String(32)` with values such as `pre_open`
-  - `decision_time DateTime index`
-  - `available_for_decision_at DateTime index`
-  - `max_input_available_for_decision_at DateTime`
-  - `source_record_refs_json JSONB`
-  - `source_available_times_json JSONB`
-  - `excluded_future_source_count Integer`
-  - `point_in_time_passed Bool`
-  - `signals_json JSONB`
-  - `missing_signals_json JSONB`
-  - `stale_signals_json JSONB`
-  - `source_freshness_json JSONB`
-  - `status`
 - `StrategyDefinition`
   - `strategy_definition_id UUID pk`
   - `strategy_id String(64)`
@@ -575,111 +389,6 @@ Create focused SQLAlchemy models:
   - `evidence_json JSONB`
   - `is_active Bool`
   - unique `(strategy_id, version)`
-- `StrategyRun`
-  - `strategy_run_id UUID pk`
-  - `trade_date Date index`
-  - `universe_snapshot_id`, `macro_snapshot_id`
-  - `status`, timestamps, `error_message`
-- `CandidateScore`
-  - `candidate_id UUID pk`
-  - `strategy_run_id fk`
-  - `signal_snapshot_id fk`
-  - `ticker`
-  - `strategy_id`, `strategy_version`
-  - `candidate_score Numeric`
-  - `typical_horizon`
-  - `evidence_json`, `invalidators_json`, `risk_tags_json`
-  - `macro_compatibility`
-  - `selection_source String(32)` with values such as `scanner`, `manual_request`, `watchlist_pin`
-  - `manual_request_id fk manual_ticker_requests` nullable
-  - `selection_reason`, `rejection_reason`
-- `ManualTickerRequest`
-  - `manual_request_id UUID pk`
-  - `ticker String(16) index`
-  - `trade_date Date index`
-  - `submitted_at DateTime`
-  - `reason Text`
-  - `priority String(16)` with values such as `normal`, `high`
-  - `mode String(32)` with values `review_only`, `paper_trade_eligible`
-  - `last_evaluated_at DateTime` nullable
-  - `dismissed_at DateTime` nullable
-  - `status String(32)` with values `active/running/failed/dismissed/cancelled`
-  - `result_status String(32)` nullable with values `actionable_trade/catalyst_watch/ordinary_watch/no_trade/blocked_by_risk/blocked_by_missing_data`
-  - `result_decision_id UUID` nullable
-  - `source_context_json JSONB`
-  - `error_message Text`
-- `TradeClassification`
-  - `trade_classification_id UUID pk`
-  - `candidate_id fk candidate_scores` nullable for current-position classifications
-  - `ticker String(16)`
-  - `trade_date Date index`
-  - `trade_identity String(64)` with `core_holding/tactical_stock_trade/tactical_option_trade/risk_hedge_overlay/watch_only`
-  - `expression_bucket_id String(64)` nullable
-  - `watch_type String(32)` nullable with `catalyst_watch/ordinary_watch`
-  - `instrument_type String(32)`
-  - `portfolio_pool String(32)`
-  - `horizon_policy String(64)`
-  - `exit_policy_json JSONB`
-  - `classification_reason Text`
-- `RiskAppetiteProfile`
-  - `risk_appetite_profile_id UUID pk`
-  - `risk_appetite String(32)` with `conservative/balanced/aggressive`
-  - `profile_version String(32)`
-  - optional `advanced_overrides_json JSONB`
-  - `is_active Boolean`
-- `RiskLimitConfig`
-  - generated versioned JSON config, source `risk_appetite_profile_id`, resolver version, and `is_active`
-- `PortfolioRiskSnapshot`
-  - portfolio-level exposure JSON before/after decisions/fills, including active risk appetite, generated risk config id/version, unified margin-account equity, buying power, excess liquidity, stock/option margin requirements, total margin requirement, margin model profile/version, margin requirement source, estimated initial/maintenance requirements, and broker-reported requirements when available
-- `RiskFactorExposure`
-  - normalized exposure rows by `factor_type`, `factor_name`, `exposure_value`
-- `HistoricalReplayRun`
-  - `historical_replay_run_id UUID pk`
-  - `trade_date Date index`
-  - `decision_time DateTime`
-  - `snapshot_version String(64)`
-  - `horizon_policy_json JSONB`
-  - `status`, timestamps, `error_message`
-- `CandidateOutcomeEvaluation`
-  - `candidate_outcome_evaluation_id UUID pk`
-  - `historical_replay_run_id fk historical_replay_runs`
-  - `candidate_id fk candidate_scores` nullable
-  - `trade_decision_id UUID` nullable
-  - `ticker String(16) index`
-  - `strategy_id`, `strategy_version`
-  - `trade_identity String(64)`
-  - `expression_bucket_id String(64)` nullable
-  - `decision_time DateTime`
-  - `horizon_start_at DateTime`
-  - `horizon_end_at DateTime`
-  - `is_final Bool`
-  - `benchmark_returns_json JSONB`
-  - `peer_basket_id UUID` nullable
-  - `candidate_return Numeric`
-  - `alpha_json JSONB`
-  - `mfe Numeric` nullable
-  - `mae Numeric` nullable
-  - `regime_json JSONB`
-  - `bucket_json JSONB`
-- `StrategyProposal`
-  - `strategy_proposal_id UUID pk`
-  - `proposed_strategy_id String(64)`
-  - `display_name String(128)`
-  - `proposed_config_json JSONB`
-  - `source String(32)`
-  - `source_reflection_ids_json JSONB`
-  - `evidence_summary Text`
-  - `status candidate/shadow/experimental/active/rejected/retired`
-  - `duplicate_of_strategy_id String(64)` nullable
-  - `rejection_reason Text`
-- `StrategyEvaluationResult`
-  - `strategy_evaluation_id UUID pk`
-  - `strategy_id`, `strategy_version`
-  - `evaluation_date Date`
-  - `mode shadow/experimental/active`
-  - `metrics_json JSONB`
-  - `promotion_decision`
-  - `decision_reason`
 - `LlmPromptTemplate`
   - `prompt_template_id UUID pk`
   - `prompt_id String(128)`
@@ -738,22 +447,17 @@ Expected: pass.
 
 - [ ] **Step 1: Write migration shape test**
 
-Add a simple test in `tests/db/test_trading_models.py` or a new `tests/db/test_trading_migration.py` that reads `alembic/versions/005_trading_foundation_tables.py` and asserts table names exist. Keep it lightweight; this repo does not currently run migrations against Postgres in unit tests.
+Add a simple test in `tests/db/test_trading_models.py` or a new `tests/db/test_trading_migration.py` that reads `alembic/versions/005_trading_minimal_foundation_tables.py` and asserts table names exist. Keep it lightweight; this repo does not currently run migrations against Postgres in unit tests.
 
 - [ ] **Step 2: Create migration**
 
-Create `alembic/versions/005_trading_foundation_tables.py` with:
+Create `alembic/versions/005_trading_minimal_foundation_tables.py` with:
 
 - `down_revision = "004"`
-- create/drop all PR 1 foundation tables
-- indexes for date, ticker, strategy, status
-- check constraints for status fields and `candidate_score between 0 and 1`
+- create/drop only PR 1a tables: `strategy_definitions`, `llm_prompt_templates`, `llm_prompt_runs`, and `llm_usage_events`
+- indexes for strategy id/version, prompt id/version, pipeline name, and status
 - check constraints for strategy lifecycle status fields
-- check constraints for manual ticker request mode/status/result status fields, including `active/running/failed/dismissed/cancelled`
-- check constraints for trade identity fields
 - check constraints for prompt lifecycle, parse status, and usage status fields
-- indexes for source/ticker availability fields used by point-in-time replay, especially `available_for_decision_at`, `decision_time`, `trade_date`, and ticker
-- check constraints for provider request status/circuit state, portfolio intent lifecycle, relationship type, and learning-factor lifecycle fields
 
 - [ ] **Step 3: Run targeted tests**
 
@@ -772,7 +476,7 @@ Expected: pass.
 
 Update `plan/research_app/trading_agent_refactor_progress_tracker.md` with:
 
-- PR 1 status
+- PR 1a status
 - implemented files
 - test commands and results
 - any known gaps
@@ -790,37 +494,281 @@ Expected: pass.
 
 - [ ] **Step 3: Stop for review**
 
-Stop after PR 1. Do not implement PR 2 until the user has reviewed and merged.
+Stop after PR 1a. Do not implement PR 1b until the user has reviewed and merged.
 
 ---
 
-## PR 2: Provider Resilience + Universe + Point-in-Time Signal MVP
+## PR 1b: Portfolio Intents + Relationship Graph Schema
 
-**Goal:** Build the smallest deterministic pre-market signal path that can be replayed without lookahead: provider guardrails, user-editable universe filters, active manual requests, point-in-time market/relative-strength signal snapshots, portfolio-intent eligibility, and relationship-backed peer basket construction. No full event calendar, no options, no trading decisions, and no LLM calls yet.
+**Goal:** Add core-holding intent configuration and structured peer/theme relationship data without touching signal generation or trading behavior.
+
+**Files:**
+- Modify: `src/db/models/trading.py`
+- Modify: `src/db/models/__init__.py`
+- Create: `alembic/versions/006_portfolio_intents_relationship_graph.py`
+- Create: `src/trading/portfolio_intents.py`
+- Create: `src/trading/relationships.py`
+- Create: `tests/trading/test_portfolio_intents.py`
+- Create: `tests/trading/test_relationships.py`
+- Modify: `tests/db/test_trading_models.py`
+- Modify: `plan/research_app/trading_agent_refactor_progress_tracker.md`
+
+### Task 1b.1: Portfolio Intents
+
+- [ ] **Step 1: Write failing portfolio intent tests**
+
+Create `tests/trading/test_portfolio_intents.py` with assertions:
+
+```python
+from src.trading.portfolio_intents import PortfolioIntentConfig, is_core_holding_approved
+
+
+def test_core_holding_requires_active_approved_intent():
+    intent = PortfolioIntentConfig(
+        ticker="GOOGL",
+        intent_type="core_growth",
+        target_weight=0.08,
+        max_weight=0.12,
+        lifecycle_status="active",
+        add_rules=["add_on_pullback"],
+        trim_rules=["trim_above_max_weight"],
+        thesis_invalidators=["cloud_growth_breaks_down"],
+        allowed_tactical_interactions=["pause_adds", "trim_for_risk"],
+    )
+
+    assert is_core_holding_approved("GOOGL", [intent]) is True
+    assert is_core_holding_approved("NVDA", [intent]) is False
+```
+
+- [ ] **Step 2: Run the failing test**
+
+Run:
+
+```bash
+source ~/.venv/bin/activate
+pytest tests/trading/test_portfolio_intents.py -q
+```
+
+Expected: fail because `src.trading.portfolio_intents` does not exist.
+
+- [ ] **Step 3: Implement portfolio intent helpers**
+
+Create `src/trading/portfolio_intents.py` with a frozen dataclass `PortfolioIntentConfig` and pure helper functions for active ticker approval, max-weight lookup, and allowed tactical interactions. Keep it independent of database sessions so PR 1b unit tests remain fast.
+
+- [ ] **Step 4: Verify tests pass**
+
+Run:
+
+```bash
+source ~/.venv/bin/activate
+pytest tests/trading/test_portfolio_intents.py -q
+```
+
+Expected: pass.
+
+### Task 1b.2: Relationship Graph Helpers
+
+- [ ] **Step 1: Write failing relationship tests**
+
+Create `tests/trading/test_relationships.py` with assertions:
+
+```python
+from src.trading.relationships import (
+    TickerRelationship,
+    build_peer_basket_members,
+    relationship_can_be_used_for,
+)
+
+
+def test_relationship_usage_is_explicit():
+    rel = TickerRelationship(
+        source_ticker="NVDA",
+        target_ticker="MU",
+        relationship_type="theme_leader",
+        confidence=0.8,
+        strength_score=0.7,
+        allowed_uses=["readthrough", "peer_basket"],
+    )
+
+    assert relationship_can_be_used_for(rel, "readthrough") is True
+    assert relationship_can_be_used_for(rel, "trade_approval") is False
+
+
+def test_peer_basket_members_are_deterministic():
+    relationships = [
+        TickerRelationship("NVDA", "MU", "theme_leader", 0.8, 0.7, ["peer_basket"]),
+        TickerRelationship("NVDA", "LITE", "theme_leader", 0.7, 0.6, ["peer_basket"]),
+        TickerRelationship("TSLA", "MU", "customer", 0.5, 0.4, ["readthrough"]),
+    ]
+
+    assert build_peer_basket_members("NVDA", relationships) == ["LITE", "MU"]
+```
+
+- [ ] **Step 2: Run the failing test**
+
+Run:
+
+```bash
+source ~/.venv/bin/activate
+pytest tests/trading/test_relationships.py -q
+```
+
+Expected: fail because `src.trading.relationships` does not exist.
+
+- [ ] **Step 3: Implement relationship helpers**
+
+Create `src/trading/relationships.py` with frozen dataclasses for `TickerRelationship`, `PeerBasketDefinition`, and `ThemeTaxonomyNode`. Provide pure deterministic helpers for usage checks and peer basket construction. Do not let these helpers infer relationships from ticker names or LLM text.
+
+- [ ] **Step 4: Verify tests pass**
+
+Run:
+
+```bash
+source ~/.venv/bin/activate
+pytest tests/trading/test_relationships.py -q
+```
+
+Expected: pass.
+
+### Task 1b.3: ORM Models and Migration
+
+- [ ] **Step 1: Extend model tests**
+
+Update `tests/db/test_trading_models.py` to instantiate:
+
+- `PortfolioIntent`
+- `TickerRelationship`
+- `PeerBasket`
+- `ThemeTaxonomy`
+
+- [ ] **Step 2: Run model tests to verify failure**
+
+Run:
+
+```bash
+source ~/.venv/bin/activate
+pytest tests/db/test_trading_models.py -q
+```
+
+Expected: fail because the PR 1b ORM models do not exist yet.
+
+- [ ] **Step 3: Add ORM models**
+
+Modify `src/db/models/trading.py`:
+
+- `PortfolioIntent`
+  - `portfolio_intent_id UUID pk`
+  - `ticker String(16) index`
+  - `intent_type String(64)` with values such as `core_growth`, `core_index`, `core_theme`, `core_cash_like`
+  - `target_weight Numeric`
+  - `max_weight Numeric`
+  - `add_rules_json JSONB`
+  - `trim_rules_json JSONB`
+  - `thesis_invalidators_json JSONB`
+  - `allowed_tactical_interactions_json JSONB`
+  - `lifecycle_status String(32)` with `active/paused/retired`
+- `TickerRelationship`
+  - `ticker_relationship_id UUID pk`
+  - `source_ticker String(16) index`
+  - `target_ticker String(16) index`
+  - `relationship_type String(64)` with values such as `peer`, `customer`, `supplier`, `competitor`, `sector_leader`, `etf_component`, `theme_leader`, `theme_constituent`
+  - `theme_id String(64)` nullable
+  - `confidence Numeric`
+  - `strength_score Numeric`
+  - `valid_from DateTime`
+  - `valid_until DateTime` nullable
+  - `source_refs_json JSONB`
+  - `allowed_uses_json JSONB`
+- `PeerBasket`
+  - `peer_basket_id UUID pk`
+  - `basket_key String(128)`
+  - `version String(32)`
+  - `trade_date Date index`
+  - `members_json JSONB`
+  - `construction_method String(64)`
+  - `source_refs_json JSONB`
+- `ThemeTaxonomy`
+  - `theme_id String(64) pk`
+  - `display_name String(128)`
+  - `parent_theme_id String(64)` nullable
+  - `description Text` nullable
+  - `lifecycle_status String(32)` with `active/retired`
+
+- [ ] **Step 4: Create migration**
+
+Create `alembic/versions/006_portfolio_intents_relationship_graph.py` with:
+
+- `down_revision = "005"`
+- create/drop PR 1b tables only
+- indexes for source ticker, target ticker, ticker, theme id, trade date, and lifecycle status
+- check constraints for portfolio intent lifecycle, relationship type, theme lifecycle, confidence range, and strength-score range
+
+- [ ] **Step 5: Run targeted tests**
+
+Run:
+
+```bash
+source ~/.venv/bin/activate
+pytest tests/trading/test_portfolio_intents.py tests/trading/test_relationships.py tests/db/test_trading_models.py -q
+```
+
+Expected: pass.
+
+### Task 1b.4: Progress Tracker and Verification
+
+- [ ] **Step 1: Update tracker**
+
+Update `plan/research_app/trading_agent_refactor_progress_tracker.md` with PR 1b status, implemented files, test commands/results, and known gaps.
+
+- [ ] **Step 2: Run broader relevant tests**
+
+Run:
+
+```bash
+source ~/.venv/bin/activate
+pytest tests/db tests/trading -q
+```
+
+Expected: pass.
+
+- [ ] **Step 3: Stop for review**
+
+Stop after PR 1b. Do not implement PR 2 until the user has reviewed and merged.
+
+---
+
+## PR 2: Provider Resilience + Three-Family Point-in-Time Signal MVP
+
+**Goal:** Build a deterministic pre-market signal path that can be replayed without lookahead across three MVP signal families: technical, fundamental, and events/news. This PR includes provider guardrails, user-editable universe filters, active manual requests, point-in-time signal snapshots, portfolio-intent eligibility, and relationship-backed peer basket construction. No options, no LLM calls, no full transcript parsing, no deep SEC/insider interpretation, and no trading decisions yet.
 
 **Files:**
 - Create: `src/trading/manual_requests.py`
 - Create: `src/trading/provider_resilience.py`
 - Create: `src/trading/point_in_time.py`
-- Create: `src/trading/relationships.py`
-- Create: `src/trading/portfolio_intents.py`
 - Create: `src/trading/universe.py`
 - Create: `src/trading/signals.py`
 - Create: `src/trading/signal_sources.py`
+- Create: `src/trading/fundamental_signals.py`
+- Create: `src/trading/event_news_signals.py`
 - Create: `src/trading/pipeline.py`
 - Create: `src/trading/repository.py`
+- Modify: `src/trading/relationships.py`
+- Modify: `src/trading/portfolio_intents.py`
+- Modify: `src/db/models/trading.py`
+- Create: `alembic/versions/007_universe_signal_mvp_tables.py`
 - Modify: `src/tools/market_data/types.py` if the provider protocol needs universe support
 - Modify: `src/tools/market_data/alpaca_provider.py` to add an asset/universe method if needed
 - Test: `tests/trading/test_universe.py`
 - Test: `tests/trading/test_provider_resilience.py`
 - Test: `tests/trading/test_point_in_time.py`
-- Test: `tests/trading/test_relationships.py`
-- Test: `tests/trading/test_portfolio_intents.py`
 - Test: `tests/trading/test_manual_requests.py`
 - Test: `tests/trading/test_signals.py`
 - Test: `tests/trading/test_signal_sources.py`
+- Test: `tests/trading/test_fundamental_signals.py`
+- Test: `tests/trading/test_event_news_signals.py`
 - Test: `tests/trading/test_relative_strength.py`
 - Test: `tests/trading/test_pipeline.py`
+- Test: `tests/db/test_trading_models.py`
 
 Implementation notes:
 
@@ -837,19 +785,38 @@ Implementation notes:
 - Manual requests stay active across trading days until dismissed by the user; update `last_evaluated_at` and latest result fields on each evaluation.
 - Manual requests can bypass scanner selection threshold, but not ticker validation, market-data availability, liquidity rules, or later risk checks.
 - Support `review_only` and `paper_trade_eligible` request modes.
-- Add `PortfolioIntentService` so `core_holding` eligibility later requires an approved active intent instead of LLM inference.
-- Add `TickerRelationshipService` and `PeerBasketBuilder` for structured peer/theme relationships used by relative-strength and replay attribution.
-- Build signal snapshots from existing daily bars/context where possible, limited in this PR to market bars, liquidity, `SPY`/`QQQ`/sector or theme ETF relative strength where configured, and peer basket relative strength where a basket is available.
+- Use the PR 1b portfolio-intent helpers/service so `core_holding` eligibility later requires an approved active intent instead of LLM inference.
+- Use the PR 1b relationship helpers/service and peer-basket builder for structured peer/theme relationships used by relative-strength and replay attribution.
+- Add ORM models and migration for PR 2 operational state only:
+  - `UniverseFilterConfig`
+  - `UniverseSnapshot`
+  - `UniverseSymbol`
+  - `ManualTickerRequest`
+  - `SourceIngestionRun`
+  - `ProviderRequestRun`
+  - `FundamentalSnapshot`
+  - `EventNewsItem`
+  - `SignalSnapshot`
+- Create `alembic/versions/007_universe_signal_mvp_tables.py` with `down_revision = "006"`.
+- `SignalSnapshot` must include `decision_time`, `available_for_decision_at`, `max_input_available_for_decision_at`, `source_record_refs_json`, `source_available_times_json`, `excluded_future_source_count`, and `point_in_time_passed`.
+- `ProviderRequestRun` must include provider, endpoint/source family, cache hit/miss, request count, budget remaining, retry/backoff, latency, status, error code, and circuit state.
+- `FundamentalSnapshot` stores latest point-in-time provider or existing normalized fundamental rows: ticker, period/as-of metadata, provider, source refs, `event_time`, `published_at`, `ingested_at`, `available_for_decision_at`, raw payload reference, and normalized metrics JSON.
+- `EventNewsItem` stores headline/calendar/provider-event rows: ticker, optional source ticker, event type, direction/sentiment, importance, headline/summary, provider/source refs, dedupe key, `event_time`, `published_at`, `ingested_at`, `available_for_decision_at`, and raw payload reference.
+- Build signal snapshots from existing daily bars/context and controlled provider/fake-provider source rows across all three MVP families:
+  - `technical`: 1d/5d/10d/20d/60d returns, 20/50/200 SMA distance, trend slope, RSI 2/3/14, ATR%, realized volatility percentile, beta proxy vs `SPY`/`QQQ`, drawdown from recent high, distance from 52-week high, relative volume, volume acceleration, dollar volume, gap/premarket gap when available, and relative strength vs `SPY`, `QQQ`, sector/theme ETF, and peer basket.
+  - `fundamental`: market-cap bucket, revenue-growth score, margin/profitability trend, quality/profitability score, valuation band or percentile, EV/sales or P/E percentile when available, FCF/profitability proxy when available, short-interest bucket when available, and explicit stale/missing flags.
+  - `events_news`: earnings date distance, known event date, own earnings headline result when available, analyst upgrade/downgrade count, price-target revision score, guidance/news flag, customer/order/product/regulatory headline flags, high-signal news counts for 24h/7d, sentiment/direction, catalyst quality score, and direct negative catalyst type.
 - Add source-ingestion run metadata for every scheduled or targeted refresh so freshness decisions are replayable.
-- Add `SignalSourceRepository` or equivalent adapters that read normalized Postgres-backed sources or fake-provider fixtures for the minimal PR 2 signal set. Full insider/SEC/news/fundamentals/event/options ingestion is deferred until later source-specific PR work.
+- Add `SignalSourceRepository` or equivalent adapters that read normalized Postgres-backed sources or fake-provider fixtures for the PR 2 technical, fundamental, and events/news signal set. Deep insider/Form 4, full SEC parsing, full transcripts, options chains, and full macro/sector read-through are deferred until later source-specific PR work.
 - Prefer normalized Postgres rows over ad hoc live provider calls. Provider calls are allowed only through controlled refresh/fallback adapters and must record attempted source, freshness, provider request metadata, and degraded-mode state.
 - Store source provenance for each signal, including `source`, `source_table` or provider name, `event_time`, `published_at`, `ingested_at`, `available_for_decision_at`, and missing/stale/unavailable status.
 - Store pre-open signal snapshots as the daily baseline with `snapshot_type = "pre_open"`, `decision_time`, `source_freshness_json`, `missing_signals_json`, `stale_signals_json`, `source_record_refs_json`, `source_available_times_json`, `max_input_available_for_decision_at`, `excluded_future_source_count`, and `point_in_time_passed`.
 - Implement source freshness SLA config for each source family. Low-frequency fields can be carried forward when inside SLA; stale required fields must downgrade or block candidate outputs.
 - Verify point-in-time behavior with tests that insert one available source row and one future source row, then assert the future row is excluded from the snapshot.
-- Defer derived insider/SEC/news/fundamental/own-earnings/event/options fields to later slices; represent them as explicit missing fields in PR 2 snapshots.
+- Cover the point-in-time exclusion separately for technical market bars, `FundamentalSnapshot`, and `EventNewsItem` rows so each MVP signal family proves it cannot leak future data.
+- Defer deep insider/Form 4, full SEC parsing, full earnings-call transcript interpretation, option-chain fields, and full macro/sector read-through to later slices; represent them as explicit missing fields in PR 2 snapshots.
 - Add relative-strength fields vs `SPY`, `QQQ`, sector/theme ETF when configured, and peer basket when available.
-- Add placeholder catalyst quality fields and direct-negative-catalyst fields as missing, without asking the LLM to infer values.
+- Add catalyst quality fields and direct-negative-catalyst fields only from structured event/news source rows; otherwise mark them missing without asking the LLM to infer values.
 - Add option-chain placeholder fields as explicitly missing unless a provider exists.
 - Store missing signals explicitly.
 - Mark manual request results as `blocked_by_missing_data` when required market data cannot be fetched.
@@ -872,6 +839,8 @@ Stop after PR 2 for review/merge.
 - Create: `src/trading/historical_replay.py`
 - Modify: `src/trading/repository.py`
 - Modify: `src/trading/pipeline.py`
+- Modify: `src/db/models/trading.py`
+- Create: `alembic/versions/008_strategy_matching_replay_tables.py`
 - Test: `tests/trading/test_strategy_matching.py`
 - Test: `tests/trading/test_primary_strategy_selector.py`
 - Test: `tests/trading/test_trade_classifier.py`
@@ -879,10 +848,13 @@ Stop after PR 2 for review/merge.
 - Test: `tests/trading/test_outcome_evaluator.py`
 - Test: `tests/trading/test_historical_replay.py`
 - Test: `tests/trading/test_candidate_repository.py`
+- Test: `tests/db/test_trading_models.py`
 
 Implementation notes:
 
 - Load active `StrategyDefinition` rows.
+- Add ORM models and migration for `StrategyRun`, `CandidateScore`, `TradeClassification`, `HistoricalReplayRun`, and `CandidateOutcomeEvaluation`.
+- Create `alembic/versions/008_strategy_matching_replay_tables.py` with `down_revision = "007"`.
 - Score only deterministic evidence available in point-in-time eligible `signals_json`.
 - Persist one `CandidateScore` per `(ticker, strategy_id)` that passes basic eligibility.
 - Persist `selection_source` as `scanner`, `manual_request`, or `watchlist_pin`, and link `manual_request_id` when applicable.
@@ -894,6 +866,10 @@ Implementation notes:
 - Compute confidence calibration inputs by strategy, expression bucket, trade identity, direction, catalyst type, benchmark/peer outperformance, and available historical outcomes from `candidate_outcome_evaluations`.
 - Implement `HistoricalReplayRun` loading that reconstructs candidate/outcome sets from stored `decision_time` and `available_for_decision_at` metadata.
 - Implement `OutcomeEvaluator` for trades, rejected candidates, `catalyst_watch`, ordinary `watch_only`, manual requests, and shadow strategy candidates.
+- Scope replay v0 to the deterministic signal families actually produced by PR 2: technical, fundamental, and events/news MVP fields, plus universe/manual request metadata, strategy definition metadata, and explicit missing/stale fields.
+- Replay v0 can evaluate technical strategies, valuation/fundamental-quality strategies that rely on PR 2 fundamental summaries, and headline/calendar/event-news strategies that rely on PR 2 structured event/news rows.
+- Do not attempt deep earnings-transcript drift, full SEC/news article interpretation, insider/Form 4 strategies, full macro read-through, or options strategy replay in PR 3. Strategies that require those deferred source families must be marked `unsupported_missing_signal_family`, skipped, or downgraded to watch according to strategy rules.
+- Do not backfill deferred source families from future/latest data just to make strategy replay look complete.
 - Evaluate outcomes over each selected strategy's configured horizon and interim checkpoints.
 - Compare against `SPY`, `QQQ`, sector/theme ETF when configured, decision-time peer basket, and decision-time opportunity set where available.
 - Persist `CandidateOutcomeEvaluation` rows with horizon start/end, interim/final status, benchmark returns, peer basket id, candidate return, alpha, MFE/MAE, regime, sector/theme, catalyst type, confidence bucket, trade identity, and expression bucket.
@@ -914,15 +890,21 @@ Stop after PR 3 for review/merge.
 **Files:**
 - Create: `src/trading/risk.py`
 - Create: `src/trading/risk_config.py`
+- Create: `src/trading/risk_context.py`
 - Create: `src/trading/position_sizing.py`
 - Modify: `src/trading/repository.py`
 - Test: `tests/trading/test_position_sizing.py`
+- Test: `tests/trading/test_risk_context.py`
 - Test: `tests/trading/test_risk_manager.py`
 
 Implementation notes:
 
 - Implement `RiskAppetiteProfile` with three presets: `conservative`, `balanced`, and `aggressive`; default to `balanced`.
 - Implement deterministic `RiskConfigResolver` that converts the active risk appetite preset into a generated `RiskLimitConfig`. Persist both the user-facing preset and the generated config with resolver version for audit/replay.
+- Define a pure `PortfolioContext` / `RiskContext` input object for PR 4 instead of reading paper portfolio tables directly. It should include account equity, cash balance, buying power, excess liquidity, current positions, existing exposure, current stock/option margin requirement, open strategy exposure, factor exposure, and current portfolio risk snapshots when available.
+- Unit tests in PR 4 must feed fixture `PortfolioContext` objects so the risk manager can be implemented before paper portfolio state exists.
+- PR 4 may read the latest persisted snapshot if one exists, but it must also work from an explicit fixture/context object. Do not couple PR 4 to `PaperBroker` or `PortfolioPipeline`.
+- PR 6 owns wiring real paper positions and portfolio snapshots into `PortfolioContext`; that wiring should not require rewriting PR 4 risk logic.
 - Keep detailed risk-limit numbers out of the default UI/operator config. Allow optional advanced overrides only as explicit metadata, not as the normal workflow.
 - Calculate factor exposure by sector, strategy, horizon, direction, beta bucket, volatility bucket, liquidity bucket, event type, and macro sensitivity.
 - Add unified margin-account risk fields and limits: account equity, cash balance, buying power, excess liquidity, stock margin requirement, option margin requirement, total margin requirement, buying-power effect, margin model profile/version, margin requirement source, estimated initial/maintenance requirement, and broker-reported requirement when imported.
@@ -948,7 +930,7 @@ Stop after PR 4 for review/merge.
 - Create: `src/agents/trading_schemas.py`
 - Modify: `src/core/config.py`
 - Modify: `src/trading/pipeline.py`
-- Add ORM models/migration for `trading_decisions` if not already created in PR 1
+- Add ORM models/migration for `trading_decisions`
 - Test: `tests/agents/test_trading_agent.py`
 - Test: `tests/agents/test_trading_schemas.py`
 - Test: `tests/trading/test_trading_decision_repository.py`
@@ -988,6 +970,7 @@ Stop after PR 5 for review/merge.
 Implementation notes:
 
 - Consume only Pydantic-validated `TradingDecision` rows or safe fallbacks from PR 5.
+- Map paper positions, cash, buying power, margin requirements, and latest portfolio snapshots into the PR 4 `PortfolioContext` / `RiskContext` contract before calling `RiskManager`.
 - Risk manager remains the final gate before paper order creation.
 - Enforce long-only common-stock paper orders in V2. Bearish evidence may reduce/reject/downgrade, but direct short-stock paper orders should be rejected before order creation.
 - Model stocks and options in one simulated margin account. Stock fills must update cash balance, stock market value, account equity, stock margin requirement, total margin requirement, buying power, excess liquidity, margin model profile/version, and margin requirement source in `portfolio_snapshots`.
@@ -1123,8 +1106,8 @@ Stop after PR 9 for review/merge.
 **Files:**
 - Create: `src/trading/strategy_evolution.py`
 - Modify: `src/trading/repository.py`
-- Modify: `src/db/models/trading.py` if `StrategyProposal` / `StrategyEvaluationResult` were not added in PR 1
-- Add Alembic migration if proposal/evaluation tables are added here
+- Modify: `src/db/models/trading.py`
+- Add Alembic migration for `strategy_proposals` and `strategy_evaluation_results`
 - Test: `tests/trading/test_strategy_evolution.py`
 - Test: `tests/trading/test_strategy_lifecycle.py`
 

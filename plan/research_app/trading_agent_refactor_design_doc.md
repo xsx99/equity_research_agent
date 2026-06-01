@@ -606,7 +606,13 @@ Own-company earnings are different. If the snapshot ticker is the reporting comp
 | Options | option chain availability, delta, IV rank/percentile, premium, breakeven, DTE, earnings-through-expiry flag |
 | Confidence Calibration | historical win rate/alpha by strategy, expression bucket, trade identity, direction, catalyst type, sector/theme, and market regime |
 
-首版不需要一次实现所有信号，但 schema 要允许增量添加。缺失信号必须显式保存为 `null` 或 `status=missing`，不能在 prompt 中伪造。
+MVP signal surface should cover three families, not only technicals:
+
+1. `technical`: OHLCV/quote-derived momentum, trend, mean-reversion, volume/liquidity, volatility, gap, and relative-strength signals.
+2. `fundamental`: latest point-in-time fundamental/valuation summary signals such as market-cap bucket, revenue growth, margin/profitability quality, valuation band/percentile, FCF/profitability proxy, short-interest bucket when available, and explicit stale/missing flags.
+3. `events_news`: headline/calendar/provider-event level signals such as earnings date proximity, own earnings headline result when available, analyst upgrade/downgrade or price-target revision, guidance/news flags, customer/order/regulatory/product headlines, high-signal news counts, sentiment/direction, and direct negative catalyst flags.
+
+MVP does not need every future signal. It should avoid full transcript parsing, full SEC/insider interpretation, option-chain strategy signals, and full macro/sector read-through until their source families are implemented. Missing signals must be stored explicitly as `null` or `status=missing`; the prompt must not fabricate them.
 
 Signal source rules:
 
@@ -1035,6 +1041,8 @@ The final action is computed in two stages:
 1. `TradingPipeline` proposes `decision`, `suggested_target_weight`, `time_horizon`, instrument expression, thesis, and invalidators.
 2. `RiskManager` applies deterministic constraints and returns `approved`, `reduced`, or `rejected`.
 
+`RiskManager` should consume an explicit `PortfolioContext` / `RiskContext` object rather than directly depending on `PaperBroker` internals. The context contains account equity, cash, buying power, existing positions, current exposure, margin requirement, factor exposure, open strategy exposure, and latest portfolio/risk snapshots when available. This lets the risk manager be tested with fixtures before paper portfolio state is implemented, and later lets `PortfolioPipeline` map real paper positions into the same contract without rewriting risk logic.
+
 Risk decision fields:
 
 - `account_equity`
@@ -1356,6 +1364,8 @@ Outcome records should include:
 
 Reflection and strategy evolution consume these outcome rows rather than recomputing attribution ad hoc.
 
+Replay v0 scope is intentionally narrower than the final strategy catalog, but it should cover the three MVP signal families: technical, fundamental, and events/news. The first replay evaluator should evaluate strategies whose required inputs are present in the deterministic signal surface implemented at that time: market bars, liquidity, benchmark/sector/theme/peer-basket relative strength, valuation/fundamental summary fields, headline/calendar/provider-event fields, universe/manual request metadata, strategy definition metadata, and explicit missing/stale fields. Full transcript-driven earnings drift, deep SEC/insider interpretation, option-chain strategy replay, and full macro/sector read-through remain unavailable until those source families are implemented as point-in-time snapshots. Strategies that require unavailable families must be marked `unsupported_missing_signal_family`, skipped, or downgraded according to strategy rules; replay must not backfill them from latest/future source tables.
+
 ### Reflection Input and Output
 
 Reflection runs after the portfolio is marked to close and after historical replay/outcome evaluation has produced the relevant interim or final outcome rows. It receives:
@@ -1471,6 +1481,8 @@ Proposed new tables:
 | `ticker_relationships` | Directed source ticker to target ticker relationships such as peer, customer, supplier, competitor, sector leader, ETF/component, theme leader, or theme constituent, with source/confidence/validity metadata |
 | `peer_baskets` | Versioned decision-time peer baskets used for relative strength, attribution, and outcome evaluation |
 | `theme_taxonomy` | User-maintained theme hierarchy used for read-through, risk exposure, peer basket construction, and UI grouping |
+| `fundamental_snapshots` | Point-in-time fundamental and valuation source rows with ticker, period/as-of metadata, provider/source refs, normalized metrics JSON, raw payload reference, and availability timestamps |
+| `event_news_items` | Point-in-time headline, calendar, and provider-event rows with event type, optional source ticker, sentiment/direction, importance, dedupe key, provider/source refs, raw payload reference, and availability timestamps |
 | `macro_snapshots` | One macro snapshot/regime per run/day |
 | `macro_readthrough_events` | Structured peer/sector-leader earnings read-through events with source ticker, scope, mechanism, direction, affected theme/relationship, transcript/release provenance, and validity window |
 | `calendar_events` | Normalized future macro, economic, Fed, earnings, market-structure, and option-relevant events with source/provider provenance, scheduled time, event type, global importance, affected ticker/theme metadata, and raw payload reference |
