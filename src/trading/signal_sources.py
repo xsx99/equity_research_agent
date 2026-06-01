@@ -1,8 +1,8 @@
 """Point-in-time source rows and in-memory source adapters for PR02."""
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime
+from dataclasses import dataclass, field
+from datetime import date, datetime
 from typing import Any, Iterable
 
 
@@ -31,6 +31,119 @@ class SourceRecord:
             "source_table": self.source_table,
             "source_record_id": self.source_record_id,
         }
+
+
+@dataclass(frozen=True)
+class SourceIngestionRunRecord:
+    """Scheduled or targeted source refresh metadata."""
+
+    source_ingestion_run_id: str
+    source_family: str
+    run_type: str
+    scope_json: dict[str, Any]
+    provider: str | None
+    as_of: datetime | None
+    started_at: datetime
+    completed_at: datetime | None
+    status: str
+    coverage_json: dict[str, Any]
+    error_code: str | None = None
+    error_message: str | None = None
+    metadata_json: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class FundamentalSnapshotRecord:
+    """Repository-level shape matching the `fundamental_snapshots` table."""
+
+    fundamental_snapshot_id: str
+    ticker: str
+    fiscal_period: str | None
+    as_of_date: date | None
+    provider: str
+    source_refs_json: list[dict[str, str]]
+    event_time: datetime
+    published_at: datetime
+    ingested_at: datetime
+    available_for_decision_at: datetime
+    raw_payload_ref: str | None
+    normalized_metrics_json: dict[str, Any]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "ticker", self.ticker.strip().upper())
+
+
+@dataclass(frozen=True)
+class EventNewsItemRecord:
+    """Repository-level shape matching the `event_news_items` table."""
+
+    event_news_item_id: str
+    ticker: str
+    source_ticker: str | None
+    event_type: str
+    direction: str | None
+    sentiment: str | None
+    importance: str | None
+    headline: str | None
+    summary: str | None
+    provider: str
+    source_refs_json: list[dict[str, str]]
+    dedupe_key: str
+    event_time: datetime
+    published_at: datetime
+    ingested_at: datetime
+    available_for_decision_at: datetime
+    raw_payload_ref: str | None
+    metadata_json: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "ticker", self.ticker.strip().upper())
+        if self.source_ticker is not None:
+            object.__setattr__(self, "source_ticker", self.source_ticker.strip().upper())
+
+
+def source_record_from_fundamental_snapshot(snapshot: FundamentalSnapshotRecord) -> SourceRecord:
+    """Convert a normalized fundamental row into the SignalPipeline source contract."""
+    return SourceRecord(
+        ticker=snapshot.ticker,
+        source_family="fundamental",
+        source=snapshot.provider,
+        source_table="fundamental_snapshots",
+        source_record_id=snapshot.fundamental_snapshot_id,
+        event_time=snapshot.event_time,
+        published_at=snapshot.published_at,
+        ingested_at=snapshot.ingested_at,
+        available_for_decision_at=snapshot.available_for_decision_at,
+        payload=dict(snapshot.normalized_metrics_json),
+    )
+
+
+def source_record_from_event_news_item(item: EventNewsItemRecord) -> SourceRecord:
+    """Convert a normalized event/news row into the SignalPipeline source contract."""
+    payload = dict(item.metadata_json)
+    payload.update(
+        {
+            "event_type": item.event_type,
+            "direction": item.direction,
+            "sentiment": item.sentiment,
+            "importance": item.importance,
+            "headline": item.headline,
+            "summary": item.summary,
+            "source_ticker": item.source_ticker,
+        }
+    )
+    return SourceRecord(
+        ticker=item.ticker,
+        source_family="events_news",
+        source=item.provider,
+        source_table="event_news_items",
+        source_record_id=item.event_news_item_id,
+        event_time=item.event_time,
+        published_at=item.published_at,
+        ingested_at=item.ingested_at,
+        available_for_decision_at=item.available_for_decision_at,
+        payload=payload,
+    )
 
 
 class InMemorySignalSourceRepository:

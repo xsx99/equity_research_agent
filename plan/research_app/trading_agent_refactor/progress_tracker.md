@@ -80,7 +80,9 @@
   - Added pre-open `SignalPipeline` and `UniverseScanPipeline` in `src/trading/pipeline.py`, including active manual-request merge without trade approval bypass.
   - Added PR 2 ORM models/enums in `src/db/models/trading.py`, exports from `src/db/models/__init__.py`, and Alembic migration `alembic/versions/007_universe_signal_mvp_tables.py`.
   - Extended market-data provider contracts with universe asset support and added an Alpaca active-asset adapter method.
-  - Known gaps by design: no strategy scoring, trading decisions, risk checks, paper orders, intraday refresh, UI, full SEC/insider/transcript parsing, option-chain signals, live provider smoke test, or live Postgres migration smoke test.
+  - Added a minimal `SourceIngestionService` adapter that calls existing market/news providers behind `ProviderResiliencePolicy`, converts technical bars, provider context, and news rows into `SourceRecord` plus repository-level `FundamentalSnapshot` / `EventNewsItem` artifacts, and records `SourceIngestionRun` / linked `ProviderRequestRun` metadata through the repository abstraction.
+  - Added standalone PR 2 source-ingestion smoke coverage in `scripts/run_trading_source_ingestion_smoke.py` and documented the opt-in live API commands in the PR reading guide.
+  - Known gaps by design: no strategy scoring, trading decisions, risk checks, paper orders, intraday refresh, UI, full SEC/insider/transcript parsing, option-chain signals, or live Postgres migration smoke test.
 
 ## PR Slice Status
 
@@ -88,7 +90,7 @@
 | --- | --- | --- | --- |
 | PR 1a | Minimal trading foundation | Ready for review | Adds strategy definitions, prompt registry/schema, 15 broad tactical strategies, 4 eval-derived playbooks, 5 expression buckets, and trade identity taxonomy. No universe/signal/relationship tables. Verified with targeted and broader PR 1a tests. |
 | PR 1b | Portfolio intents + relationship graph schema | Ready for review | Adds portfolio intents, ticker relationships, peer baskets, theme taxonomy, and pure helpers for core-holding eligibility and structured peer/theme data. No signal pipeline, strategy scoring, or relationship inference. |
-| PR 2 | Provider resilience + three-family point-in-time signal MVP | Ready for review | Adds provider guardrails, fake-provider test path, request telemetry, user-editable universe filters, persistent manual requests, technical/fundamental/events-news signal snapshots, `FundamentalSnapshot`/`EventNewsItem` source rows, and source availability metadata. |
+| PR 2 | Provider resilience + three-family point-in-time signal MVP | Ready for review | Adds provider guardrails, provider-backed source ingestion adapter with fake-provider test path, request telemetry, user-editable universe filters, persistent manual requests, technical/fundamental/events-news signal snapshots, `FundamentalSnapshot`/`EventNewsItem` source rows, and source availability metadata. |
 | PR 3 | Strategy matching + historical replay outcome evaluator | Pending | Adds source attribution, primary strategy selection, trade classification, catalyst-watch split, bearish gating, confidence calibration inputs, and replay v0 for the PR 2 technical/fundamental/events-news MVP signal families. |
 | PR 4 | Position sizing + portfolio risk manager | Pending | Depends on candidates and risk tables; adds fixture-backed `PortfolioContext` / `RiskContext`, simple risk appetite presets, generated risk configs, invariant hard safety rails, and conservative broker-profile margin estimates. |
 | PR 5 | Trading decision agent guardrails | Pending | Adds bounded LLM trading output with Pydantic validation, retry, safe fallback, prompt/schema persistence, full context snapshot, and no paper order side effects yet. |
@@ -161,3 +163,12 @@
 - 2026-06-01: PR 2 diff whitespace checks passed for tracked changes with `git diff --check`; untracked file no-index whitespace check emitted no whitespace errors.
 - 2026-06-01: PR 2 follow-up extracted explicit technical signal module after review feedback. Focused verification passed: `source ~/.venv/bin/activate && pytest tests/trading/test_technical_signals.py tests/trading/test_signals.py tests/trading/test_relative_strength.py -q` passed with 5 tests.
 - 2026-06-01: PR 2 follow-up full verification passed: `source ~/.venv/bin/activate && pytest -q` passed with 278 tests.
+- 2026-06-01: PR 2 follow-up RED checks failed for the missing provider-backed source ingestion adapter:
+  - `source ~/.venv/bin/activate && pytest tests/trading/test_signal_sources.py tests/trading/test_pipeline.py -q`
+- 2026-06-01: PR 2 provider-backed source ingestion adapter targeted verification passed: `source ~/.venv/bin/activate && pytest tests/trading/test_signal_sources.py tests/trading/test_pipeline.py -q` passed with 4 tests.
+- 2026-06-01: PR 2 provider-backed source ingestion adapter broader relevant verification passed: `source ~/.venv/bin/activate && pytest tests/trading tests/db -q` passed with 43 tests.
+- 2026-06-01: PR 2 provider-backed source ingestion adapter full verification passed: `source ~/.venv/bin/activate && pytest -q` passed with 280 tests.
+- 2026-06-01: PR 2 source-ingestion smoke script RED check failed for expected missing script: `source ~/.venv/bin/activate && pytest tests/test_run_trading_source_ingestion_smoke.py -q`.
+- 2026-06-01: PR 2 source-ingestion smoke script unit verification passed: `source ~/.venv/bin/activate && pytest tests/test_run_trading_source_ingestion_smoke.py -q` passed with 1 test.
+- 2026-06-01: PR 2 live API smoke passed with the documented command `LOG_LEVEL=WARNING python scripts/run_trading_source_ingestion_smoke.py --env-file /Users/shuxinxu/repos/equity_research_agent/.env --ticker AAPL --families technical fundamental events_news --json`; source records were `technical=1`, `fundamental=1`, `events_news=5`; provider request statuses were `succeeded` for `market_bars`, `market_context`, and `news`.
+- 2026-06-01: PR 2 source-ingestion smoke script full verification passed: `source ~/.venv/bin/activate && pytest -q` passed with 281 tests.

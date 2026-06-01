@@ -35,6 +35,7 @@ class ProviderRequestRunRecord:
     degraded_mode: bool
     started_at: datetime
     completed_at: datetime
+    source_ingestion_run_id: str | None = None
 
 
 class ProviderRequestRecorder(Protocol):

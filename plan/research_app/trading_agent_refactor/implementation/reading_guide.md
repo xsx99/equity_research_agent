@@ -58,6 +58,32 @@ PR 11 is the only slice where reading more design context is often justified, be
 | Portfolio, margin account, option risk, assignment risk, factor exposure | D06 |
 | Reflection, learning factors, strategy performance, replay outcomes | D07 |
 
+## PR 2 Live API Smoke
+
+PR 2 live provider checks are opt-in and should stay outside normal unit tests. Use the standalone source-ingestion smoke script from the PR 2 worktree when you need to verify the real provider path:
+
+```bash
+source ~/.venv/bin/activate
+LOG_LEVEL=WARNING python scripts/run_trading_source_ingestion_smoke.py \
+  --env-file /Users/shuxinxu/repos/equity_research_agent/.env \
+  --ticker AAPL \
+  --families technical \
+  --json
+```
+
+The default/cheap path is `technical` only and should make one market-data request. To verify the full PR 2 adapter path, run:
+
+```bash
+source ~/.venv/bin/activate
+LOG_LEVEL=WARNING python scripts/run_trading_source_ingestion_smoke.py \
+  --env-file /Users/shuxinxu/repos/equity_research_agent/.env \
+  --ticker AAPL \
+  --families technical fundamental events_news \
+  --json
+```
+
+This smoke script uses in-memory repositories only. It does not write to Postgres, does not create trading decisions, and does not call an LLM. `LOG_LEVEL=WARNING` keeps HTTP client INFO logs from printing provider query parameters. The command should report `status=passed`, source records for each requested family, and `ProviderRequestRun` statuses for `market_bars`, `market_context`, and `news` when the full path is requested.
+
 ## When To Read More
 
 Broaden the context only for one of these reasons:

@@ -6,7 +6,7 @@ This repository contains the research app and the staged V2 trading-agent refact
 
 - `src/agents/` contains bounded agent code. Existing research behavior still uses `src/prompts/registry.py`; PR 1a adds `src/agents/prompt_registry.py` for trading-agent prompt metadata, template hashes, and rendered prompt hashes.
 - `src/db/models/` contains SQLAlchemy ORM models using the shared `Base` and `ChoiceEnum` helpers. PR 1a adds trading foundation models for strategy definitions, LLM prompt templates, prompt runs, and usage telemetry. PR 1b adds portfolio-intent and relationship graph models. PR 2 adds universe, manual request, provider telemetry, source ingestion, fundamental/event source, and signal snapshot models.
-- `src/trading/` contains data-only trading foundation helpers. PR 1a seeds the initial strategy catalog and portfolio-pool trade identity taxonomy without changing runtime trading behavior. PR 1b adds pure portfolio-intent and relationship helpers for later classifier/signal consumers. PR 2 adds deterministic universe filtering, manual request state, provider resilience guardrails, point-in-time source filtering, technical/fundamental/events-news signal builders, and a pre-open signal pipeline.
+- `src/trading/` contains data-only trading foundation helpers. PR 1a seeds the initial strategy catalog and portfolio-pool trade identity taxonomy without changing runtime trading behavior. PR 1b adds pure portfolio-intent and relationship helpers for later classifier/signal consumers. PR 2 adds deterministic universe filtering, manual request state, provider resilience guardrails, provider-backed source ingestion adapters, point-in-time source filtering, technical/fundamental/events-news signal builders, and a pre-open signal pipeline.
 - `alembic/versions/` contains database migrations. PR 1a adds revision `005` for `strategy_definitions`, `llm_prompt_templates`, `llm_prompt_runs`, and `llm_usage_events`. PR 1b adds revision `006` for `portfolio_intents`, `ticker_relationships`, `peer_baskets`, and `theme_taxonomy`. PR 2 adds revision `007` for universe/signal MVP operational state.
 - `plan/research_app/trading_agent_refactor/` is the canonical modular plan for the V2 trading-agent work. Implementation proceeds one PR slice at a time and stops for review before the next slice.
 
@@ -41,6 +41,7 @@ PR 2 adds the deterministic universe-to-signal MVP path:
 - `TRADING_UNIVERSE_SYMBOLS` local fallback for fixture/dev universe rows
 - provider resilience guardrails for request budgets, cache freshness, retries/backoff, circuit state, degraded-mode telemetry, and request-run recording
 - active manual ticker request helpers for `review_only` and `paper_trade_eligible` modes
+- provider-backed source ingestion adapters that call existing market/news providers behind `ProviderResiliencePolicy` and record source/provider run metadata through repository abstractions
 - point-in-time source row filtering with source refs, available times, max input availability, and future-row exclusion counts
 - technical, fundamental, and events/news signal family builders with explicit missing placeholders for deferred source families
 - pre-open signal pipeline that merges scanner symbols and active manual requests without adding trading approval

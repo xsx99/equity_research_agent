@@ -1,6 +1,8 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
+from src.trading.repository import InMemoryTradingRepository
 from src.trading.signal_sources import InMemorySignalSourceRepository, SourceRecord
+from src.trading.source_ingestion import SourceIngestionService
 
 
 def test_signal_source_repository_returns_latest_decision_available_rows_by_family():
@@ -18,3 +20,89 @@ def test_signal_source_repository_returns_latest_decision_available_rows_by_fami
     rows = repo.latest_available_by_family("AAPL", "fundamental", decision_time)
 
     assert [row.source_record_id for row in rows] == ["new"]
+
+
+class _FakeMarketProvider:
+    def __init__(self) -> None:
+        self.bar_calls: list[tuple[str, int]] = []
+        self.context_calls: list[str] = []
+
+    def fetch_daily_bars(self, ticker: str, lookback_days: int):
+        self.bar_calls.append((ticker, lookback_days))
+        return [
+            {"date": date(2026, 5, 29), "open": 100.0, "high": 102.0, "low": 99.0, "close": 100.0, "volume": 1_000_000},
+            {"date": date(2026, 5, 30), "open": 100.0, "high": 104.0, "low": 99.0, "close": 103.0, "volume": 2_000_000},
+        ]
+
+    def fetch_context(self, ticker: str):
+        self.context_calls.append(ticker)
+        return {
+            "market_cap": 3_000_000_000_000,
+            "revenue_growth_score": 0.8,
+            "quality_score": 0.7,
+            "short_interest_pct_float": 2.4,
+            "pe_ratio": 28.0,
+            "earnings_in_days": 6,
+        }
+
+
+class _FakeNewsProvider:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, int]] = []
+
+    def fetch_recent(self, ticker: str, limit: int):
+        self.calls.append((ticker, limit))
+        return [
+            {
+                "title": "Apple upgraded after stronger iPhone demand",
+                "summary": "Analyst raises rating and price target.",
+                "published_at": "2026-06-01T10:30:00+00:00",
+                "source": "fixture-news",
+                "url": "https://example.test/aapl-upgrade",
+                "signal_type": "analyst_rating",
+            }
+        ]
+
+
+def test_source_ingestion_service_adapts_existing_providers_and_records_metadata():
+    now = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+    market_provider = _FakeMarketProvider()
+    news_provider = _FakeNewsProvider()
+    source_repository = InMemorySignalSourceRepository()
+    artifact_repository = InMemoryTradingRepository()
+
+    result = SourceIngestionService(
+        market_provider=market_provider,
+        news_provider=news_provider,
+        source_repository=source_repository,
+        artifact_repository=artifact_repository,
+        provider_name="fixture",
+        now=lambda: now,
+        sleeper=lambda seconds: None,
+    ).refresh_tickers(("aapl",), as_of=now, run_type="targeted")
+
+    records = source_repository.records_for_ticker("AAPL")
+    assert result.ingestion_run.status == "succeeded"
+    assert result.ingestion_run.source_family == "all"
+    assert result.ingestion_run.coverage_json == {
+        "tickers_requested": 1,
+        "source_records": 3,
+        "fundamental_snapshots": 1,
+        "event_news_items": 1,
+    }
+    assert {record.source_family for record in records} == {"technical", "fundamental", "events_news"}
+    assert source_repository.latest_available_by_family("AAPL", "technical", now)[0].payload["bars"][1]["close"] == 103.0
+    assert artifact_repository.fundamental_snapshots[0].normalized_metrics_json["market_cap"] == 3_000_000_000_000
+    assert artifact_repository.event_news_items[0].event_type == "analyst_upgrade"
+    assert artifact_repository.provider_request_runs
+    assert {run.source_ingestion_run_id for run in artifact_repository.provider_request_runs} == {
+        result.ingestion_run.source_ingestion_run_id
+    }
+    assert [run.status for run in artifact_repository.provider_request_runs] == [
+        "succeeded",
+        "succeeded",
+        "succeeded",
+    ]
+    assert market_provider.bar_calls == [("AAPL", 252)]
+    assert market_provider.context_calls == ["AAPL"]
+    assert news_provider.calls == [("AAPL", 5)]

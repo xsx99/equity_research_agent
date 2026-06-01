@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Callable
+from typing import Callable, Protocol
 
 from src.trading.manual_requests import ManualTickerRequestService
 from src.trading.signal_sources import InMemorySignalSourceRepository
@@ -13,6 +13,19 @@ from src.trading.universe import (
     UniverseSnapshotResult,
     apply_universe_filters,
 )
+
+
+class SourceIngestionServiceProtocol(Protocol):
+    """Minimal ingestion service API consumed by the SignalPipeline."""
+
+    def refresh_tickers(
+        self,
+        tickers: tuple[str, ...],
+        *,
+        as_of: datetime,
+        run_type: str,
+    ) -> object:
+        """Refresh source rows for the requested tickers."""
 
 
 class UniverseScanPipeline:
@@ -45,9 +58,11 @@ class SignalPipeline:
         *,
         source_repository: InMemorySignalSourceRepository,
         manual_request_service: ManualTickerRequestService,
+        source_ingestion_service: SourceIngestionServiceProtocol | None = None,
     ) -> None:
         self.source_repository = source_repository
         self.manual_request_service = manual_request_service
+        self.source_ingestion_service = source_ingestion_service
 
     def build_pre_open_snapshots(
         self,
@@ -61,6 +76,12 @@ class SignalPipeline:
         tickers = included_symbols + [
             ticker for ticker in sorted(manual_by_ticker) if ticker not in included_symbols
         ]
+        if self.source_ingestion_service is not None:
+            self.source_ingestion_service.refresh_tickers(
+                tuple(tickers),
+                as_of=decision_time,
+                run_type="pre_open",
+            )
         snapshots: list[SignalSnapshotResult] = []
         for ticker in tickers:
             manual_request = manual_by_ticker.get(ticker)
