@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import sys
 from collections import Counter
@@ -40,6 +41,8 @@ def run_smoke(
     news_provider: NewsProvider | None,
     provider_name: str,
     as_of: datetime | None = None,
+    now=None,
+    include_records: bool = False,
     sleeper=None,
 ) -> dict[str, Any]:
     """Run source ingestion through the real service and return a compact report."""
@@ -47,13 +50,14 @@ def run_smoke(
     source_repository = InMemorySignalSourceRepository()
     artifact_repository = InMemoryTradingRepository()
     smoke_as_of = as_of or datetime.now(timezone.utc)
+    clock = now or (lambda: datetime.now(timezone.utc))
     service = SourceIngestionService(
         market_provider=market_provider,
         news_provider=news_provider,
         source_repository=source_repository,
         artifact_repository=artifact_repository,
         provider_name=provider_name,
-        now=lambda: smoke_as_of,
+        now=clock,
         sleeper=sleeper or (lambda seconds: None),
     )
     result = service.refresh_tickers(
@@ -69,7 +73,7 @@ def run_smoke(
         required_families.remove("events_news")
     missing_families = sorted(family for family in required_families if records_by_family[family] == 0)
     status = "passed" if result.ingestion_run.status in {"succeeded", "degraded"} and not missing_families else "failed"
-    return {
+    report = {
         "status": status,
         "ticker": normalize_ticker(ticker),
         "families": list(normalized_families),
@@ -87,13 +91,20 @@ def run_smoke(
                 "cache_status": run.cache_status,
                 "request_count": run.request_count,
                 "budget_remaining": run.budget_remaining,
+                "started_at": _iso(run.started_at),
+                "completed_at": _iso(run.completed_at),
+                "latency_ms": run.latency_ms,
                 "degraded_mode": run.degraded_mode,
                 "error_code": run.error_code,
             }
             for run in artifact_repository.provider_request_runs
         ],
+        "event_news_preview": _event_news_preview(result.event_news_items),
         "technical_preview": _technical_preview(source_records),
     }
+    if include_records:
+        report["source_records"] = [_source_record_json(record) for record in source_records]
+    return report
 
 
 def main() -> int:
@@ -116,10 +127,22 @@ def main() -> int:
         default="auto",
         help="News provider used when events_news is requested.",
     )
+    parser.add_argument(
+        "--include-records",
+        action="store_true",
+        help="Include normalized SourceRecord rows and payloads in JSON output.",
+    )
+    parser.add_argument(
+        "--show-http-logs",
+        action="store_true",
+        help="Allow httpx INFO logs. Off by default to avoid printing provider query parameters.",
+    )
     parser.add_argument("--json", action="store_true", help="Print structured JSON output.")
     args = parser.parse_args()
     if args.env_file:
         load_dotenv(args.env_file)
+    if not args.show_http_logs:
+        logging.getLogger("httpx").setLevel(logging.WARNING)
 
     families = _normalize_families(args.families)
     if "technical" in families and not _has_alpaca_creds():
@@ -135,6 +158,7 @@ def main() -> int:
             market_provider=market_provider,
             news_provider=news_provider,
             provider_name="live",
+            include_records=args.include_records,
         )
     finally:
         _close_if_present(market_provider)
@@ -190,6 +214,42 @@ def _technical_preview(records: tuple[SourceRecord, ...]) -> dict[str, Any]:
     }
 
 
+def _event_news_preview(items) -> list[dict[str, Any]]:
+    return [
+        {
+            "event_type": item.event_type,
+            "headline": item.headline,
+            "importance": item.importance,
+            "published_at": _iso(item.published_at),
+            "sentiment": item.sentiment,
+            "source": item.provider,
+            "summary": item.summary,
+        }
+        for item in items
+    ]
+
+
+def _source_record_json(record: SourceRecord) -> dict[str, Any]:
+    return {
+        "ticker": record.ticker,
+        "source_family": record.source_family,
+        "source": record.source,
+        "source_table": record.source_table,
+        "source_record_id": record.source_record_id,
+        "event_time": _iso(record.event_time),
+        "published_at": _iso(record.published_at),
+        "ingested_at": _iso(record.ingested_at),
+        "available_for_decision_at": _iso(record.available_for_decision_at),
+        "payload": record.payload,
+    }
+
+
+def _iso(value: Any) -> Any:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return value
+
+
 def _print_report(report: dict[str, Any]) -> None:
     print(f"[{report['status'].upper()}] trading_source_ingestion_smoke ticker={report['ticker']}")
     print(f"families={','.join(report['families'])} ingestion_status={report['ingestion_status']}")
@@ -197,6 +257,8 @@ def _print_report(report: dict[str, Any]) -> None:
     if report["missing_families"]:
         print(f"missing_families={','.join(report['missing_families'])}")
     print(f"provider_request_statuses={report['provider_request_statuses']}")
+    if report["event_news_preview"]:
+        print(f"event_news_preview={report['event_news_preview']}")
     if report["technical_preview"]:
         print(f"technical_preview={report['technical_preview']}")
 

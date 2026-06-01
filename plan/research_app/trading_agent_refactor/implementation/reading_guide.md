@@ -84,6 +84,20 @@ LOG_LEVEL=WARNING python scripts/run_trading_source_ingestion_smoke.py \
 
 This smoke script uses in-memory repositories only. It does not write to Postgres, does not create trading decisions, and does not call an LLM. `LOG_LEVEL=WARNING` keeps HTTP client INFO logs from printing provider query parameters. The command should report `status=passed`, source records for each requested family, and `ProviderRequestRun` statuses for `market_bars`, `market_context`, and `news` when the full path is requested.
 
+To inspect concrete normalized source rows, add `--include-records`:
+
+```bash
+source ~/.venv/bin/activate
+LOG_LEVEL=WARNING python scripts/run_trading_source_ingestion_smoke.py \
+  --env-file /Users/shuxinxu/repos/equity_research_agent/.env \
+  --ticker SNDK \
+  --families events_news \
+  --include-records \
+  --json
+```
+
+The detailed output includes `provider_requests[*].started_at`, `completed_at`, and `latency_ms` for endpoint timing, `event_news_preview` for human-readable headlines, and `source_records[*].payload` for the exact normalized payload consumed by `SignalPipeline`.
+
 ## When To Read More
 
 Broaden the context only for one of these reasons:
