@@ -71,6 +71,16 @@
   - Added Alembic migration `alembic/versions/006_portfolio_intents_relationship_graph.py`.
   - Added focused tests under `tests/trading/` and extended `tests/db/test_trading_models.py`.
   - Known gaps by design: no universe/signal pipeline behavior, no strategy scoring, no relationship inference, and no live Postgres migration smoke test.
+- Implemented PR 2 provider resilience and three-family point-in-time signal MVP on branch `pr02-provider-resilience-signal-mvp`:
+  - Added universe filtering in `src/trading/universe.py` with default common-stock/liquidity filters, sector/industry/exchange filters, manual exclusion reasons, and `TRADING_UNIVERSE_SYMBOLS` local fallback.
+  - Added provider guardrails in `src/trading/provider_resilience.py` with cache/freshness decisions, request budgets, retry/backoff, circuit state, degraded-mode telemetry, and in-memory request recording for tests.
+  - Added manual ticker request service in `src/trading/manual_requests.py` for active requests, dismiss/cancel state, result metadata, and `review_only` / `paper_trade_eligible` modes.
+  - Added point-in-time source filtering and source repositories in `src/trading/point_in_time.py` and `src/trading/signal_sources.py`.
+  - Added deterministic technical, fundamental, and events/news signal builders in `src/trading/signals.py`, `src/trading/fundamental_signals.py`, and `src/trading/event_news_signals.py`, with explicit missing placeholders for deferred SEC/insider/transcript/options/macro read-through families.
+  - Added pre-open `SignalPipeline` and `UniverseScanPipeline` in `src/trading/pipeline.py`, including active manual-request merge without trade approval bypass.
+  - Added PR 2 ORM models/enums in `src/db/models/trading.py`, exports from `src/db/models/__init__.py`, and Alembic migration `alembic/versions/007_universe_signal_mvp_tables.py`.
+  - Extended market-data provider contracts with universe asset support and added an Alpaca active-asset adapter method.
+  - Known gaps by design: no strategy scoring, trading decisions, risk checks, paper orders, intraday refresh, UI, full SEC/insider/transcript parsing, option-chain signals, live provider smoke test, or live Postgres migration smoke test.
 
 ## PR Slice Status
 
@@ -78,7 +88,7 @@
 | --- | --- | --- | --- |
 | PR 1a | Minimal trading foundation | Ready for review | Adds strategy definitions, prompt registry/schema, 15 broad tactical strategies, 4 eval-derived playbooks, 5 expression buckets, and trade identity taxonomy. No universe/signal/relationship tables. Verified with targeted and broader PR 1a tests. |
 | PR 1b | Portfolio intents + relationship graph schema | Ready for review | Adds portfolio intents, ticker relationships, peer baskets, theme taxonomy, and pure helpers for core-holding eligibility and structured peer/theme data. No signal pipeline, strategy scoring, or relationship inference. |
-| PR 2 | Provider resilience + three-family point-in-time signal MVP | Pending | Adds provider guardrails, fake-provider test path, request telemetry, user-editable universe filters, persistent manual requests, technical/fundamental/events-news signal snapshots, `FundamentalSnapshot`/`EventNewsItem` source rows, and source availability metadata. |
+| PR 2 | Provider resilience + three-family point-in-time signal MVP | Ready for review | Adds provider guardrails, fake-provider test path, request telemetry, user-editable universe filters, persistent manual requests, technical/fundamental/events-news signal snapshots, `FundamentalSnapshot`/`EventNewsItem` source rows, and source availability metadata. |
 | PR 3 | Strategy matching + historical replay outcome evaluator | Pending | Adds source attribution, primary strategy selection, trade classification, catalyst-watch split, bearish gating, confidence calibration inputs, and replay v0 for the PR 2 technical/fundamental/events-news MVP signal families. |
 | PR 4 | Position sizing + portfolio risk manager | Pending | Depends on candidates and risk tables; adds fixture-backed `PortfolioContext` / `RiskContext`, simple risk appetite presets, generated risk configs, invariant hard safety rails, and conservative broker-profile margin estimates. |
 | PR 5 | Trading decision agent guardrails | Pending | Adds bounded LLM trading output with Pydantic validation, retry, safe fallback, prompt/schema persistence, full context snapshot, and no paper order side effects yet. |
@@ -141,3 +151,11 @@
 - 2026-06-01: PR 1b full verification passed: `source ~/.venv/bin/activate && pytest -q` passed with 257 tests.
 - 2026-06-01: PR 1b Alembic offline SQL generation passed: `source ~/.venv/bin/activate && alembic upgrade head --sql`.
 - 2026-06-01: PR 1b diff whitespace checks passed with `git diff --check`.
+- 2026-06-01: PR 2 baseline before implementation: `source ~/.venv/bin/activate && pytest tests/db tests/trading -q` passed with 20 tests.
+- 2026-06-01: PR 2 RED checks failed for expected missing modules/models:
+  - `pytest tests/trading/test_universe.py tests/trading/test_provider_resilience.py tests/trading/test_point_in_time.py tests/trading/test_manual_requests.py tests/trading/test_signal_sources.py tests/trading/test_fundamental_signals.py tests/trading/test_event_news_signals.py tests/trading/test_relative_strength.py tests/trading/test_signals.py tests/trading/test_pipeline.py tests/db/test_trading_models.py -q`
+- 2026-06-01: PR 2 targeted verification passed: `source ~/.venv/bin/activate && pytest tests/trading/test_universe.py tests/trading/test_provider_resilience.py tests/trading/test_point_in_time.py tests/trading/test_manual_requests.py tests/trading/test_signal_sources.py tests/trading/test_fundamental_signals.py tests/trading/test_event_news_signals.py tests/trading/test_relative_strength.py tests/trading/test_signals.py tests/trading/test_pipeline.py tests/db/test_trading_models.py -q` passed with 25 tests.
+- 2026-06-01: PR 2 broader relevant verification passed: `source ~/.venv/bin/activate && pytest tests/db tests/trading tests/tools/test_market_data.py -q` passed with 55 tests.
+- 2026-06-01: PR 2 full verification passed: `source ~/.venv/bin/activate && pytest -q` passed with 276 tests.
+- 2026-06-01: PR 2 Alembic offline SQL generation passed: `source ~/.venv/bin/activate && alembic upgrade head --sql`.
+- 2026-06-01: PR 2 diff whitespace checks passed for tracked changes with `git diff --check`; untracked file no-index whitespace check emitted no whitespace errors.

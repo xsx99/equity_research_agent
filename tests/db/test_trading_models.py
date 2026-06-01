@@ -2,16 +2,26 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 from src.db.models.trading import (
+    EventNewsItem,
+    FundamentalSnapshot,
     LlmParseStatus,
     LlmPromptLifecycleStatus,
     LlmPromptRun,
     LlmPromptTemplate,
     LlmUsageEvent,
     LlmUsageStatus,
+    ManualTickerRequest,
+    ManualTickerRequestMode,
+    ManualTickerRequestStatus,
     PeerBasket,
     PortfolioIntent,
     PortfolioIntentLifecycleStatus,
     PortfolioIntentType,
+    ProviderRequestRun,
+    ProviderRequestStatus,
+    SignalSnapshot,
+    SourceIngestionRun,
+    SourceIngestionStatus,
     StrategyDefinition,
     StrategyLifecycleStatus,
     StrategySource,
@@ -19,6 +29,10 @@ from src.db.models.trading import (
     ThemeTaxonomy,
     TickerRelationship,
     TickerRelationshipType,
+    UniverseFilterConfig,
+    UniverseSnapshot,
+    UniverseSymbol,
+    UniverseSymbolStatus,
 )
 
 
@@ -72,6 +86,17 @@ def test_new_status_enums_expose_choices():
         "theme_constituent",
     )
     assert ThemeLifecycleStatus.choices() == ("active", "retired")
+    assert UniverseSymbolStatus.choices() == ("included", "excluded")
+    assert ManualTickerRequestMode.choices() == ("review_only", "paper_trade_eligible")
+    assert ManualTickerRequestStatus.choices() == ("active", "dismissed", "cancelled")
+    assert ProviderRequestStatus.choices() == (
+        "succeeded",
+        "failed",
+        "cache_hit",
+        "budget_exceeded",
+        "circuit_open",
+    )
+    assert SourceIngestionStatus.choices() == ("succeeded", "failed", "degraded")
 
 
 def test_llm_models_can_be_instantiated():
@@ -160,6 +185,138 @@ def test_pr_1b_models_can_be_instantiated():
     assert theme.lifecycle_status == "active"
 
 
+def test_pr_2_models_can_be_instantiated():
+    now = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+    config = UniverseFilterConfig(
+        profile_name="default",
+        version=1,
+        is_active=True,
+        min_price=5,
+        min_avg_dollar_volume=25_000_000,
+        included_sectors_json=["Technology"],
+        excluded_sectors_json=[],
+        included_industries_json=[],
+        excluded_industries_json=[],
+        exchanges_json=["NASDAQ"],
+        asset_types_json=["common_stock"],
+        manual_include_json=[],
+        manual_exclude_json=[],
+    )
+    universe = UniverseSnapshot(
+        filter_config=config,
+        snapshot_date=date(2026, 6, 1),
+        started_at=now,
+        completed_at=now,
+        provider="fixture",
+        status="succeeded",
+        included_count=1,
+        excluded_count=0,
+    )
+    symbol = UniverseSymbol(
+        universe_snapshot=universe,
+        symbol="AAPL",
+        company_name="Apple",
+        asset_type="common_stock",
+        exchange="NASDAQ",
+        sector="Technology",
+        industry="Hardware",
+        price=180,
+        avg_dollar_volume=90_000_000,
+        status="included",
+        exclusion_reason=None,
+    )
+    manual = ManualTickerRequest(
+        ticker="AAPL",
+        reason="forced review",
+        mode="review_only",
+        status="active",
+        created_at=now,
+    )
+    ingestion = SourceIngestionRun(
+        source_family="fundamental",
+        run_type="targeted",
+        scope_json={"tickers": ["AAPL"]},
+        provider="fixture",
+        as_of=now,
+        status="succeeded",
+        coverage_json={"count": 1},
+    )
+    request = ProviderRequestRun(
+        provider="fixture",
+        endpoint="fundamentals",
+        source_family="fundamental",
+        scope_json={"ticker": "AAPL"},
+        cache_status="miss",
+        request_count=1,
+        budget_remaining=99,
+        retry_count=0,
+        backoff_ms=0,
+        latency_ms=5,
+        status="succeeded",
+        error_code=None,
+        circuit_state="closed",
+        degraded_mode=False,
+        started_at=now,
+        completed_at=now,
+    )
+    fundamental = FundamentalSnapshot(
+        ticker="AAPL",
+        fiscal_period="2026Q1",
+        as_of_date=date(2026, 3, 31),
+        provider="fixture",
+        source_refs_json=[{"id": "fund-1"}],
+        event_time=now,
+        published_at=now,
+        ingested_at=now,
+        available_for_decision_at=now,
+        raw_payload_ref="fixture://fund-1",
+        normalized_metrics_json={"revenue_growth_score": 0.7},
+    )
+    event = EventNewsItem(
+        ticker="AAPL",
+        source_ticker=None,
+        event_type="analyst_upgrade",
+        direction="positive",
+        sentiment="positive",
+        importance="high",
+        headline="Analyst upgrade",
+        summary="Upgrade",
+        provider="fixture",
+        source_refs_json=[{"id": "event-1"}],
+        dedupe_key="AAPL|analyst_upgrade|2026-06-01",
+        event_time=now,
+        published_at=now,
+        ingested_at=now,
+        available_for_decision_at=now,
+        raw_payload_ref="fixture://event-1",
+    )
+    signal = SignalSnapshot(
+        ticker="AAPL",
+        snapshot_type="pre_open",
+        decision_time=now,
+        available_for_decision_at=now,
+        max_input_available_for_decision_at=now,
+        signal_json={"technical": {}},
+        source_freshness_json={"technical": "fresh"},
+        missing_signals_json=["option_chain_availability"],
+        stale_signals_json=[],
+        source_record_refs_json=[{"source_record_id": "fund-1"}],
+        source_available_times_json={"fund-1": now.isoformat()},
+        excluded_future_source_count=0,
+        point_in_time_passed=True,
+        selection_source="scanner",
+    )
+
+    assert config.profile_name == "default"
+    assert symbol.status == "included"
+    assert manual.mode == "review_only"
+    assert ingestion.status == "succeeded"
+    assert request.circuit_state == "closed"
+    assert fundamental.normalized_metrics_json["revenue_growth_score"] == 0.7
+    assert event.dedupe_key.startswith("AAPL|")
+    assert signal.point_in_time_passed is True
+
+
 def test_trading_migration_contains_pr_1a_tables():
     migration_path = Path("alembic/versions/005_trading_minimal_foundation_tables.py")
     text = migration_path.read_text(encoding="utf-8")
@@ -185,3 +342,32 @@ def test_trading_migration_contains_pr_1b_tables_and_constraints():
     assert "ck_ticker_relationships_confidence" in text
     assert "ck_ticker_relationships_strength_score" in text
     assert "ck_theme_taxonomy_lifecycle_status" in text
+
+
+def test_trading_migration_contains_pr_2_tables_and_pit_columns():
+    migration_path = Path("alembic/versions/007_universe_signal_mvp_tables.py")
+    text = migration_path.read_text(encoding="utf-8")
+
+    assert 'down_revision: Union[str, None] = "006"' in text
+    for table_name in (
+        '"universe_filter_configs"',
+        '"universe_snapshots"',
+        '"universe_symbols"',
+        '"manual_ticker_requests"',
+        '"source_ingestion_runs"',
+        '"provider_request_runs"',
+        '"fundamental_snapshots"',
+        '"event_news_items"',
+        '"signal_snapshots"',
+    ):
+        assert table_name in text
+    for required_column in (
+        '"decision_time"',
+        '"available_for_decision_at"',
+        '"max_input_available_for_decision_at"',
+        '"source_record_refs_json"',
+        '"source_available_times_json"',
+        '"excluded_future_source_count"',
+        '"point_in_time_passed"',
+    ):
+        assert required_column in text
