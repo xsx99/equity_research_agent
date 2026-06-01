@@ -2,7 +2,7 @@
 
 ## 2026-05-29
 
-- Created the V2 staged implementation plan in `plan/research_app/trading_agent_refactor_implementation_plan.md`.
+- Created the V2 staged implementation plan, now modularized under `plan/research_app/trading_agent_refactor/implementation/`.
 - Execution policy: implement one PR slice at a time, stop after verification, wait for user review/merge before continuing.
 - Updated the design and implementation plan to include strategy evolution: the system can summarize repeated learning into new strategy proposals, add them to the strategy catalog as candidate/shadow strategies, and promote them through gated lifecycle states.
 - Updated the design and implementation plan to include hourly intraday signal refresh, news scans, and risk-gated immediate rebalance actions for material signal changes or critical/high positive or negative news.
@@ -49,6 +49,13 @@
 - Clarified historical replay v0 scope: PR 3 evaluates the three deterministic MVP signal families available after PR 2 and marks deeper transcript, SEC/insider, options, and macro/read-through strategies as unsupported/missing instead of pretending full-strategy replay exists.
 - Expanded the PR 2 MVP signal surface from mostly market/relative-strength signals to three required families: technical, fundamental, and events/news, with point-in-time `FundamentalSnapshot` and `EventNewsItem` source rows.
 
+## 2026-06-01
+
+- Split the oversized design doc and implementation plan into modular docs under `plan/research_app/trading_agent_refactor/`, kept the old files as compatibility indexes, and added `module_contracts.md` to make cross-module inputs, outputs, consumers, and hard constraints explicit.
+- Added `plan/research_app/trading_agent_refactor/implementation/reading_guide.md` with a PR-by-PR minimal context matrix so implementation agents can read only the required design modules, current PR module, module contracts, and direct upstream artifacts.
+- Organized `documents/` and `plan/`: moved research-app deploy/runbook docs under `documents/research_app/`, archived older MVP and architecture-refactor plans under `plan/archive/`, added README indexes for active vs archived docs, updated references to moved paths, and removed stray `.DS_Store` files from `plan/`.
+- Aggressively cleaned the active trading-agent plan entrypoints: moved the progress tracker into `plan/research_app/trading_agent_refactor/progress_tracker.md`, removed the old compatibility index files, and updated active docs to point directly at modular design and implementation files.
+
 ## PR Slice Status
 
 | Slice | Scope | Status | Notes |
@@ -93,4 +100,8 @@
 - 2026-05-31: `git diff --check` passed after adding PIT/no-lookahead constraints, historical replay evaluator, safer learning-factor lifecycle, LLM validation/fallback, provider resilience, smaller PR slices, portfolio intents, relationship graph, and deterministic testing policy.
 - 2026-05-31: `git diff --check` passed after splitting PR 1 into PR 1a/1b, clarifying PR 4 `PortfolioContext` sequencing, and limiting PR 3 replay v0 to PR 2 deterministic signal families.
 - 2026-05-31: `git diff --check` passed after expanding PR 2/PR 3 planning to three MVP signal families: technical, fundamental, and events/news.
+- 2026-06-01: `git diff --check` passed after modularizing the design and implementation plan. Custom checks confirmed the split design body and all implementation PR sections preserve the original text exactly, all 68 original design headings and all 25 original implementation headings exist in the modules, and all new relative Markdown links resolve.
+- 2026-06-01: `git diff --check` passed after adding the PR reading guide. A custom Markdown link check confirmed all relative links in the trading-agent refactor planning docs resolve.
+- 2026-06-01: `git diff --check` passed after `documents/` and `plan/` directory cleanup. Custom checks confirmed Markdown links under `documents/` and `plan/` resolve, stale moved-path references are gone, and no `.DS_Store` files remain under those directories.
+- 2026-06-01: `git diff --check` passed after aggressive trading-agent plan entrypoint cleanup. Custom checks confirmed Markdown links under `documents/` and `plan/` resolve, stale root trading-agent index/tracker references are gone, and the old root trading-agent doc/index files no longer exist.
 - No implementation tests run yet; documentation/planning update only.

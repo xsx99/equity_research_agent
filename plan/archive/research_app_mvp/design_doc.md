@@ -77,7 +77,7 @@ Research App MVP 设计文档（重构版）
    - Agent 框架（MVP 边界）：采用 hybrid 方案。custom orchestration 负责 watchlist 遍历、market/news/DB 数据获取、`input_json` 快照落库、run 状态流转、错误隔离、结果持久化与 eval；Phidata Agent 仅负责单次 LLM 调用与返回原始响应。
    - MVP 不启用 Phidata 的动态 tool-calling。market_data、news_data、insider 查询等工具由 Python orchestration 在模型调用前直接执行，再把结果整理进 prompt/input snapshot；这样可保证 replayability、可测试性与稳定的 eval 输入。
    - 每个 ticker/run 建立独立上下文，避免跨标的泄漏；上下文控制（history truncation / selective recall）继续由 orchestration/tool 层决定。`show_tool_calls` 仅保留给未来引入动态 tool-calling 时的调试场景，不作为 MVP 运行路径的依赖。
-   - 详细边界与取舍见 `plan/research_app/architecture_recommendation.md`。
+   - 详细边界与取舍见 `plan/archive/research_app_mvp/architecture_recommendation.md`。
 
 9. 运行流程
    - research cron：工作日 `9:20 ET` 读取所有 active tickers -> 在 Python orchestration 中先抓取一次 batch 级 `global_context`，再对每个 ticker 现场拉取 market snapshot + ticker news + 必要 DB context -> 写入 `research_runs.input_json` 快照 -> 调用 Phidata 包装的单次 LLM -> 直接写 runs/outputs 入 Postgres。插入 run 时 status=queued，开始处理某 ticker 时置 running+started_at，成功后置 succeeded+finished_at，失败则置 failed 并写 error_message+finished_at（不中断其他 ticker）。
@@ -94,7 +94,7 @@ Research App MVP 设计文档（重构版）
 11. 部署与运维要点
    - 单机部署，Postgres 数据目录固定在持久化磁盘（非 tmpfs）；树莓派需确认磁盘挂载。
    - scheduler 采用系统 cron 或等效方案；成本与频率记录在 runbook。
-   - 详细步骤见 documents/research_app_deploy.md；运维常见操作见 documents/research_app_runbook.md。
+   - 详细步骤见 `documents/research_app/deploy.md`；运维常见操作见 `documents/research_app/runbook.md`。
 
 12. 验收标准
    1. /watchlist 可添加 ticker，刷新可见。
