@@ -76,7 +76,7 @@
   - Added provider guardrails in `src/trading/provider_resilience.py` with cache/freshness decisions, request budgets, retry/backoff, circuit state, degraded-mode telemetry, and in-memory request recording for tests.
   - Added manual ticker request service in `src/trading/manual_requests.py` for active requests, dismiss/cancel state, result metadata, and `review_only` / `paper_trade_eligible` modes.
   - Added point-in-time source filtering and source repositories in `src/trading/point_in_time.py` and `src/trading/signal_sources.py`.
-  - Added deterministic technical, fundamental, and events/news signal builders in `src/trading/signals.py`, `src/trading/fundamental_signals.py`, and `src/trading/event_news_signals.py`, with explicit missing placeholders for deferred SEC/insider/transcript/options/macro read-through families.
+  - Added deterministic technical, fundamental, and events/news signal builders in `src/trading/technical_signals.py`, `src/trading/fundamental_signals.py`, and `src/trading/event_news_signals.py`, with explicit missing placeholders for deferred SEC/insider/transcript/options/macro read-through families.
   - Added pre-open `SignalPipeline` and `UniverseScanPipeline` in `src/trading/pipeline.py`, including active manual-request merge without trade approval bypass.
   - Added PR 2 ORM models/enums in `src/db/models/trading.py`, exports from `src/db/models/__init__.py`, and Alembic migration `alembic/versions/007_universe_signal_mvp_tables.py`.
   - Extended market-data provider contracts with universe asset support and added an Alpaca active-asset adapter method.
@@ -159,3 +159,5 @@
 - 2026-06-01: PR 2 full verification passed: `source ~/.venv/bin/activate && pytest -q` passed with 276 tests.
 - 2026-06-01: PR 2 Alembic offline SQL generation passed: `source ~/.venv/bin/activate && alembic upgrade head --sql`.
 - 2026-06-01: PR 2 diff whitespace checks passed for tracked changes with `git diff --check`; untracked file no-index whitespace check emitted no whitespace errors.
+- 2026-06-01: PR 2 follow-up extracted explicit technical signal module after review feedback. Focused verification passed: `source ~/.venv/bin/activate && pytest tests/trading/test_technical_signals.py tests/trading/test_signals.py tests/trading/test_relative_strength.py -q` passed with 5 tests.
+- 2026-06-01: PR 2 follow-up full verification passed: `source ~/.venv/bin/activate && pytest -q` passed with 278 tests.
