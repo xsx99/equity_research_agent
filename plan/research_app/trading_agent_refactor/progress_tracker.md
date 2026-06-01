@@ -55,12 +55,21 @@
 - Added `plan/research_app/trading_agent_refactor/implementation/reading_guide.md` with a PR-by-PR minimal context matrix so implementation agents can read only the required design modules, current PR module, module contracts, and direct upstream artifacts.
 - Organized `documents/` and `plan/`: moved research-app deploy/runbook docs under `documents/research_app/`, archived older MVP and architecture-refactor plans under `plan/archive/`, added README indexes for active vs archived docs, updated references to moved paths, and removed stray `.DS_Store` files from `plan/`.
 - Aggressively cleaned the active trading-agent plan entrypoints: moved the progress tracker into `plan/research_app/trading_agent_refactor/progress_tracker.md`, removed the old compatibility index files, and updated active docs to point directly at modular design and implementation files.
+- Implemented PR 1a minimal trading foundation on branch `trading-agent-pr1a`:
+  - Added seed strategy catalog helpers in `src/trading/strategy_catalog.py` with 19 tactical strategy/playbook rows and 5 expression buckets.
+  - Added trade identity policy taxonomy in `src/trading/trade_taxonomy.py`.
+  - Added trading prompt registry foundation in `src/agents/prompt_registry.py` and prompt metadata docs under `src/agents/prompts/`.
+  - Added PR 1a ORM models and enums in `src/db/models/trading.py` and exported them from `src/db/models/__init__.py`.
+  - Added Alembic migration `alembic/versions/005_trading_minimal_foundation_tables.py`.
+  - Added focused tests under `tests/trading/`, `tests/agents/`, and `tests/db/`.
+  - Added package markers for the new test directories so full pytest collection keeps unique module names.
+  - Known gaps by design: no universe/signal pipeline behavior, no portfolio-intent/relationship graph schema, and no DB smoke/migration execution against Postgres in unit tests.
 
 ## PR Slice Status
 
 | Slice | Scope | Status | Notes |
 | --- | --- | --- | --- |
-| PR 1a | Minimal trading foundation | Pending | Adds strategy definitions, prompt registry/schema, 15 broad tactical strategies, 4 eval-derived playbooks, 5 expression buckets, and trade identity taxonomy. No universe/signal/relationship tables. |
+| PR 1a | Minimal trading foundation | Ready for review | Adds strategy definitions, prompt registry/schema, 15 broad tactical strategies, 4 eval-derived playbooks, 5 expression buckets, and trade identity taxonomy. No universe/signal/relationship tables. Verified with targeted and broader PR 1a tests. |
 | PR 1b | Portfolio intents + relationship graph schema | Pending | Adds portfolio intents, ticker relationships, peer baskets, theme taxonomy, and pure helpers for core-holding eligibility and structured peer/theme data. |
 | PR 2 | Provider resilience + three-family point-in-time signal MVP | Pending | Adds provider guardrails, fake-provider test path, request telemetry, user-editable universe filters, persistent manual requests, technical/fundamental/events-news signal snapshots, `FundamentalSnapshot`/`EventNewsItem` source rows, and source availability metadata. |
 | PR 3 | Strategy matching + historical replay outcome evaluator | Pending | Adds source attribution, primary strategy selection, trade classification, catalyst-watch split, bearish gating, confidence calibration inputs, and replay v0 for the PR 2 technical/fundamental/events-news MVP signal families. |
@@ -104,4 +113,14 @@
 - 2026-06-01: `git diff --check` passed after adding the PR reading guide. A custom Markdown link check confirmed all relative links in the trading-agent refactor planning docs resolve.
 - 2026-06-01: `git diff --check` passed after `documents/` and `plan/` directory cleanup. Custom checks confirmed Markdown links under `documents/` and `plan/` resolve, stale moved-path references are gone, and no `.DS_Store` files remain under those directories.
 - 2026-06-01: `git diff --check` passed after aggressive trading-agent plan entrypoint cleanup. Custom checks confirmed Markdown links under `documents/` and `plan/` resolve, stale root trading-agent index/tracker references are gone, and the old root trading-agent doc/index files no longer exist.
-- No implementation tests run yet; documentation/planning update only.
+- 2026-06-01: PR 1a baseline before implementation: `source ~/.venv/bin/activate && pytest -q` passed with 235 tests.
+- 2026-06-01: PR 1a RED checks failed for expected missing modules/models:
+  - `pytest tests/trading/test_strategy_catalog.py -q`
+  - `pytest tests/trading/test_trade_taxonomy.py -q`
+  - `pytest tests/agents/test_prompt_registry.py -q`
+  - `pytest tests/db/test_trading_models.py -q`
+- 2026-06-01: PR 1a targeted verification passed: `source ~/.venv/bin/activate && pytest tests/agents/test_prompt_registry.py tests/trading/test_strategy_catalog.py tests/trading/test_trade_taxonomy.py tests/db/test_trading_models.py -q` passed with 13 tests.
+- 2026-06-01: PR 1a broader relevant verification passed: `source ~/.venv/bin/activate && pytest tests/agents/test_prompt_registry.py tests/db tests/trading -q` passed with 13 tests.
+- 2026-06-01: PR 1a full verification passed after adding package markers for new test directories: `source ~/.venv/bin/activate && pytest -q` passed with 248 tests.
+- 2026-06-01: PR 1a Alembic offline SQL generation passed: `source ~/.venv/bin/activate && alembic upgrade head --sql`.
+- 2026-06-01: PR 1a diff whitespace checks passed for tracked changes and new files with `git diff --check` plus no-index checks over untracked files.
