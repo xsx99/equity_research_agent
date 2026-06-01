@@ -64,13 +64,20 @@
   - Added focused tests under `tests/trading/`, `tests/agents/`, and `tests/db/`.
   - Added package markers for the new test directories so full pytest collection keeps unique module names.
   - Known gaps by design: no universe/signal pipeline behavior, no portfolio-intent/relationship graph schema, and no DB smoke/migration execution against Postgres in unit tests.
+- Implemented PR 1b portfolio intents and relationship graph schema on branch `pr1b-portfolio-intents-relationships`:
+  - Added pure portfolio-intent helpers in `src/trading/portfolio_intents.py` for active core-holding approval, max-weight lookup, and tactical interaction checks.
+  - Added pure relationship graph helpers in `src/trading/relationships.py` for explicit allowed-use checks, deterministic peer-basket members, peer-basket definitions, and theme taxonomy nodes.
+  - Added PR 1b ORM models and enums in `src/db/models/trading.py` and exported them from `src/db/models/__init__.py`.
+  - Added Alembic migration `alembic/versions/006_portfolio_intents_relationship_graph.py`.
+  - Added focused tests under `tests/trading/` and extended `tests/db/test_trading_models.py`.
+  - Known gaps by design: no universe/signal pipeline behavior, no strategy scoring, no relationship inference, and no live Postgres migration smoke test.
 
 ## PR Slice Status
 
 | Slice | Scope | Status | Notes |
 | --- | --- | --- | --- |
 | PR 1a | Minimal trading foundation | Ready for review | Adds strategy definitions, prompt registry/schema, 15 broad tactical strategies, 4 eval-derived playbooks, 5 expression buckets, and trade identity taxonomy. No universe/signal/relationship tables. Verified with targeted and broader PR 1a tests. |
-| PR 1b | Portfolio intents + relationship graph schema | Pending | Adds portfolio intents, ticker relationships, peer baskets, theme taxonomy, and pure helpers for core-holding eligibility and structured peer/theme data. |
+| PR 1b | Portfolio intents + relationship graph schema | Ready for review | Adds portfolio intents, ticker relationships, peer baskets, theme taxonomy, and pure helpers for core-holding eligibility and structured peer/theme data. No signal pipeline, strategy scoring, or relationship inference. |
 | PR 2 | Provider resilience + three-family point-in-time signal MVP | Pending | Adds provider guardrails, fake-provider test path, request telemetry, user-editable universe filters, persistent manual requests, technical/fundamental/events-news signal snapshots, `FundamentalSnapshot`/`EventNewsItem` source rows, and source availability metadata. |
 | PR 3 | Strategy matching + historical replay outcome evaluator | Pending | Adds source attribution, primary strategy selection, trade classification, catalyst-watch split, bearish gating, confidence calibration inputs, and replay v0 for the PR 2 technical/fundamental/events-news MVP signal families. |
 | PR 4 | Position sizing + portfolio risk manager | Pending | Depends on candidates and risk tables; adds fixture-backed `PortfolioContext` / `RiskContext`, simple risk appetite presets, generated risk configs, invariant hard safety rails, and conservative broker-profile margin estimates. |
@@ -124,3 +131,13 @@
 - 2026-06-01: PR 1a full verification passed after adding package markers for new test directories: `source ~/.venv/bin/activate && pytest -q` passed with 248 tests.
 - 2026-06-01: PR 1a Alembic offline SQL generation passed: `source ~/.venv/bin/activate && alembic upgrade head --sql`.
 - 2026-06-01: PR 1a diff whitespace checks passed for tracked changes and new files with `git diff --check` plus no-index checks over untracked files.
+- 2026-06-01: PR 1b baseline before implementation: `source ~/.venv/bin/activate && pytest tests/db tests/trading -q` passed with 11 tests.
+- 2026-06-01: PR 1b RED checks failed for expected missing modules/models:
+  - `pytest tests/trading/test_portfolio_intents.py -q`
+  - `pytest tests/trading/test_relationships.py -q`
+  - `pytest tests/db/test_trading_models.py -q`
+- 2026-06-01: PR 1b targeted verification passed: `source ~/.venv/bin/activate && pytest tests/trading/test_portfolio_intents.py tests/trading/test_relationships.py tests/db/test_trading_models.py -q` passed with 13 tests.
+- 2026-06-01: PR 1b broader relevant verification passed: `source ~/.venv/bin/activate && pytest tests/db tests/trading -q` passed with 20 tests.
+- 2026-06-01: PR 1b full verification passed: `source ~/.venv/bin/activate && pytest -q` passed with 257 tests.
+- 2026-06-01: PR 1b Alembic offline SQL generation passed: `source ~/.venv/bin/activate && alembic upgrade head --sql`.
+- 2026-06-01: PR 1b diff whitespace checks passed with `git diff --check`.

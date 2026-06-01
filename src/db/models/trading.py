@@ -1,7 +1,21 @@
 """Trading foundation ORM models."""
 import uuid
 
-from sqlalchemy import Boolean, CheckConstraint, Column, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint, func
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Column,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
 
@@ -35,6 +49,35 @@ class LlmParseStatus(ChoiceEnum):
 class LlmUsageStatus(ChoiceEnum):
     SUCCEEDED = "succeeded"
     FAILED = "failed"
+
+
+class PortfolioIntentLifecycleStatus(ChoiceEnum):
+    ACTIVE = "active"
+    PAUSED = "paused"
+    RETIRED = "retired"
+
+
+class PortfolioIntentType(ChoiceEnum):
+    CORE_GROWTH = "core_growth"
+    CORE_INDEX = "core_index"
+    CORE_THEME = "core_theme"
+    CORE_CASH_LIKE = "core_cash_like"
+
+
+class TickerRelationshipType(ChoiceEnum):
+    PEER = "peer"
+    CUSTOMER = "customer"
+    SUPPLIER = "supplier"
+    COMPETITOR = "competitor"
+    SECTOR_LEADER = "sector_leader"
+    ETF_COMPONENT = "etf_component"
+    THEME_LEADER = "theme_leader"
+    THEME_CONSTITUENT = "theme_constituent"
+
+
+class ThemeLifecycleStatus(ChoiceEnum):
+    ACTIVE = "active"
+    RETIRED = "retired"
 
 
 class StrategyDefinition(Base):
@@ -204,4 +247,122 @@ class LlmUsageEvent(Base):
         CheckConstraint("latency_ms >= 0", name="ck_llm_usage_events_latency_ms"),
         CheckConstraint("retry_count >= 0", name="ck_llm_usage_events_retry_count"),
         Index("ix_llm_usage_events_provider_model", "provider", "model"),
+    )
+
+
+class PortfolioIntent(Base):
+    """User-approved core holding and portfolio-intent configuration."""
+
+    __tablename__ = "portfolio_intents"
+
+    portfolio_intent_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    ticker = Column(String(16), nullable=False, index=True)
+    intent_type = Column(String(64), nullable=False)
+    target_weight = Column(Numeric, nullable=False)
+    max_weight = Column(Numeric, nullable=False)
+    add_rules_json = Column(JSONB, nullable=False, default=list)
+    trim_rules_json = Column(JSONB, nullable=False, default=list)
+    thesis_invalidators_json = Column(JSONB, nullable=False, default=list)
+    allowed_tactical_interactions_json = Column(JSONB, nullable=False, default=list)
+    lifecycle_status = Column(
+        String(32),
+        nullable=False,
+        default=PortfolioIntentLifecycleStatus.ACTIVE.value,
+        server_default=PortfolioIntentLifecycleStatus.ACTIVE.value,
+        index=True,
+    )
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (
+        CheckConstraint(
+            f"intent_type IN {PortfolioIntentType.check_in_sql()}",
+            name="ck_portfolio_intents_intent_type",
+        ),
+        CheckConstraint(
+            f"lifecycle_status IN {PortfolioIntentLifecycleStatus.check_in_sql()}",
+            name="ck_portfolio_intents_lifecycle_status",
+        ),
+        CheckConstraint("target_weight >= 0", name="ck_portfolio_intents_target_weight"),
+        CheckConstraint("max_weight >= target_weight", name="ck_portfolio_intents_max_weight"),
+    )
+
+
+class TickerRelationship(Base):
+    """Directed structured ticker relationship for read-through and peer baskets."""
+
+    __tablename__ = "ticker_relationships"
+
+    ticker_relationship_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    source_ticker = Column(String(16), nullable=False, index=True)
+    target_ticker = Column(String(16), nullable=False, index=True)
+    relationship_type = Column(String(64), nullable=False)
+    theme_id = Column(String(64), nullable=True, index=True)
+    confidence = Column(Numeric, nullable=False)
+    strength_score = Column(Numeric, nullable=False)
+    valid_from = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    valid_until = Column(DateTime(timezone=True), nullable=True)
+    source_refs_json = Column(JSONB, nullable=False, default=list)
+    allowed_uses_json = Column(JSONB, nullable=False, default=list)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (
+        CheckConstraint(
+            f"relationship_type IN {TickerRelationshipType.check_in_sql()}",
+            name="ck_ticker_relationships_relationship_type",
+        ),
+        CheckConstraint("confidence >= 0 AND confidence <= 1", name="ck_ticker_relationships_confidence"),
+        CheckConstraint(
+            "strength_score >= 0 AND strength_score <= 1",
+            name="ck_ticker_relationships_strength_score",
+        ),
+        CheckConstraint(
+            "valid_until IS NULL OR valid_until >= valid_from",
+            name="ck_ticker_relationships_valid_window",
+        ),
+    )
+
+
+class PeerBasket(Base):
+    """Versioned decision-time peer basket used for attribution and replay."""
+
+    __tablename__ = "peer_baskets"
+
+    peer_basket_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    basket_key = Column(String(128), nullable=False)
+    version = Column(String(32), nullable=False)
+    trade_date = Column(Date, nullable=False, index=True)
+    members_json = Column(JSONB, nullable=False, default=list)
+    construction_method = Column(String(64), nullable=False)
+    source_refs_json = Column(JSONB, nullable=False, default=list)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("basket_key", "version", "trade_date", name="uq_peer_baskets_key_version_trade_date"),
+        Index("ix_peer_baskets_basket_key_version", "basket_key", "version"),
+    )
+
+
+class ThemeTaxonomy(Base):
+    """User-maintained theme hierarchy for grouping and read-through."""
+
+    __tablename__ = "theme_taxonomy"
+
+    theme_id = Column(String(64), primary_key=True)
+    display_name = Column(String(128), nullable=False)
+    parent_theme_id = Column(String(64), nullable=True, index=True)
+    description = Column(Text, nullable=True)
+    lifecycle_status = Column(
+        String(32),
+        nullable=False,
+        default=ThemeLifecycleStatus.ACTIVE.value,
+        server_default=ThemeLifecycleStatus.ACTIVE.value,
+        index=True,
+    )
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (
+        CheckConstraint(
+            f"lifecycle_status IN {ThemeLifecycleStatus.check_in_sql()}",
+            name="ck_theme_taxonomy_lifecycle_status",
+        ),
     )
