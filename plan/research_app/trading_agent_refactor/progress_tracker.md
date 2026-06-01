@@ -83,6 +83,16 @@
   - Added a minimal `SourceIngestionService` adapter that calls existing market/news providers behind `ProviderResiliencePolicy`, converts technical bars, provider context, and news rows into `SourceRecord` plus repository-level `FundamentalSnapshot` / `EventNewsItem` artifacts, and records `SourceIngestionRun` / linked `ProviderRequestRun` metadata through the repository abstraction.
   - Added standalone PR 2 source-ingestion smoke coverage in `scripts/run_trading_source_ingestion_smoke.py` and documented the opt-in live API commands in the PR reading guide.
   - Known gaps by design: no strategy scoring, trading decisions, risk checks, paper orders, intraday refresh, UI, full SEC/insider/transcript parsing, option-chain signals, or live Postgres migration smoke test.
+- Implemented PR 3 strategy matching and historical replay outcome evaluator on branch `pr3-strategy-matching-replay`:
+  - Added deterministic strategy matching in `src/trading/strategy_matching.py` for PR 2 technical, fundamental, and events/news MVP signals, with rejected rows for direct negative catalysts and unsupported deferred source families.
+  - Added primary strategy selection in `src/trading/primary_strategy_selector.py` to freeze one selected strategy and expression bucket per ticker/action before trade classification.
+  - Added trade identity classification in `src/trading/trade_classifier.py`, including `catalyst_watch` vs ordinary `watch_only` handling and active portfolio-intent gating for `core_holding`.
+  - Added confidence calibration inputs in `src/trading/confidence_calibration.py` from historical `candidate_outcome_evaluations`.
+  - Added deterministic outcome evaluation and replay orchestration in `src/trading/outcome_evaluator.py` and `src/trading/historical_replay.py`; replay reconstructs from stored decision-available signal snapshots and uses future prices only for outcome measurement.
+  - Extended `src/trading/repository.py` and `src/trading/pipeline.py` with PR 3 in-memory persistence and a `StrategyPipeline` that stops before `TradingPipeline`.
+  - Added PR 3 ORM models/enums in `src/db/models/trading.py`, exports from `src/db/models/__init__.py`, and Alembic migration `alembic/versions/008_strategy_matching_replay_tables.py`.
+  - Added focused tests for strategy matching, primary selection, trade classification, confidence calibration, outcome evaluation, historical replay, repository storage, and DB model/migration coverage.
+  - Known gaps by design: no TradingPipeline call, no paper orders, no risk/sizing, no live Postgres migration smoke test, no option-chain strategy replay, and no backfill for full transcript, SEC/insider, or macro/read-through source families.
 
 ## PR Slice Status
 
@@ -91,7 +101,7 @@
 | PR 1a | Minimal trading foundation | Ready for review | Adds strategy definitions, prompt registry/schema, 15 broad tactical strategies, 4 eval-derived playbooks, 5 expression buckets, and trade identity taxonomy. No universe/signal/relationship tables. Verified with targeted and broader PR 1a tests. |
 | PR 1b | Portfolio intents + relationship graph schema | Ready for review | Adds portfolio intents, ticker relationships, peer baskets, theme taxonomy, and pure helpers for core-holding eligibility and structured peer/theme data. No signal pipeline, strategy scoring, or relationship inference. |
 | PR 2 | Provider resilience + three-family point-in-time signal MVP | Ready for review | Adds provider guardrails, provider-backed source ingestion adapter with fake-provider test path, request telemetry, user-editable universe filters, persistent manual requests, technical/fundamental/events-news signal snapshots, `FundamentalSnapshot`/`EventNewsItem` source rows, and source availability metadata. |
-| PR 3 | Strategy matching + historical replay outcome evaluator | Pending | Adds source attribution, primary strategy selection, trade classification, catalyst-watch split, bearish gating, confidence calibration inputs, and replay v0 for the PR 2 technical/fundamental/events-news MVP signal families. |
+| PR 3 | Strategy matching + historical replay outcome evaluator | Ready for review | Adds source attribution, primary strategy selection, trade classification, catalyst-watch split, bearish gating, confidence calibration inputs, and replay v0 for the PR 2 technical/fundamental/events-news MVP signal families. Stops before TradingPipeline/paper trading. |
 | PR 4 | Position sizing + portfolio risk manager | Pending | Depends on candidates and risk tables; adds fixture-backed `PortfolioContext` / `RiskContext`, simple risk appetite presets, generated risk configs, invariant hard safety rails, and conservative broker-profile margin estimates. |
 | PR 5 | Trading decision agent guardrails | Pending | Adds bounded LLM trading output with Pydantic validation, retry, safe fallback, prompt/schema persistence, full context snapshot, and no paper order side effects yet. |
 | PR 6 | Paper stock broker + portfolio state | Pending | Adds stock paper orders/executions/positions, unified simulated margin account, margin model/source metadata, and order idempotency. |
@@ -174,3 +184,11 @@
 - 2026-06-01: PR 2 source-ingestion smoke script full verification passed: `source ~/.venv/bin/activate && pytest -q` passed with 281 tests.
 - 2026-06-01: PR 2 source-ingestion smoke detail output now supports `--include-records`; RED/green verification passed with `source ~/.venv/bin/activate && pytest tests/test_run_trading_source_ingestion_smoke.py -q`, and live SNDK events/news smoke returned 5 normalized `event_news_items` plus provider timing fields.
 - 2026-06-01: PR 2 source-ingestion smoke detail output full verification passed: `source ~/.venv/bin/activate && pytest -q` passed with 282 tests.
+- 2026-06-01: PR 3 baseline in isolated worktree: `source ~/.venv/bin/activate && pytest -q` passed with 282 tests.
+- 2026-06-01: PR 3 RED checks failed for expected missing modules/models:
+  - `source ~/.venv/bin/activate && pytest tests/trading/test_strategy_matching.py tests/trading/test_primary_strategy_selector.py tests/trading/test_trade_classifier.py tests/trading/test_confidence_calibration.py tests/trading/test_outcome_evaluator.py tests/trading/test_historical_replay.py tests/trading/test_candidate_repository.py tests/db/test_trading_models.py -q`
+- 2026-06-01: PR 3 targeted verification passed: `source ~/.venv/bin/activate && pytest tests/trading/test_strategy_matching.py tests/trading/test_primary_strategy_selector.py tests/trading/test_trade_classifier.py tests/trading/test_confidence_calibration.py tests/trading/test_outcome_evaluator.py tests/trading/test_historical_replay.py tests/trading/test_candidate_repository.py tests/db/test_trading_models.py -q` passed with 22 tests.
+- 2026-06-01: PR 3 broader relevant verification passed: `source ~/.venv/bin/activate && pytest tests/trading tests/db -q` passed with 57 tests.
+- 2026-06-01: PR 3 full verification passed: `source ~/.venv/bin/activate && pytest -q` passed with 296 tests.
+- 2026-06-01: PR 3 Alembic offline SQL generation passed: `source ~/.venv/bin/activate && alembic upgrade head --sql`.
+- 2026-06-01: PR 3 diff whitespace checks passed with `git diff --check` and an untracked-file trailing-whitespace scan using `git ls-files --others --exclude-standard` plus `rg -n "[ \t]$"`.

@@ -2,8 +2,11 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 from src.db.models.trading import (
+    CandidateOutcomeEvaluation,
+    CandidateScore,
     EventNewsItem,
     FundamentalSnapshot,
+    HistoricalReplayRun,
     LlmParseStatus,
     LlmPromptLifecycleStatus,
     LlmPromptRun,
@@ -24,11 +27,13 @@ from src.db.models.trading import (
     SourceIngestionStatus,
     StrategyDefinition,
     StrategyLifecycleStatus,
+    StrategyRun,
     StrategySource,
     ThemeLifecycleStatus,
     ThemeTaxonomy,
     TickerRelationship,
     TickerRelationshipType,
+    TradeClassification,
     UniverseFilterConfig,
     UniverseSnapshot,
     UniverseSymbol,
@@ -317,6 +322,103 @@ def test_pr_2_models_can_be_instantiated():
     assert signal.point_in_time_passed is True
 
 
+def test_pr_3_models_can_be_instantiated():
+    now = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+    run = StrategyRun(
+        decision_time=now,
+        snapshot_type="pre_open",
+        status="succeeded",
+        metadata_json={"source": "unit"},
+    )
+    candidate = CandidateScore(
+        strategy_run=run,
+        signal_snapshot_id=None,
+        ticker="AAPL",
+        strategy_id="relative_strength_rotation_v1",
+        strategy_version="v1",
+        strategy_definition_id=None,
+        candidate_score=0.72,
+        direction="bullish",
+        action="enter_long",
+        typical_horizon="2w-3m",
+        core_signal_evidence_json={"technical.rs_vs_spy_1d": 0.02},
+        missing_required_signals_json=[],
+        unsupported_missing_signal_families_json=[],
+        invalidators_json=["relative strength breaks"],
+        risk_tags_json=["relative_strength"],
+        macro_compatibility="allowed",
+        selection_source="scanner",
+        manual_request_id=None,
+        selection_reason="relative strength confirmed",
+        rejection_reason=None,
+        benchmark_context_json={"primary_benchmark": "QQQ"},
+        decision_time=now,
+        available_for_decision_at=now,
+        source_record_refs_json=[],
+    )
+    classification = TradeClassification(
+        candidate_score=candidate,
+        strategy_run=run,
+        ticker="AAPL",
+        selected_strategy_id="relative_strength_rotation_v1",
+        selected_strategy_version="v1",
+        expression_bucket_id="long_stock",
+        expression_bucket_version="v1",
+        trade_identity="tactical_stock_trade",
+        watch_type=None,
+        direction="bullish",
+        intended_horizon="2w-3m",
+        exit_policy="strategy_invalidators_or_target_horizon",
+        result_status="actionable_trade",
+        classification_reason="actionable long stock",
+        selected_strategy_context_json={"candidate_score": 0.72},
+        decision_time=now,
+    )
+    replay = HistoricalReplayRun(
+        decision_time=now,
+        snapshot_type="pre_open",
+        status="succeeded",
+        started_at=now,
+        completed_at=now,
+        decision_filter_json={"available_for_decision_at_lte": now.isoformat()},
+        outcome_horizon_policy_json={"default_days": 5},
+        metadata_json={},
+    )
+    outcome = CandidateOutcomeEvaluation(
+        historical_replay_run=replay,
+        candidate_score=candidate,
+        trade_classification=classification,
+        ticker="AAPL",
+        strategy_id="relative_strength_rotation_v1",
+        strategy_version="v1",
+        expression_bucket_id="long_stock",
+        trade_identity="tactical_stock_trade",
+        direction="bullish",
+        catalyst_type="analyst_upgrade",
+        confidence_bucket="relative_strength_rotation_v1|long_stock|tactical_stock_trade|bullish|analyst_upgrade",
+        decision_time=now,
+        horizon_start_at=now,
+        horizon_end_at=now,
+        evaluation_status="final",
+        candidate_return=0.08,
+        benchmark_returns_json={"QQQ": 0.02},
+        peer_basket_id=None,
+        peer_basket_return=None,
+        alpha=0.06,
+        max_favorable_excursion=0.1,
+        max_adverse_excursion=-0.02,
+        regime=None,
+        sector_theme=None,
+        metadata_json={},
+    )
+
+    assert candidate.strategy_run is run
+    assert classification.candidate_score is candidate
+    assert replay.status == "succeeded"
+    assert outcome.trade_classification is classification
+    assert outcome.alpha == 0.06
+
+
 def test_trading_migration_contains_pr_1a_tables():
     migration_path = Path("alembic/versions/005_trading_minimal_foundation_tables.py")
     text = migration_path.read_text(encoding="utf-8")
@@ -371,3 +473,26 @@ def test_trading_migration_contains_pr_2_tables_and_pit_columns():
         '"point_in_time_passed"',
     ):
         assert required_column in text
+
+
+def test_trading_migration_contains_pr_3_tables_and_constraints():
+    migration_path = Path("alembic/versions/008_strategy_matching_replay_tables.py")
+    text = migration_path.read_text(encoding="utf-8")
+
+    assert 'down_revision: Union[str, None] = "007"' in text
+    for table_name in (
+        '"strategy_runs"',
+        '"candidate_scores"',
+        '"trade_classifications"',
+        '"historical_replay_runs"',
+        '"candidate_outcome_evaluations"',
+    ):
+        assert table_name in text
+    for constraint_name in (
+        "ck_candidate_scores_score_range",
+        "ck_candidate_scores_selection_source",
+        "ck_trade_classifications_trade_identity",
+        "ck_trade_classifications_watch_type",
+        "ck_candidate_outcome_evaluations_status",
+    ):
+        assert constraint_name in text

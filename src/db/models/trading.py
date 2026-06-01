@@ -110,6 +110,34 @@ class SourceIngestionStatus(ChoiceEnum):
     DEGRADED = "degraded"
 
 
+class StrategyRunStatus(ChoiceEnum):
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+
+
+class MacroCompatibility(ChoiceEnum):
+    ALLOWED = "allowed"
+    REDUCED_SIZE = "reduced_size"
+    BLOCKED = "blocked"
+
+
+class TradeIdentity(ChoiceEnum):
+    CORE_HOLDING = "core_holding"
+    TACTICAL_STOCK_TRADE = "tactical_stock_trade"
+    TACTICAL_OPTION_TRADE = "tactical_option_trade"
+    WATCH_ONLY = "watch_only"
+
+
+class WatchType(ChoiceEnum):
+    CATALYST_WATCH = "catalyst_watch"
+    ORDINARY_WATCH = "ordinary_watch"
+
+
+class CandidateOutcomeEvaluationStatus(ChoiceEnum):
+    INTERIM = "interim"
+    FINAL = "final"
+
+
 class StrategyDefinition(Base):
     """Versioned strategy metadata and JSON scoring/config policy."""
 
@@ -714,4 +742,265 @@ class SignalSnapshot(Base):
             name="ck_signal_snapshots_excluded_future_source_count",
         ),
         Index("ix_signal_snapshots_ticker_decision_type", "ticker", "decision_time", "snapshot_type"),
+    )
+
+
+class StrategyRun(Base):
+    """One candidate-scoring batch for a decision time."""
+
+    __tablename__ = "strategy_runs"
+
+    strategy_run_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    decision_time = Column(DateTime(timezone=True), nullable=False, index=True)
+    snapshot_type = Column(String(32), nullable=False, index=True)
+    status = Column(String(32), nullable=False, index=True)
+    metadata_json = Column(JSONB, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    candidate_scores = relationship("CandidateScore", back_populates="strategy_run")
+    trade_classifications = relationship("TradeClassification", back_populates="strategy_run")
+
+    __table_args__ = (
+        CheckConstraint(
+            "snapshot_type IN ('pre_open', 'intraday')",
+            name="ck_strategy_runs_snapshot_type",
+        ),
+        CheckConstraint(
+            f"status IN {StrategyRunStatus.check_in_sql()}",
+            name="ck_strategy_runs_status",
+        ),
+    )
+
+
+class CandidateScore(Base):
+    """Ranked ticker candidate for one strategy definition."""
+
+    __tablename__ = "candidate_scores"
+
+    candidate_score_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    strategy_run_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("strategy_runs.strategy_run_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    signal_snapshot_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("signal_snapshots.signal_snapshot_id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    ticker = Column(String(16), nullable=False, index=True)
+    strategy_id = Column(String(64), nullable=False, index=True)
+    strategy_version = Column(String(16), nullable=False)
+    strategy_definition_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("strategy_definitions.strategy_definition_id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    candidate_score = Column(Numeric, nullable=False)
+    direction = Column(String(32), nullable=False, index=True)
+    action = Column(String(64), nullable=False)
+    typical_horizon = Column(String(32), nullable=False)
+    core_signal_evidence_json = Column(JSONB, nullable=False, default=dict)
+    missing_required_signals_json = Column(JSONB, nullable=False, default=list)
+    unsupported_missing_signal_families_json = Column(JSONB, nullable=False, default=list)
+    invalidators_json = Column(JSONB, nullable=False, default=list)
+    risk_tags_json = Column(JSONB, nullable=False, default=list)
+    macro_compatibility = Column(String(32), nullable=False, index=True)
+    selection_source = Column(String(32), nullable=False, index=True)
+    manual_request_id = Column(UUID(as_uuid=True), nullable=True, index=True)
+    selection_reason = Column(Text, nullable=False)
+    rejection_reason = Column(String(128), nullable=True, index=True)
+    benchmark_context_json = Column(JSONB, nullable=False, default=dict)
+    decision_time = Column(DateTime(timezone=True), nullable=False, index=True)
+    available_for_decision_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    source_record_refs_json = Column(JSONB, nullable=False, default=list)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    strategy_run = relationship("StrategyRun", back_populates="candidate_scores")
+    signal_snapshot = relationship("SignalSnapshot")
+    strategy_definition = relationship("StrategyDefinition")
+    trade_classifications = relationship("TradeClassification", back_populates="candidate_score")
+    outcome_evaluations = relationship("CandidateOutcomeEvaluation", back_populates="candidate_score")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "strategy_run_id",
+            "ticker",
+            "strategy_id",
+            name="uq_candidate_scores_run_ticker_strategy",
+        ),
+        CheckConstraint(
+            "candidate_score >= 0 AND candidate_score <= 1",
+            name="ck_candidate_scores_score_range",
+        ),
+        CheckConstraint(
+            f"macro_compatibility IN {MacroCompatibility.check_in_sql()}",
+            name="ck_candidate_scores_macro_compatibility",
+        ),
+        CheckConstraint(
+            "selection_source IN ('scanner', 'manual_request', 'watchlist_pin')",
+            name="ck_candidate_scores_selection_source",
+        ),
+        Index("ix_candidate_scores_run_score", "strategy_run_id", "candidate_score"),
+        Index("ix_candidate_scores_ticker_strategy", "ticker", "strategy_id"),
+    )
+
+
+class TradeClassification(Base):
+    """Selected primary strategy context and portfolio-pool trade identity."""
+
+    __tablename__ = "trade_classifications"
+
+    trade_classification_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    candidate_score_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("candidate_scores.candidate_score_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    strategy_run_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("strategy_runs.strategy_run_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    ticker = Column(String(16), nullable=False, index=True)
+    selected_strategy_id = Column(String(64), nullable=False, index=True)
+    selected_strategy_version = Column(String(16), nullable=False)
+    expression_bucket_id = Column(String(64), nullable=False, index=True)
+    expression_bucket_version = Column(String(16), nullable=False)
+    trade_identity = Column(String(64), nullable=False, index=True)
+    watch_type = Column(String(64), nullable=True, index=True)
+    direction = Column(String(32), nullable=False, index=True)
+    intended_horizon = Column(String(32), nullable=False)
+    exit_policy = Column(String(128), nullable=False)
+    result_status = Column(String(64), nullable=False, index=True)
+    classification_reason = Column(Text, nullable=False)
+    selected_strategy_context_json = Column(JSONB, nullable=False, default=dict)
+    decision_time = Column(DateTime(timezone=True), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    candidate_score = relationship("CandidateScore", back_populates="trade_classifications")
+    strategy_run = relationship("StrategyRun", back_populates="trade_classifications")
+    outcome_evaluations = relationship("CandidateOutcomeEvaluation", back_populates="trade_classification")
+
+    __table_args__ = (
+        CheckConstraint(
+            f"trade_identity IN {TradeIdentity.check_in_sql()}",
+            name="ck_trade_classifications_trade_identity",
+        ),
+        CheckConstraint(
+            "watch_type IS NULL OR watch_type IN ('catalyst_watch', 'ordinary_watch')",
+            name="ck_trade_classifications_watch_type",
+        ),
+        Index("ix_trade_classifications_ticker_strategy", "ticker", "selected_strategy_id"),
+    )
+
+
+class HistoricalReplayRun(Base):
+    """Deterministic replay batch metadata."""
+
+    __tablename__ = "historical_replay_runs"
+
+    historical_replay_run_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    decision_time = Column(DateTime(timezone=True), nullable=False, index=True)
+    snapshot_type = Column(String(32), nullable=False, index=True)
+    status = Column(String(32), nullable=False, index=True)
+    started_at = Column(DateTime(timezone=True), nullable=False)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    decision_filter_json = Column(JSONB, nullable=False, default=dict)
+    outcome_horizon_policy_json = Column(JSONB, nullable=False, default=dict)
+    metadata_json = Column(JSONB, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    outcome_evaluations = relationship("CandidateOutcomeEvaluation", back_populates="historical_replay_run")
+
+    __table_args__ = (
+        CheckConstraint(
+            "snapshot_type IN ('pre_open', 'intraday')",
+            name="ck_historical_replay_runs_snapshot_type",
+        ),
+        CheckConstraint(
+            "status IN ('running', 'succeeded', 'failed')",
+            name="ck_historical_replay_runs_status",
+        ),
+    )
+
+
+class CandidateOutcomeEvaluation(Base):
+    """Outcome attribution for candidates, trades, rejected rows, and watch items."""
+
+    __tablename__ = "candidate_outcome_evaluations"
+
+    candidate_outcome_evaluation_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    historical_replay_run_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("historical_replay_runs.historical_replay_run_id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    candidate_score_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("candidate_scores.candidate_score_id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    trade_classification_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("trade_classifications.trade_classification_id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    ticker = Column(String(16), nullable=False, index=True)
+    strategy_id = Column(String(64), nullable=False, index=True)
+    strategy_version = Column(String(16), nullable=False)
+    expression_bucket_id = Column(String(64), nullable=False, index=True)
+    trade_identity = Column(String(64), nullable=False, index=True)
+    direction = Column(String(32), nullable=False, index=True)
+    catalyst_type = Column(String(128), nullable=True, index=True)
+    confidence_bucket = Column(String(255), nullable=False, index=True)
+    decision_time = Column(DateTime(timezone=True), nullable=False, index=True)
+    horizon_start_at = Column(DateTime(timezone=True), nullable=False)
+    horizon_end_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    evaluation_status = Column(String(32), nullable=False, index=True)
+    candidate_return = Column(Numeric, nullable=True)
+    benchmark_returns_json = Column(JSONB, nullable=False, default=dict)
+    peer_basket_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("peer_baskets.peer_basket_id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    peer_basket_return = Column(Numeric, nullable=True)
+    alpha = Column(Numeric, nullable=True)
+    max_favorable_excursion = Column(Numeric, nullable=True)
+    max_adverse_excursion = Column(Numeric, nullable=True)
+    regime = Column(String(64), nullable=True, index=True)
+    sector_theme = Column(String(128), nullable=True, index=True)
+    metadata_json = Column(JSONB, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    historical_replay_run = relationship("HistoricalReplayRun", back_populates="outcome_evaluations")
+    candidate_score = relationship("CandidateScore", back_populates="outcome_evaluations")
+    trade_classification = relationship("TradeClassification", back_populates="outcome_evaluations")
+    peer_basket = relationship("PeerBasket")
+
+    __table_args__ = (
+        CheckConstraint(
+            f"trade_identity IN {TradeIdentity.check_in_sql()}",
+            name="ck_candidate_outcome_evaluations_trade_identity",
+        ),
+        CheckConstraint(
+            f"evaluation_status IN {CandidateOutcomeEvaluationStatus.check_in_sql()}",
+            name="ck_candidate_outcome_evaluations_status",
+        ),
+        CheckConstraint(
+            "horizon_end_at >= horizon_start_at",
+            name="ck_candidate_outcome_evaluations_horizon_window",
+        ),
+        Index("ix_candidate_outcomes_strategy_bucket", "strategy_id", "confidence_bucket"),
+        Index("ix_candidate_outcomes_ticker_horizon", "ticker", "horizon_end_at"),
     )
