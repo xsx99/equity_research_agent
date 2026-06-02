@@ -5,7 +5,7 @@
 **Goal:** Add Alpaca-backed common-stock paper execution and unified paper margin-account portfolio state after guarded trading decisions and deterministic risk approval. Alpaca paper trading is the stock execution/account source of truth; local paper tables are audit, reconciliation, and replay mirrors.
 
 **Files:**
-- Create/modify: `src/trading/paper_stock_broker.py`
+- Create/modify: `src/trading/brokers/paper_stock.py`
 - Create/modify: `src/trading/portfolio/state.py`
 - Modify: `src/trading/repository.py`
 - Modify: `src/trading/pipeline.py`
@@ -30,7 +30,7 @@ Implementation notes:
 
 Already-written implementation adjustments:
 
-- `src/trading/paper_stock_broker.py`: keep local guardrails and idempotency, but submit supported stock actions to Alpaca paper trading using `market` / `day` orders. Poll order status by `client_order_id`; create local execution records only from broker-reported filled state.
+- `src/trading/brokers/paper_stock.py`: keep local guardrails and idempotency, but submit supported stock actions to Alpaca paper trading using `market` / `day` orders. Poll order status by `client_order_id`; create local execution records only from broker-reported filled state.
 - `src/trading/portfolio/state.py`: keep the offline `PortfolioLedger` only for replay/local simulation. The live PR 6 workflow should build `PortfolioSnapshot` from Alpaca `/v2/account` and `StockPosition` rows from `/v2/positions`.
 - `src/trading/workflows/paper_execution.py`: after a broker-reported fill, sync account and positions, replace local stock positions with broker-synced positions, persist the broker-sourced snapshot, and preserve local strategy/trade-identity metadata for mapped positions.
 - DB/ORM/migration: keep `paper_orders`, `paper_executions`, `paper_positions`, and `portfolio_snapshots`, but treat them as application audit/reconciliation records. Include broker/client order identifiers and broker-sourced margin profile/source fields.

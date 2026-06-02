@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from src.trading.replay.historical import HistoricalReplayRunRecord
 from src.trading.replay.outcomes import CandidateOutcomeEvaluationRecord
 from src.trading.data_sources.provider_resilience import ProviderRequestRunRecord
-from src.trading.paper_stock_broker import PaperExecutionRecord, PaperOrderRecord
+from src.trading.brokers.paper_stock import PaperExecutionRecord, PaperOrderRecord
 from src.trading.portfolio.state import PortfolioSnapshot, StockPosition
 from src.trading.risk import (
     PortfolioRiskSnapshotRecord,

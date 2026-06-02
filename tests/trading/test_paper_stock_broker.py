@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from src.trading.manual_review.requests import ManualTickerRequestService
-from src.trading.paper_stock_broker import PaperOrderRequest, PaperStockBroker
+from src.trading.brokers.paper_stock import PaperOrderRequest, PaperStockBroker
 from src.trading.repositories.in_memory import InMemoryTradingRepository
 from src.trading.risk import RiskDecisionRecord
 from src.trading.workflows.paper_execution import PaperExecutionWorkflow

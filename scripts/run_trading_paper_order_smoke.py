@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.core import config as app_config  # noqa: F401
-from src.trading.paper_stock_broker import PaperStockBroker
+from src.trading.brokers.paper_stock import PaperStockBroker
 
 
 def run_smoke(

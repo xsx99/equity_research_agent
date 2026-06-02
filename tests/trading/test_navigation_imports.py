@@ -63,10 +63,10 @@ def test_trading_strategy_paths_export_catalog_and_selection_components():
 
 
 def test_trading_contract_paths_export_remaining_components():
+    from src.trading.brokers.paper_stock import PaperStockBroker
     from src.trading.data_sources.provider_resilience import ProviderResiliencePolicy
     from src.trading.data_sources.universe import UniverseAsset, normalize_ticker
     from src.trading.manual_review.requests import ManualTickerRequestService
-    from src.trading.paper_stock_broker import PaperStockBroker
     from src.trading.portfolio.intents import PortfolioIntentConfig
     from src.trading.portfolio.state import PortfolioLedger
     from src.trading.risk import PortfolioContext, PositionSizer, RiskConfigResolver, RiskManager
@@ -99,6 +99,7 @@ def test_trading_root_no_longer_contains_compatibility_modules():
         "src/trading/historical_replay.py",
         "src/trading/manual_requests.py",
         "src/trading/outcome_evaluator.py",
+        "src/trading/paper_stock_broker.py",
         "src/trading/pipeline.py",
         "src/trading/point_in_time.py",
         "src/trading/portfolio_intents.py",

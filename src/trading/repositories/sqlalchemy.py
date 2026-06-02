@@ -6,7 +6,7 @@ from decimal import Decimal
 from typing import Any
 
 from src.db.models.trading import PaperExecution, PaperOrder, PaperPosition, PortfolioSnapshot as PortfolioSnapshotModel
-from src.trading.paper_stock_broker import PaperExecutionRecord, PaperOrderRecord
+from src.trading.brokers.paper_stock import PaperExecutionRecord, PaperOrderRecord
 from src.trading.portfolio.state import PortfolioSnapshot, StockPosition
 
 

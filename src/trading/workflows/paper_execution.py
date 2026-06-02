@@ -5,8 +5,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from src.trading.brokers.paper_stock import PaperOrderRequest, PaperOrderRecord, PaperStockBroker
 from src.trading.manual_review.requests import ManualTickerRequestService
-from src.trading.paper_stock_broker import PaperOrderRequest, PaperOrderRecord, PaperStockBroker
 from src.trading.portfolio.state import PortfolioSnapshot
 from src.trading.risk import RiskDecisionRecord
 from src.trading.workflows.portfolio_sync import BrokerPortfolioSyncWorkflow

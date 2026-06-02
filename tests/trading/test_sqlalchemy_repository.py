@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from typing import Any
 
-from src.trading.paper_stock_broker import PaperExecutionRecord, PaperOrderRecord
+from src.trading.brokers.paper_stock import PaperExecutionRecord, PaperOrderRecord
 from src.trading.portfolio.state import PortfolioSnapshot, StockPosition
 from src.trading.repositories.sqlalchemy import SqlAlchemyTradingRepository
 from src.trading.workflows.paper_execution import PaperExecutionWorkflow

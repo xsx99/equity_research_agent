@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.core import config as app_config  # noqa: F401
 from src.trading.manual_review.requests import ManualTickerRequestService
-from src.trading.paper_stock_broker import PaperStockBroker
+from src.trading.brokers.paper_stock import PaperStockBroker
 from src.trading.repositories.in_memory import InMemoryTradingRepository
 from src.trading.risk import RiskDecisionRecord
 from src.trading.workflows.paper_execution import PaperExecutionWorkflow
