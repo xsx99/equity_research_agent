@@ -1,4 +1,4 @@
-"""Portfolio intent contracts used by trading classification."""
+"""Portfolio intent helpers for trading classification."""
 from src.trading.portfolio.intents import (
     PortfolioIntentConfig,
     allowed_tactical_interactions_for_ticker,

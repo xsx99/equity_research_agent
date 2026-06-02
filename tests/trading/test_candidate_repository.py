@@ -1,5 +1,7 @@
 from datetime import datetime, timezone
 
+from src.trading.paper_stock_broker import PaperExecutionRecord, PaperOrderRecord
+from src.trading.portfolio.state import PortfolioSnapshot, StockPosition
 from src.trading.replay.outcomes import CandidateOutcomeEvaluationRecord
 from src.trading.risk import PortfolioRiskSnapshotRecord, PositionSizingDecisionRecord, RiskDecisionRecord, RiskFactorExposureRecord
 from src.trading.repositories.in_memory import InMemoryTradingRepository
@@ -185,3 +187,80 @@ def test_in_memory_repository_stores_pr4_risk_artifacts():
     assert repo.risk_factor_exposures == [exposure]
     assert repo.portfolio_risk_snapshots == [snapshot]
     assert repo.risk_decisions == [decision]
+
+
+def test_in_memory_repository_stores_pr6_paper_broker_artifacts_idempotently():
+    now = datetime(2026, 6, 1, 20, 0, tzinfo=timezone.utc)
+    repo = InMemoryTradingRepository()
+    order = PaperOrderRecord(
+        paper_order_id="order-1",
+        broker_order_id="broker-order-1",
+        client_order_id="2026-06-01:NVDA:relative_strength_rotation_v1:enter_long",
+        trading_decision_id="decision-1",
+        risk_decision_id="risk-1",
+        ticker="NVDA",
+        strategy_id="relative_strength_rotation_v1",
+        action="enter_long",
+        trade_date=now.date(),
+        quantity=25.0,
+        limit_price=200.0,
+        status="filled",
+        rejection_reason=None,
+        created_at=now,
+    )
+    execution = PaperExecutionRecord(
+        paper_execution_id="execution-1",
+        paper_order_id="order-1",
+        broker_order_id="broker-order-1",
+        ticker="NVDA",
+        quantity=25.0,
+        fill_price=200.0,
+        trade_date=now.date(),
+        executed_at=now,
+        net_cash_effect=-5_000.0,
+    )
+    position = StockPosition(
+        ticker="NVDA",
+        quantity=25.0,
+        average_cost=200.0,
+        market_price=200.0,
+        market_value=5_000.0,
+        trade_identity="tactical_stock_trade",
+        strategy_id="relative_strength_rotation_v1",
+        opened_at=now,
+        updated_at=now,
+        direction="long",
+    )
+    snapshot = PortfolioSnapshot(
+        as_of=now,
+        cash_balance=95_000.0,
+        account_equity=100_000.0,
+        net_liquidation_value=100_000.0,
+        buying_power=97_500.0,
+        excess_liquidity=98_500.0,
+        stock_market_value=5_000.0,
+        option_market_value=0.0,
+        stock_margin_requirement=2_500.0,
+        option_margin_requirement=0.0,
+        total_margin_requirement=2_500.0,
+        initial_margin_requirement=2_500.0,
+        maintenance_margin_requirement=1_500.0,
+        margin_model_profile="estimated_fidelity_like_conservative_v1",
+        margin_model_version="v1",
+        margin_requirement_source="estimated",
+        day_pnl=0.0,
+        realized_pnl=0.0,
+        unrealized_pnl=0.0,
+    )
+
+    repo.save_paper_order(order)
+    repo.save_paper_order(order)
+    repo.save_paper_execution(execution)
+    repo.save_paper_position(position)
+    repo.save_portfolio_snapshot(snapshot)
+
+    assert repo.paper_orders == [order]
+    assert repo.paper_executions == [execution]
+    assert repo.paper_positions == [position]
+    assert repo.portfolio_snapshots == [snapshot]
+    assert repo.has_paper_execution("execution-1") is True

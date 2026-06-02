@@ -8,11 +8,13 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_trading_workflow_paths_export_pipeline_entrypoints():
+    from src.trading.workflows.paper_execution import PaperExecutionWorkflow
     from src.trading.workflows.signal_snapshot import SignalPipeline
     from src.trading.workflows.strategy_scoring import StrategyPipeline
     from src.trading.workflows.trading_decision import TradingDecisionPipeline
     from src.trading.workflows.universe_scan import UniverseScanPipeline
 
+    assert PaperExecutionWorkflow.__name__ == "PaperExecutionWorkflow"
     assert UniverseScanPipeline.__name__ == "UniverseScanPipeline"
     assert SignalPipeline.__name__ == "SignalPipeline"
     assert StrategyPipeline.__name__ == "StrategyPipeline"
@@ -64,7 +66,9 @@ def test_trading_contract_paths_export_remaining_components():
     from src.trading.data_sources.provider_resilience import ProviderResiliencePolicy
     from src.trading.data_sources.universe import UniverseAsset, normalize_ticker
     from src.trading.manual_review.requests import ManualTickerRequestService
+    from src.trading.paper_stock_broker import PaperStockBroker
     from src.trading.portfolio.intents import PortfolioIntentConfig
+    from src.trading.portfolio.state import PortfolioLedger
     from src.trading.risk import PortfolioContext, PositionSizer, RiskConfigResolver, RiskManager
     from src.trading.relationships.graph import TickerRelationship
     from src.trading.replay.historical import HistoricalReplayRunner
@@ -74,7 +78,9 @@ def test_trading_contract_paths_export_remaining_components():
     assert UniverseAsset.__name__ == "UniverseAsset"
     assert normalize_ticker(" aapl ") == "AAPL"
     assert ManualTickerRequestService.__name__ == "ManualTickerRequestService"
+    assert PaperStockBroker.__name__ == "PaperStockBroker"
     assert PortfolioIntentConfig.__name__ == "PortfolioIntentConfig"
+    assert PortfolioLedger.__name__ == "PortfolioLedger"
     assert PortfolioContext.__name__ == "PortfolioContext"
     assert PositionSizer.__name__ == "PositionSizer"
     assert RiskConfigResolver.__name__ == "RiskConfigResolver"

@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING
 from src.trading.replay.historical import HistoricalReplayRunRecord
 from src.trading.replay.outcomes import CandidateOutcomeEvaluationRecord
 from src.trading.data_sources.provider_resilience import ProviderRequestRunRecord
+from src.trading.paper_stock_broker import PaperExecutionRecord, PaperOrderRecord
+from src.trading.portfolio.state import PortfolioSnapshot, StockPosition
 from src.trading.risk import (
     PortfolioRiskSnapshotRecord,
     PositionSizingDecisionRecord,
@@ -51,6 +53,10 @@ class InMemoryTradingRepository:
         self.llm_prompt_runs: list[object] = []
         self.llm_usage_events: list[object] = []
         self.trading_decisions: list["TradingDecisionRecord"] = []
+        self.paper_orders: list[PaperOrderRecord] = []
+        self.paper_executions: list[PaperExecutionRecord] = []
+        self.paper_positions: list[StockPosition] = []
+        self.portfolio_snapshots: list[PortfolioSnapshot] = []
 
     def save_universe_snapshot(self, snapshot: UniverseSnapshotResult) -> None:
         self.universe_snapshots.append(snapshot)
@@ -158,3 +164,25 @@ class InMemoryTradingRepository:
 
     def save_trading_decision(self, decision: "TradingDecisionRecord") -> None:
         self.trading_decisions.append(decision)
+
+    def save_paper_order(self, order: PaperOrderRecord) -> None:
+        if order.paper_order_id not in {item.paper_order_id for item in self.paper_orders}:
+            self.paper_orders.append(order)
+
+    def save_paper_execution(self, execution: PaperExecutionRecord) -> None:
+        if execution.paper_execution_id not in {item.paper_execution_id for item in self.paper_executions}:
+            self.paper_executions.append(execution)
+
+    def has_paper_execution(self, paper_execution_id: str) -> bool:
+        return any(item.paper_execution_id == paper_execution_id for item in self.paper_executions)
+
+    def save_paper_position(self, position: StockPosition) -> None:
+        self.paper_positions = [item for item in self.paper_positions if item.ticker != position.ticker]
+        self.paper_positions.append(position)
+        self.paper_positions.sort(key=lambda item: item.ticker)
+
+    def replace_paper_positions(self, positions: tuple[StockPosition, ...] | list[StockPosition]) -> None:
+        self.paper_positions = sorted(list(positions), key=lambda item: item.ticker)
+
+    def save_portfolio_snapshot(self, snapshot: PortfolioSnapshot) -> None:
+        self.portfolio_snapshots.append(snapshot)

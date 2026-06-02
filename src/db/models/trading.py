@@ -1285,3 +1285,140 @@ class TradingDecision(Base):
         ),
         Index("ix_trading_decisions_ticker_decision_time", "ticker", "decision_time"),
     )
+
+
+class PaperOrder(Base):
+    """Paper stock order staged from a validated trading decision and risk approval."""
+
+    __tablename__ = "paper_orders"
+
+    paper_order_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    broker_order_id = Column(String(128), nullable=True, index=True)
+    client_order_id = Column(String(255), nullable=False)
+    trading_decision_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("trading_decisions.trading_decision_id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    risk_decision_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("risk_decisions.risk_decision_id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    ticker = Column(String(16), nullable=False, index=True)
+    strategy_id = Column(String(64), nullable=False, index=True)
+    action = Column(String(32), nullable=False, index=True)
+    trade_date = Column(Date, nullable=False, index=True)
+    quantity = Column(Numeric, nullable=False)
+    order_price = Column(Numeric, nullable=True)
+    status = Column(String(32), nullable=False, index=True)
+    rejection_reason = Column(String(128), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    trading_decision = relationship("TradingDecision")
+    risk_decision = relationship("RiskDecision")
+    executions = relationship("PaperExecution", back_populates="paper_order")
+
+    __table_args__ = (
+        UniqueConstraint("client_order_id", name="uq_paper_orders_client_order_id"),
+        CheckConstraint(
+            "action IN ('enter_long', 'enter_short', 'reduce', 'exit')",
+            name="ck_paper_orders_action",
+        ),
+        CheckConstraint(
+            "status IN ('new', 'accepted', 'pending_new', 'partially_filled', 'filled', "
+            "'canceled', 'expired', 'rejected')",
+            name="ck_paper_orders_status",
+        ),
+    )
+
+
+class PaperExecution(Base):
+    """Paper fill record for a stock order."""
+
+    __tablename__ = "paper_executions"
+
+    paper_execution_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    paper_order_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("paper_orders.paper_order_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    broker_order_id = Column(String(128), nullable=True, index=True)
+    ticker = Column(String(16), nullable=False, index=True)
+    quantity = Column(Numeric, nullable=False)
+    fill_price = Column(Numeric, nullable=False)
+    trade_date = Column(Date, nullable=False, index=True)
+    executed_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    net_cash_effect = Column(Numeric, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    paper_order = relationship("PaperOrder", back_populates="executions")
+
+
+class PaperPosition(Base):
+    """Open or closed stock position in the unified paper margin account."""
+
+    __tablename__ = "paper_positions"
+
+    paper_position_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    ticker = Column(String(16), nullable=False, index=True)
+    strategy_id = Column(String(64), nullable=True, index=True)
+    trade_identity = Column(String(64), nullable=False, index=True)
+    direction = Column(String(16), nullable=False, default="long", server_default="long")
+    quantity = Column(Numeric, nullable=False)
+    average_cost = Column(Numeric, nullable=False)
+    market_price = Column(Numeric, nullable=False)
+    market_value = Column(Numeric, nullable=False)
+    opened_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+    closed_at = Column(DateTime(timezone=True), nullable=True)
+    status = Column(String(16), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (
+        CheckConstraint(
+            f"trade_identity IN {TradeIdentity.check_in_sql()}",
+            name="ck_paper_positions_trade_identity",
+        ),
+        CheckConstraint(
+            "direction IN ('long', 'short')",
+            name="ck_paper_positions_direction",
+        ),
+        CheckConstraint(
+            "status IN ('open', 'closed')",
+            name="ck_paper_positions_status",
+        ),
+    )
+
+
+class PortfolioSnapshot(Base):
+    """Unified simulated margin-account snapshot after stock paper executions."""
+
+    __tablename__ = "portfolio_snapshots"
+
+    portfolio_snapshot_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    snapshot_time = Column(DateTime(timezone=True), nullable=False, index=True)
+    cash_balance = Column(Numeric, nullable=False)
+    account_equity = Column(Numeric, nullable=False)
+    net_liquidation_value = Column(Numeric, nullable=False)
+    buying_power = Column(Numeric, nullable=False)
+    excess_liquidity = Column(Numeric, nullable=False)
+    stock_market_value = Column(Numeric, nullable=False)
+    option_market_value = Column(Numeric, nullable=False)
+    stock_margin_requirement = Column(Numeric, nullable=False)
+    option_margin_requirement = Column(Numeric, nullable=False)
+    total_margin_requirement = Column(Numeric, nullable=False)
+    initial_margin_requirement = Column(Numeric, nullable=False)
+    maintenance_margin_requirement = Column(Numeric, nullable=False)
+    margin_model_profile = Column(String(128), nullable=False)
+    margin_model_version = Column(String(32), nullable=False)
+    margin_requirement_source = Column(String(64), nullable=False)
+    day_pnl = Column(Numeric, nullable=False)
+    realized_pnl = Column(Numeric, nullable=False)
+    unrealized_pnl = Column(Numeric, nullable=False)
+    metadata_json = Column(JSONB, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())

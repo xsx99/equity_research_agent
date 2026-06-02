@@ -16,10 +16,14 @@ from src.db.models.trading import (
     ManualTickerRequest,
     ManualTickerRequestMode,
     ManualTickerRequestStatus,
+    PaperExecution,
+    PaperOrder,
+    PaperPosition,
     PeerBasket,
     PortfolioIntent,
     PortfolioIntentLifecycleStatus,
     PortfolioIntentType,
+    PortfolioSnapshot,
     ProviderRequestRun,
     ProviderRequestStatus,
     PortfolioRiskSnapshot,
@@ -538,6 +542,74 @@ def test_pr_5_models_can_be_instantiated():
     assert decision.paper_trade_authorized is False
 
 
+def test_pr_6_models_can_be_instantiated():
+    now = datetime(2026, 6, 1, 20, 0, tzinfo=timezone.utc)
+    order = PaperOrder(
+        broker_order_id="broker-order-1",
+        client_order_id="2026-06-01:NVDA:relative_strength_rotation_v1:enter_long",
+        trading_decision_id=None,
+        risk_decision_id=None,
+        ticker="NVDA",
+        strategy_id="relative_strength_rotation_v1",
+        action="enter_long",
+        trade_date=now.date(),
+        quantity=25,
+        order_price=200.0,
+        status="filled",
+        rejection_reason=None,
+    )
+    execution = PaperExecution(
+        paper_order=order,
+        broker_order_id="broker-order-1",
+        ticker="NVDA",
+        quantity=25,
+        fill_price=200.0,
+        trade_date=now.date(),
+        executed_at=now,
+        net_cash_effect=-5_000.0,
+    )
+    position = PaperPosition(
+        ticker="NVDA",
+        strategy_id="relative_strength_rotation_v1",
+        trade_identity="tactical_stock_trade",
+        direction="long",
+        quantity=25,
+        average_cost=200.0,
+        market_price=200.0,
+        market_value=5_000.0,
+        opened_at=now,
+        updated_at=now,
+        status="open",
+    )
+    snapshot = PortfolioSnapshot(
+        snapshot_time=now,
+        cash_balance=95_000.0,
+        account_equity=100_000.0,
+        net_liquidation_value=100_000.0,
+        buying_power=97_500.0,
+        excess_liquidity=98_500.0,
+        stock_market_value=5_000.0,
+        option_market_value=0.0,
+        stock_margin_requirement=2_500.0,
+        option_margin_requirement=0.0,
+        total_margin_requirement=2_500.0,
+        initial_margin_requirement=2_500.0,
+        maintenance_margin_requirement=1_500.0,
+        margin_model_profile="estimated_fidelity_like_conservative_v1",
+        margin_model_version="v1",
+        margin_requirement_source="estimated",
+        day_pnl=0.0,
+        realized_pnl=0.0,
+        unrealized_pnl=0.0,
+        metadata_json={},
+    )
+
+    assert execution.paper_order is order
+    assert order.client_order_id == "2026-06-01:NVDA:relative_strength_rotation_v1:enter_long"
+    assert position.status == "open"
+    assert snapshot.margin_model_profile == "estimated_fidelity_like_conservative_v1"
+
+
 def test_trading_migration_contains_pr_1a_tables():
     migration_path = Path("alembic/versions/005_trading_minimal_foundation_tables.py")
     text = migration_path.read_text(encoding="utf-8")
@@ -651,5 +723,27 @@ def test_trading_migration_contains_pr_5_tables_and_constraints():
         "ck_trading_decisions_instrument_type",
         "ck_trading_decisions_selection_source",
         "ck_trading_decisions_weight_ranges",
+    ):
+        assert constraint_name in text
+
+
+def test_trading_migration_contains_pr_6_tables_and_constraints():
+    migration_path = Path("alembic/versions/011_paper_stock_broker_portfolio_state.py")
+    text = migration_path.read_text(encoding="utf-8")
+
+    assert 'down_revision: Union[str, None] = "010"' in text
+    for table_name in (
+        '"paper_orders"',
+        '"paper_executions"',
+        '"paper_positions"',
+        '"portfolio_snapshots"',
+    ):
+        assert table_name in text
+    for constraint_name in (
+        "uq_paper_orders_client_order_id",
+        "ck_paper_orders_action",
+        "ck_paper_orders_status",
+        "ck_paper_positions_direction",
+        "ck_paper_positions_status",
     ):
         assert constraint_name in text
