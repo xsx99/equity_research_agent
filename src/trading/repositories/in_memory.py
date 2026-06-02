@@ -6,6 +6,12 @@ from datetime import datetime
 from src.trading.replay.historical import HistoricalReplayRunRecord
 from src.trading.replay.outcomes import CandidateOutcomeEvaluationRecord
 from src.trading.data_sources.provider_resilience import ProviderRequestRunRecord
+from src.trading.risk import (
+    PortfolioRiskSnapshotRecord,
+    PositionSizingDecisionRecord,
+    RiskDecisionRecord,
+    RiskFactorExposureRecord,
+)
 from src.trading.signals.sources import (
     EventNewsItemRecord,
     FundamentalSnapshotRecord,
@@ -33,6 +39,10 @@ class InMemoryTradingRepository:
         self.trade_classifications: list[TradeClassificationRecord] = []
         self.historical_replay_runs: list[HistoricalReplayRunRecord] = []
         self.candidate_outcome_evaluations: list[CandidateOutcomeEvaluationRecord] = []
+        self.position_sizing_decisions: list[PositionSizingDecisionRecord] = []
+        self.portfolio_risk_snapshots: list[PortfolioRiskSnapshotRecord] = []
+        self.risk_factor_exposures: list[RiskFactorExposureRecord] = []
+        self.risk_decisions: list[RiskDecisionRecord] = []
 
     def save_universe_snapshot(self, snapshot: UniverseSnapshotResult) -> None:
         self.universe_snapshots.append(snapshot)
@@ -107,3 +117,18 @@ class InMemoryTradingRepository:
         outcomes: list[CandidateOutcomeEvaluationRecord] | tuple[CandidateOutcomeEvaluationRecord, ...],
     ) -> None:
         self.candidate_outcome_evaluations.extend(outcomes)
+
+    def save_position_sizing_decision(self, decision: PositionSizingDecisionRecord) -> None:
+        self.position_sizing_decisions.append(decision)
+
+    def save_portfolio_risk_snapshot(self, snapshot: PortfolioRiskSnapshotRecord) -> None:
+        self.portfolio_risk_snapshots.append(snapshot)
+
+    def save_risk_factor_exposures(
+        self,
+        exposures: list[RiskFactorExposureRecord] | tuple[RiskFactorExposureRecord, ...],
+    ) -> None:
+        self.risk_factor_exposures.extend(exposures)
+
+    def save_risk_decision(self, decision: RiskDecisionRecord) -> None:
+        self.risk_decisions.append(decision)

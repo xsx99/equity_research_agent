@@ -22,6 +22,12 @@ from src.db.models.trading import (
     PortfolioIntentType,
     ProviderRequestRun,
     ProviderRequestStatus,
+    PortfolioRiskSnapshot,
+    PositionSizingDecision,
+    RiskAppetite,
+    RiskDecision,
+    RiskDecisionStatus,
+    RiskFactorExposure,
     SignalSnapshot,
     SourceIngestionRun,
     SourceIngestionStatus,
@@ -102,6 +108,8 @@ def test_new_status_enums_expose_choices():
         "circuit_open",
     )
     assert SourceIngestionStatus.choices() == ("succeeded", "failed", "degraded")
+    assert RiskAppetite.choices() == ("conservative", "balanced", "aggressive")
+    assert RiskDecisionStatus.choices() == ("approved", "reduced", "rejected")
 
 
 def test_llm_models_can_be_instantiated():
@@ -419,6 +427,79 @@ def test_pr_3_models_can_be_instantiated():
     assert outcome.alpha == 0.06
 
 
+def test_pr_4_models_can_be_instantiated():
+    now = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+    sizing = PositionSizingDecision(
+        candidate_score_id=None,
+        trade_classification_id=None,
+        ticker="AAPL",
+        risk_appetite="balanced",
+        base_weight=0.06,
+        volatility_adjusted_weight=0.05,
+        liquidity_capped_weight=0.04,
+        final_weight=0.04,
+        final_notional=4_000,
+        applied_caps_json=["liquidity_cap"],
+        binding_constraint="liquidity_cap",
+        decision_time=now,
+        metadata_json={},
+    )
+    snapshot = PortfolioRiskSnapshot(
+        decision_time=now,
+        risk_appetite="balanced",
+        resolver_version="risk_config_resolver_v1",
+        margin_model_profile="estimated_fidelity_like_conservative_v1",
+        margin_model_version="v1",
+        account_equity=100_000,
+        cash_balance=20_000,
+        buying_power=180_000,
+        excess_liquidity=60_000,
+        stock_margin_requirement=12_000,
+        option_margin_requirement=0,
+        total_margin_requirement=12_000,
+        initial_margin_requirement=12_000,
+        maintenance_margin_requirement=8_000,
+        margin_requirement_source="estimated",
+        net_exposure=40_000,
+        gross_exposure=40_000,
+        beta_adjusted_net_exposure=44_000,
+        concentration_flags_json=["sector:Technology"],
+        metadata_json={},
+    )
+    exposure = RiskFactorExposure(
+        portfolio_risk_snapshot=snapshot,
+        factor_type="sector",
+        factor_value="Technology",
+        gross_exposure=40_000,
+        net_exposure=40_000,
+        long_exposure=40_000,
+        short_exposure=0,
+        position_count=2,
+        metadata_json={},
+    )
+    decision = RiskDecision(
+        candidate_score_id=None,
+        trade_classification_id=None,
+        position_sizing_decision=sizing,
+        portfolio_risk_snapshot=snapshot,
+        ticker="AAPL",
+        status="approved",
+        reason_code="within_limits",
+        approved_weight=0.04,
+        approved_notional=4_000,
+        approved_quantity=40,
+        applied_rules_json=["single_name_limit_ok"],
+        generated_hedge_action_json=None,
+        decision_time=now,
+        metadata_json={},
+    )
+
+    assert sizing.risk_appetite == "balanced"
+    assert snapshot.margin_model_profile == "estimated_fidelity_like_conservative_v1"
+    assert exposure.portfolio_risk_snapshot is snapshot
+    assert decision.position_sizing_decision is sizing
+
+
 def test_trading_migration_contains_pr_1a_tables():
     migration_path = Path("alembic/versions/005_trading_minimal_foundation_tables.py")
     text = migration_path.read_text(encoding="utf-8")
@@ -494,5 +575,27 @@ def test_trading_migration_contains_pr_3_tables_and_constraints():
         "ck_trade_classifications_trade_identity",
         "ck_trade_classifications_watch_type",
         "ck_candidate_outcome_evaluations_status",
+    ):
+        assert constraint_name in text
+
+
+def test_trading_migration_contains_pr_4_tables_and_constraints():
+    migration_path = Path("alembic/versions/009_position_sizing_risk_manager_tables.py")
+    text = migration_path.read_text(encoding="utf-8")
+
+    assert 'down_revision: Union[str, None] = "008"' in text
+    for table_name in (
+        '"position_sizing_decisions"',
+        '"portfolio_risk_snapshots"',
+        '"risk_factor_exposures"',
+        '"risk_decisions"',
+    ):
+        assert table_name in text
+    for constraint_name in (
+        "ck_position_sizing_decisions_risk_appetite",
+        "ck_position_sizing_decisions_weight_range",
+        "ck_portfolio_risk_snapshots_risk_appetite",
+        "ck_risk_factor_exposures_position_count",
+        "ck_risk_decisions_status",
     ):
         assert constraint_name in text

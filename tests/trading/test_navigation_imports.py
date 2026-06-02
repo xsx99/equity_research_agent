@@ -63,6 +63,7 @@ def test_trading_contract_paths_export_remaining_components():
     from src.trading.data_sources.universe import UniverseAsset, normalize_ticker
     from src.trading.manual_review.requests import ManualTickerRequestService
     from src.trading.portfolio.intents import PortfolioIntentConfig
+    from src.trading.risk import PortfolioContext, PositionSizer, RiskConfigResolver, RiskManager
     from src.trading.relationships.graph import TickerRelationship
     from src.trading.replay.historical import HistoricalReplayRunner
     from src.trading.replay.outcomes import OutcomeEvaluator, PricePoint
@@ -72,6 +73,10 @@ def test_trading_contract_paths_export_remaining_components():
     assert normalize_ticker(" aapl ") == "AAPL"
     assert ManualTickerRequestService.__name__ == "ManualTickerRequestService"
     assert PortfolioIntentConfig.__name__ == "PortfolioIntentConfig"
+    assert PortfolioContext.__name__ == "PortfolioContext"
+    assert PositionSizer.__name__ == "PositionSizer"
+    assert RiskConfigResolver.__name__ == "RiskConfigResolver"
+    assert RiskManager.__name__ == "RiskManager"
     assert TickerRelationship.__name__ == "TickerRelationship"
     assert HistoricalReplayRunner.__name__ == "HistoricalReplayRunner"
     assert OutcomeEvaluator.__name__ == "OutcomeEvaluator"

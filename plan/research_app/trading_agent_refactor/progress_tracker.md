@@ -192,3 +192,12 @@
 - 2026-06-01: PR 3 full verification passed: `source ~/.venv/bin/activate && pytest -q` passed with 296 tests.
 - 2026-06-01: PR 3 Alembic offline SQL generation passed: `source ~/.venv/bin/activate && alembic upgrade head --sql`.
 - 2026-06-01: PR 3 diff whitespace checks passed with `git diff --check` and an untracked-file trailing-whitespace scan using `git ls-files --others --exclude-standard` plus `rg -n "[ \t]$"`.
+- 2026-06-01: PR 4 baseline before implementation: `source ~/.venv/bin/activate && pytest tests/db tests/trading -q` passed with 72 tests.
+- 2026-06-01: PR 4 RED checks failed for expected missing modules/models:
+  - `source ~/.venv/bin/activate && pytest tests/trading/test_risk_context.py tests/trading/test_position_sizing.py tests/trading/test_risk_manager.py tests/trading/test_candidate_repository.py tests/trading/test_navigation_imports.py tests/db/test_trading_models.py -q`
+- 2026-06-01: PR 4 implemented deterministic risk modules under `src/trading/risk/`, extended `src/trading/repositories/in_memory.py`, added ORM models in `src/db/models/trading.py`, added Alembic revision `009_position_sizing_risk_manager_tables.py`, and updated `documents/repo_overview.md`.
+- 2026-06-01: PR 4 targeted verification passed: `source ~/.venv/bin/activate && pytest tests/trading/test_risk_context.py tests/trading/test_position_sizing.py tests/trading/test_risk_manager.py tests/trading/test_candidate_repository.py tests/trading/test_navigation_imports.py tests/db/test_trading_models.py -q` passed with 26 tests.
+- 2026-06-01: PR 4 broader relevant verification passed: `source ~/.venv/bin/activate && pytest tests/db tests/trading -q` passed with 72 tests.
+- 2026-06-01: PR 4 full verification passed: `source ~/.venv/bin/activate && pytest -q` passed with 317 tests.
+- 2026-06-01: PR 4 Alembic offline SQL generation passed: `source ~/.venv/bin/activate && alembic upgrade head --sql`.
+- 2026-06-01: PR 4 diff whitespace checks passed with `git diff --check`.
