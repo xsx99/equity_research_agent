@@ -5,7 +5,7 @@ from typing import Any
 
 from src.agents.prompt_registry import PromptRegistry
 from src.trading.brokers.paper_stock import PaperStockBroker
-from src.trading.intraday_rebalance import IntradayRebalancePipeline, IntradayRebalanceRequest
+from src.trading.intraday.rebalance import IntradayRebalancePipeline, IntradayRebalanceRequest
 from src.trading.portfolio.state import PortfolioLedger
 from src.trading.repositories.in_memory import InMemoryTradingRepository
 

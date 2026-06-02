@@ -10,10 +10,23 @@ from src.trading.risk.context import (
     RiskFactorExposureRecord,
     TradeRiskRequest,
 )
+from src.trading.risk.hedges import RiskHedgeDecisionRecord
 from src.trading.risk.manager import RiskManager
+from src.trading.risk.options import (
+    OptionLegRiskInput,
+    OptionRiskAssessment,
+    OptionRiskInput,
+    OptionRiskManager,
+    OptionRiskSnapshotRecord,
+)
 from src.trading.risk.sizing import PositionSizer
 
 __all__ = [
+    "OptionLegRiskInput",
+    "OptionRiskAssessment",
+    "OptionRiskInput",
+    "OptionRiskManager",
+    "OptionRiskSnapshotRecord",
     "PortfolioContext",
     "PortfolioPosition",
     "PortfolioRiskSnapshotRecord",
@@ -23,6 +36,7 @@ __all__ = [
     "RiskConfigResolver",
     "RiskDecisionRecord",
     "RiskFactorExposureRecord",
+    "RiskHedgeDecisionRecord",
     "RiskLimitConfig",
     "RiskManager",
     "TradeRiskRequest",

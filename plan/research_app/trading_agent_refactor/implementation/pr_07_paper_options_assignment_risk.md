@@ -5,12 +5,14 @@
 **Goal:** Add paper/simulation-only leg-based option strategy decisions, single-leg and multi-leg option positions, strategy-level option risk, and worst-case assigned-portfolio risk management when assignment is possible.
 
 **Files:**
-- Create: `src/trading/options_strategy.py`
-- Create: `src/trading/option_risk.py`
-- Create: `src/trading/paper_option_broker.py`
-- Modify: `src/trading/repository.py`
-- Modify: `src/trading/portfolio.py`
-- Modify: `src/trading/risk.py`
+- Create: `src/trading/options/strategy.py`
+- Create: `src/trading/risk/options.py`
+- Create: `src/trading/risk/hedges.py`
+- Create: `src/trading/brokers/paper_option.py`
+- Modify: `src/trading/repositories/in_memory.py`
+- Modify: `src/trading/repositories/sqlalchemy.py`
+- Modify: `src/trading/portfolio/state.py`
+- Modify: `src/trading/risk/`
 - Modify: `src/agents/trading_schemas.py`
 - Add ORM models/migration for `option_strategy_decisions`, `option_strategy_legs`, `risk_hedge_decisions`, `paper_option_orders`, `paper_option_positions`, `option_risk_snapshots`
 - Test: `tests/trading/test_options_strategy.py`
@@ -38,4 +40,3 @@ Implementation notes:
 Stop after PR 7 for review/merge.
 
 ---
-

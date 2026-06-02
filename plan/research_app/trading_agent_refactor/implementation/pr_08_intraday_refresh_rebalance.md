@@ -5,10 +5,11 @@
 **Goal:** Refresh intraday signals and news hourly during regular trading hours using the pre-open baseline snapshot, source freshness gates, and targeted source refreshes, then trigger risk-gated intraday rebalance actions for material signal changes or high-impact positive/negative events.
 
 **Files:**
-- Create: `src/trading/intraday_signals.py`
-- Create: `src/trading/news_alerts.py`
-- Create: `src/trading/intraday_rebalance.py`
-- Modify: `src/trading/repository.py`
+- Create: `src/trading/intraday/signals.py`
+- Create: `src/trading/intraday/news_alerts.py`
+- Create: `src/trading/intraday/rebalance.py`
+- Modify: `src/trading/repositories/in_memory.py`
+- Modify: `src/trading/repositories/sqlalchemy.py`
 - Modify: `src/agents/trading_schemas.py` if rebalance decisions share trading-agent schema
 - Modify: `src/core/config.py`
 - Add ORM models/migration for `intraday_signal_scans`, `intraday_signal_snapshots`, `news_alerts`, `intraday_rebalance_decisions`

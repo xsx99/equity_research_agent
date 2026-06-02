@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 
-from src.trading.options.risk import OptionLegRiskInput, OptionRiskInput, OptionRiskManager
+from src.trading.risk.options import OptionLegRiskInput, OptionRiskInput, OptionRiskManager
 from src.trading.risk import (
     PortfolioContext,
     PortfolioPosition,
@@ -102,4 +102,3 @@ def test_option_risk_manager_rejects_assignment_concentration_breach():
     assert assessment.status == "rejected"
     assert assessment.reason_code == "assignment_concentration_cap"
     assert assessment.worst_case_assignment_notional == 11_000.0
-

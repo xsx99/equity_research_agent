@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from src.trading.news_alerts import NewsAlertService
+from src.trading.intraday.news_alerts import NewsAlertService
 from src.trading.signals.sources import EventNewsItemRecord
 
 

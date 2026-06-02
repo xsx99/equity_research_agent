@@ -12,11 +12,11 @@ from src.trading.brokers.paper_option import (
     PaperOptionOrderRecord,
     PaperOptionPosition,
 )
-from src.trading.intraday_signals import IntradaySignalScanRecord, IntradaySignalSnapshotRecord
-from src.trading.news_alerts import NewsAlertRecord
+from src.trading.intraday.news_alerts import NewsAlertRecord
+from src.trading.intraday.signals import IntradaySignalScanRecord, IntradaySignalSnapshotRecord
 from src.trading.brokers.paper_stock import PaperExecutionRecord, PaperOrderRecord
-from src.trading.options.hedge import RiskHedgeDecisionRecord
-from src.trading.options.risk import OptionRiskSnapshotRecord
+from src.trading.risk.hedges import RiskHedgeDecisionRecord
+from src.trading.risk.options import OptionRiskSnapshotRecord
 from src.trading.options.strategy import OptionStrategyDecisionRecord, OptionStrategyLegRecord
 from src.trading.portfolio.state import PortfolioSnapshot, StockPosition
 from src.trading.risk import (
@@ -36,7 +36,7 @@ from src.trading.strategies.classifier import TradeClassificationRecord
 from src.trading.data_sources.universe import UniverseSnapshotResult
 
 if TYPE_CHECKING:
-    from src.trading.intraday_rebalance import IntradayRebalanceDecisionRecord
+    from src.trading.intraday.rebalance import IntradayRebalanceDecisionRecord
     from src.trading.workflows.trading_decision import TradingDecisionRecord
 
 

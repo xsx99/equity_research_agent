@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from src.trading.intraday_signals import IntradaySignalScanRecord, IntradaySignalSnapshotRecord
-from src.trading.intraday_rebalance import IntradayRebalanceDecisionRecord
-from src.trading.news_alerts import NewsAlertRecord
+from src.trading.intraday.news_alerts import NewsAlertRecord
+from src.trading.intraday.rebalance import IntradayRebalanceDecisionRecord
+from src.trading.intraday.signals import IntradaySignalScanRecord, IntradaySignalSnapshotRecord
 from src.trading.repositories.in_memory import InMemoryTradingRepository
 from src.trading.repositories.sqlalchemy import SqlAlchemyTradingRepository
 

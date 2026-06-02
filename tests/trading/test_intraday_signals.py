@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from src.trading.intraday_signals import build_intraday_signal_snapshot
+from src.trading.intraday.signals import build_intraday_signal_snapshot
 from src.trading.signals import SignalSnapshotResult
 
 

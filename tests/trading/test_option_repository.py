@@ -3,8 +3,8 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 
 from src.trading.brokers.paper_option import PaperOptionExecutionRecord, PaperOptionOrderRecord, PaperOptionPosition
-from src.trading.options.hedge import RiskHedgeDecisionRecord
-from src.trading.options.risk import OptionRiskSnapshotRecord
+from src.trading.risk.hedges import RiskHedgeDecisionRecord
+from src.trading.risk.options import OptionRiskSnapshotRecord
 from src.trading.options.strategy import OptionStrategyDecisionRecord, OptionStrategyLegRecord
 from src.trading.repositories.in_memory import InMemoryTradingRepository
 

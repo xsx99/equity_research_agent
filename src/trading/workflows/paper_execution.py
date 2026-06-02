@@ -8,11 +8,11 @@ from typing import Any
 from src.trading.brokers.paper_option import PaperOptionBroker, PaperOptionOrderRequest, PaperOptionPosition
 from src.trading.brokers.paper_stock import PaperOrderRequest, PaperOrderRecord, PaperStockBroker
 from src.trading.manual_review.requests import ManualTickerRequestService
-from src.trading.options.hedge import RiskHedgeDecisionRecord
-from src.trading.options.risk import OptionRiskSnapshotRecord
 from src.trading.options.strategy import OptionStrategyDecisionRecord, OptionsStrategyLayer
 from src.trading.portfolio.state import PortfolioSnapshot
 from src.trading.risk import RiskDecisionRecord
+from src.trading.risk.hedges import RiskHedgeDecisionRecord
+from src.trading.risk.options import OptionRiskSnapshotRecord
 from src.trading.workflows.portfolio_sync import BrokerPortfolioSyncWorkflow
 from src.trading.workflows.trading_decision import TradingDecisionRecord
 

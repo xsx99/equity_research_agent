@@ -23,9 +23,9 @@ def test_trading_workflow_paths_export_pipeline_entrypoints():
 
 def test_trading_repository_path_names_in_memory_store_explicitly():
     from src.trading.repositories.in_memory import InMemoryTradingRepository
-    from src.trading.intraday_rebalance import IntradayRebalancePipeline
-    from src.trading.intraday_signals import IntradaySignalSnapshotRecord
-    from src.trading.news_alerts import NewsAlertService
+    from src.trading.intraday.rebalance import IntradayRebalancePipeline
+    from src.trading.intraday.signals import IntradaySignalSnapshotRecord
+    from src.trading.intraday.news_alerts import NewsAlertService
 
     assert InMemoryTradingRepository.__name__ == "InMemoryTradingRepository"
     assert IntradayRebalancePipeline.__name__ == "IntradayRebalancePipeline"
@@ -70,7 +70,7 @@ def test_trading_strategy_paths_export_catalog_and_selection_components():
 
 def test_trading_contract_paths_export_remaining_components():
     from src.trading.brokers.paper_option import PaperOptionBroker
-    from src.trading.options.risk import OptionRiskManager
+    from src.trading.risk.options import OptionRiskManager
     from src.trading.options.strategy import OptionsStrategyLayer
     from src.trading.brokers.paper_stock import PaperStockBroker
     from src.trading.data_sources.provider_resilience import ProviderResiliencePolicy
@@ -109,7 +109,12 @@ def test_trading_root_no_longer_contains_compatibility_modules():
         "src/trading/event_news_signals.py",
         "src/trading/fundamental_signals.py",
         "src/trading/historical_replay.py",
+        "src/trading/intraday_rebalance.py",
+        "src/trading/intraday_signals.py",
         "src/trading/manual_requests.py",
+        "src/trading/news_alerts.py",
+        "src/trading/options/hedge.py",
+        "src/trading/options/risk.py",
         "src/trading/outcome_evaluator.py",
         "src/trading/paper_stock_broker.py",
         "src/trading/pipeline.py",

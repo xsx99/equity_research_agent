@@ -28,10 +28,10 @@ from src.trading.brokers.paper_option import (
     PaperOptionPosition,
 )
 from src.trading.brokers.paper_stock import PaperExecutionRecord, PaperOrderRecord
-from src.trading.intraday_signals import IntradaySignalScanRecord, IntradaySignalSnapshotRecord
-from src.trading.news_alerts import NewsAlertRecord
-from src.trading.options.hedge import RiskHedgeDecisionRecord
-from src.trading.options.risk import OptionRiskSnapshotRecord
+from src.trading.intraday.news_alerts import NewsAlertRecord
+from src.trading.intraday.signals import IntradaySignalScanRecord, IntradaySignalSnapshotRecord
+from src.trading.risk.hedges import RiskHedgeDecisionRecord
+from src.trading.risk.options import OptionRiskSnapshotRecord
 from src.trading.options.strategy import OptionStrategyDecisionRecord, OptionStrategyLegRecord
 from src.trading.portfolio.state import PortfolioSnapshot, StockPosition
 
