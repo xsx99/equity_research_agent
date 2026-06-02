@@ -39,8 +39,8 @@
    Add deterministic sizing, risk appetite presets, generated risk configs, risk factor exposure calculation, unified margin-account buying-power caps, conservative broker-profile margin estimates, concentration caps, embedded bearish-evidence gating, and reduce/reject decisions.
 6. **PR 5: Trading Decision Agent Guardrails**
    Add bounded trading agent output with Pydantic schema validation, retry, safe fallback, manual request mode gating, prompt/schema persistence, and no paper order side effects yet.
-7. **PR 6: Paper Stock Broker + Portfolio State**
-   Add paper stock orders/executions, positions, and unified simulated margin-account portfolio snapshots with margin model profile/source metadata.
+7. **PR 6: Alpaca-Backed Paper Stock Broker + Portfolio State**
+   Add Alpaca-backed stock paper orders/executions, broker-synced positions, and unified paper margin-account portfolio snapshots with margin model profile/source metadata.
 8. **PR 7: Paper Options Strategy Layer + Assignment Risk**
    Add paper-only leg-based option strategy decisions, option legs, option orders/positions, open/close/roll/adjust/avoid-event actions, an initial whitelist of long call/put, credit spread, long straddle, and long strangle strategies, strategy-level option risk, conservative option margin requirements, and worst-case assigned-portfolio risk checks when assignment is possible.
 9. **PR 8: Intraday Signal Refresh + News Alerts + Rebalance**

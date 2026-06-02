@@ -231,7 +231,7 @@ Implementation must continue to use `source ~/.venv/bin/activate` before Python 
 - Refresh intraday price/volume/relative-strength/options/news signals for open positions, top candidates, and pinned review tickers.
 - Classify positive/negative high-impact events for open positions and top candidates.
 - Trigger intraday rebalance proposals for material signal changes or critical/high alerts.
-- Gate every alert-driven action through `PositionSizer`, `RiskManager`, and `PaperBroker`.
+- Gate every alert-driven action through `PositionSizer`, `RiskManager`, and `PaperStockBroker` / option paper broker.
 - Persist no-action/rejected alerts for post-close reflection.
 
 ### Phase 5: Reflection
@@ -278,11 +278,11 @@ Implementation must continue to use `source ~/.venv/bin/activate` before Python 
 10. Strategy pipeline evaluates the initial strategy catalog and stores strategy-specific candidate score, evidence, invalidators, and strategy-determined holding horizon.
 11. Historical replay/outcome evaluator measures trades, rejected candidates, watch items, and shadow strategies over each strategy horizon against `SPY`, `QQQ`, sector/theme ETF, and decision-time peer basket.
 12. The morning trade plan selects ticker, strategy, expression bucket, trade identity, horizon, action, target exposure, and risk budget used before the market opens.
-13. Trading pipeline creates paper orders only after Pydantic-validated LLM output, retry/fallback handling, risk checks, and budget allocation pass.
+13. Paper execution creates stock paper orders only after Pydantic-validated LLM output, retry/fallback handling, risk checks, and budget allocation pass; `TradingPipeline` itself persists decisions, not broker side effects.
 14. Position sizing records base size, volatility adjustment, liquidity cap, remaining factor budget, final size, and binding constraints.
 15. Portfolio risk snapshots show factor exposure by sector, strategy, horizon, beta, volatility, liquidity, event type, macro sensitivity, correlation cluster, leg-based option risk, and assignment exposure where relevant.
 16. Risk manager reduces or rejects trades that would make current portfolio risk, option strategy risk, or worst-case assigned portfolio too concentrated in any configured risk factor.
-17. Paper portfolio shows positions, trades, exposure, and day PnL.
+17. Paper portfolio shows broker-synced stock positions, trades, exposure, and day PnL.
 18. Paper options layer is initially limited to `long_call`, `long_put`, `put_credit_spread`, `call_credit_spread`, `long_straddle`, and `long_strangle`, and records generic `open_option_strategy`, `close_option_strategy`, `roll_option_strategy`, `adjust_option_strategy`, and `avoid_event_option` actions with strategy type, per-leg call/put side, strike, expiry, DTE, Greeks, IV rank, price, net debit/credit, max loss, breakevens, margin requirement, buying-power effect, event dates, and assignment data when relevant.
 19. Macro-only bearish context cannot create high-confidence single-name bearish trades; it can only reduce size, block strategy tags, or add risk warnings unless direct company-level negative evidence exists.
 20. Confidence displays and persistence distinguish historically strong bullish catalyst patterns from weak bearish/macro narratives.
@@ -293,7 +293,7 @@ Implementation must continue to use `source ~/.venv/bin/activate` before Python 
 25. Strategy evolution can create new strategy proposals from repeated learning patterns without being limited to the initial seed strategies.
 26. New strategies enter `candidate` or `shadow` status first, and cannot create paper orders until promoted to `experimental` or `active`.
 27. New learning factors default to `candidate` or `observation`; only risk-tightening factors may become automatically active, and expansionary factors require shadow/test evidence before promotion.
-28. Unit tests run against fake providers, integration tests use recorded cassettes, and live provider smoke tests are opt-in and non-blocking for ordinary CI.
+28. Unit tests run against fake providers/brokers, integration tests use recorded cassettes, and live provider or Alpaca paper smoke tests are opt-in and non-blocking for ordinary CI.
 29. `/today` is a tabbed trading workstation with `Overview`, `Portfolio`, `Trades`, `Risk & Macro`, `Candidates`, `Learning & Strategies`, and `Ops & Cost` tabs.
 30. Trade detail views show complete audit trails: signal snapshots, strategy scores, selected strategy, trade identity, LLM decision JSON, risk decision, order/fill state, exit plan, invalidators, and post-close outcome.
 31. `Ops & Cost` shows LLM/API usage, model/provider, tokens, estimated cost, latency, retry/error state, validation/fallback state, prompt/schema version, and provider request budget/circuit-breaker state by pipeline and run.
@@ -303,7 +303,8 @@ Implementation must continue to use `source ~/.venv/bin/activate` before Python 
 
 1. Universe scope: use a user-editable US common-stock universe with liquidity filters and sector/industry include/exclude filters. Do not scan every listed name by default.
 2. Common-stock paper trading is long-only in V2. Do not add direct short-stock paper trades behind a flag.
-3. Holding period is determined automatically by the selected trading strategy definition. There is no global intraday-only or swing-only horizon.
-4. New learning factors default to `candidate` or `observation`; only risk-tightening factors may become automatically active, while expansionary changes must be represented as strategy/config proposals or promoted after shadow/test evidence.
-5. Manual ticker requests stay active until manually dismissed. They do not expire at end of day by default.
-6. The first verifiable MVP is universe -> point-in-time signal snapshot -> strategy scoring -> historical replay/outcome evaluator; paper trading, options, intraday, reflection, and strategy evolution follow after that edge-validation path exists.
+3. Alpaca paper trading is the PR 6 stock execution/account source of truth; local paper stock tables are audit/reconciliation mirrors, not an independent live stock ledger.
+4. Holding period is determined automatically by the selected trading strategy definition. There is no global intraday-only or swing-only horizon.
+5. New learning factors default to `candidate` or `observation`; only risk-tightening factors may become automatically active, while expansionary changes must be represented as strategy/config proposals or promoted after shadow/test evidence.
+6. Manual ticker requests stay active until manually dismissed. They do not expire at end of day by default.
+7. The first verifiable MVP is universe -> point-in-time signal snapshot -> strategy scoring -> historical replay/outcome evaluator; paper trading, options, intraday, reflection, and strategy evolution follow after that edge-validation path exists.

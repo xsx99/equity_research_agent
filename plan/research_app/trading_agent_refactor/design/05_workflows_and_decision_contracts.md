@@ -10,12 +10,12 @@ All scheduled times are in `America/New_York`.
 | 07:15 | Macro snapshot + event calendar refresh | `macro_snapshots`, normalized `calendar_events`, portfolio-scored `portfolio_event_risk_assessments`, and prior-night/early-morning sector-theme read-through context |
 | 07:30 | Pre-market signal computation | `signal_snapshots` for the universe, including own-event timing and macro/sector/theme read-through exposure context |
 | 08:15 | Strategy matching and candidate scoring | `candidate_scores` with strategy, horizon, evidence, invalidators |
-| 08:45 | Trading decision generation | `trading_decisions` with selected action and staged `paper_orders` |
-| 09:30 | Paper open execution | `paper_executions`, open positions |
+| 08:45 | Trading decision generation | `trading_decisions` with selected action and downstream risk decision inputs |
+| 09:30 | Alpaca paper open execution | broker-backed stock `paper_orders`, `paper_executions`, synced open positions |
 | Hourly 10:00-15:00 | Intraday signal refresh + news scan | `intraday_signal_scans`, `intraday_signal_snapshots`, `news_alerts`, possible rebalance proposals |
 | Immediately after material signal change or critical/high alert | Intraday rebalance | approved/reduced/rejected `intraday_rebalance_decisions`, possible paper orders |
-| 15:55 | Optional risk check | staged close/rebalance decisions if enabled |
-| 16:05 | Portfolio mark | `portfolio_snapshots`, trade PnL |
+| 15:55 | Optional risk check | approved close/rebalance decisions if enabled |
+| 16:05 | Portfolio mark | Alpaca-synced `portfolio_snapshots`, trade PnL |
 | 16:20 | Daily reflection | `daily_reflections` |
 | 16:40 | Learning factor update | `learning_factors`, next-run context |
 | 16:50 | Strategy evolution | `strategy_proposals`, candidate/shadow strategy updates |
@@ -48,7 +48,7 @@ Morning workflow semantics:
 8. Build a tactical option plan only when the selected expression bucket and `trade_identity = "tactical_option_trade"` make an option expression eligible.
 9. Pass only the selected candidates plus current positions and paper option positions into `TradingPipeline`.
 10. `TradingPipeline` proposes an action, thesis, invalidators, suggested size, horizon, instrument expression, and trade identity.
-11. Deterministic risk constraints and portfolio budget decide whether the proposed action becomes a staged paper stock order, staged tactical paper option order, is reduced, or is rejected.
+11. Deterministic risk constraints and portfolio budget decide whether the proposed action becomes an approved Alpaca paper stock order request, a staged tactical paper option order, is reduced, or is rejected.
 12. Separately, `RiskManager` may generate paper-only `risk_hedge_overlay` actions when portfolio-level beta, concentration, or event risk should be hedged instead of handled only by sizing.
 
 The final morning output is not just a ranked list. It is a trade plan: selected ticker, selected strategy, horizon, action, target exposure, risk budget used, and explicit reason if a high-scoring candidate was skipped.
@@ -119,7 +119,7 @@ Manual request outcomes are important reflection inputs. The system should later
 During regular trading hours, the system runs an hourly intraday refresh. It should scan news and refresh all signal families that can materially change intraday for portfolio-relevant tickers. The initial scope should include:
 
 - open paper positions
-- tickers with staged orders or same-day trades
+- tickers with open/pending paper order audit rows or same-day trades
 - top active candidates from the morning scan
 - active manual/pinned review tickers
 - high-impact market/sector news from the provider feed
@@ -128,7 +128,7 @@ If provider limits allow, the scan can also query broader universe signals/news,
 
 Hourly refresh starts with a freshness plan rather than a full rerun of all source pipelines:
 
-1. Determine the intraday scope: open positions, same-day trades, staged orders, top morning candidates, manual requests, option positions, and critical/high event exposures.
+1. Determine the intraday scope: open positions, same-day trades, open/pending paper order audit rows, top morning candidates, manual requests, option positions, and critical/high event exposures.
 2. Load each ticker's pre-open baseline `signal_snapshot_id` and previous intraday snapshot if available.
 3. Evaluate source freshness requirements by source family and ticker/event scope.
 4. Run required inline refreshes within a time budget: market price/volume, intraday relative strength, latest scoped news/events, and open option marks.
@@ -190,7 +190,7 @@ Intraday rebalance is still gated:
 2. `IntradayRebalancePipeline` proposes action with signal/news evidence and urgency.
 3. `PositionSizer` recalculates target size.
 4. `RiskManager` applies factor exposure and concentration limits.
-5. `PaperBroker` simulates any approved order.
+5. `PaperStockBroker` submits approved stock paper orders to Alpaca paper trading; the option broker simulates approved whitelisted option orders until a broker-backed option path is explicitly designed.
 
 This loop must persist rejected and no-action alerts. They are important for reflection: the system should learn whether it ignored useful news, overreacted to noise, or correctly protected the portfolio.
 
@@ -305,7 +305,7 @@ The final action is computed in two stages:
 1. `TradingPipeline` proposes `decision`, `suggested_target_weight`, `time_horizon`, instrument expression, thesis, and invalidators.
 2. `RiskManager` applies deterministic constraints and returns `approved`, `reduced`, or `rejected`.
 
-`RiskManager` should consume an explicit `PortfolioContext` / `RiskContext` object rather than directly depending on `PaperBroker` internals. The context contains account equity, cash, buying power, existing positions, current exposure, margin requirement, factor exposure, open strategy exposure, and latest portfolio/risk snapshots when available. This lets the risk manager be tested with fixtures before paper portfolio state is implemented, and later lets `PortfolioPipeline` map real paper positions into the same contract without rewriting risk logic.
+`RiskManager` should consume an explicit `PortfolioContext` / `RiskContext` object rather than directly depending on `PaperStockBroker` internals. The context contains account equity, cash, buying power, existing positions, current exposure, margin requirement, factor exposure, open strategy exposure, and latest portfolio/risk snapshots when available. This lets the risk manager be tested with fixtures and lets `PortfolioPipeline` map Alpaca paper account/position sync results into the same contract without rewriting risk logic.
 
 Risk decision fields:
 
@@ -342,4 +342,3 @@ Risk decision fields:
 - `learning_factor_adjustments`
 - `final_action`: `create_order`, `reduce_size_create_order`, or `reject`
 - `risk_rejection_reason`
-

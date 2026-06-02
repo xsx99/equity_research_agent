@@ -45,10 +45,10 @@ Proposed new tables:
 | `position_sizing_decisions` | Deterministic sizing inputs, applied caps, final target weight/quantity |
 | `portfolio_risk_snapshots` | Portfolio-level gross/net exposure, active risk appetite, generated risk config id/version, unified margin-account risk, and factor exposures before/after proposed trades and after fills |
 | `risk_factor_exposures` | Normalized per-position and portfolio exposures by factor type/name |
-| `paper_orders` | Staged/submitted/filled/rejected paper orders |
-| `paper_executions` | Simulated fills |
-| `paper_positions` | Current position state |
-| `portfolio_snapshots` | Daily unified margin account state: NAV/net liquidation value, account equity, cash balance, buying power, excess liquidity, margin requirements, margin model profile/source, exposure, and PnL |
+| `paper_orders` | Staged/submitted/filled/rejected paper orders; stock rows mirror Alpaca paper broker state and include broker/client order identifiers |
+| `paper_executions` | Broker-reported stock fills and simulated option fills when applicable |
+| `paper_positions` | Current paper position state; PR 6 stock rows are synced from Alpaca paper positions |
+| `portfolio_snapshots` | Unified paper margin account state: NAV/net liquidation value, account equity, cash balance, buying power, excess liquidity, margin requirements, margin model profile/source, exposure, and PnL; PR 6 stock account fields are synced from Alpaca paper account payloads |
 | `historical_replay_runs` | Deterministic replay batches with decision-time filters, snapshot version, outcome horizon policy, and replay status |
 | `candidate_outcome_evaluations` | Per candidate/trade/watch/strategy outcome rows with horizon, benchmarks, peer basket snapshot, alpha, MFE/MAE, regime, catalyst type, and interim/final status |
 | `daily_reflections` | Post-close reflection JSON |
@@ -63,6 +63,8 @@ Legacy tables are optional:
 - `research_runs` and `research_outputs` are not required in the V2 trading critical path. If they still provide useful UI explanation, audit, or legacy compatibility value, keep them as optional archival research artifacts. Otherwise they can be deprecated after migration.
 - `eval_results` is not required for trade/portfolio scoring. If retained, it should only score research-output quality, prompt quality, or legacy evals. Strategy win rate, alpha, PnL, drawdown, option attribution, and portfolio risk outcomes should live in the paper trading and strategy evaluation tables.
 - New V2 tables are the source of truth for trading behavior. Do not add compatibility writes to legacy research/eval tables unless a current UI or migration task explicitly needs them.
+
+For PR 6 stock paper trading, Alpaca paper trading is the external execution/account source of truth. The local V2 tables remain the application audit and replay source: persist deterministic `client_order_id`, broker order id, broker status/reject reason, fill details from broker-reported filled state, and account/position snapshots from broker sync. Do not reconstruct live stock cash, buying power, or open stock quantity from a separate local simulated ledger when broker sync data is available.
 
 ### Strategy Definition Shape
 
@@ -95,4 +97,3 @@ This keeps strategy identity, horizon, and signal requirements in data. Python s
 Discovered strategies use the same `strategy_definitions` shape once promoted from proposal to catalog entry. They differ only by `source`, `lifecycle_status`, parent/revision metadata, and risk budget limits.
 
 Strategy expression buckets use the same table with `strategy_layer = "expression_bucket"` and include fields such as `default_trade_identity`, `allowed_trade_identities`, `allowed_instruments`, `allowed_option_strategy_types`, `required_option_leg_fields`, `required_assignment_fields`, `earnings_policy`, and `default_exit_policy`. They should not duplicate portfolio-pool semantics or strategy thesis. Names such as `strong_theme_no_clear_near_term_sell_put` are intentionally avoided because they mix the alpha pattern with the instrument expression.
-

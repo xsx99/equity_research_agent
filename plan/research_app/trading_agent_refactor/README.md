@@ -36,7 +36,7 @@ This directory is the canonical modular version of the trading-agent refactor pl
 | [PR 3](implementation/pr_03_strategy_matching_replay.md) | Strategy matching and historical replay |
 | [PR 4](implementation/pr_04_position_sizing_risk_manager.md) | Position sizing and risk manager |
 | [PR 5](implementation/pr_05_trading_decision_agent_guardrails.md) | Trading decision agent guardrails |
-| [PR 6](implementation/pr_06_paper_stock_broker_portfolio_state.md) | Paper stock broker and portfolio state |
+| [PR 6](implementation/pr_06_paper_stock_broker_portfolio_state.md) | Alpaca-backed paper stock broker and portfolio state |
 | [PR 7](implementation/pr_07_paper_options_assignment_risk.md) | Paper options and assignment risk |
 | [PR 8](implementation/pr_08_intraday_refresh_rebalance.md) | Intraday refresh and rebalance |
 | [PR 9](implementation/pr_09_reflection_learning_factors.md) | Reflection and learning factors |
@@ -53,6 +53,7 @@ This split is organizational only. A module may clarify ownership and dependenci
 - All trading, replay, reflection, and learning paths use point-in-time source availability.
 - Macro context constrains risk and strategy eligibility; it does not directly rank individual stocks or create macro-only single-name bearish trades.
 - Common-stock paper trading is long-only in V2.
+- PR 6 common-stock paper execution/account state is Alpaca paper-backed; local paper stock tables are audit/reconciliation mirrors.
 - Options are paper/simulation-only and limited to the initial whitelist until a later design revision changes it.
 - Manual ticker review forces evaluation only; it never bypasses liquidity, data, strategy, confidence, sizing, or risk gates.
 - Strategy evolution and learning factors use lifecycle gates before they can expand risk.

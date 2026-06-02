@@ -179,7 +179,7 @@ Implementation ownership:
 - `OptionsStrategyLayer` only builds a paper tactical option expression when the selected expression bucket and `trade_identity = "tactical_option_trade"` make that expression eligible.
 - `RiskManager` owns `risk_hedge_overlay` creation, adjustment, and closure. Hedge overlays can use the same paper option broker, but they are persisted and evaluated separately from tactical option trades.
 - `PositionSizer` and `RiskManager` apply the pool-specific budget, concentration, hedge, and exit constraints.
-- `PortfolioState` persists the identity with open positions, staged orders, paper option positions, and closed trades.
+- `PortfolioState` persists the identity with open positions, open/pending paper order audit rows, paper option positions, and closed trades.
 - `ReflectionPipeline` grades each trade against the holding period and exit rules implied by its identity.
 
 ### Paper Options Strategy Layer
@@ -385,4 +385,3 @@ Required candidate fields:
 - `macro_compatibility`: `allowed`, `reduced_size`, or `blocked`
 - `selection_reason`
 - `rejection_reason`, if not tradable after filters
-

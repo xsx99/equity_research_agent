@@ -20,7 +20,7 @@ Implementation notes:
 - Implement deterministic `RiskConfigResolver` that converts the active risk appetite preset into a generated `RiskLimitConfig`. Persist both the user-facing preset and the generated config with resolver version for audit/replay.
 - Define a pure `PortfolioContext` / `RiskContext` input object for PR 4 instead of reading paper portfolio tables directly. It should include account equity, cash balance, buying power, excess liquidity, current positions, existing exposure, current stock/option margin requirement, open strategy exposure, factor exposure, and current portfolio risk snapshots when available.
 - Unit tests in PR 4 must feed fixture `PortfolioContext` objects so the risk manager can be implemented before paper portfolio state exists.
-- PR 4 may read the latest persisted snapshot if one exists, but it must also work from an explicit fixture/context object. Do not couple PR 4 to `PaperBroker` or `PortfolioPipeline`.
+- PR 4 may read the latest persisted snapshot if one exists, but it must also work from an explicit fixture/context object. Do not couple PR 4 to `PaperStockBroker`, option paper broker, or `PortfolioPipeline`.
 - PR 6 owns wiring real paper positions and portfolio snapshots into `PortfolioContext`; that wiring should not require rewriting PR 4 risk logic.
 - Keep detailed risk-limit numbers out of the default UI/operator config. Allow optional advanced overrides only as explicit metadata, not as the normal workflow.
 - Calculate factor exposure by sector, strategy, horizon, direction, beta bucket, volatility bucket, liquidity bucket, event type, and macro sensitivity.
@@ -37,4 +37,3 @@ Implementation notes:
 Stop after PR 4 for review/merge.
 
 ---
-

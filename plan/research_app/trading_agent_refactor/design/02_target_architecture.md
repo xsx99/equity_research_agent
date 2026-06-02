@@ -36,10 +36,10 @@ RiskConfigResolver -> generated effective risk config from risk_appetite preset
 PositionSizer + RiskManager -> approved/reduced/rejected final action, including option-risk and worst-case assignment checks
       |
       v
-PaperBroker -> paper_orders / paper_option_orders -> paper_executions
+PaperStockBroker -> Alpaca paper stock orders -> local paper_orders / paper_executions audit rows
       |
       v
-PortfolioPipeline -> positions + portfolio_snapshots + trade PnL
+PortfolioPipeline -> Alpaca-synced stock positions + option paper overlays + portfolio_snapshots + trade PnL
       |
       v
 HourlySignalRefreshPipeline -> intraday_signal_snapshots + news_alerts -> intraday_rebalance_decisions
@@ -48,7 +48,7 @@ HourlySignalRefreshPipeline -> intraday_signal_snapshots + news_alerts -> intrad
 PositionSizer + RiskManager -> approved/reduced/rejected intraday actions
       |
       v
-PaperBroker -> intraday paper_orders -> paper_executions
+PaperStockBroker / option broker -> intraday paper orders -> paper_executions
       |
       v
 HistoricalReplayOutcomeEvaluator -> candidate/trade outcomes by strategy horizon
@@ -77,12 +77,13 @@ Next trading run receives validated active learning_factors
 | `PrimaryStrategySelector` | Choose one primary tactical strategy and one expression bucket per ticker/action so attribution, trade identity, and risk budgeting stay clean | No | `trade_classifications`, `trading_decisions` context |
 | `TradeClassifier` | Assign portfolio-pool trade identity before candidate order decisions: core holding, tactical stock trade, tactical option trade, or watch-only. `RiskManager` assigns `risk_hedge_overlay` for hedge actions | No | `trade_classifications` or embedded in `trading_decisions` |
 | `OptionsStrategyLayer` | Create paper-only leg-based option plans only when an option expression is eligible, limited initially to long calls, long puts, call/put credit spreads, long straddles, and long strangles, with Greeks, max loss, margin requirement, buying-power effect, and assignment risk when relevant | Mostly no; optional explanation | `option_strategy_decisions`, `paper_option_orders`, `paper_option_positions` |
-| `TradingPipeline` | Combine selected strategy, trade identity, instrument plan, macro regime, portfolio state, risk appetite/effective risk config, and learning factors; produce proposed trading decisions, thesis, invalidators, and suggested sizing | Yes, Gemini Flash bounded decision schema | `trading_decisions`, `paper_orders` |
+| `TradingPipeline` | Combine selected strategy, trade identity, instrument plan, macro regime, portfolio state, risk appetite/effective risk config, and learning factors; produce proposed trading decisions, thesis, invalidators, and suggested sizing | Yes, Gemini Flash bounded decision schema | `trading_decisions` |
 | `RiskConfigResolver` | Convert the user-facing `risk_appetite` preset into a deterministic generated risk config using account state, macro regime, portfolio composition, trade identity, and hard safety rails | No | `risk_appetite_profiles`, `risk_limit_configs` |
 | `PositionSizer` | Convert approved trade intent into target quantity/weight using volatility, liquidity, strategy budget, macro budget, and factor exposure constraints | No | `position_sizing_decisions` |
 | `RiskManager` | Enforce portfolio-level risk limits, factor exposure concentration limits, correlation clusters, leg-based option risk, assignment exposure when relevant, and hard reject/reduce rules | No | `portfolio_risk_snapshots`, `risk_factor_exposures`, `option_risk_snapshots` |
-| `PaperBroker` | Simulate stock and option fills, slippage, commissions, rejects, order status transitions, and margin/buying-power effects | No | `paper_orders`, `paper_executions` |
-| `PortfolioPipeline` | Maintain stock/options positions and one unified simulated margin account with cash balance, account equity, margin used, buying power, excess liquidity, exposure, and realized/unrealized PnL | No | `paper_positions`, `portfolio_snapshots` |
+| `PaperStockBroker` | Submit approved common-stock paper orders to Alpaca paper trading, poll broker status by deterministic client order id, persist local audit rows for broker order ids, fills, rejects, and state transitions, and enforce local V2 guardrails before the broker call | No | `paper_orders`, `paper_executions` |
+| Option paper broker | Simulate whitelisted option fills, rejects, order status transitions, and option margin/buying-power effects until a broker-backed option paper path is explicitly designed | No | `paper_option_orders`, `paper_option_positions` |
+| `PortfolioPipeline` | Sync stock cash, equity, buying power, open positions, and broker-reported margin fields from the Alpaca paper account; maintain option paper overlays in the same unified margin-account view with exposure, realized/unrealized PnL, and audit snapshots | No | `paper_positions`, `portfolio_snapshots` |
 | `HourlySignalRefreshPipeline` | Build scoped intraday delta snapshots using the same canonical signal schema as pre-open snapshots. It runs freshness-gated targeted refreshes for portfolio-relevant tickers, updates price/volume, relative strength, VWAP/gap, option marks, news/events, and checks low-frequency source freshness without full re-ingestion | Optional Gemini Flash bounded classifier only for news/event classification after deterministic filters | `intraday_signal_scans`, `intraday_signal_snapshots`, `news_alerts` |
 | `IntradayRebalancePipeline` | Convert material signal changes and critical/high-impact alerts into reduce/exit/add/hold proposals for existing positions or active candidates | Yes, Gemini Flash bounded decision schema; risk manager remains final gate | `intraday_rebalance_decisions`, `paper_orders` |
 | `HistoricalReplayOutcomeEvaluator` | Replay prior decision-time snapshots without lookahead, evaluate candidates/trades/watch items over each strategy horizon, and compute alpha vs `SPY`, `QQQ`, sector/theme ETF, and decision-time peer basket before reflection or strategy promotion uses the evidence | No | `historical_replay_runs`, `candidate_outcome_evaluations`, `strategy_evaluation_results` |
@@ -113,4 +114,3 @@ Config should keep these separate:
 - `REFLECTION_MODEL_NAME`: required for production reflection, set to the highest-quality model available in the deployment.
 
 If `REFLECTION_MODEL_NAME` is not configured, reflection may run in degraded mode with the fast model for local development, but production should surface a warning because lower-quality reflection can pollute the learning loop.
-

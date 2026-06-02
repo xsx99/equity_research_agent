@@ -2,9 +2,11 @@
 
 ## 10. Paper Trading and Risk
 
-### Unified Paper Margin Account
+### Alpaca-Backed Unified Paper Margin Account
 
-V2 should simulate one margin account shared by stock trades, option trades, hedge overlays, and assignment scenarios. There should not be a separate stock cash account and option margin account. Every proposed order must be evaluated against the same account-level buying power and margin constraints.
+V2 should represent one paper margin-account view shared by stock trades, option trades, hedge overlays, and assignment scenarios. For PR 6 common-stock trading, Alpaca paper trading is the execution and account-state source of truth. Local `paper_orders`, `paper_executions`, `paper_positions`, and `portfolio_snapshots` are audit/replay mirrors of broker order status, fills, account fields, and open stock positions rather than an independent stock fill simulator.
+
+There should not be a separate stock cash account and option margin account. Every proposed order must be evaluated against the same account-level buying power and margin constraints. In PR 6, the stock portion of that account comes from Alpaca `/v2/account` and `/v2/positions` sync. PR 7 option simulation must overlay option buying-power effects and assignment scenarios onto this same local account view, or explicitly revise this design if option execution also becomes broker-backed.
 
 The account snapshot should persist:
 
@@ -22,15 +24,16 @@ The account snapshot should persist:
 - `margin_model_profile`, `margin_model_version`, and `margin_requirement_source`
 - `day_pnl`, `realized_pnl`, and `unrealized_pnl`
 
-The default estimated margin model should be more realistic than a flat toy model while still being explicit that it is an estimate. V2 should default to `estimated_fidelity_like_conservative_v1`: a broker-profile model inspired by public Reg T, exchange, and Fidelity-style house/RBR concepts. It must not claim to exactly reproduce Fidelity's internal margin engine unless broker-observed margin requirements are imported and stored.
+When broker-reported margin fields are unavailable, or when replay/local simulation/option overlays need an estimate, the estimated margin model should be more realistic than a flat toy model while still being explicit that it is an estimate. The conservative fallback is `estimated_fidelity_like_conservative_v1`: a broker-profile model inspired by public Reg T, exchange, and Fidelity-style house/RBR concepts. It must not claim to exactly reproduce Fidelity's internal margin engine unless broker-observed margin requirements are imported and stored.
 
 Supported margin model profiles:
 
+- `alpaca_paper_account`: broker-sourced paper account fields for stock cash, equity, buying power, stock market value, and broker-reported margin fields.
 - `reg_t_base_conservative_v1`: simple Reg T style fallback.
-- `estimated_fidelity_like_conservative_v1`: default paper model with Reg T initial requirements, broker-house maintenance assumptions, option-spread treatment, and conservative add-ons.
+- `estimated_fidelity_like_conservative_v1`: offline/replay fallback model with Reg T initial requirements, broker-house maintenance assumptions, option-spread treatment, and conservative add-ons.
 - `broker_observed_margin_v1`: optional future mode that uses imported broker-reported requirements or broker-calculator outputs as the authoritative requirement, while still storing the simulated estimate for comparison.
 
-Every margin computation should persist `margin_model_profile`, `margin_model_version`, `margin_requirement_source`, and whether the requirement is estimated, broker-observed, or manually overridden. If broker-observed values are unavailable, the system should use the conservative estimate and label it as such.
+Every margin computation or broker sync should persist `margin_model_profile`, `margin_model_version`, `margin_requirement_source`, and whether the requirement is estimated, broker-reported, broker-observed, or manually overridden. For Alpaca-backed stock snapshots, use `margin_model_profile = "alpaca_paper_account"` and `margin_requirement_source = "broker_reported"` when the value came from the paper account payload. If broker-reported values are unavailable or a replay run has no broker payload, the system should use the conservative estimate and label it as such.
 
 Default estimated rules:
 
@@ -50,13 +53,15 @@ This keeps paper risk close enough to real margin-account behavior for planning,
 
 ### Paper Broker Rules
 
-- Default execution model: market-on-open for planned entries, close price for end-of-day exits.
-- Stock and option simulations can share order-state semantics, but option fills must stay paper-only and use explicit option-chain data or fixture data.
-- Slippage model: configurable bps by liquidity bucket.
-- Commission model: configurable flat or zero.
-- Fill rejection if price, volume, or market data is missing.
+- Default stock execution model: submit approved `market` / `day` stock orders to Alpaca paper trading and poll broker order state by deterministic `client_order_id`.
+- Local stock guardrails still run before the broker call: V2 common-stock paper orders are long-only for new exposure, `review_only` manual requests cannot create orders, unsupported actions are rejected, and non-positive quantities are rejected.
+- Local `paper_orders` must persist the deterministic client order id, broker order id when returned, status, rejection reason, linked trading/risk decision ids, ticker, strategy, action, trade date, quantity, and submitted/fill timestamps.
+- Local `paper_executions` must be created only from broker-reported filled order state, including broker order id, filled quantity, filled average price, execution time, and net cash effect for audit.
+- After each stock fill, the workflow must sync Alpaca account and open positions, then persist `paper_positions` and `portfolio_snapshots` from broker payloads.
+- Stock slippage, commission, price availability, and fill rejection are broker-reported in the Alpaca-backed path. Offline replay/local simulation may retain estimated slippage/commission models, but those estimates must not be mixed into live Alpaca paper snapshots as authoritative fills.
+- Stock and option paper paths can share order-state semantics, but option fills remain simulated and must use explicit option-chain data or fixture data until an option broker path is designed.
 - Option fill rejection if strike, expiry, bid/ask/mark, delta, IV rank/percentile, or earnings date data required by the strategy is missing.
-- All fills are persisted; order state transitions are auditable.
+- All fills are persisted; order state transitions are auditable and reconcileable by broker/client order id.
 
 ### Position Management
 
@@ -243,4 +248,3 @@ Example generated config snapshot:
 ```
 
 The risk manager must persist both accepted and rejected decisions. Rejected trades are important training data for reflection because the system should learn whether risk constraints protected the portfolio or blocked good opportunities.
-

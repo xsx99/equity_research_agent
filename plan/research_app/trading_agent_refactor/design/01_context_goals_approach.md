@@ -14,7 +14,7 @@ V2 的目标是把系统从“用户维护 watchlist 后生成研究结论”升
 2. 增加更系统的 quant signals，包括 momentum、mean reversion、volume/liquidity、volatility、gap、relative strength、event/fundamental/insider 等维度。
 3. 引入 versioned trading strategies，由策略层把 signals 转成候选交易意图。
 4. 允许系统从 reflection/learning 中归纳新的 trading strategy，并把新 strategy 加入 versioned strategy catalog；初始 15 个策略只是 seed set，不是上限。
-5. 引入 paper trading：每天根据策略和风险规则生成 orders，在同一个 simulated margin account 里更新 stock/options positions、trades、PnL、margin usage 和 buying power。
+5. 引入 paper trading：每天根据策略和风险规则生成 paper order requests，stock 通过 Alpaca paper account 执行并同步 positions/account state，options 仍保持 paper/simulation-only，并在同一个 paper margin-account view 里更新 positions、trades、PnL、margin usage 和 buying power。
 6. 常规交易时段每小时扫描新闻，盘前和盘后再额外扫描一次，识别高影响正面/负面事件，并在风险约束下立即触发调仓或退出。
 7. 在 reflection 之前运行 historical replay / outcome evaluator，按策略 horizon 评估候选和已交易标的相对 `SPY`、`QQQ`、sector/theme ETF、decision-time peer basket 的表现。
 8. 每天收盘后自动 reflection，归因当天交易表现，并生成结构化 learning factors 和 strategy proposals。
@@ -31,13 +31,13 @@ V2 的目标是把系统从“用户维护 watchlist 后生成研究结论”升
 
 ## 3. Non-Goals
 
-- 不接入真实券商下单，V2 只做 paper trading。
+- 不接入真实券商实盘下单，V2 只做 paper trading。股票 paper execution 可以使用 Alpaca paper API；任何 live/cash account 下单都不在 V2 范围内。
 - 不做高频或分钟级自动交易。首版以 daily pre-market plan、market-open execution simulation、post-close reflection 为主。
 - 不做 direct short common-stock paper trades。V2 common-stock orders are long-only; bearish evidence can reduce, block, downgrade to watch, or support paper option/risk-hedge expressions where explicitly allowed by strategy and risk rules.
 - 不让 LLM 直接执行 broker/order/database side effects。Python orchestration 仍然拥有状态流转和持久化。
 - 不把 reflection 生成的 learning factors 默认当作 active trading rules。扩大仓位、提高分数、放宽准入、扩大 universe 或提高风险预算的学习结果必须先进入 candidate/shadow/test；只有收紧风险、降低仓位、增加 blocked condition 的规则可以自动 active。
 - 不让新生成的 strategy 直接扩大组合风险。自动发现的 strategy 必须先进入 candidate/shadow lifecycle，并受更小的 strategy/risk budget 约束。
-- 不让新闻情绪单独绕过风险管理。Intraday 新闻只能触发有审计的 rebalance proposal，最终仍由 `RiskManager` 和 `PaperBroker` 执行。
+- 不让新闻情绪单独绕过风险管理。Intraday 新闻只能触发有审计的 rebalance proposal，最终仍由 `RiskManager` 和 `PaperStockBroker` / option paper broker 执行。
 - 不把宏观新闻直接混入每个 ticker prompt 里做随意推理。宏观只通过结构化 macro snapshot/regime 进入个股策略和交易 agent。
 - 不因为宏观 risk-off、估值高、RSI 高、VIX 上升等单独理由生成单票做空或高 confidence bearish trade。除非有直接公司级负面 catalyst 和价格/成交量确认，否则 bearish 结论只能作为风险提示、减仓或暂停加仓依据。
 - 不让短线 catalyst 信号直接驱动核心仓卖出。核心仓由独立的风险预算、加仓/暂停加仓规则和 thesis invalidation 管理。
@@ -65,4 +65,3 @@ V2 的目标是把系统从“用户维护 watchlist 后生成研究结论”升
 优点：最可测、最稳定。缺点：没有充分利用当前 research agent 的结构化 reasoning 能力，learning loop 的表达力也弱。
 
 结论：采用 Option A，但首版 MVP 不直接实现完整交易平台。先跑通 universe -> point-in-time signal snapshot -> strategy scoring -> historical replay/outcome evaluator，证明候选生成和策略评分能被无未来数据地回放和评估；再逐步加入 paper trading、options、intraday refresh、reflection 和 strategy evolution。保留当前“Python owns orchestration, LLM owns bounded reasoning”的原则，把系统拆成可审计的 daily trading layers。
-

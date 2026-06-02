@@ -19,7 +19,7 @@
 
 Implementation notes:
 
-- Scan scope starts with open stock positions, paper option positions, same-day trades, staged orders, top morning candidates, active manual/pinned review tickers, and high-impact market/sector news.
+- Scan scope starts with open stock positions, paper option positions, same-day trades, open/pending paper order audit rows, top morning candidates, active manual/pinned review tickers, and high-impact market/sector news.
 - Refresh intraday price/volume/liquidity signals, VWAP/opening-range/gap signals, relative strength vs benchmarks/peers, option marks, per-leg Greeks, max-loss/margin/buying-power changes, assignment-risk deltas when relevant, news/event signals, target-company earnings release/transcript/guidance updates, peer/sector-leader earnings read-through updates, and freshness checks for low-frequency insider/SEC/fundamental/event sources.
 - Persist intraday signal snapshots with deltas vs the morning snapshot and previous hourly snapshot.
 - Define material-change thresholds that can trigger rebalance even without a new headline.
@@ -41,4 +41,3 @@ Implementation notes:
 Stop after PR 8 for review/merge.
 
 ---
-
