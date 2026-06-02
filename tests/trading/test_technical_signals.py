@@ -2,8 +2,8 @@ from datetime import date, datetime, timezone
 
 import pytest
 
-from src.trading.signal_sources import SourceRecord
-from src.trading.technical_signals import build_technical_signals, compute_relative_strength
+from src.trading.signals.sources import SourceRecord
+from src.trading.signals.technical import build_technical_signals, compute_relative_strength
 
 
 def test_technical_signals_build_price_volume_and_relative_strength_fields():

@@ -1,7 +1,7 @@
 """Unit tests for news-data filtering and normalization."""
 from __future__ import annotations
 
-from src.tools.news_data import get_recent_news
+from src.providers.news_data import get_recent_news
 
 
 def test_get_recent_news_filters_low_signal_headlines_and_preserves_metadata():

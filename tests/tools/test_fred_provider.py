@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
-from src.tools.global_context.fred_provider import FredMacroDataProvider
+from src.providers.global_context.fred_provider import FredMacroDataProvider
 
 
 class _StubResponse:

@@ -1,8 +1,8 @@
 from datetime import datetime, timedelta, timezone
 
-from src.trading.outcome_evaluator import OutcomeEvaluator, PricePoint
-from src.trading.strategy_matching import CandidateScoreRecord
-from src.trading.trade_classifier import TradeClassificationRecord
+from src.trading.replay.outcomes import OutcomeEvaluator, PricePoint
+from src.trading.strategies.matching import CandidateScoreRecord
+from src.trading.strategies.classifier import TradeClassificationRecord
 
 
 def _candidate() -> CandidateScoreRecord:

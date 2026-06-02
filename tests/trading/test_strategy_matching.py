@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from src.trading.signals import SignalSnapshotResult
-from src.trading.strategy_matching import StrategyDefinitionRecord, StrategyMatcher
+from src.trading.strategies.matching import StrategyDefinitionRecord, StrategyMatcher
 
 
 def _snapshot(

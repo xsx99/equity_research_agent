@@ -1,6 +1,6 @@
 from datetime import date, datetime, timezone
 
-from src.trading.signal_sources import SourceRecord
+from src.trading.signals.sources import SourceRecord
 from src.trading.signals import build_signal_snapshot
 
 

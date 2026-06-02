@@ -4,7 +4,7 @@ from __future__ import annotations
 import sys
 from unittest.mock import MagicMock, patch
 
-from src.research.pipeline import TickerResult
+from src.research.workflows.batch_research import TickerResult
 
 from scripts import run_research_once
 

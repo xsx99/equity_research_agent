@@ -1,5 +1,5 @@
 """Research pipeline package — orchestration, repository helpers, and pipeline runner."""
-from src.research.repository import (
+from src.research.repositories.research_repository import (
     get_active_tickers,
     get_watchlist,
     add_ticker,
@@ -10,7 +10,7 @@ from src.research.repository import (
     mark_run_failed,
     persist_output,
 )
-from src.research.pipeline import ResearchPipeline, PipelineResult, TickerResult
+from src.research.workflows.batch_research import ResearchPipeline, PipelineResult, TickerResult
 
 __all__ = [
     "get_active_tickers",

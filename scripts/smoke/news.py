@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from src.core import config as app_config  # noqa: F401
 from src.tools import ToolContext, build_research_tool_registry
-from src.tools.news_data import (
+from src.providers.news_data import (
     AlpacaNewsProvider,
     FinnhubNewsProvider,
     MarketauxNewsProvider,

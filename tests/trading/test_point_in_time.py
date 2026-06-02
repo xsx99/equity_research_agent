@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
-from src.trading.point_in_time import filter_point_in_time_records
-from src.trading.signal_sources import SourceRecord
+from src.trading.signals.point_in_time import filter_point_in_time_records
+from src.trading.signals.sources import SourceRecord
 
 
 def _record(ticker: str, family: str, record_id: str, available_at: datetime) -> SourceRecord:

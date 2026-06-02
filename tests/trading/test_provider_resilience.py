@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from src.trading.provider_resilience import (
+from src.trading.data_sources.provider_resilience import (
     InMemoryProviderRequestRecorder,
     ProviderCircuitOpen,
     ProviderRequestBudgetExceeded,

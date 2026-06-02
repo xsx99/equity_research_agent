@@ -6,7 +6,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from src.db.connection import get_session
-from src.research import repository
+from src.research.repositories import research_repository as repository
 from src.web.flash import flash, get_flash
 
 router = APIRouter()

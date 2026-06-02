@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
-from src.trading.fundamental_signals import build_fundamental_signals
-from src.trading.signal_sources import SourceRecord
+from src.trading.signals.fundamental import build_fundamental_signals
+from src.trading.signals.sources import SourceRecord
 
 
 def test_fundamental_signals_use_latest_available_snapshot_and_mark_missing_fields():

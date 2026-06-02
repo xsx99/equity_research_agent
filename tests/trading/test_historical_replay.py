@@ -1,10 +1,10 @@
 from datetime import datetime, timedelta, timezone
 
-from src.trading.historical_replay import HistoricalReplayRunner
-from src.trading.outcome_evaluator import OutcomeEvaluator, PricePoint
-from src.trading.repository import InMemoryTradingRepository
+from src.trading.replay.historical import HistoricalReplayRunner
+from src.trading.replay.outcomes import OutcomeEvaluator, PricePoint
+from src.trading.repositories.in_memory import InMemoryTradingRepository
 from src.trading.signals import SignalSnapshotResult
-from src.trading.strategy_matching import StrategyDefinitionRecord
+from src.trading.strategies.matching import StrategyDefinitionRecord
 
 
 def _snapshot(snapshot_id: str, available_at: datetime, *, return_20d: float) -> SignalSnapshotResult:

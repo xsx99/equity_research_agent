@@ -1,4 +1,4 @@
-from src.trading.strategy_catalog import INITIAL_STRATEGY_CATALOG, get_initial_strategy_definitions
+from src.trading.strategies.catalog import INITIAL_STRATEGY_CATALOG, get_initial_strategy_definitions
 
 
 def test_initial_catalog_contains_expected_strategies():

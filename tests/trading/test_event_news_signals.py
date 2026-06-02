@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
-from src.trading.event_news_signals import build_event_news_signals
-from src.trading.signal_sources import SourceRecord
+from src.trading.signals.event_news import build_event_news_signals
+from src.trading.signals.sources import SourceRecord
 
 
 def test_event_news_signals_count_high_signal_news_and_direct_negative_catalyst():

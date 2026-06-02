@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from src.trading.universe import (
+from src.trading.data_sources.universe import (
     UniverseAsset,
     UniverseFilterConfig,
     apply_universe_filters,

@@ -15,7 +15,7 @@ from sqlalchemy import desc, func, text
 from src.core import config as app_config  # noqa: F401
 from src.db.connection import get_session
 from src.db.models import InsiderTrade
-from src.research import repository
+from src.research.repositories import research_repository as repository
 from src.tools import ToolContext, build_research_tool_registry
 
 from scripts.smoke import SmokeCheckResult, _failed, _passed, _print_results

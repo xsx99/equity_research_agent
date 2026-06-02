@@ -22,13 +22,13 @@ from dotenv import load_dotenv
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.core import config as app_config  # noqa: F401
-from src.tools.market_data.alpaca_provider import AlpacaMarketDataProvider
-from src.tools.news_data import AlpacaNewsProvider, FinnhubNewsProvider, MarketauxNewsProvider
-from src.tools.news_data.types import NewsProvider
-from src.trading.repository import InMemoryTradingRepository
-from src.trading.signal_sources import InMemorySignalSourceRepository, SourceRecord
-from src.trading.source_ingestion import SourceIngestionService
-from src.trading.universe import normalize_ticker
+from src.providers.market_data.alpaca_provider import AlpacaMarketDataProvider
+from src.providers.news_data import AlpacaNewsProvider, FinnhubNewsProvider, MarketauxNewsProvider
+from src.providers.news_data.types import NewsProvider
+from src.trading.repositories.in_memory import InMemoryTradingRepository
+from src.trading.signals.sources import InMemorySignalSourceRepository, SourceRecord
+from src.trading.signals.source_ingestion import SourceIngestionService
+from src.trading.data_sources.universe import normalize_ticker
 
 _ALL_FAMILIES = ("technical", "fundamental", "events_news")
 

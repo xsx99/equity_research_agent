@@ -1,4 +1,4 @@
-from src.trading.trade_taxonomy import TRADE_IDENTITIES, get_trade_identity_policy
+from src.trading.strategies.taxonomy import TRADE_IDENTITIES, get_trade_identity_policy
 
 
 def test_trade_identities_include_required_pools():

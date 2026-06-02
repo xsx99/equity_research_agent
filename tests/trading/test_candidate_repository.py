@@ -1,8 +1,8 @@
 from datetime import datetime, timezone
 
-from src.trading.outcome_evaluator import CandidateOutcomeEvaluationRecord
-from src.trading.repository import InMemoryTradingRepository
-from src.trading.strategy_matching import CandidateScoreRecord, StrategyDefinitionRecord, StrategyRunRecord
+from src.trading.replay.outcomes import CandidateOutcomeEvaluationRecord
+from src.trading.repositories.in_memory import InMemoryTradingRepository
+from src.trading.strategies.matching import CandidateScoreRecord, StrategyDefinitionRecord, StrategyRunRecord
 
 
 def test_in_memory_repository_stores_pr3_artifacts_and_filters_active_definitions():

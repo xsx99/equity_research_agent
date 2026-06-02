@@ -1,9 +1,9 @@
 from datetime import datetime, timezone
 
-from src.trading.portfolio_intents import PortfolioIntentConfig
-from src.trading.primary_strategy_selector import SelectedStrategyRecord
-from src.trading.strategy_matching import CandidateScoreRecord
-from src.trading.trade_classifier import TradeClassifier
+from src.trading.portfolio.intents import PortfolioIntentConfig
+from src.trading.strategies.selector import SelectedStrategyRecord
+from src.trading.strategies.matching import CandidateScoreRecord
+from src.trading.strategies.classifier import TradeClassifier
 
 
 def _candidate(

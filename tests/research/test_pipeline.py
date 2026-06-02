@@ -17,7 +17,7 @@ from src.agents.research import ResearchAgent
 from src.db.models.research import RunStatus
 from src.db.models.watch_list import Watchlist
 from src.prompts.registry import PromptRegistry
-from src.research.pipeline import ResearchPipeline, TickerResult
+from src.research.workflows.batch_research import ResearchPipeline, TickerResult
 from src.tools import ToolContext, ToolRegistry
 from src.tools.base import BaseTool
 
@@ -180,7 +180,7 @@ class TestRunTickerHappyPath:
         assert result.run_id is not None
         assert result.error is None
 
-    @patch("src.research.pipeline.repository")
+    @patch("src.research.workflows.batch_research.repository")
     def test_calls_status_transitions_in_order(self, mock_repo):
         """create_run → mark_running → (agent) → persist_output → mark_succeeded."""
         run = MagicMock()
@@ -201,7 +201,7 @@ class TestRunTickerHappyPath:
         mock_repo.mark_run_succeeded.assert_called_once_with(session, run)
         mock_repo.mark_run_failed.assert_not_called()
 
-    @patch("src.research.pipeline.repository")
+    @patch("src.research.workflows.batch_research.repository")
     def test_input_json_includes_market_and_news(self, mock_repo):
         run = MagicMock()
         run.run_id = uuid.uuid4()
@@ -255,7 +255,7 @@ class TestRunTickerHappyPath:
         )
         assert input_json["global_context"]["indicators"]["vix"]["value"] == pytest.approx(19.2)
 
-    @patch("src.research.pipeline.repository")
+    @patch("src.research.workflows.batch_research.repository")
     def test_run_all_fetches_global_context_once_for_batch(self, mock_repo):
         mock_repo.get_active_tickers.return_value = ["AAPL", "MSFT"]
         mock_repo.create_run.side_effect = [MagicMock(run_id=uuid.uuid4()), MagicMock(run_id=uuid.uuid4())]
@@ -271,7 +271,7 @@ class TestRunTickerHappyPath:
 
         pipeline._fetch_global_context.assert_called_once()
 
-    @patch("src.research.pipeline.repository")
+    @patch("src.research.workflows.batch_research.repository")
     def test_run_ticker_reuses_existing_global_context_when_requested(self, mock_repo):
         run = MagicMock()
         run.run_id = uuid.uuid4()
@@ -302,7 +302,7 @@ class TestRunTickerHappyPath:
 
 class TestRunTickerAgentFailure:
 
-    @patch("src.research.pipeline.repository")
+    @patch("src.research.workflows.batch_research.repository")
     def test_marks_run_failed_on_agent_error(self, mock_repo):
         run = MagicMock()
         run.run_id = uuid.uuid4()
@@ -321,7 +321,7 @@ class TestRunTickerAgentFailure:
         mock_repo.mark_run_succeeded.assert_not_called()
         mock_repo.persist_output.assert_not_called()
 
-    @patch("src.research.pipeline.repository")
+    @patch("src.research.workflows.batch_research.repository")
     def test_failed_result_has_run_id(self, mock_repo):
         run_id = uuid.uuid4()
         run = MagicMock()
@@ -337,7 +337,7 @@ class TestRunTickerAgentFailure:
 
         assert result.run_id == run_id
 
-    @patch("src.research.pipeline.repository")
+    @patch("src.research.workflows.batch_research.repository")
     def test_does_not_raise(self, mock_repo):
         run = MagicMock()
         run.run_id = uuid.uuid4()
@@ -360,7 +360,7 @@ class TestRunTickerAgentFailure:
 
 class TestRunAll:
 
-    @patch("src.research.pipeline.repository")
+    @patch("src.research.workflows.batch_research.repository")
     def test_empty_watchlist_returns_zero_counts(self, mock_repo):
         mock_repo.get_active_tickers.return_value = []
 
@@ -374,7 +374,7 @@ class TestRunAll:
         assert result.failed == 0
         assert result.ticker_results == []
 
-    @patch("src.research.pipeline.repository")
+    @patch("src.research.workflows.batch_research.repository")
     def test_all_succeed(self, mock_repo):
         mock_repo.get_active_tickers.return_value = ["AAPL", "MSFT"]
         runs = [MagicMock(run_id=uuid.uuid4()), MagicMock(run_id=uuid.uuid4())]
@@ -390,7 +390,7 @@ class TestRunAll:
         assert result.failed == 0
         assert len(result.ticker_results) == 2
 
-    @patch("src.research.pipeline.repository")
+    @patch("src.research.workflows.batch_research.repository")
     def test_one_failure_does_not_abort_batch(self, mock_repo):
         """A failing ticker must not prevent remaining tickers from running."""
         mock_repo.get_active_tickers.return_value = ["AAPL", "FAIL", "MSFT"]
@@ -417,7 +417,7 @@ class TestRunAll:
         assert result.failed == 1
         assert len(result.ticker_results) == 3
 
-    @patch("src.research.pipeline.repository")
+    @patch("src.research.workflows.batch_research.repository")
     def test_inactive_tickers_not_in_results(self, mock_repo):
         """Only active tickers returned by get_active_tickers should be processed."""
         mock_repo.get_active_tickers.return_value = ["AAPL"]
