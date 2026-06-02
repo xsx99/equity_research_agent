@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from src.trading.manual_review.requests import ManualTickerRequestService
+from src.trading.brokers.paper_option import PaperOptionBroker
 from src.trading.brokers.paper_stock import PaperOrderRequest, PaperStockBroker
 from src.trading.repositories.in_memory import InMemoryTradingRepository
 from src.trading.risk import RiskDecisionRecord
@@ -243,3 +244,76 @@ def test_paper_execution_workflow_persists_broker_sourced_order_account_and_posi
     assert repository.paper_positions[0].quantity == 0.01
     assert result.portfolio_snapshots[-1].cash_balance == 999997.73
     assert result.portfolio_snapshots[-1].buying_power == 1999995.46
+
+
+def test_paper_execution_workflow_persists_option_artifacts_and_overlay():
+    now = datetime(2026, 6, 2, 16, 31, tzinfo=timezone.utc)
+    repository = InMemoryTradingRepository()
+    workflow = PaperExecutionWorkflow(
+        repository=repository,
+        broker=PaperStockBroker(api_key="key", secret_key="secret", client=_CapturingClient()),
+        option_broker=PaperOptionBroker(now=lambda: now),
+        manual_request_service=ManualTickerRequestService(now=lambda: now),
+    )
+    option_decision = TradingDecisionRecord(
+        trading_decision_id="option-decision-1",
+        candidate_score_id="candidate-1",
+        trade_classification_id="classification-1",
+        risk_decision_id="risk-1",
+        ticker="NVDA",
+        decision="open_option_strategy",
+        strategy_id="earnings_drift_v1",
+        strategy_version="v1",
+        expression_bucket_id="defined_risk_income_spread",
+        expression_bucket_version="v1",
+        trade_identity="tactical_option_trade",
+        instrument_type="option",
+        selection_source="scanner",
+        manual_request_id=None,
+        confidence=0.78,
+        target_weight=0.02,
+        approved_weight=0.02,
+        max_loss_pct=0.02,
+        time_horizon="1w-4w",
+        thesis="Defined-risk income spread.",
+        invalidators=["itm_near_expiry"],
+        prompt_template=object(),
+        prompt_run=object(),
+        usage_events=[],
+        decision_time=now,
+        available_for_decision_at=now,
+        metadata_json={
+            "paper_trade_authorized": True,
+            "option_strategy": {
+                "option_strategy_decision_id": "option-strategy-1",
+                "option_strategy_type": "put_credit_spread",
+                "underlying_price": 118.0,
+                "net_debit_or_credit": -1.5,
+                "max_loss": 500.0,
+                "max_profit": 150.0,
+                "breakevens": [108.5],
+                "margin_requirement": 500.0,
+                "buying_power_effect": 500.0,
+                "assignment_notional": 11000.0,
+                "portfolio_delta": -0.11,
+                "portfolio_gamma": 0.01,
+                "portfolio_theta": 0.01,
+                "portfolio_vega": -0.03,
+                "event_through_expiry": True,
+                "strategy_pairing_method": "vertical_by_expiry_and_width",
+                "assignment_plan": "close_or_roll_before_expiry_if_itm",
+            },
+        },
+    )
+    risk = _risk_decision(approved_quantity=1)
+
+    workflow.run(
+        trading_decisions=(option_decision,),
+        risk_decisions=(risk,),
+        trade_date=now,
+    )
+
+    assert len(repository.option_strategy_decisions) == 1
+    assert len(repository.paper_option_orders) == 1
+    assert len(repository.paper_option_positions) == 1
+    assert len(repository.option_risk_snapshots) == 1

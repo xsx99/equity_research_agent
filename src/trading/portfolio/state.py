@@ -64,6 +64,26 @@ class PortfolioSnapshot:
     metadata_json: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class OptionPosition:
+    """Open option strategy state overlayed on top of the broker stock account."""
+
+    ticker: str
+    quantity: int
+    market_value: float
+    trade_identity: str
+    strategy_id: str | None
+    option_strategy_type: str
+    opened_at: datetime
+    updated_at: datetime
+    expiry: date
+    max_loss: float
+    margin_requirement: float
+    buying_power_effect: float
+    assignment_notional: float
+    direction: str = "long"
+
+
 class PortfolioLedger:
     """Retained offline ledger for replay or local simulation modes."""
 
@@ -239,34 +259,58 @@ def build_portfolio_context(
     *,
     snapshot: PortfolioSnapshot,
     positions: tuple[StockPosition, ...],
+    option_positions: tuple[OptionPosition, ...] = (),
     approved_core_tickers: tuple[str, ...] = (),
 ) -> PortfolioContext:
+    stock_positions = tuple(
+        PortfolioPosition(
+            ticker=position.ticker,
+            quantity=position.quantity,
+            market_value=position.market_value,
+            notional_exposure=position.market_value,
+            trade_identity=position.trade_identity,
+            direction=position.direction,
+            sector=None,
+            strategy_id=position.strategy_id,
+            intended_horizon=None,
+            beta_bucket=None,
+            volatility_bucket=None,
+            liquidity_bucket=None,
+            event_type=None,
+            macro_sensitivity=None,
+            margin_requirement=_initial_margin_requirement(position),
+        )
+        for position in positions
+    )
+    option_portfolio_positions = tuple(
+        PortfolioPosition(
+            ticker=position.ticker,
+            quantity=float(position.quantity),
+            market_value=position.market_value,
+            notional_exposure=position.market_value,
+            trade_identity=position.trade_identity,
+            direction=position.direction,
+            sector=None,
+            strategy_id=position.strategy_id,
+            intended_horizon=None,
+            beta_bucket=None,
+            volatility_bucket=None,
+            liquidity_bucket=None,
+            event_type="earnings_through_expiry",
+            macro_sensitivity=None,
+            margin_requirement=position.margin_requirement,
+            option_margin_requirement=position.margin_requirement,
+            assignment_notional=position.assignment_notional,
+        )
+        for position in option_positions
+    )
     return PortfolioContext(
         as_of=snapshot.as_of,
         account_equity=snapshot.account_equity,
         cash_balance=snapshot.cash_balance,
         buying_power=snapshot.buying_power,
         excess_liquidity=snapshot.excess_liquidity,
-        positions=tuple(
-            PortfolioPosition(
-                ticker=position.ticker,
-                quantity=position.quantity,
-                market_value=position.market_value,
-                notional_exposure=position.market_value,
-                trade_identity=position.trade_identity,
-                direction=position.direction,
-                sector=None,
-                strategy_id=position.strategy_id,
-                intended_horizon=None,
-                beta_bucket=None,
-                volatility_bucket=None,
-                liquidity_bucket=None,
-                event_type=None,
-                macro_sensitivity=None,
-                margin_requirement=_initial_margin_requirement(position),
-            )
-            for position in positions
-        ),
+        positions=stock_positions + option_portfolio_positions,
         open_strategy_exposure={},
         current_factor_exposure=(),
         stock_margin_requirement=snapshot.stock_margin_requirement,

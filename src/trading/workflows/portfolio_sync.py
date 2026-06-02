@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Any
 
 from src.trading.portfolio.state import (
+    OptionPosition,
     PortfolioSnapshot,
     StockPosition,
     build_portfolio_context,
@@ -68,6 +69,25 @@ class BrokerPortfolioSyncWorkflow:
             portfolio_context=build_portfolio_context(
                 snapshot=snapshot,
                 positions=synced_positions,
+                option_positions=tuple(
+                    OptionPosition(
+                        ticker=position.ticker,
+                        quantity=position.quantity,
+                        market_value=position.buying_power_effect,
+                        trade_identity=position.trade_identity,
+                        strategy_id=position.strategy_id,
+                        option_strategy_type=position.option_strategy_type,
+                        opened_at=position.opened_at,
+                        updated_at=position.updated_at,
+                        expiry=position.expiry,
+                        max_loss=position.max_loss,
+                        margin_requirement=position.margin_requirement,
+                        buying_power_effect=position.buying_power_effect,
+                        assignment_notional=position.assignment_notional,
+                    )
+                    for position in getattr(self.repository, "load_paper_option_positions", lambda: ())()
+                    if position.status == "open"
+                ),
                 approved_core_tickers=approved_core_tickers,
             ),
         )

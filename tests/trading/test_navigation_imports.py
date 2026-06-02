@@ -63,6 +63,9 @@ def test_trading_strategy_paths_export_catalog_and_selection_components():
 
 
 def test_trading_contract_paths_export_remaining_components():
+    from src.trading.brokers.paper_option import PaperOptionBroker
+    from src.trading.options.risk import OptionRiskManager
+    from src.trading.options.strategy import OptionsStrategyLayer
     from src.trading.brokers.paper_stock import PaperStockBroker
     from src.trading.data_sources.provider_resilience import ProviderResiliencePolicy
     from src.trading.data_sources.universe import UniverseAsset, normalize_ticker
@@ -78,7 +81,10 @@ def test_trading_contract_paths_export_remaining_components():
     assert UniverseAsset.__name__ == "UniverseAsset"
     assert normalize_ticker(" aapl ") == "AAPL"
     assert ManualTickerRequestService.__name__ == "ManualTickerRequestService"
+    assert PaperOptionBroker.__name__ == "PaperOptionBroker"
     assert PaperStockBroker.__name__ == "PaperStockBroker"
+    assert OptionsStrategyLayer.__name__ == "OptionsStrategyLayer"
+    assert OptionRiskManager.__name__ == "OptionRiskManager"
     assert PortfolioIntentConfig.__name__ == "PortfolioIntentConfig"
     assert PortfolioLedger.__name__ == "PortfolioLedger"
     assert PortfolioContext.__name__ == "PortfolioContext"
