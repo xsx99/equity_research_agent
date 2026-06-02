@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from src.trading.replay.historical import HistoricalReplayRunRecord
 from src.trading.replay.outcomes import CandidateOutcomeEvaluationRecord
@@ -21,6 +22,9 @@ from src.trading.signals import SignalSnapshotResult
 from src.trading.strategies.matching import CandidateScoreRecord, StrategyDefinitionRecord, StrategyRunRecord
 from src.trading.strategies.classifier import TradeClassificationRecord
 from src.trading.data_sources.universe import UniverseSnapshotResult
+
+if TYPE_CHECKING:
+    from src.trading.workflows.trading_decision import TradingDecisionRecord
 
 
 class InMemoryTradingRepository:
@@ -43,6 +47,10 @@ class InMemoryTradingRepository:
         self.portfolio_risk_snapshots: list[PortfolioRiskSnapshotRecord] = []
         self.risk_factor_exposures: list[RiskFactorExposureRecord] = []
         self.risk_decisions: list[RiskDecisionRecord] = []
+        self.llm_prompt_templates: list[object] = []
+        self.llm_prompt_runs: list[object] = []
+        self.llm_usage_events: list[object] = []
+        self.trading_decisions: list["TradingDecisionRecord"] = []
 
     def save_universe_snapshot(self, snapshot: UniverseSnapshotResult) -> None:
         self.universe_snapshots.append(snapshot)
@@ -132,3 +140,21 @@ class InMemoryTradingRepository:
 
     def save_risk_decision(self, decision: RiskDecisionRecord) -> None:
         self.risk_decisions.append(decision)
+
+    def save_prompt_template(self, template: object) -> None:
+        versioned = (getattr(template, "prompt_id", None), getattr(template, "prompt_version", None))
+        existing = {
+            (getattr(item, "prompt_id", None), getattr(item, "prompt_version", None))
+            for item in self.llm_prompt_templates
+        }
+        if versioned not in existing:
+            self.llm_prompt_templates.append(template)
+
+    def save_prompt_run(self, prompt_run: object) -> None:
+        self.llm_prompt_runs.append(prompt_run)
+
+    def save_usage_events(self, usage_events: list[object] | tuple[object, ...]) -> None:
+        self.llm_usage_events.extend(usage_events)
+
+    def save_trading_decision(self, decision: "TradingDecisionRecord") -> None:
+        self.trading_decisions.append(decision)

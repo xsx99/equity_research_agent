@@ -10,11 +10,13 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 def test_trading_workflow_paths_export_pipeline_entrypoints():
     from src.trading.workflows.signal_snapshot import SignalPipeline
     from src.trading.workflows.strategy_scoring import StrategyPipeline
+    from src.trading.workflows.trading_decision import TradingDecisionPipeline
     from src.trading.workflows.universe_scan import UniverseScanPipeline
 
     assert UniverseScanPipeline.__name__ == "UniverseScanPipeline"
     assert SignalPipeline.__name__ == "SignalPipeline"
     assert StrategyPipeline.__name__ == "StrategyPipeline"
+    assert TradingDecisionPipeline.__name__ == "TradingDecisionPipeline"
 
 
 def test_trading_repository_path_names_in_memory_store_explicitly():

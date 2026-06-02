@@ -201,3 +201,10 @@
 - 2026-06-01: PR 4 full verification passed: `source ~/.venv/bin/activate && pytest -q` passed with 317 tests.
 - 2026-06-01: PR 4 Alembic offline SQL generation passed: `source ~/.venv/bin/activate && alembic upgrade head --sql`.
 - 2026-06-01: PR 4 diff whitespace checks passed with `git diff --check`.
+- 2026-06-01: PR 5 baseline before implementation: `source ~/.venv/bin/activate && pytest tests/agents/test_trading_schemas.py tests/agents/test_trading_agent.py tests/trading/test_trading_decision_repository.py tests/trading/test_navigation_imports.py -q` failed during collection for expected missing modules `src.agents.trading_schemas`, `src.agents.trading`, and `src.trading.workflows.trading_decision`.
+- 2026-06-01: PR 5 implemented bounded trading-agent guardrails in `src/agents/trading.py`, `src/agents/trading_schemas.py`, `src/trading/workflows/trading_decision.py`, prompt template `src/agents/prompts/trading/trading_decision_v1.yaml`, extended `src/trading/repositories/in_memory.py`, added ORM model `TradingDecision` in `src/db/models/trading.py`, added Alembic revision `010_trading_decision_guardrails.py`, and updated `documents/repo_overview.md`.
+- 2026-06-01: PR 5 targeted verification passed: `source ~/.venv/bin/activate && pytest tests/agents/test_trading_schemas.py tests/agents/test_trading_agent.py tests/trading/test_trading_decision_repository.py tests/trading/test_navigation_imports.py tests/db/test_trading_models.py -q` passed with 26 tests.
+- 2026-06-01: PR 5 broader relevant verification passed: `source ~/.venv/bin/activate && pytest tests/agents tests/trading tests/db -q` passed with 82 tests.
+- 2026-06-01: PR 5 full verification passed: `source ~/.venv/bin/activate && pytest -q` passed with 325 tests.
+- 2026-06-01: PR 5 Alembic offline SQL generation passed: `source ~/.venv/bin/activate && alembic upgrade head --sql`.
+- 2026-06-01: PR 5 diff whitespace checks passed with `git diff --check`.

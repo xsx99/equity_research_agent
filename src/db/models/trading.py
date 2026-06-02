@@ -1195,3 +1195,93 @@ class RiskDecision(Base):
             name="ck_risk_decisions_weight_range",
         ),
     )
+
+
+class TradingDecision(Base):
+    """Persisted PR05 trading decision artifact before any paper-order wiring."""
+
+    __tablename__ = "trading_decisions"
+
+    trading_decision_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    candidate_score_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("candidate_scores.candidate_score_id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    trade_classification_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("trade_classifications.trade_classification_id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    risk_decision_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("risk_decisions.risk_decision_id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    prompt_run_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("llm_prompt_runs.prompt_run_id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    ticker = Column(String(16), nullable=False, index=True)
+    decision = Column(String(64), nullable=False, index=True)
+    strategy_id = Column(String(64), nullable=False, index=True)
+    strategy_version = Column(String(16), nullable=False)
+    expression_bucket_id = Column(String(64), nullable=False, index=True)
+    expression_bucket_version = Column(String(16), nullable=False)
+    trade_identity = Column(String(64), nullable=False, index=True)
+    instrument_type = Column(String(32), nullable=False)
+    selection_source = Column(String(32), nullable=False, index=True)
+    manual_request_id = Column(UUID(as_uuid=True), nullable=True, index=True)
+    confidence = Column(Numeric, nullable=False)
+    target_weight = Column(Numeric, nullable=False)
+    approved_weight = Column(Numeric, nullable=False)
+    max_loss_pct = Column(Numeric, nullable=False)
+    time_horizon = Column(String(32), nullable=False)
+    thesis = Column(Text, nullable=False)
+    invalidators_json = Column(JSONB, nullable=False, default=list)
+    fallback_action = Column(String(64), nullable=True)
+    paper_trade_authorized = Column(Boolean, nullable=False, default=False, server_default="false")
+    context_snapshot_json = Column(JSONB, nullable=False, default=dict)
+    metadata_json = Column(JSONB, nullable=False, default=dict)
+    decision_time = Column(DateTime(timezone=True), nullable=False, index=True)
+    available_for_decision_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    candidate_score = relationship("CandidateScore")
+    trade_classification = relationship("TradeClassification")
+    risk_decision = relationship("RiskDecision")
+    prompt_run = relationship("LlmPromptRun")
+
+    __table_args__ = (
+        CheckConstraint(
+            "decision IN ('enter_long', 'enter_short', 'hold', 'reduce', 'exit', "
+            "'no_trade', 'open_option_strategy', 'close_option_strategy', "
+            "'roll_option_strategy', 'adjust_option_strategy', 'avoid_event_option')",
+            name="ck_trading_decisions_decision",
+        ),
+        CheckConstraint(
+            f"trade_identity IN {TradeIdentity.check_in_sql()}",
+            name="ck_trading_decisions_trade_identity",
+        ),
+        CheckConstraint(
+            "instrument_type IN ('stock', 'option', 'watch')",
+            name="ck_trading_decisions_instrument_type",
+        ),
+        CheckConstraint(
+            "selection_source IN ('scanner', 'manual_request', 'watchlist_pin')",
+            name="ck_trading_decisions_selection_source",
+        ),
+        CheckConstraint(
+            "confidence >= 0 AND confidence <= 1 "
+            "AND target_weight >= 0 AND target_weight <= 1 "
+            "AND approved_weight >= 0 AND approved_weight <= 1 "
+            "AND max_loss_pct >= 0 AND max_loss_pct <= 1",
+            name="ck_trading_decisions_weight_ranges",
+        ),
+        Index("ix_trading_decisions_ticker_decision_time", "ticker", "decision_time"),
+    )

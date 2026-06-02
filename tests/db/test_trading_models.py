@@ -40,6 +40,7 @@ from src.db.models.trading import (
     TickerRelationship,
     TickerRelationshipType,
     TradeClassification,
+    TradingDecision,
     UniverseFilterConfig,
     UniverseSnapshot,
     UniverseSymbol,
@@ -500,6 +501,43 @@ def test_pr_4_models_can_be_instantiated():
     assert decision.position_sizing_decision is sizing
 
 
+def test_pr_5_models_can_be_instantiated():
+    now = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+    decision = TradingDecision(
+        candidate_score_id=None,
+        trade_classification_id=None,
+        risk_decision_id=None,
+        prompt_run_id=None,
+        ticker="NVDA",
+        decision="no_trade",
+        strategy_id="relative_strength_rotation_v1",
+        strategy_version="v1",
+        expression_bucket_id="long_stock",
+        expression_bucket_version="v1",
+        trade_identity="tactical_stock_trade",
+        instrument_type="stock",
+        selection_source="manual_request",
+        manual_request_id=None,
+        confidence=0.0,
+        target_weight=0.0,
+        approved_weight=0.0,
+        max_loss_pct=0.0,
+        time_horizon="2w-3m",
+        thesis="Review-only manual request found the setup actionable but did not authorize a trade.",
+        invalidators_json=["QQQ breaks trend"],
+        fallback_action="no_trade",
+        paper_trade_authorized=False,
+        context_snapshot_json={"manual_request_mode": "review_only"},
+        metadata_json={"paper_trade_authorized": False},
+        decision_time=now,
+        available_for_decision_at=now,
+    )
+
+    assert decision.ticker == "NVDA"
+    assert decision.decision == "no_trade"
+    assert decision.paper_trade_authorized is False
+
+
 def test_trading_migration_contains_pr_1a_tables():
     migration_path = Path("alembic/versions/005_trading_minimal_foundation_tables.py")
     text = migration_path.read_text(encoding="utf-8")
@@ -597,5 +635,21 @@ def test_trading_migration_contains_pr_4_tables_and_constraints():
         "ck_portfolio_risk_snapshots_risk_appetite",
         "ck_risk_factor_exposures_position_count",
         "ck_risk_decisions_status",
+    ):
+        assert constraint_name in text
+
+
+def test_trading_migration_contains_pr_5_tables_and_constraints():
+    migration_path = Path("alembic/versions/010_trading_decision_guardrails.py")
+    text = migration_path.read_text(encoding="utf-8")
+
+    assert 'down_revision: Union[str, None] = "009"' in text
+    assert '"trading_decisions"' in text
+    for constraint_name in (
+        "ck_trading_decisions_decision",
+        "ck_trading_decisions_trade_identity",
+        "ck_trading_decisions_instrument_type",
+        "ck_trading_decisions_selection_source",
+        "ck_trading_decisions_weight_ranges",
     ):
         assert constraint_name in text
