@@ -1,4 +1,4 @@
-from src.trading.portfolio_intents import (
+from src.trading.portfolio.intents import (
     PortfolioIntentConfig,
     allowed_tactical_interactions_for_ticker,
     is_core_holding_approved,

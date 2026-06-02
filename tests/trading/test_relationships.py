@@ -1,6 +1,6 @@
 from datetime import date
 
-from src.trading.relationships import (
+from src.trading.relationships.graph import (
     PeerBasketDefinition,
     ThemeTaxonomyNode,
     TickerRelationship,

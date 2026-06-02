@@ -1,8 +1,8 @@
 from datetime import datetime, timezone
 
-from src.trading.confidence_calibration import ConfidenceCalibrator
-from src.trading.outcome_evaluator import CandidateOutcomeEvaluationRecord
-from src.trading.trade_classifier import TradeClassificationRecord
+from src.trading.strategies.calibration import ConfidenceCalibrator
+from src.trading.replay.outcomes import CandidateOutcomeEvaluationRecord
+from src.trading.strategies.classifier import TradeClassificationRecord
 
 
 def _classification() -> TradeClassificationRecord:

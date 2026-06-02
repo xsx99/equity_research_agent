@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.core.logging import get_logger
 from src.db.connection import get_session
-from src.research.eval_pipeline import EvalPipeline, EvalPipelineResult
+from src.research.workflows.evaluation import EvalPipeline, EvalPipelineResult
 
 logger = get_logger(__name__)
 

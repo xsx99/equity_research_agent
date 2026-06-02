@@ -1,11 +1,12 @@
 from datetime import date, datetime, timezone
 
-from src.trading.manual_requests import ManualTickerRequestService
-from src.trading.repository import InMemoryTradingRepository
-from src.trading.pipeline import SignalPipeline, UniverseScanPipeline
-from src.trading.signal_sources import InMemorySignalSourceRepository, SourceRecord
-from src.trading.source_ingestion import SourceIngestionService
-from src.trading.universe import UniverseAsset, UniverseFilterConfig
+from src.trading.manual_review.requests import ManualTickerRequestService
+from src.trading.repositories.in_memory import InMemoryTradingRepository
+from src.trading.workflows.signal_snapshot import SignalPipeline
+from src.trading.workflows.universe_scan import UniverseScanPipeline
+from src.trading.signals.sources import InMemorySignalSourceRepository, SourceRecord
+from src.trading.signals.source_ingestion import SourceIngestionService
+from src.trading.data_sources.universe import UniverseAsset, UniverseFilterConfig
 
 
 class _FakeUniverseProvider:

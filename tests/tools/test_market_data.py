@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from src.tools.market_data import (
+from src.providers.market_data import (
     AlpacaMarketDataProvider,
     DEFAULT_ALPACA_DATA_BASE_URL,
     fetch_close_price_on_date,

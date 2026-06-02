@@ -5,8 +5,9 @@ from datetime import datetime, timezone
 
 import pytest
 
-from src.tools.global_context import GlobalContextTool, get_global_context
+from src.providers.global_context import get_global_context
 from src.tools.context import ToolContext
+from src.tools.global_context import GlobalContextTool
 
 
 class _StubMacroProvider:

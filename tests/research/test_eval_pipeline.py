@@ -15,7 +15,7 @@ class TestRuleV1:
     """Exhaustive label matrix tests. No I/O required."""
 
     def _label(self, decision, realized, benchmark=0.01, threshold=0.01):
-        from src.research.eval_pipeline import apply_rule_v1
+        from src.research.workflows.evaluation import apply_rule_v1
         return apply_rule_v1(decision, realized, benchmark, neutral_threshold=threshold)
 
     def test_none_realized_returns_none(self):
@@ -109,10 +109,10 @@ def _make_output(decision: str = "bullish", time_horizon: str = "1d") -> MagicMo
 
 
 class TestEvalPipelineSameDay:
-    @patch("src.research.eval_pipeline.fetch_price_at_or_before")
-    @patch("src.research.eval_pipeline.fetch_close_price_on_date")
-    @patch("src.research.eval_pipeline.fetch_open_to_close_return")
-    @patch("src.research.eval_pipeline.repository")
+    @patch("src.research.workflows.evaluation.fetch_price_at_or_before")
+    @patch("src.research.workflows.evaluation.fetch_close_price_on_date")
+    @patch("src.research.workflows.evaluation.fetch_open_to_close_return")
+    @patch("src.research.workflows.evaluation.repository")
     def test_pre_open_run_uses_open_to_close_window(
         self,
         mock_repo,
@@ -120,7 +120,7 @@ class TestEvalPipelineSameDay:
         mock_close_price,
         mock_price_at_or_before,
     ):
-        from src.research.eval_pipeline import EvalPipeline
+        from src.research.workflows.evaluation import EvalPipeline
 
         run = _make_run(as_of=_PRE_OPEN_AS_OF)
         output = _make_output()
@@ -145,10 +145,10 @@ class TestEvalPipelineSameDay:
         mock_close_price.assert_not_called()
         mock_price_at_or_before.assert_not_called()
 
-    @patch("src.research.eval_pipeline.fetch_price_at_or_before")
-    @patch("src.research.eval_pipeline.fetch_close_price_on_date")
-    @patch("src.research.eval_pipeline.fetch_open_to_close_return")
-    @patch("src.research.eval_pipeline.repository")
+    @patch("src.research.workflows.evaluation.fetch_price_at_or_before")
+    @patch("src.research.workflows.evaluation.fetch_close_price_on_date")
+    @patch("src.research.workflows.evaluation.fetch_open_to_close_return")
+    @patch("src.research.workflows.evaluation.repository")
     def test_post_open_manual_run_uses_run_snapshot_price_to_close(
         self,
         mock_repo,
@@ -156,7 +156,7 @@ class TestEvalPipelineSameDay:
         mock_close_price,
         mock_price_at_or_before,
     ):
-        from src.research.eval_pipeline import EvalPipeline
+        from src.research.workflows.evaluation import EvalPipeline
 
         run = _make_run(
             as_of=_POST_OPEN_AS_OF,
@@ -184,10 +184,10 @@ class TestEvalPipelineSameDay:
         assert result.evaluated == 1
         mock_open_to_close.assert_not_called()
 
-    @patch("src.research.eval_pipeline.fetch_price_at_or_before")
-    @patch("src.research.eval_pipeline.fetch_close_price_on_date")
-    @patch("src.research.eval_pipeline.fetch_open_to_close_return")
-    @patch("src.research.eval_pipeline.repository")
+    @patch("src.research.workflows.evaluation.fetch_price_at_or_before")
+    @patch("src.research.workflows.evaluation.fetch_close_price_on_date")
+    @patch("src.research.workflows.evaluation.fetch_open_to_close_return")
+    @patch("src.research.workflows.evaluation.repository")
     def test_post_open_manual_run_missing_entry_price_writes_null_outcome(
         self,
         mock_repo,
@@ -195,7 +195,7 @@ class TestEvalPipelineSameDay:
         mock_close_price,
         mock_price_at_or_before,
     ):
-        from src.research.eval_pipeline import EvalPipeline
+        from src.research.workflows.evaluation import EvalPipeline
 
         run = _make_run(
             as_of=_POST_OPEN_AS_OF,
@@ -216,9 +216,9 @@ class TestEvalPipelineSameDay:
         assert result.evaluated == 1
         mock_open_to_close.assert_not_called()
 
-    @patch("src.research.eval_pipeline.repository")
+    @patch("src.research.workflows.evaluation.repository")
     def test_no_candidates_returns_zero_counts(self, mock_repo):
-        from src.research.eval_pipeline import EvalPipeline, EvalPipelineResult
+        from src.research.workflows.evaluation import EvalPipeline, EvalPipelineResult
 
         mock_repo.get_same_day_eval_candidates.return_value = []
         pipeline = EvalPipeline(session=MagicMock(), provider=MagicMock())
@@ -229,10 +229,10 @@ class TestEvalPipelineSameDay:
         assert result.failed == 0
         mock_repo.upsert_eval_result.assert_not_called()
 
-    @patch("src.research.eval_pipeline.fetch_open_to_close_return")
-    @patch("src.research.eval_pipeline.repository")
+    @patch("src.research.workflows.evaluation.fetch_open_to_close_return")
+    @patch("src.research.workflows.evaluation.repository")
     def test_run_single_bypasses_candidate_selection(self, mock_repo, mock_open_to_close):
-        from src.research.eval_pipeline import EvalPipeline
+        from src.research.workflows.evaluation import EvalPipeline
 
         run_id = uuid.uuid4()
         run = _make_run(as_of=_PRE_OPEN_AS_OF)
@@ -250,10 +250,10 @@ class TestEvalPipelineSameDay:
         assert result.run_id == run_id
         mock_repo.upsert_eval_result.assert_called_once()
 
-    @patch("src.research.eval_pipeline.fetch_open_to_close_return")
-    @patch("src.research.eval_pipeline.repository")
+    @patch("src.research.workflows.evaluation.fetch_open_to_close_return")
+    @patch("src.research.workflows.evaluation.repository")
     def test_upsert_exception_does_not_abort_batch(self, mock_repo, mock_open_to_close):
-        from src.research.eval_pipeline import EvalPipeline
+        from src.research.workflows.evaluation import EvalPipeline
 
         run1 = _make_run("AAPL", as_of=_PRE_OPEN_AS_OF)
         run2 = _make_run("MSFT", as_of=_PRE_OPEN_AS_OF)
@@ -278,9 +278,9 @@ class TestEvalPipelineSameDay:
         assert result.evaluated == 1
         assert len(result.ticker_results) == 2
 
-    @patch("src.research.eval_pipeline.repository")
+    @patch("src.research.workflows.evaluation.repository")
     def test_invalid_horizon_increments_skipped(self, mock_repo):
-        from src.research.eval_pipeline import EvalPipeline
+        from src.research.workflows.evaluation import EvalPipeline
 
         run = _make_run()
         output = _make_output(time_horizon="invalid_horizon")

@@ -1,8 +1,8 @@
 from datetime import date, datetime, timezone
 
-from src.trading.repository import InMemoryTradingRepository
-from src.trading.signal_sources import InMemorySignalSourceRepository, SourceRecord
-from src.trading.source_ingestion import SourceIngestionService
+from src.trading.repositories.in_memory import InMemoryTradingRepository
+from src.trading.signals.sources import InMemorySignalSourceRepository, SourceRecord
+from src.trading.signals.source_ingestion import SourceIngestionService
 
 
 def test_signal_source_repository_returns_latest_decision_available_rows_by_family():

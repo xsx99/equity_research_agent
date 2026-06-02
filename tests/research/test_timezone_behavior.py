@@ -4,8 +4,8 @@ from datetime import date, datetime, timezone
 from unittest.mock import MagicMock
 from unittest.mock import patch
 
-from src.research import repository
-from src.research.pipeline import ResearchPipeline
+from src.research.repositories import research_repository as repository
+from src.research.workflows.batch_research import ResearchPipeline
 
 
 class TestMarketTradeDateNormalization:
@@ -37,7 +37,7 @@ class TestMarketTradeDateNormalization:
         as_of = datetime(2026, 3, 25, 3, 13, 16, tzinfo=timezone.utc)  # 2026-03-24 23:13 ET
 
         with patch(
-            "src.research.pipeline.repository.get_latest_global_context_for_trade_date",
+            "src.research.workflows.batch_research.repository.get_latest_global_context_for_trade_date",
             return_value={"ok": True},
         ) as mock_get_latest:
             result = pipeline._get_reusable_global_context(as_of)

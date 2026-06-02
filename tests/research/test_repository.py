@@ -14,7 +14,7 @@ import pytest
 from src.db.models.evaluation import EvalResult, EvaluationMethod
 from src.db.models.research import ResearchOutput, ResearchRun, RunStatus
 from src.db.models.watch_list import Watchlist
-from src.research import repository
+from src.research.repositories import research_repository as repository
 
 
 _AS_OF = datetime(2026, 3, 22, 9, 0, 0, tzinfo=timezone.utc)

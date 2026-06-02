@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from src.core import config as app_config  # noqa: F401
 from src.tools import ToolContext, build_research_tool_registry
-from src.tools.market_data import AlpacaMarketDataProvider
+from src.providers.market_data import AlpacaMarketDataProvider
 
 from scripts.smoke import SmokeCheckResult, _failed, _passed, _print_results, _skipped
 

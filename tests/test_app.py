@@ -9,8 +9,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.db.models.research import RunStatus
-from src.research.pipeline import PipelineResult, TickerResult
-from src.research.eval_pipeline import EvalPipelineResult
+from src.research.workflows.batch_research import PipelineResult, TickerResult
+from src.research.workflows.evaluation import EvalPipelineResult
 
 
 # ---------------------------------------------------------------------------

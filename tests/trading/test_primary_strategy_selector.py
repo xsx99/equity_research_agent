@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
-from src.trading.primary_strategy_selector import PrimaryStrategySelector
-from src.trading.strategy_matching import CandidateScoreRecord, StrategyDefinitionRecord
+from src.trading.strategies.selector import PrimaryStrategySelector
+from src.trading.strategies.matching import CandidateScoreRecord, StrategyDefinitionRecord
 
 
 def _candidate(strategy_id: str, score: float, *, rejection_reason: str | None = None) -> CandidateScoreRecord:

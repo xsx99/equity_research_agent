@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from src.trading.manual_requests import ManualTickerRequestService
+from src.trading.manual_review.requests import ManualTickerRequestService
 
 
 def test_manual_request_service_keeps_requests_active_until_dismissed():

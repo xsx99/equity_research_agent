@@ -8,7 +8,7 @@ from src.core.config import (
 )
 from src.core.logging import get_logger
 from src.db.connection import get_session
-from src.research.eval_pipeline import EvalPipeline
+from src.research.workflows.evaluation import EvalPipeline
 from src.scheduler.base import BaseJob, JobConfig
 
 logger = get_logger(__name__)
@@ -16,7 +16,7 @@ logger = get_logger(__name__)
 
 class EvalJob(BaseJob):
     """
-    Scheduled job that runs :class:`~src.research.eval_pipeline.EvalPipeline`
+    Scheduled job that runs :class:`~src.research.workflows.evaluation.EvalPipeline`
     for all eligible (matured) research runs once per day.
     """
 

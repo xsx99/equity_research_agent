@@ -26,7 +26,7 @@ from src.agents.research import DEFAULT_MODEL_NAME, ResearchAgent
 from src.core.logging import get_logger
 from src.db.connection import get_session
 from src.prompts.registry import PromptRegistry
-from src.research.pipeline import PipelineResult, ResearchPipeline
+from src.research.workflows.batch_research import PipelineResult, ResearchPipeline
 from src.tools import build_research_tool_registry
 
 logger = get_logger(__name__)
