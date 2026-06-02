@@ -23,8 +23,14 @@ def test_trading_workflow_paths_export_pipeline_entrypoints():
 
 def test_trading_repository_path_names_in_memory_store_explicitly():
     from src.trading.repositories.in_memory import InMemoryTradingRepository
+    from src.trading.intraday_rebalance import IntradayRebalancePipeline
+    from src.trading.intraday_signals import IntradaySignalSnapshotRecord
+    from src.trading.news_alerts import NewsAlertService
 
     assert InMemoryTradingRepository.__name__ == "InMemoryTradingRepository"
+    assert IntradayRebalancePipeline.__name__ == "IntradayRebalancePipeline"
+    assert IntradaySignalSnapshotRecord.__name__ == "IntradaySignalSnapshotRecord"
+    assert NewsAlertService.__name__ == "NewsAlertService"
 
 
 def test_trading_signal_paths_export_builders_and_source_contracts():

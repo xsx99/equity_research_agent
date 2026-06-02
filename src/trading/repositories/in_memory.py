@@ -12,6 +12,8 @@ from src.trading.brokers.paper_option import (
     PaperOptionOrderRecord,
     PaperOptionPosition,
 )
+from src.trading.intraday_signals import IntradaySignalScanRecord, IntradaySignalSnapshotRecord
+from src.trading.news_alerts import NewsAlertRecord
 from src.trading.brokers.paper_stock import PaperExecutionRecord, PaperOrderRecord
 from src.trading.options.hedge import RiskHedgeDecisionRecord
 from src.trading.options.risk import OptionRiskSnapshotRecord
@@ -34,6 +36,7 @@ from src.trading.strategies.classifier import TradeClassificationRecord
 from src.trading.data_sources.universe import UniverseSnapshotResult
 
 if TYPE_CHECKING:
+    from src.trading.intraday_rebalance import IntradayRebalanceDecisionRecord
     from src.trading.workflows.trading_decision import TradingDecisionRecord
 
 
@@ -72,6 +75,10 @@ class InMemoryTradingRepository:
         self.paper_option_positions: list[PaperOptionPosition] = []
         self.option_risk_snapshots: list[OptionRiskSnapshotRecord] = []
         self.portfolio_snapshots: list[PortfolioSnapshot] = []
+        self.intraday_signal_scans: list[IntradaySignalScanRecord] = []
+        self.intraday_signal_snapshots: list[IntradaySignalSnapshotRecord] = []
+        self.news_alerts: list[NewsAlertRecord] = []
+        self.intraday_rebalance_decisions: list["IntradayRebalanceDecisionRecord"] = []
 
     def save_universe_snapshot(self, snapshot: UniverseSnapshotResult) -> None:
         self.universe_snapshots.append(snapshot)
@@ -241,3 +248,16 @@ class InMemoryTradingRepository:
 
     def save_portfolio_snapshot(self, snapshot: PortfolioSnapshot) -> None:
         self.portfolio_snapshots.append(snapshot)
+
+    def save_intraday_signal_scan(self, scan: IntradaySignalScanRecord) -> None:
+        self.intraday_signal_scans.append(scan)
+
+    def save_intraday_signal_snapshot(self, snapshot: IntradaySignalSnapshotRecord) -> None:
+        self.intraday_signal_snapshots.append(snapshot)
+
+    def save_news_alert(self, alert: NewsAlertRecord) -> None:
+        if alert.dedupe_key not in {item.dedupe_key for item in self.news_alerts}:
+            self.news_alerts.append(alert)
+
+    def save_intraday_rebalance_decision(self, decision: "IntradayRebalanceDecisionRecord") -> None:
+        self.intraday_rebalance_decisions.append(decision)

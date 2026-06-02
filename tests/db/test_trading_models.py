@@ -26,6 +26,10 @@ from src.db.models.trading import (
     PortfolioSnapshot,
     ProviderRequestRun,
     ProviderRequestStatus,
+    IntradaySignalScan,
+    IntradaySignalSnapshot,
+    IntradayRebalanceDecision,
+    NewsAlert,
     PortfolioRiskSnapshot,
     PositionSizingDecision,
     RiskAppetite,
@@ -155,6 +159,72 @@ def test_llm_models_can_be_instantiated():
     assert template.prompt_id == "trading_decision"
     assert run.prompt_template is template
     assert usage.prompt_run is run
+
+
+def test_pr_8_models_can_be_instantiated():
+    now = datetime(2026, 6, 2, 15, 0, tzinfo=timezone.utc)
+    scan = IntradaySignalScan(
+        decision_time=now,
+        started_at=now,
+        completed_at=now,
+        status="succeeded",
+        scope_json={"tickers": ["NVDA"]},
+        coverage_json={"tickers_requested": 1, "tickers_completed": 1},
+        metadata_json={},
+    )
+    snapshot = IntradaySignalSnapshot(
+        intraday_signal_scan=scan,
+        ticker="NVDA",
+        decision_time=now,
+        baseline_signal_snapshot_id=None,
+        previous_intraday_snapshot_id=None,
+        refreshed_signals_json={"technical": {"last_price": 125.0}},
+        carried_forward_signals_json={"fundamental": {"market_cap_bucket": "mega"}},
+        delta_vs_baseline_json={"technical": {"last_price": 5.0}},
+        delta_vs_previous_json={},
+        source_freshness_json={"technical": "fresh"},
+        metadata_json={},
+    )
+    alert = NewsAlert(
+        ticker="NVDA",
+        source_ticker="NVDA",
+        alert_type="earnings_beat_raise",
+        sentiment="positive",
+        severity="high",
+        source="fixture",
+        published_at=now,
+        headline="NVDA rises after earnings beat and raised guidance",
+        summary="Beat and raise guidance.",
+        strategy_relevance_json=["earnings_drift_v1"],
+        affected_positions_json=["position-1"],
+        affected_candidates_json=["candidate-1"],
+        affected_themes_json=["ai_semis"],
+        readthrough_source_ticker=None,
+        action_required=True,
+        dedupe_key="NVDA|earnings_beat_raise|2026-06-02T15:00:00+00:00",
+        event_news_item_id=None,
+        metadata_json={},
+    )
+
+    assert scan.status == "succeeded"
+    assert snapshot.ticker == "NVDA"
+    assert alert.severity == "high"
+    rebalance = IntradayRebalanceDecision(
+        ticker="NVDA",
+        action="hold",
+        status="fallback",
+        reason_code="classification_failed",
+        confidence=0,
+        target_weight=0,
+        approved_quantity=0,
+        thesis="",
+        urgency="low",
+        rationale_json=[],
+        available_for_decision_at=now,
+        decision_time=now,
+        metadata_json={},
+    )
+    assert rebalance.action == "hold"
 
 
 def test_pr_1b_models_can_be_instantiated():

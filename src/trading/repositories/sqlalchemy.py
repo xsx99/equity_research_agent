@@ -6,6 +6,10 @@ from decimal import Decimal
 from typing import Any
 
 from src.db.models.trading import (
+    IntradayRebalanceDecision,
+    IntradaySignalScan,
+    IntradaySignalSnapshot,
+    NewsAlert,
     OptionRiskSnapshot,
     OptionStrategyDecision,
     OptionStrategyLeg,
@@ -24,6 +28,8 @@ from src.trading.brokers.paper_option import (
     PaperOptionPosition,
 )
 from src.trading.brokers.paper_stock import PaperExecutionRecord, PaperOrderRecord
+from src.trading.intraday_signals import IntradaySignalScanRecord, IntradaySignalSnapshotRecord
+from src.trading.news_alerts import NewsAlertRecord
 from src.trading.options.hedge import RiskHedgeDecisionRecord
 from src.trading.options.risk import OptionRiskSnapshotRecord
 from src.trading.options.strategy import OptionStrategyDecisionRecord, OptionStrategyLegRecord
@@ -56,6 +62,96 @@ class SQLAlchemyTradingRepository:
         row.status = order.status
         row.rejection_reason = order.rejection_reason
         row.created_at = order.created_at
+        self.session.flush()
+
+    def save_intraday_signal_scan(self, scan: IntradaySignalScanRecord) -> None:
+        row = self.session.query(IntradaySignalScan).filter_by(
+            intraday_signal_scan_id=_to_uuid(scan.intraday_signal_scan_id)
+        ).one_or_none()
+        if row is None:
+            row = IntradaySignalScan(intraday_signal_scan_id=_to_uuid(scan.intraday_signal_scan_id))
+            self.session.add(row)
+        row.decision_time = scan.decision_time
+        row.started_at = scan.started_at
+        row.completed_at = scan.completed_at
+        row.status = scan.status
+        row.scope_json = dict(scan.scope_json)
+        row.coverage_json = dict(scan.coverage_json)
+        row.error_message = scan.error_message
+        row.metadata_json = dict(scan.metadata_json)
+        self.session.flush()
+
+    def save_intraday_signal_snapshot(self, snapshot: IntradaySignalSnapshotRecord) -> None:
+        row = self.session.query(IntradaySignalSnapshot).filter_by(
+            intraday_signal_snapshot_id=_to_uuid(snapshot.intraday_signal_snapshot_id)
+        ).one_or_none()
+        if row is None:
+            row = IntradaySignalSnapshot(
+                intraday_signal_snapshot_id=_to_uuid(snapshot.intraday_signal_snapshot_id)
+            )
+            self.session.add(row)
+        row.intraday_signal_scan_id = _to_uuid(snapshot.intraday_signal_scan_id)
+        row.ticker = snapshot.ticker
+        row.decision_time = snapshot.decision_time
+        row.baseline_signal_snapshot_id = _to_uuid_or_none(snapshot.baseline_signal_snapshot_id)
+        row.previous_intraday_snapshot_id = _to_uuid_or_none(snapshot.previous_intraday_snapshot_id)
+        row.refreshed_signals_json = dict(snapshot.refreshed_signals_json)
+        row.carried_forward_signals_json = dict(snapshot.carried_forward_signals_json)
+        row.delta_vs_baseline_json = dict(snapshot.delta_vs_baseline_json)
+        row.delta_vs_previous_json = dict(snapshot.delta_vs_previous_json)
+        row.source_freshness_json = dict(snapshot.source_freshness_json)
+        row.metadata_json = dict(snapshot.metadata_json)
+        row.created_at = snapshot.created_at
+        self.session.flush()
+
+    def save_news_alert(self, alert: NewsAlertRecord) -> None:
+        row = self.session.query(NewsAlert).filter_by(dedupe_key=alert.dedupe_key).one_or_none()
+        if row is None:
+            row = NewsAlert(news_alert_id=_to_uuid(alert.news_alert_id), dedupe_key=alert.dedupe_key)
+            self.session.add(row)
+        row.ticker = alert.ticker
+        row.source_ticker = alert.source_ticker
+        row.alert_type = alert.alert_type
+        row.sentiment = alert.sentiment
+        row.severity = alert.severity
+        row.source = alert.source
+        row.published_at = alert.published_at
+        row.headline = alert.headline
+        row.summary = alert.summary
+        row.strategy_relevance_json = list(alert.strategy_relevance)
+        row.affected_positions_json = list(alert.affected_positions)
+        row.affected_candidates_json = list(alert.affected_candidates)
+        row.affected_themes_json = list(alert.affected_themes)
+        row.readthrough_source_ticker = alert.readthrough_source_ticker
+        row.action_required = alert.action_required
+        row.event_news_item_id = _to_uuid_or_none(alert.event_news_item_id)
+        row.metadata_json = dict(alert.metadata_json)
+        row.created_at = alert.created_at
+        self.session.flush()
+
+    def save_intraday_rebalance_decision(self, decision: Any) -> None:
+        row = self.session.query(IntradayRebalanceDecision).filter_by(
+            intraday_rebalance_decision_id=_to_uuid(decision.intraday_rebalance_decision_id)
+        ).one_or_none()
+        if row is None:
+            row = IntradayRebalanceDecision(
+                intraday_rebalance_decision_id=_to_uuid(decision.intraday_rebalance_decision_id)
+            )
+            self.session.add(row)
+        row.ticker = decision.ticker
+        row.action = decision.action
+        row.status = decision.status
+        row.reason_code = decision.reason_code
+        row.confidence = Decimal(str(decision.confidence))
+        row.target_weight = Decimal(str(decision.target_weight))
+        row.approved_quantity = Decimal(str(decision.approved_quantity))
+        row.thesis = decision.thesis
+        row.urgency = decision.urgency
+        row.rationale_json = list(decision.rationale)
+        row.available_for_decision_at = decision.available_for_decision_at
+        row.decision_time = decision.decision_time
+        row.risk_decision_id = _to_uuid_or_none(decision.risk_decision_id)
+        row.metadata_json = dict(decision.metadata_json)
         self.session.flush()
 
     def save_paper_execution(self, execution: PaperExecutionRecord) -> None:
