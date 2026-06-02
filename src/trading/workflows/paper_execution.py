@@ -7,12 +7,9 @@ from typing import Any
 
 from src.trading.manual_review.requests import ManualTickerRequestService
 from src.trading.paper_stock_broker import PaperOrderRequest, PaperOrderRecord, PaperStockBroker
-from src.trading.portfolio.state import (
-    PortfolioSnapshot,
-    build_portfolio_snapshot_from_account,
-    build_positions_from_broker,
-)
+from src.trading.portfolio.state import PortfolioSnapshot
 from src.trading.risk import RiskDecisionRecord
+from src.trading.workflows.portfolio_sync import BrokerPortfolioSyncWorkflow
 from src.trading.workflows.trading_decision import TradingDecisionRecord
 
 
@@ -37,6 +34,7 @@ class PaperExecutionWorkflow:
         self.repository = repository
         self.broker = broker
         self.manual_request_service = manual_request_service
+        self.portfolio_sync = BrokerPortfolioSyncWorkflow(repository=repository, broker=broker)
 
     def run(
         self,
@@ -75,31 +73,16 @@ class PaperExecutionWorkflow:
             if self.repository.has_paper_execution(execution.paper_execution_id):
                 continue
             self.repository.save_paper_execution(execution)
-            account_payload = self.broker.sync_account()
-            broker_positions = self.broker.sync_positions()
-            local_position_metadata = {
-                position.ticker: {
-                    "strategy_id": position.strategy_id,
-                    "trade_identity": position.trade_identity,
-                }
-                for position in self.repository.paper_positions
-            }
-            local_position_metadata[trading_decision.ticker] = {
-                "strategy_id": trading_decision.strategy_id,
-                "trade_identity": trading_decision.trade_identity,
-            }
-            synced_positions = build_positions_from_broker(
-                broker_positions=broker_positions,
+            sync_result = self.portfolio_sync.run(
                 as_of=execution.executed_at,
-                local_position_metadata=local_position_metadata,
+                extra_position_metadata={
+                    trading_decision.ticker: {
+                        "strategy_id": trading_decision.strategy_id,
+                        "trade_identity": trading_decision.trade_identity,
+                    }
+                },
             )
-            self.repository.replace_paper_positions(synced_positions)
-            snapshot = build_portfolio_snapshot_from_account(
-                account_payload,
-                as_of=execution.executed_at,
-            )
-            self.repository.save_portfolio_snapshot(snapshot)
-            snapshots.append(snapshot)
+            snapshots.append(sync_result.snapshot)
         return PaperExecutionWorkflowResult(
             paper_orders=tuple(orders),
             portfolio_snapshots=tuple(snapshots),

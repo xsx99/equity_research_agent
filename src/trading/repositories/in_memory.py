@@ -181,6 +181,9 @@ class InMemoryTradingRepository:
         self.paper_positions.append(position)
         self.paper_positions.sort(key=lambda item: item.ticker)
 
+    def load_paper_positions(self) -> tuple[StockPosition, ...]:
+        return tuple(sorted(self.paper_positions, key=lambda item: item.ticker))
+
     def replace_paper_positions(self, positions: tuple[StockPosition, ...] | list[StockPosition]) -> None:
         self.paper_positions = sorted(list(positions), key=lambda item: item.ticker)
 
