@@ -35,6 +35,7 @@ from src.trading.signals.source_ingestion import SourceIngestionService
 from src.trading.signals.sources import EventNewsItemRecord, InMemorySignalSourceRepository
 from src.trading.strategies.matching import StrategyDefinitionRecord
 from src.trading.strategy_evolution import StrategyEvolutionPipeline, StrategyEvolutionRequest
+from src.trading.runtime_live import run_live_preopen_once
 from src.trading.workflows.signal_snapshot import SignalPipeline
 from src.trading.workflows.strategy_scoring import StrategyPipeline
 from src.trading.workflows.universe_scan import UniverseScanPipeline
@@ -65,7 +66,7 @@ TRADING_JOB_PHASES = (
 def run_job_phase(phase: str) -> dict[str, Any]:
     """Run one scheduler-facing trading phase."""
     handlers = {
-        "preopen": run_trading_preopen_once,
+        "preopen": run_live_preopen_once,
         "manual_review": run_manual_ticker_review_once,
         "intraday_refresh": run_intraday_signal_refresh_once,
         "reflection": run_trading_reflection_once,

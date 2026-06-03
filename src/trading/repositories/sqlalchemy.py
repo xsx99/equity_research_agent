@@ -6,6 +6,7 @@ from decimal import Decimal
 from typing import Any
 
 from src.db.models.trading import (
+    CandidateScore,
     IntradayRebalanceDecision,
     IntradaySignalScan,
     IntradaySignalSnapshot,
@@ -21,10 +22,16 @@ from src.db.models.trading import (
     PaperPosition,
     PortfolioSnapshot as PortfolioSnapshotModel,
     RiskHedgeDecision,
+    SignalSnapshot,
     StrategyDefinition,
+    StrategyRun,
     StrategyEvaluationResult,
     StrategyProposal,
+    TradeClassification,
+    TradingDecision,
+    UniverseFilterConfig,
 )
+from src.trading.data_sources.universe import UniverseFilterConfig as UniverseFilterConfigRecord
 from src.trading.brokers.paper_option import (
     PaperOptionExecutionRecord,
     PaperOptionOrderRecord,
@@ -37,7 +44,11 @@ from src.trading.risk.hedges import RiskHedgeDecisionRecord
 from src.trading.risk.options import OptionRiskSnapshotRecord
 from src.trading.options.strategy import OptionStrategyDecisionRecord, OptionStrategyLegRecord
 from src.trading.portfolio.state import PortfolioSnapshot, StockPosition
+from src.trading.signals import SignalSnapshotResult
+from src.trading.strategies.classifier import TradeClassificationRecord
+from src.trading.strategies.matching import CandidateScoreRecord, StrategyRunRecord
 from src.trading.strategies.matching import StrategyDefinitionRecord
+from src.trading.workflows.trading_decision import TradingDecisionRecord
 
 
 class SQLAlchemyTradingRepository:
@@ -92,6 +103,31 @@ class SQLAlchemyTradingRepository:
             if row.is_active and row.lifecycle_status in {"active", "experimental", "shadow"}
         ]
 
+    def load_active_universe_filter_config(self) -> UniverseFilterConfigRecord:
+        rows = [
+            row
+            for row in self.session.query(UniverseFilterConfig).all()
+            if bool(row.is_active)
+        ]
+        if not rows:
+            raise RuntimeError("active_universe_filter_config_not_found")
+        row = max(rows, key=lambda item: (int(item.version), getattr(item, "created_at", None) or 0))
+        return UniverseFilterConfigRecord(
+            profile_name=row.profile_name,
+            version=int(row.version),
+            min_price=float(row.min_price),
+            min_avg_dollar_volume=float(row.min_avg_dollar_volume),
+            included_sectors=tuple(row.included_sectors_json or ()),
+            excluded_sectors=tuple(row.excluded_sectors_json or ()),
+            included_industries=tuple(row.included_industries_json or ()),
+            excluded_industries=tuple(row.excluded_industries_json or ()),
+            exchanges=tuple(row.exchanges_json or ()),
+            asset_types=tuple(row.asset_types_json or ()),
+            manual_include=tuple(row.manual_include_json or ()),
+            manual_exclude=tuple(row.manual_exclude_json or ()),
+            is_active=bool(row.is_active),
+        )
+
     def save_strategy_proposal(self, proposal: Any) -> None:
         row = StrategyProposal(
             strategy_proposal_id=_to_uuid(proposal.strategy_proposal_id),
@@ -109,6 +145,197 @@ class SQLAlchemyTradingRepository:
             metadata_json=dict(proposal.metadata_json),
         )
         self.session.add(row)
+        self.session.flush()
+
+    def save_strategy_run(self, run: StrategyRunRecord) -> None:
+        row = self.session.query(StrategyRun).filter_by(strategy_run_id=_to_uuid(run.strategy_run_id)).one_or_none()
+        if row is None:
+            row = StrategyRun(strategy_run_id=_to_uuid(run.strategy_run_id))
+            self.session.add(row)
+        row.decision_time = run.decision_time
+        row.snapshot_type = run.snapshot_type
+        row.status = run.status
+        row.metadata_json = dict(run.metadata_json)
+        self.session.flush()
+
+    def save_signal_snapshot(self, snapshot: SignalSnapshotResult) -> None:
+        row = self.session.query(SignalSnapshot).filter_by(
+            signal_snapshot_id=_to_uuid(snapshot.signal_snapshot_id)
+        ).one_or_none()
+        if row is None:
+            row = SignalSnapshot(signal_snapshot_id=_to_uuid(snapshot.signal_snapshot_id))
+            self.session.add(row)
+        row.ticker = snapshot.ticker
+        row.snapshot_type = snapshot.snapshot_type
+        row.decision_time = snapshot.decision_time
+        row.available_for_decision_at = snapshot.available_for_decision_at
+        row.max_input_available_for_decision_at = snapshot.max_input_available_for_decision_at
+        row.signal_json = dict(snapshot.signal_json)
+        row.source_freshness_json = dict(snapshot.source_freshness_json)
+        row.missing_signals_json = list(snapshot.missing_signals_json)
+        row.stale_signals_json = list(snapshot.stale_signals_json)
+        row.source_record_refs_json = list(snapshot.source_record_refs_json)
+        row.source_available_times_json = dict(snapshot.source_available_times_json)
+        row.excluded_future_source_count = int(snapshot.excluded_future_source_count)
+        row.point_in_time_passed = bool(snapshot.point_in_time_passed)
+        row.selection_source = snapshot.selection_source
+        row.manual_request_id = _to_uuid_or_none(snapshot.manual_request_id)
+        row.universe_snapshot_id = None
+        row.metadata_json = {}
+        self.session.flush()
+
+    def load_signal_snapshots_for_decision(
+        self,
+        *,
+        decision_time: Any,
+        snapshot_type: str = "pre_open",
+    ) -> tuple[SignalSnapshotResult, ...]:
+        selected_by_ticker: dict[str, SignalSnapshotResult] = {}
+        for row in self.session.query(SignalSnapshot).all():
+            if row.snapshot_type != snapshot_type:
+                continue
+            if row.decision_time != decision_time:
+                continue
+            if row.available_for_decision_at > decision_time:
+                continue
+            snapshot = SignalSnapshotResult(
+                signal_snapshot_id=str(row.signal_snapshot_id),
+                ticker=row.ticker,
+                snapshot_type=row.snapshot_type,
+                decision_time=row.decision_time,
+                available_for_decision_at=row.available_for_decision_at,
+                max_input_available_for_decision_at=row.max_input_available_for_decision_at,
+                signal_json=dict(row.signal_json or {}),
+                source_freshness_json=dict(row.source_freshness_json or {}),
+                missing_signals_json=list(row.missing_signals_json or []),
+                stale_signals_json=list(row.stale_signals_json or []),
+                source_record_refs_json=list(row.source_record_refs_json or []),
+                source_available_times_json=dict(row.source_available_times_json or {}),
+                excluded_future_source_count=int(row.excluded_future_source_count or 0),
+                point_in_time_passed=bool(row.point_in_time_passed),
+                selection_source=row.selection_source,
+                manual_request_id=str(row.manual_request_id) if row.manual_request_id is not None else None,
+            )
+            current = selected_by_ticker.get(snapshot.ticker)
+            if current is None or snapshot.available_for_decision_at > current.available_for_decision_at:
+                selected_by_ticker[snapshot.ticker] = snapshot
+        return tuple(snapshot for _ticker, snapshot in sorted(selected_by_ticker.items()))
+
+    def save_candidate_scores(self, candidates: list[CandidateScoreRecord] | tuple[CandidateScoreRecord, ...]) -> None:
+        for candidate in candidates:
+            row = self.session.query(CandidateScore).filter_by(
+                candidate_score_id=_to_uuid(candidate.candidate_score_id)
+            ).one_or_none()
+            if row is None:
+                row = CandidateScore(candidate_score_id=_to_uuid(candidate.candidate_score_id))
+                self.session.add(row)
+            row.strategy_run_id = _to_uuid(candidate.strategy_run_id)
+            row.signal_snapshot_id = _to_uuid_or_none(candidate.signal_snapshot_id)
+            row.ticker = candidate.ticker
+            row.strategy_id = candidate.strategy_id
+            row.strategy_version = candidate.strategy_version
+            row.strategy_definition_id = _to_uuid_or_none(candidate.strategy_definition_id)
+            row.candidate_score = Decimal(str(candidate.candidate_score))
+            row.direction = candidate.direction
+            row.action = candidate.action
+            row.typical_horizon = candidate.typical_horizon
+            row.core_signal_evidence_json = dict(candidate.core_signal_evidence)
+            row.missing_required_signals_json = list(candidate.missing_required_signals)
+            row.unsupported_missing_signal_families_json = list(candidate.unsupported_missing_signal_families)
+            row.invalidators_json = list(candidate.invalidators)
+            row.risk_tags_json = list(candidate.risk_tags)
+            row.macro_compatibility = candidate.macro_compatibility
+            row.selection_source = candidate.selection_source
+            row.manual_request_id = _to_uuid_or_none(candidate.manual_request_id)
+            row.selection_reason = candidate.selection_reason
+            row.rejection_reason = candidate.rejection_reason
+            row.benchmark_context_json = dict(candidate.benchmark_context)
+            row.decision_time = candidate.decision_time
+            row.available_for_decision_at = candidate.available_for_decision_at
+            row.source_record_refs_json = list(candidate.source_record_refs_json)
+        self.session.flush()
+
+    def save_trade_classifications(
+        self,
+        classifications: list[TradeClassificationRecord] | tuple[TradeClassificationRecord, ...],
+    ) -> None:
+        for classification in classifications:
+            row = self.session.query(TradeClassification).filter_by(
+                trade_classification_id=_to_uuid(classification.trade_classification_id)
+            ).one_or_none()
+            if row is None:
+                row = TradeClassification(
+                    trade_classification_id=_to_uuid(classification.trade_classification_id)
+                )
+                self.session.add(row)
+            row.candidate_score_id = _to_uuid(classification.candidate_score_id)
+            row.strategy_run_id = _to_uuid(classification.strategy_run_id)
+            row.ticker = classification.ticker
+            row.selected_strategy_id = classification.selected_strategy_id
+            row.selected_strategy_version = classification.selected_strategy_version
+            row.expression_bucket_id = classification.expression_bucket_id
+            row.expression_bucket_version = classification.expression_bucket_version
+            row.trade_identity = classification.trade_identity
+            row.watch_type = classification.watch_type
+            row.direction = classification.direction
+            row.intended_horizon = classification.intended_horizon
+            row.exit_policy = classification.exit_policy
+            row.result_status = classification.result_status
+            row.classification_reason = classification.classification_reason
+            row.selected_strategy_context_json = dict(classification.selected_strategy_context_json)
+            row.decision_time = classification.decision_time
+        self.session.flush()
+
+    def save_prompt_template(self, template: object) -> None:
+        return None
+
+    def save_prompt_run(self, prompt_run: object) -> None:
+        return None
+
+    def save_usage_events(self, usage_events: list[object] | tuple[object, ...]) -> None:
+        return None
+
+    def save_trading_decision(self, decision: TradingDecisionRecord) -> None:
+        row = self.session.query(TradingDecision).filter_by(
+            trading_decision_id=_to_uuid(decision.trading_decision_id)
+        ).one_or_none()
+        if row is None:
+            row = TradingDecision(trading_decision_id=_to_uuid(decision.trading_decision_id))
+            self.session.add(row)
+        row.candidate_score_id = _to_uuid_or_none(decision.candidate_score_id)
+        row.trade_classification_id = _to_uuid_or_none(decision.trade_classification_id)
+        row.risk_decision_id = _to_uuid_or_none(decision.risk_decision_id)
+        row.ticker = decision.ticker
+        row.decision = decision.decision
+        row.strategy_id = decision.strategy_id
+        row.strategy_version = decision.strategy_version
+        row.expression_bucket_id = decision.expression_bucket_id
+        row.expression_bucket_version = decision.expression_bucket_version
+        row.trade_identity = decision.trade_identity
+        row.instrument_type = decision.instrument_type
+        row.selection_source = decision.selection_source
+        row.manual_request_id = _to_uuid_or_none(decision.manual_request_id)
+        row.confidence = Decimal(str(decision.confidence))
+        row.target_weight = Decimal(str(decision.target_weight))
+        row.approved_weight = Decimal(str(decision.approved_weight))
+        row.max_loss_pct = Decimal(str(decision.max_loss_pct))
+        row.time_horizon = decision.time_horizon
+        row.thesis = decision.thesis
+        row.invalidators_json = list(decision.invalidators)
+        row.prompt_run_id = None
+        row.fallback_action = decision.metadata_json.get("fallback_action")
+        row.paper_trade_authorized = bool(decision.metadata_json.get("paper_trade_authorized", False))
+        row.context_snapshot_json = {
+            "prompt_template": {
+                "prompt_id": getattr(decision.prompt_template, "prompt_id", None),
+                "prompt_version": getattr(decision.prompt_template, "prompt_version", None),
+            },
+            "prompt_run": getattr(decision.prompt_run, "__dict__", {}),
+            "usage_events": [getattr(event, "__dict__", {}) for event in decision.usage_events],
+        }
+        row.decision_time = decision.decision_time
+        row.available_for_decision_at = decision.available_for_decision_at
+        row.metadata_json = dict(decision.metadata_json)
         self.session.flush()
 
     def save_strategy_evaluation_result(self, result: Any) -> None:

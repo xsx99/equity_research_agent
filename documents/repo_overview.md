@@ -152,3 +152,16 @@ PR 11 adds the first operator-facing V2 trading workstation in the existing Fast
 - `/research` remains intact as the legacy audit UI, but top-level navigation now prioritizes the `Today` workstation
 
 This PR intentionally stops at the UI/read-model layer. It does not add new pipeline producers, calendar-event persistence, or a dedicated UI-specific repository abstraction yet.
+
+## PR 13 Scope
+
+PR 13 starts the live preopen cutover on top of the existing fixture-first scheduler/runtime layer:
+
+- `src/trading/runtime_live.py` now defines a dedicated live morning runtime boundary with explicit dependencies for active universe-filter loading, active manual-request loading, universe scan, signal snapshots, strategy scoring, portfolio sync, risk approval, trading decisions, and optional paper execution
+- `run_live_preopen_once()` can now build its default live dependency graph from a real DB session instead of requiring test-only injection, and `src/trading/runtime.py` delegates the scheduler-facing `preopen` phase to that live entrypoint
+- SQL-backed adapters were added for active manual-request loading/evaluation updates and normalized source persistence / point-in-time source reconstruction: `src/trading/manual_review/sqlalchemy.py` and `src/trading/repositories/source_sqlalchemy.py`
+- `src/trading/repositories/sqlalchemy.py` now includes the first PR 13 repository additions needed by the live runtime: active universe-filter loading plus persisted signal, strategy-run, candidate, trade-classification, and trading-decision helpers
+- `scripts/run_trading_once.py` now exposes an explicit `--mode live-preopen` path and keeps paper execution opt-in through `--execute-paper-orders`, so manual morning runs default to dry-run decision/risk persistence unless an operator explicitly enables order submission
+- `src/trading/data_sources/live_universe.py` adds a live universe-provider adapter that normalizes market-provider asset rows and falls back to the configured ticker env set when the provider does not return a usable universe payload
+
+This implementation is intentionally still scoped to the morning live path. It does not replace the existing fixture smoke modes, and it does not yet redesign intraday, reflection, or strategy-evolution runtime assembly.
