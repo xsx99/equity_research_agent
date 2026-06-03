@@ -3,10 +3,15 @@ from pathlib import Path
 
 from src.db.models.trading import (
     CandidateOutcomeEvaluation,
+    DailyReflection,
+    DailyReflectionStatus,
     CandidateScore,
     EventNewsItem,
     FundamentalSnapshot,
     HistoricalReplayRun,
+    LearningFactor,
+    LearningFactorApplication,
+    LearningFactorStatus,
     LlmParseStatus,
     LlmPromptLifecycleStatus,
     LlmPromptRun,
@@ -88,6 +93,15 @@ def test_new_status_enums_expose_choices():
     assert LlmPromptLifecycleStatus.choices() == ("active", "retired")
     assert LlmParseStatus.choices() == ("succeeded", "failed")
     assert LlmUsageStatus.choices() == ("succeeded", "failed")
+    assert DailyReflectionStatus.choices() == ("succeeded", "fallback")
+    assert LearningFactorStatus.choices() == (
+        "candidate",
+        "observation",
+        "shadow",
+        "active",
+        "suppressed",
+        "retired",
+    )
     assert PortfolioIntentLifecycleStatus.choices() == ("active", "paused", "retired")
     assert PortfolioIntentType.choices() == (
         "core_growth",
@@ -159,6 +173,91 @@ def test_llm_models_can_be_instantiated():
     assert template.prompt_id == "trading_decision"
     assert run.prompt_template is template
     assert usage.prompt_run is run
+
+
+def test_reflection_models_can_be_instantiated():
+    template = LlmPromptTemplate(
+        prompt_id="reflection",
+        prompt_version="v1",
+        pipeline_name="reflection",
+        template_path="src/agents/prompts/trading/reflection_v1.yaml",
+        template_hash="reflection123",
+        output_schema_id="reflection",
+        output_schema_version="v1",
+        lifecycle_status="active",
+    )
+    prompt_run = LlmPromptRun(
+        prompt_template=template,
+        pipeline_name="reflection",
+        rendered_prompt_hash="rendered-reflection-123",
+        input_context_json={"trade_date": "2026-06-02"},
+        raw_output_text="{}",
+        parsed_output_json={},
+        parse_status="succeeded",
+        validation_errors_json=[],
+        error_message=None,
+    )
+    reflection = DailyReflection(
+        trade_date=date(2026, 6, 2),
+        prompt_run=prompt_run,
+        status="succeeded",
+        portfolio_summary_json={"realized_pnl": 120.0},
+        reflection_json={"what_worked": ["confirmation"]},
+        strategy_proposal_hints_json=[],
+        metadata_json={},
+    )
+    factor = LearningFactor(
+        factor_key="lf_2026_06_02_01",
+        daily_reflection=reflection,
+        trade_date=date(2026, 6, 2),
+        title="Require confirmation for risky gaps",
+        factor_type="candidate_filter",
+        scope="strategy",
+        status="active",
+        strategy_id="gap_reversal_v1",
+        condition="opening_gap_pct > 0.04 and relative_volume < 1.5",
+        recommendation="Require first-30-minute confirmation.",
+        confidence=0.7,
+        activation_policy="auto_risk_tightening",
+        effect_tags_json=["require_confirmation"],
+        evidence_json=["Reduced false starts."],
+        metadata_json={},
+    )
+    decision = TradingDecision(
+        ticker="NVDA",
+        decision="no_trade",
+        strategy_id="gap_reversal_v1",
+        strategy_version="v1",
+        expression_bucket_id="long_stock",
+        expression_bucket_version="v1",
+        trade_identity="tactical_stock_trade",
+        instrument_type="stock",
+        selection_source="scanner",
+        manual_request_id=None,
+        confidence=0,
+        target_weight=0,
+        approved_weight=0,
+        max_loss_pct=0,
+        time_horizon="2w-3m",
+        thesis="Hold off until confirmation arrives.",
+        invalidators_json=[],
+        fallback_action=None,
+        paper_trade_authorized=False,
+        context_snapshot_json={},
+        metadata_json={},
+        decision_time=datetime(2026, 6, 2, 13, 0, tzinfo=timezone.utc),
+        available_for_decision_at=datetime(2026, 6, 2, 13, 0, tzinfo=timezone.utc),
+    )
+    application = LearningFactorApplication(
+        learning_factor=factor,
+        trading_decision=decision,
+        application_scope="trading_decision",
+        metadata_json={},
+    )
+
+    assert reflection.status == "succeeded"
+    assert factor.status == "active"
+    assert application.learning_factor is factor
 
 
 def test_pr_8_models_can_be_instantiated():

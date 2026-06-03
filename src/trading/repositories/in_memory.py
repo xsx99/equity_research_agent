@@ -37,6 +37,7 @@ from src.trading.data_sources.universe import UniverseSnapshotResult
 
 if TYPE_CHECKING:
     from src.trading.intraday.rebalance import IntradayRebalanceDecisionRecord
+    from src.trading.reflection_pipeline import DailyReflectionRecord, LearningFactorRecord
     from src.trading.workflows.trading_decision import TradingDecisionRecord
 
 
@@ -79,6 +80,8 @@ class InMemoryTradingRepository:
         self.intraday_signal_snapshots: list[IntradaySignalSnapshotRecord] = []
         self.news_alerts: list[NewsAlertRecord] = []
         self.intraday_rebalance_decisions: list["IntradayRebalanceDecisionRecord"] = []
+        self.daily_reflections: list["DailyReflectionRecord"] = []
+        self.learning_factors: list["LearningFactorRecord"] = []
 
     def save_universe_snapshot(self, snapshot: UniverseSnapshotResult) -> None:
         self.universe_snapshots.append(snapshot)
@@ -261,3 +264,9 @@ class InMemoryTradingRepository:
 
     def save_intraday_rebalance_decision(self, decision: "IntradayRebalanceDecisionRecord") -> None:
         self.intraday_rebalance_decisions.append(decision)
+
+    def save_daily_reflection(self, reflection: "DailyReflectionRecord") -> None:
+        self.daily_reflections.append(reflection)
+
+    def save_learning_factor(self, learning_factor: "LearningFactorRecord") -> None:
+        self.learning_factors.append(learning_factor)

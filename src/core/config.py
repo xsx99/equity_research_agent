@@ -1,6 +1,6 @@
-"""Configuration settings."""
-from pathlib import Path
 import os
+import warnings
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -45,11 +45,22 @@ SEC_EDGAR_RUN_ON_STARTUP = os.getenv(
 SEC_ATOM_PAGE_SIZE = int(os.getenv("SEC_ATOM_PAGE_SIZE", "100"))
 
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+APP_ENV = os.getenv("APP_ENV", "development").lower()
 RESEARCH_MODEL_NAME = os.getenv("RESEARCH_MODEL_NAME", "gemini-2.5-flash-lite")
 DEFAULT_FAST_MODEL_NAME = os.getenv("DEFAULT_FAST_MODEL_NAME", RESEARCH_MODEL_NAME)
 TRADING_MODEL_NAME = os.getenv("TRADING_MODEL_NAME", DEFAULT_FAST_MODEL_NAME)
 INTRADAY_REBALANCE_MODEL_NAME = os.getenv("INTRADAY_REBALANCE_MODEL_NAME", TRADING_MODEL_NAME)
+REFLECTION_MODEL_NAME_RAW = os.getenv("REFLECTION_MODEL_NAME", "").strip()
+REFLECTION_MODEL_NAME = REFLECTION_MODEL_NAME_RAW or DEFAULT_FAST_MODEL_NAME
+REFLECTION_MODEL_CONFIGURED = bool(REFLECTION_MODEL_NAME_RAW)
 TRADING_UNIVERSE_SYMBOLS = os.getenv("TRADING_UNIVERSE_SYMBOLS", "")
+
+if APP_ENV in {"prod", "production"} and not REFLECTION_MODEL_CONFIGURED:
+    warnings.warn(
+        "REFLECTION_MODEL_NAME is not configured; falling back to DEFAULT_FAST_MODEL_NAME",
+        RuntimeWarning,
+        stacklevel=1,
+    )
 
 # Research scheduler settings (weekdays only; pre-open batch)
 RESEARCH_SCHEDULE_HOUR = int(os.getenv("RESEARCH_SCHEDULE_HOUR", "9"))

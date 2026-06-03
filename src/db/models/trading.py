@@ -139,6 +139,20 @@ class CandidateOutcomeEvaluationStatus(ChoiceEnum):
     FINAL = "final"
 
 
+class DailyReflectionStatus(ChoiceEnum):
+    SUCCEEDED = "succeeded"
+    FALLBACK = "fallback"
+
+
+class LearningFactorStatus(ChoiceEnum):
+    CANDIDATE = "candidate"
+    OBSERVATION = "observation"
+    SHADOW = "shadow"
+    ACTIVE = "active"
+    SUPPRESSED = "suppressed"
+    RETIRED = "retired"
+
+
 class RiskAppetite(ChoiceEnum):
     CONSERVATIVE = "conservative"
     BALANCED = "balanced"
@@ -1016,6 +1030,118 @@ class CandidateOutcomeEvaluation(Base):
         ),
         Index("ix_candidate_outcomes_strategy_bucket", "strategy_id", "confidence_bucket"),
         Index("ix_candidate_outcomes_ticker_horizon", "ticker", "horizon_end_at"),
+    )
+
+
+class DailyReflection(Base):
+    """Persisted post-close reflection artifact and structured output."""
+
+    __tablename__ = "daily_reflections"
+
+    daily_reflection_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    trade_date = Column(Date, nullable=False, unique=True, index=True)
+    prompt_run_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("llm_prompt_runs.prompt_run_id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    status = Column(String(16), nullable=False, index=True)
+    portfolio_summary_json = Column(JSONB, nullable=False, default=dict)
+    reflection_json = Column(JSONB, nullable=False, default=dict)
+    strategy_proposal_hints_json = Column(JSONB, nullable=False, default=list)
+    metadata_json = Column(JSONB, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    prompt_run = relationship("LlmPromptRun")
+    learning_factors = relationship("LearningFactor", back_populates="daily_reflection")
+
+    __table_args__ = (
+        CheckConstraint(
+            f"status IN {DailyReflectionStatus.check_in_sql()}",
+            name="ck_daily_reflections_status",
+        ),
+    )
+
+
+class LearningFactor(Base):
+    """Persisted structured lesson extracted from daily reflection."""
+
+    __tablename__ = "learning_factors"
+
+    learning_factor_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    factor_key = Column(String(64), nullable=False, unique=True, index=True)
+    daily_reflection_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("daily_reflections.daily_reflection_id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    trade_date = Column(Date, nullable=False, index=True)
+    title = Column(String(255), nullable=False)
+    factor_type = Column(String(64), nullable=False, index=True)
+    scope = Column(String(32), nullable=False, index=True)
+    status = Column(String(16), nullable=False, index=True)
+    strategy_id = Column(String(64), nullable=True, index=True)
+    condition = Column(Text, nullable=False)
+    recommendation = Column(Text, nullable=False)
+    confidence = Column(Numeric, nullable=False)
+    activation_policy = Column(String(32), nullable=False)
+    effect_tags_json = Column(JSONB, nullable=False, default=list)
+    evidence_json = Column(JSONB, nullable=False, default=list)
+    metadata_json = Column(JSONB, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    daily_reflection = relationship("DailyReflection", back_populates="learning_factors")
+    applications = relationship("LearningFactorApplication", back_populates="learning_factor")
+
+    __table_args__ = (
+        CheckConstraint(
+            "scope IN ('strategy', 'portfolio', 'trade', 'watchlist', 'risk')",
+            name="ck_learning_factors_scope",
+        ),
+        CheckConstraint(
+            f"status IN {LearningFactorStatus.check_in_sql()}",
+            name="ck_learning_factors_status",
+        ),
+        CheckConstraint(
+            "confidence >= 0 AND confidence <= 1",
+            name="ck_learning_factors_confidence_range",
+        ),
+    )
+
+
+class LearningFactorApplication(Base):
+    """Join table for future learning-factor injection into trading decisions."""
+
+    __tablename__ = "learning_factor_applications"
+
+    learning_factor_application_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    learning_factor_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("learning_factors.learning_factor_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    trading_decision_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("trading_decisions.trading_decision_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    application_scope = Column(String(32), nullable=False, index=True)
+    metadata_json = Column(JSONB, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    learning_factor = relationship("LearningFactor", back_populates="applications")
+    trading_decision = relationship("TradingDecision")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "learning_factor_id",
+            "trading_decision_id",
+            name="uq_learning_factor_applications_factor_decision",
+        ),
     )
 
 
