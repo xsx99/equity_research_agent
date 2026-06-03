@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from src.agents.research import ResearchAgent
+from src.agents.prompt_registry import PromptRegistry
 from src.core.config import (
     RESEARCH_RUN_ON_STARTUP,
     RESEARCH_SCHEDULE_HOUR,
@@ -9,7 +10,6 @@ from src.core.config import (
 )
 from src.core.logging import get_logger
 from src.db.connection import get_session
-from src.prompts.registry import PromptRegistry
 from src.research.workflows.batch_research import ResearchPipeline
 from src.scheduler.base import BaseJob, JobConfig
 from src.tools import build_research_tool_registry

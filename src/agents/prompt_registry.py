@@ -4,7 +4,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import yaml
 from jinja2 import Environment, StrictUndefined
@@ -39,6 +39,8 @@ class RenderedPrompt:
 class PromptRegistry:
     """Load and render versioned prompt YAML files from a controlled root."""
 
+    _instance: ClassVar[PromptRegistry | None] = None
+
     REQUIRED_FIELDS = (
         "prompt_id",
         "prompt_version",
@@ -58,6 +60,13 @@ class PromptRegistry:
             lstrip_blocks=False,
             undefined=StrictUndefined,
         )
+
+    @classmethod
+    def get_default(cls) -> "PromptRegistry":
+        """Return the module-level singleton registry rooted at agents prompts."""
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
 
     def load(self, prompt_id: str, prompt_version: str) -> PromptTemplate:
         """Load a versioned prompt template from disk."""

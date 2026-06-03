@@ -10,8 +10,8 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from src.agents.prompt_registry import PromptRegistry
 from src.agents.research import DEFAULT_MODEL_NAME, ResearchAgent
-from src.prompts.registry import PromptRegistry
 from src.tools import ToolContext, build_research_tool_registry
 
 

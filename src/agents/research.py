@@ -7,11 +7,11 @@ from typing import Any, Callable, Optional
 
 from pydantic import ValidationError
 
+from src.agents.prompt_registry import PromptRegistry
 from src.agents.base import AgentResult, BaseAgent
 from src.agents.research_schemas import ResearchInputPayload, StructuredResearchOutput
 from src.core import config as app_config
 from src.core.logging import get_logger
-from src.prompts.registry import PromptRegistry
 from src.tools.context import ToolContext
 from src.tools.registry import ToolRegistry
 
@@ -64,8 +64,7 @@ class ResearchAgent(BaseAgent):
         """Generate one structured research output for the given payload."""
         try:
             validated = ResearchInputPayload.model_validate(input_payload)
-            prompt_obj = self.prompt_registry.get("research", self.prompt_version)
-            prompt = self._build_prompt(validated, prompt_obj.template)
+            prompt = self._build_prompt(validated)
 
             raw_response = self._agent_runner(prompt, self.model_name)
             parsed = _coerce_json_object(raw_response)
@@ -106,14 +105,17 @@ class ResearchAgent(BaseAgent):
     def fetch_insider_trades(self, ticker: str, context: ToolContext, days: int = 30) -> list[dict[str, Any]]:
         return self.tool_registry.dispatch("query_trades_by_ticker", {"ticker": ticker, "days": days}, context)
 
-    def _build_prompt(self, payload: ResearchInputPayload, template: str) -> str:
+    def _build_prompt(self, payload: ResearchInputPayload, template: str = "") -> str:
         payload_json = json.dumps(payload.model_dump(mode="json"), ensure_ascii=False, indent=2)
-        return (
-            f"{template.strip()}\n\n"
-            "Input JSON:\n"
-            f"{payload_json}\n\n"
-            "Return only one JSON object with no surrounding markdown."
+        rendered = self.prompt_registry.render(
+            "research",
+            self.prompt_version,
+            {
+                "ticker": payload.ticker,
+                "input_payload_json": payload_json,
+            },
         )
+        return rendered.text
 
 
 # ---------------------------------------------------------------------------

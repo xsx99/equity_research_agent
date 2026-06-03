@@ -23,9 +23,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.agents.research import DEFAULT_MODEL_NAME, ResearchAgent
+from src.agents.prompt_registry import PromptRegistry
 from src.core.logging import get_logger
 from src.db.connection import get_session
-from src.prompts.registry import PromptRegistry
 from src.research.workflows.batch_research import PipelineResult, ResearchPipeline
 from src.tools import build_research_tool_registry
 

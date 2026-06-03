@@ -5,9 +5,9 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
+from src.agents.prompt_registry import PromptRegistry
 from src.agents.research import ResearchAgent
 from src.db.connection import get_session
-from src.prompts.registry import PromptRegistry
 from src.research.workflows.evaluation import EvalPipeline
 from src.research.workflows.batch_research import ResearchPipeline
 from src.tools import build_research_tool_registry

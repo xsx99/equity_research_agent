@@ -5,9 +5,9 @@ import abc
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from src.agents.prompt_registry import PromptRegistry
 from src.tools.context import ToolContext
 from src.tools.registry import ToolRegistry
-from src.prompts.registry import PromptRegistry
 
 
 @dataclass
@@ -40,7 +40,7 @@ class BaseAgent(abc.ABC):
     Abstract base for all LLM agents.
 
     Agents receive a :class:`~src.tools.registry.ToolRegistry` and a
-    :class:`~src.prompts.registry.PromptRegistry` at construction time.
+    :class:`~src.agents.prompt_registry.PromptRegistry` at construction time.
     Each :meth:`run` call receives a :class:`~src.tools.context.ToolContext`
     scoped to that single invocation (carrying the DB session, etc.).
 
@@ -48,7 +48,7 @@ class BaseAgent(abc.ABC):
 
     * :meth:`run` — the main entry point.
     * :meth:`_build_prompt` — assembles the final prompt string from a
-      validated payload and a :class:`~src.prompts.registry.Prompt` template.
+      validated payload and template text.
     """
 
     def __init__(

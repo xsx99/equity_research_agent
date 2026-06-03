@@ -13,10 +13,10 @@ from unittest.mock import MagicMock, patch, call
 
 import pytest
 
+from src.agents.prompt_registry import PromptRegistry
 from src.agents.research import ResearchAgent
 from src.db.models.research import RunStatus
 from src.db.models.watch_list import Watchlist
-from src.prompts.registry import PromptRegistry
 from src.research.workflows.batch_research import ResearchPipeline, TickerResult
 from src.tools import ToolContext, ToolRegistry
 from src.tools.base import BaseTool
