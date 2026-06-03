@@ -7,7 +7,7 @@ This document covers deploying the full research app stack on the Raspberry Pi.
 | Container    | Purpose                                      |
 |-------------|----------------------------------------------|
 | `postgres_db` | PostgreSQL database (separate compose file) |
-| `scheduler`   | APScheduler: SEC, research, eval jobs        |
+| `scheduler`   | APScheduler: SEC, research, eval, trading jobs |
 | `web`         | FastAPI/uvicorn web app (port 8000 internal) |
 | `nginx`       | HTTPS reverse proxy (port 443 exposed)       |
 
@@ -91,8 +91,15 @@ The certificate is generated automatically on first nginx startup and stored in 
 | SEC EDGAR collection   | 2:00 AM daily          | `SEC_EDGAR_SCHEDULE_HOUR`, `SEC_EDGAR_SCHEDULE_MINUTE`   |
 | Research (pre-open)    | 9:20 AM Mon–Fri        | `RESEARCH_SCHEDULE_HOUR`, `RESEARCH_SCHEDULE_MINUTE` |
 | Eval                   | 4:10 PM Mon–Fri        | `EVAL_SCHEDULE_HOUR`, `EVAL_SCHEDULE_MINUTE`             |
+| Trading pre-open       | 8:45 AM Mon–Fri        | fixed in code, `America/New_York`                        |
+| Manual ticker review   | 8:50 AM Mon–Fri        | fixed in code, `America/New_York`                        |
+| Intraday refresh       | Hourly 10:00-15:00 Mon–Fri | fixed in code, `America/New_York`                   |
+| Trading reflection     | 4:20 PM Mon–Fri        | fixed in code, `America/New_York`                        |
+| Strategy evolution     | 4:50 PM Mon–Fri        | fixed in code, `America/New_York`                        |
 
 Set `RESEARCH_RUN_ON_STARTUP=true` or `EVAL_RUN_ON_STARTUP=true` in the env file to trigger a run immediately when the scheduler container starts.
+
+The scheduler service now constructs its default job set through `src/scheduler/service.py::build_scheduler_jobs()`, so ad-hoc runs and deployed runs use the same job registry.
 
 Evaluation semantics:
 - pre-open scheduled or manual runs: `open_to_close`
@@ -133,6 +140,34 @@ docker exec -w /app scheduler python scripts/run_research_agent_once.py
 ```
 
 For same-day manual iteration, run research first, then eval after the close. If the manual run happened after `9:30 ET`, the resulting eval row should store `evaluation_params.price_window=run_time_price_to_close`.
+
+Trading runtime entrypoints use the same container:
+
+```bash
+# One trading scheduler phase
+docker exec -w /app scheduler python scripts/run_trading_once.py --phase preopen --json
+
+# One trading smoke mode
+docker exec -w /app scheduler python scripts/run_trading_smoke_test.py --mode historical_replay_fixture --json
+```
+
+Use fixture-backed smoke modes in ordinary deploy verification. Keep any live provider/API smoke checks explicitly opt-in.
+
+## Postgres Persistence Verification
+
+Postgres data must live on persistent disk, not tmpfs, `/tmp`, `/run`, or anonymous Docker volumes. After every deploy or host migration, verify both the database-reported data directory and the host mount:
+
+```bash
+docker exec postgres_db psql -U postgres -d mono_db -c "SHOW data_directory;"
+docker inspect -f '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql/data"}}{{.Source}}{{end}}{{end}}' postgres_db
+```
+
+Expected result:
+
+- `SHOW data_directory;` returns `/var/lib/postgresql/data`
+- the container mount source is a real disk path such as `/data/postgres_data`
+
+If either command points to tmpfs, `/tmp`, `/run`, `/dev/shm`, or an anonymous volume, stop and fix the Compose volume mapping before continuing.
 
 ## Redeploying After a Code Change
 

@@ -9,6 +9,14 @@ from src.core.config import SCHEDULER_TIMEZONE
 from src.core.logging import get_logger
 from src.core.timezones import resolve_timezone
 from src.scheduler.base import BaseJob
+from src.scheduler.jobs.eval_job import EvalJob
+from src.scheduler.jobs.intraday_signal_refresh_job import IntradaySignalRefreshJob
+from src.scheduler.jobs.manual_ticker_review_job import ManualTickerReviewJob
+from src.scheduler.jobs.research_job import ResearchJob
+from src.scheduler.jobs.sec_edgar_job import SECEdgarJob
+from src.scheduler.jobs.strategy_evolution_job import StrategyEvolutionJob
+from src.scheduler.jobs.trading_preopen_job import TradingPreopenJob
+from src.scheduler.jobs.trading_reflection_job import TradingReflectionJob
 
 logger = get_logger(__name__)
 
@@ -64,3 +72,17 @@ class SchedulerService:
                 "invalid_timezone", timezone=SCHEDULER_TIMEZONE, fallback="UTC"
             )
         return resolved
+
+
+def build_scheduler_jobs() -> list[BaseJob]:
+    """Return the default scheduler job set for deployed services."""
+    return [
+        SECEdgarJob(),
+        ResearchJob(),
+        EvalJob(),
+        TradingPreopenJob(),
+        ManualTickerReviewJob(),
+        IntradaySignalRefreshJob(),
+        TradingReflectionJob(),
+        StrategyEvolutionJob(),
+    ]

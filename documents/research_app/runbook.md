@@ -94,3 +94,48 @@ docker compose exec scheduler python scripts/run_tool_smoke_test.py --ticker AAP
 - Missing FRED access or unreachable upstream pages can degrade `get_global_context`; the smoke check will fail if macro indicators or filtered geopolitical news come back empty.
 - Missing `MARKETAUX_API_KEY` will skip `marketaux_recent_news`; a configured but failing/empty Marketaux response will fail it.
 - Unreachable Postgres or an empty `insider_trades` table will fail the DB-backed tool checks unless `--skip-db` is set.
+
+## Trading Scheduler Phases
+
+All trading scheduler phases are defined in `America/New_York` and can be run ad hoc through one shared entrypoint:
+
+```bash
+source ~/.venv/bin/activate
+python scripts/run_trading_once.py --phase preopen --json
+python scripts/run_trading_once.py --phase manual_review --json
+python scripts/run_trading_once.py --phase intraday_refresh --json
+python scripts/run_trading_once.py --phase reflection --json
+python scripts/run_trading_once.py --phase strategy_evolution --json
+```
+
+The current PR 12 runtime is intentionally thin and reuses fixture-first workflow assembly under `src/trading/runtime.py`. Scheduler jobs call the same shared phase functions that these manual commands use.
+
+## Trading Smoke Test Modes
+
+List the available standalone trading smoke modes:
+
+```bash
+source ~/.venv/bin/activate
+python scripts/run_trading_smoke_test.py --list-modes
+```
+
+Run one mode and print JSON:
+
+```bash
+source ~/.venv/bin/activate
+python scripts/run_trading_smoke_test.py --mode manual_review_fixture --json
+```
+
+PR 12 smoke modes:
+
+- `provider_guardrail_fixture`: fixture-backed universe, source ingestion, and pre-open signal assembly without live API calls
+- `universe_signal_db_write`: fixture-backed universe and signal snapshots with real Postgres persistence when the configured database is reachable
+- `historical_replay_fixture`: point-in-time replay reconstruction plus outcome evaluation
+- `paper_trade_dry_run`: workflow-driven paper-trade dry run using a fake broker
+- `manual_review_fixture`: active `review_only` manual ticker request remains active and is re-evaluated
+- `paper_option_fixture`: whitelisted paper option decision, leg derivation, and assignment-risk evaluation
+- `intraday_refresh_fixture`: hourly intraday signal delta plus deduped alert generation
+- `reflection_fixture`: post-close reflection and learning-factor extraction
+- `strategy_evolution_fixture`: strategy proposal generation from reflection fixtures
+
+Ordinary CI should keep using fixture-backed smoke modes only. Live provider/API checks stay opt-in and should use tiny ticker sets plus explicit request budgets.

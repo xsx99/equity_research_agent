@@ -7,10 +7,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.db.connection import init_db
 from src.core.logging import get_logger
-from src.scheduler.service import SchedulerService
-from src.scheduler.jobs.sec_edgar_job import SECEdgarJob
-from src.scheduler.jobs.research_job import ResearchJob
-from src.scheduler.jobs.eval_job import EvalJob
+from src.scheduler.service import SchedulerService, build_scheduler_jobs
 
 logger = get_logger(__name__)
 
@@ -22,11 +19,7 @@ def main():
     logger.info("database_ready")
 
     logger.info("scheduler_service_starting")
-    SchedulerService(jobs=[
-        SECEdgarJob(),
-        ResearchJob(),
-        EvalJob(),
-    ]).start()
+    SchedulerService(jobs=build_scheduler_jobs()).start()
 
 
 if __name__ == "__main__":
