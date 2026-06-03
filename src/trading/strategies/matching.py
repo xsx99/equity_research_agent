@@ -34,6 +34,7 @@ class StrategyDefinitionRecord:
     config_json: dict[str, Any]
     lifecycle_status: str
     is_active: bool
+    source: str = "seed"
 
     @classmethod
     def from_mapping(cls, row: dict[str, Any]) -> "StrategyDefinitionRecord":
@@ -48,6 +49,7 @@ class StrategyDefinitionRecord:
             config_json=dict(row.get("config_json") or {}),
             lifecycle_status=str(row.get("lifecycle_status") or "active"),
             is_active=bool(row.get("is_active", True)),
+            source=str(row.get("source") or "seed"),
         )
 
 
@@ -91,6 +93,8 @@ class CandidateScoreRecord:
     decision_time: datetime
     available_for_decision_at: datetime
     source_record_refs_json: list[dict[str, Any]]
+    strategy_lifecycle_status: str = "active"
+    strategy_source: str = "seed"
 
     @property
     def is_actionable(self) -> bool:
@@ -227,6 +231,8 @@ class StrategyMatcher:
             decision_time=snapshot.decision_time,
             available_for_decision_at=snapshot.available_for_decision_at,
             source_record_refs_json=list(snapshot.source_record_refs_json),
+            strategy_lifecycle_status=definition.lifecycle_status,
+            strategy_source=definition.source,
         )
 
 

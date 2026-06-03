@@ -38,6 +38,7 @@ from src.trading.data_sources.universe import UniverseSnapshotResult
 if TYPE_CHECKING:
     from src.trading.intraday.rebalance import IntradayRebalanceDecisionRecord
     from src.trading.reflection_pipeline import DailyReflectionRecord, LearningFactorRecord
+    from src.trading.strategy_evolution import StrategyEvaluationResultRecord, StrategyProposalRecord
     from src.trading.workflows.trading_decision import TradingDecisionRecord
 
 
@@ -82,6 +83,8 @@ class InMemoryTradingRepository:
         self.intraday_rebalance_decisions: list["IntradayRebalanceDecisionRecord"] = []
         self.daily_reflections: list["DailyReflectionRecord"] = []
         self.learning_factors: list["LearningFactorRecord"] = []
+        self.strategy_proposals: list["StrategyProposalRecord"] = []
+        self.strategy_evaluation_results: list["StrategyEvaluationResultRecord"] = []
 
     def save_universe_snapshot(self, snapshot: UniverseSnapshotResult) -> None:
         self.universe_snapshots.append(snapshot)
@@ -126,7 +129,13 @@ class InMemoryTradingRepository:
         self.event_news_items.append(item)
 
     def save_strategy_definition(self, definition: StrategyDefinitionRecord) -> None:
+        self.strategy_definitions = [
+            item for item in self.strategy_definitions if item.strategy_definition_id != definition.strategy_definition_id
+        ]
         self.strategy_definitions.append(definition)
+
+    def load_strategy_definitions(self) -> list[StrategyDefinitionRecord]:
+        return list(self.strategy_definitions)
 
     def load_active_strategy_definitions(self) -> list[StrategyDefinitionRecord]:
         """Return active strategy and expression definitions for matching/selection."""
@@ -270,3 +279,9 @@ class InMemoryTradingRepository:
 
     def save_learning_factor(self, learning_factor: "LearningFactorRecord") -> None:
         self.learning_factors.append(learning_factor)
+
+    def save_strategy_proposal(self, proposal: "StrategyProposalRecord") -> None:
+        self.strategy_proposals.append(proposal)
+
+    def save_strategy_evaluation_result(self, result: "StrategyEvaluationResultRecord") -> None:
+        self.strategy_evaluation_results.append(result)

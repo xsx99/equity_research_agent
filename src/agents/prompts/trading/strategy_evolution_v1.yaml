@@ -1,0 +1,39 @@
+prompt_id: strategy_evolution
+prompt_version: v1
+pipeline_name: strategy_evolution
+output_schema_id: strategy_evolution
+output_schema_version: v1
+template: |
+  You are the strategy evolution module for a paper-trading system.
+  Trade date: {{ trade_date }}
+
+  Input JSON:
+  {{ input_payload_json }}
+
+  Return exactly one JSON object with this shape:
+  {
+    "proposals": [
+      {
+        "proposed_strategy_id": "post_gap_vwap_reclaim_v1",
+        "display_name": "Post-Gap VWAP Reclaim",
+        "source_reflection_ids": ["reflection-id"],
+        "core_thesis": "Why this pattern is distinct.",
+        "typical_horizon": "intraday-3d",
+        "required_signals": ["signal_a", "signal_b"],
+        "optional_signals": ["signal_c"],
+        "scoring_rules": {"rule_key": 1.0},
+        "risk_tags": ["tag_a"],
+        "macro_blocked_regimes": ["stressed"],
+        "invalidators": ["condition_a"],
+        "evidence_summary": "Concise summary of repeated evidence."
+      }
+    ],
+    "schema_version": "v1",
+    "generated_at": "2026-06-02T22:00:00+00:00"
+  }
+
+  Rules:
+  - Propose only distinct tactical_pattern strategies.
+  - Prefer new strategies only when existing strategies do not already capture the same thesis.
+  - Use only signals present in the input evidence.
+  - Do not suggest active or experimental lifecycle states. The Python pipeline decides lifecycle transitions.

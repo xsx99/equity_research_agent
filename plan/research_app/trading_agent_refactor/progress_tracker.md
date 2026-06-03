@@ -108,7 +108,7 @@
 | PR 7 | Paper options strategy layer + assignment risk | Pending | Paper/simulation-only whitelisted option strategies: long call/put, call/put credit spread, long straddle, and long strangle; includes conservative option margin formulas, RiskManager-owned hedge overlays, option-risk snapshots, and worst-case assignment checks when relevant. |
 | PR 8 | Intraday signal refresh + news alerts + rebalance | Pending | Hourly freshness-gated signal/news refresh during market hours; intraday snapshots are scoped deltas vs pre-open baseline and previous hourly snapshot before risk-gated stock/paper-option actions. |
 | PR 9 | Reflection + learning factors | Ready for review | Adds bounded post-close reflection with prompt telemetry, safe fallback, `daily_reflections`, conservative learning-factor lifecycle persistence, and future-facing `learning_factor_applications` schema without backfill. |
-| PR 10 | Strategy evolution + dynamic strategy catalog | Pending | Converts repeated learning into candidate/shadow strategies beyond the initial seeds after replay evidence and schema-validated proposals. |
+| PR 10 | Strategy evolution + dynamic strategy catalog | Ready for review | Converts repeated learning into candidate/shadow strategies beyond the initial seeds after replay evidence and schema-validated proposals, promotes shadow winners into experimental status, and caps experimental paper-trade eligibility. |
 | PR 11 | Today dashboard UI | Pending | Tabbed workstation with PIT audit, trade drill-downs, strategy performance, relationship/core-intent views, and LLM/API/provider telemetry. |
 | PR 12 | Scheduler, smoke tests, deploy docs | Pending | Final operational wiring, including manual ticker review job, intraday signal refresh job, replay smoke, fixture/cassette tests, opt-in live smoke, and deploy docs. |
 
@@ -261,3 +261,9 @@
 - 2026-06-02: PR 9 full verification passed: `source ~/.venv/bin/activate && pytest -q` passed with 346 tests.
 - 2026-06-02: PR 9 Alembic offline SQL generation passed: `source ~/.venv/bin/activate && alembic upgrade head --sql`.
 - 2026-06-02: PR 9 diff whitespace checks passed with `git diff --check`.
+- 2026-06-02: PR 10 baseline before implementation: `source ~/.venv/bin/activate && pytest tests/trading/test_strategy_evolution.py tests/trading/test_strategy_lifecycle.py -q` failed during collection for expected missing module `src.trading.strategy_evolution`.
+- 2026-06-02: PR 10 implemented `src/trading/strategy_evolution.py`, `src/agents/strategy_evolution.py`, `src/agents/strategy_evolution_schemas.py`, prompt template `src/agents/prompts/trading/strategy_evolution_v1.yaml`, extended `src/trading/strategies/matching.py`, `src/trading/risk/sizing.py`, `src/trading/workflows/trading_decision.py`, `src/trading/repositories/in_memory.py`, `src/trading/repositories/sqlalchemy.py`, added ORM models in `src/db/models/trading.py`, added Alembic revision `015_strategy_evolution_tables.py`, and updated `documents/repo_overview.md`.
+- 2026-06-02: PR 10 targeted verification passed: `source ~/.venv/bin/activate && pytest tests/trading/test_strategy_evolution.py tests/trading/test_strategy_lifecycle.py tests/trading/test_strategy_matching.py tests/trading/test_candidate_repository.py tests/trading/test_trading_decision_repository.py tests/trading/test_reflection_pipeline.py tests/trading/test_navigation_imports.py tests/db/test_trading_models.py -q` passed with 38 tests.
+- 2026-06-02: PR 10 full verification passed: `source ~/.venv/bin/activate && pytest -q` passed with 351 tests.
+- 2026-06-02: PR 10 Alembic offline SQL generation passed: `source ~/.venv/bin/activate && alembic upgrade head --sql`.
+- 2026-06-02: PR 10 diff whitespace checks passed with `git diff --check`.

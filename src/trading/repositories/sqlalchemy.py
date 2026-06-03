@@ -21,6 +21,9 @@ from src.db.models.trading import (
     PaperPosition,
     PortfolioSnapshot as PortfolioSnapshotModel,
     RiskHedgeDecision,
+    StrategyDefinition,
+    StrategyEvaluationResult,
+    StrategyProposal,
 )
 from src.trading.brokers.paper_option import (
     PaperOptionExecutionRecord,
@@ -34,6 +37,7 @@ from src.trading.risk.hedges import RiskHedgeDecisionRecord
 from src.trading.risk.options import OptionRiskSnapshotRecord
 from src.trading.options.strategy import OptionStrategyDecisionRecord, OptionStrategyLegRecord
 from src.trading.portfolio.state import PortfolioSnapshot, StockPosition
+from src.trading.strategies.matching import StrategyDefinitionRecord
 
 
 class SQLAlchemyTradingRepository:
@@ -41,6 +45,89 @@ class SQLAlchemyTradingRepository:
 
     def __init__(self, session: Any) -> None:
         self.session = session
+
+    def save_strategy_definition(self, definition: StrategyDefinitionRecord) -> None:
+        row = self.session.query(StrategyDefinition).filter_by(
+            strategy_definition_id=_to_uuid(definition.strategy_definition_id)
+        ).one_or_none()
+        if row is None:
+            row = StrategyDefinition(
+                strategy_definition_id=_to_uuid(definition.strategy_definition_id),
+                strategy_id=definition.strategy_id,
+                version=definition.version,
+            )
+            self.session.add(row)
+        row.display_name = definition.display_name
+        row.strategy_layer = definition.strategy_layer
+        row.typical_horizon = definition.typical_horizon
+        row.allowed_common_stock_direction = "long_only"
+        row.config_json = dict(definition.config_json)
+        row.lifecycle_status = definition.lifecycle_status
+        row.source = definition.source
+        row.is_active = definition.is_active
+        self.session.flush()
+
+    def load_strategy_definitions(self) -> list[StrategyDefinitionRecord]:
+        rows = self.session.query(StrategyDefinition).all()
+        return [
+            StrategyDefinitionRecord(
+                strategy_definition_id=str(row.strategy_definition_id),
+                strategy_id=row.strategy_id,
+                version=row.version,
+                display_name=row.display_name,
+                strategy_layer=row.strategy_layer,
+                typical_horizon=row.typical_horizon,
+                config_json=dict(row.config_json or {}),
+                lifecycle_status=row.lifecycle_status,
+                is_active=bool(row.is_active),
+                source=row.source,
+            )
+            for row in rows
+        ]
+
+    def load_active_strategy_definitions(self) -> list[StrategyDefinitionRecord]:
+        return [
+            row
+            for row in self.load_strategy_definitions()
+            if row.is_active and row.lifecycle_status in {"active", "experimental", "shadow"}
+        ]
+
+    def save_strategy_proposal(self, proposal: Any) -> None:
+        row = StrategyProposal(
+            strategy_proposal_id=_to_uuid(proposal.strategy_proposal_id),
+            trade_date=proposal.trade_date,
+            prompt_run_id=None,
+            proposal_status=proposal.proposal_status,
+            proposed_strategy_id=proposal.proposed_strategy_id,
+            display_name=proposal.display_name,
+            proposed_lifecycle_status=proposal.proposed_lifecycle_status,
+            duplicate_of_strategy_id=proposal.duplicate_of_strategy_id,
+            rejection_reason=proposal.rejection_reason,
+            source="reflection_learning",
+            evidence_summary=proposal.evidence_summary,
+            proposal_json=dict(proposal.proposal_json),
+            metadata_json=dict(proposal.metadata_json),
+        )
+        self.session.add(row)
+        self.session.flush()
+
+    def save_strategy_evaluation_result(self, result: Any) -> None:
+        row = StrategyEvaluationResult(
+            strategy_evaluation_result_id=_to_uuid(result.strategy_evaluation_result_id),
+            strategy_definition_id=_to_uuid_or_none(result.strategy_definition_id),
+            strategy_proposal_id=_to_uuid_or_none(result.strategy_proposal_id),
+            strategy_id=result.strategy_id,
+            evaluation_type=result.evaluation_type,
+            evaluation_status=result.evaluation_status,
+            prior_lifecycle_status=result.prior_lifecycle_status,
+            new_lifecycle_status=result.new_lifecycle_status,
+            reason_code=result.reason_code,
+            evidence_summary=result.evidence_summary,
+            metrics_json=dict(result.metrics_json),
+            created_at=result.created_at,
+        )
+        self.session.add(row)
+        self.session.flush()
 
     def save_paper_order(self, order: PaperOrderRecord) -> None:
         row = self.session.query(PaperOrder).filter_by(client_order_id=order.client_order_id).one_or_none()

@@ -45,7 +45,11 @@ from src.db.models.trading import (
     SourceIngestionRun,
     SourceIngestionStatus,
     StrategyDefinition,
+    StrategyEvaluationResult,
+    StrategyEvaluationStatus,
     StrategyLifecycleStatus,
+    StrategyProposal,
+    StrategyProposalStatus,
     StrategyRun,
     StrategySource,
     ThemeLifecycleStatus,
@@ -102,6 +106,8 @@ def test_new_status_enums_expose_choices():
         "suppressed",
         "retired",
     )
+    assert StrategyProposalStatus.choices() == ("accepted", "duplicate_rejected", "proposal_failed")
+    assert StrategyEvaluationStatus.choices() == ("observed", "promoted", "rejected", "retired")
     assert PortfolioIntentLifecycleStatus.choices() == ("active", "paused", "retired")
     assert PortfolioIntentType.choices() == (
         "core_growth",
@@ -258,6 +264,72 @@ def test_reflection_models_can_be_instantiated():
     assert reflection.status == "succeeded"
     assert factor.status == "active"
     assert application.learning_factor is factor
+
+
+def test_strategy_evolution_models_can_be_instantiated():
+    template = LlmPromptTemplate(
+        prompt_id="strategy_evolution",
+        prompt_version="v1",
+        pipeline_name="strategy_evolution",
+        template_path="src/agents/prompts/trading/strategy_evolution_v1.yaml",
+        template_hash="strategy-evolution-123",
+        output_schema_id="strategy_evolution",
+        output_schema_version="v1",
+        lifecycle_status="active",
+    )
+    prompt_run = LlmPromptRun(
+        prompt_template=template,
+        pipeline_name="strategy_evolution",
+        rendered_prompt_hash="rendered-strategy-evolution-123",
+        input_context_json={"trade_date": "2026-06-02"},
+        raw_output_text="{}",
+        parsed_output_json={},
+        parse_status="succeeded",
+        validation_errors_json=[],
+        error_message=None,
+    )
+    definition = StrategyDefinition(
+        strategy_id="post_gap_vwap_reclaim_v1",
+        version="v1",
+        display_name="Post-Gap VWAP Reclaim",
+        strategy_layer="tactical_pattern",
+        typical_horizon="intraday-3d",
+        allowed_common_stock_direction="long_only",
+        config_json={"required_signals": ["opening_gap_pct", "vwap_reclaim"]},
+        lifecycle_status="shadow",
+        source="reflection_learning",
+        is_active=True,
+    )
+    proposal = StrategyProposal(
+        trade_date=date(2026, 6, 2),
+        prompt_run=prompt_run,
+        proposal_status="accepted",
+        proposed_strategy_id="post_gap_vwap_reclaim_v1",
+        display_name="Post-Gap VWAP Reclaim",
+        proposed_lifecycle_status="shadow",
+        duplicate_of_strategy_id=None,
+        rejection_reason=None,
+        source="reflection_learning",
+        evidence_summary="Observed in repeated reclaim winners.",
+        proposal_json={"required_signals": ["opening_gap_pct", "vwap_reclaim"]},
+        metadata_json={},
+    )
+    evaluation = StrategyEvaluationResult(
+        strategy_definition=definition,
+        strategy_proposal=proposal,
+        strategy_id="post_gap_vwap_reclaim_v1",
+        evaluation_type="lifecycle_transition",
+        evaluation_status="promoted",
+        prior_lifecycle_status="candidate",
+        new_lifecycle_status="shadow",
+        reason_code="required_signals_computable",
+        evidence_summary="Signals are computable.",
+        metrics_json={"required_signals": ["opening_gap_pct", "vwap_reclaim"]},
+    )
+
+    assert proposal.prompt_run is prompt_run
+    assert evaluation.strategy_definition is definition
+    assert evaluation.strategy_proposal is proposal
 
 
 def test_pr_8_models_can_be_instantiated():

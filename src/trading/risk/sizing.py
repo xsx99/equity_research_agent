@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from src.trading.risk.config import RiskLimitConfig
 from src.trading.risk.context import PortfolioContext, PositionSizingDecisionRecord, TradeRiskRequest
+from src.trading.strategy_evolution import experimental_strategy_weight_cap
 
 
 class PositionSizer:
@@ -21,6 +22,8 @@ class PositionSizer:
             * max(0.0, min(1.0, request.confidence))
             * config.macro_risk_budget_multiplier,
         )
+        if request.candidate.strategy_lifecycle_status == "experimental":
+            base_weight = min(base_weight, experimental_strategy_weight_cap(config.strategy_budget_weight))
         volatility_adjusted_weight = base_weight
         if request.atr_pct > 0:
             volatility_adjusted_weight = min(
@@ -58,5 +61,6 @@ class PositionSizer:
                 "atr_pct": request.atr_pct,
                 "target_volatility": config.target_volatility,
                 "average_daily_dollar_volume": request.average_daily_dollar_volume,
+                "strategy_lifecycle_status": request.candidate.strategy_lifecycle_status,
             },
         )

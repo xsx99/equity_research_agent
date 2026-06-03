@@ -137,8 +137,11 @@ class TradingDecisionPipeline:
                         candidate.manual_request_id is None
                         or payload["manual_request_mode"] == "paper_trade_eligible"
                     )
+                    and candidate.strategy_lifecycle_status in {"active", "experimental"}
                     and str(final_output["decision"]) not in {"no_trade", "hold"},
                     "selection_reason": candidate.selection_reason,
+                    "strategy_lifecycle_status": candidate.strategy_lifecycle_status,
+                    "strategy_source": candidate.strategy_source,
                     "classification_result_status": classification.result_status,
                     "risk_status": risk.status if risk is not None else None,
                     "confidence_basis": final_output.get("confidence_basis", {}),
@@ -213,6 +216,8 @@ class TradingDecisionPipeline:
             if decision not in {"hold", "exit", "reduce", "no_trade"}:
                 final_output["decision"] = "no_trade"
         if classification.trade_identity == "watch_only" and decision not in {"hold", "no_trade"}:
+            final_output["decision"] = "no_trade"
+        if candidate.strategy_lifecycle_status == "candidate" and decision not in {"hold", "no_trade"}:
             final_output["decision"] = "no_trade"
         return final_output
 
