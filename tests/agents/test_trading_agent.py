@@ -150,6 +150,63 @@ def test_trading_agent_returns_safe_fallback_after_retry_failure(tmp_path):
     assert result.metadata["retry_count"] == 1
 
 
+def test_trading_agent_normalizes_common_model_output_shape_mismatches(tmp_path):
+    registry = _write_prompt(tmp_path)
+
+    def runner(prompt: str, model_name: str):
+        return {
+            "content": {
+                "ticker": "NVDA",
+                "decision": "enter_long",
+                "strategy_id": "relative_strength_rotation_v1",
+                "expression_bucket_id": "long_stock",
+                "trade_identity": "tactical_stock_trade",
+                "instrument_type": "stock",
+                "selection_source": "scanner",
+                "manual_request_id": None,
+                "confidence": 0.74,
+                "confidence_basis": {"calibration_bucket": "bullish_relative_strength"},
+                "benchmark_context": {"primary_benchmark": "QQQ"},
+                "target_weight": 0.04,
+                "max_loss_pct": 0.02,
+                "time_horizon": "2w-3m",
+                "entry_plan": {"type": "limit_order", "price": None},
+                "exit_plan": {"type": "stop_loss", "price": None},
+                "reason": "Relative strength remains intact.",
+                "key_signals": ["sector_relative_strength"],
+                "risk_checks": ["liquidity_ok"],
+                "invalidators": ["QQQ closes below prior close"],
+                "learning_factors_used": [],
+                "schema_version": "v1",
+                "generated_at": "2026-06-01T12:00:00+00:00",
+            },
+            "usage": {
+                "provider": "openai",
+                "model": model_name,
+                "prompt_tokens": 12,
+                "completion_tokens": 20,
+                "total_tokens": 32,
+                "estimated_cost": 0.002,
+                "latency_ms": 75,
+            },
+        }
+
+    agent = TradingAgent(
+        tool_registry=None,
+        prompt_registry=registry,
+        model_name="gpt-5-mini",
+        agent_runner=runner,
+    )
+
+    result = agent.run(_payload(), ToolContext())
+
+    assert result.success is True
+    assert result.output_data["decision"] == "enter_long"
+    assert result.output_data["thesis"] == "Relative strength remains intact."
+    assert result.output_data["entry_plan"] == '{"price":null,"type":"limit_order"}'
+    assert result.output_data["exit_plan"] == '{"price":null,"type":"stop_loss"}'
+
+
 def test_default_trading_agent_runner_uses_phi_agent(monkeypatch):
     class _FakeAgent:
         def __init__(self, *, model, markdown):

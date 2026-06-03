@@ -339,8 +339,9 @@ def _event_news_item_from_provider(
     signal_type = str(item.get("signal_type") or "general_news")
     published_at = _parse_datetime(item.get("published_at"), fallback=as_of)
     available_at = max(published_at, as_of)
-    dedupe_key = (url or title or f"{ticker}:{published_at.isoformat()}").strip().lower()
-    item_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"event_news:{ticker}:{dedupe_key}"))
+    provider_dedupe = (url or title or f"{ticker}:{published_at.isoformat()}").strip().lower()
+    dedupe_key = f"{ticker.upper()}|{provider_dedupe}"
+    item_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"event_news:{dedupe_key}"))
     event_type = _news_event_type(signal_type, title, summary)
     sentiment = _news_sentiment(title, summary, event_type)
     return EventNewsItemRecord(

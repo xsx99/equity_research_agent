@@ -93,6 +93,21 @@ class _FakeNewsProvider:
         ]
 
 
+class _SharedNewsProvider:
+    def fetch_recent(self, *, ticker: str, limit: int) -> list[dict[str, object]]:
+        del ticker, limit
+        return [
+            {
+                "title": "Macro headline impacting several mega-caps",
+                "summary": "Shared article returned for multiple symbols.",
+                "source": "fixture-news",
+                "url": "https://example.com/shared-article",
+                "published_at": "2026-06-03T12:30:00+00:00",
+                "signal_type": "general_news",
+            }
+        ]
+
+
 def test_sqlalchemy_signal_source_repository_persists_source_artifacts():
     session = _FakeSession()
     repository = SQLAlchemySignalSourceRepository(session)
@@ -287,6 +302,37 @@ def test_source_ingestion_service_persists_provider_requests_after_ingestion_run
                 .all()
             )
             assert len(provider_requests) == 3
+    finally:
+        with get_session() as session:
+            session.query(ProviderRequestRun).filter_by(provider=provider_name).delete(synchronize_session=False)
+            session.query(SourceIngestionRun).filter_by(provider=provider_name).delete(synchronize_session=False)
+            session.query(FundamentalSnapshot).filter_by(provider=provider_name).delete(synchronize_session=False)
+            session.query(EventNewsItem).filter_by(provider=provider_name).delete(synchronize_session=False)
+
+
+def test_source_ingestion_service_namespaces_shared_news_dedupe_keys_per_ticker():
+    now = datetime(2026, 6, 3, 12, 45, tzinfo=timezone.utc)
+    provider_name = f"test_provider_{uuid.uuid4().hex}"
+
+    try:
+        with get_session() as session:
+            repository = SQLAlchemySignalSourceRepository(session)
+            service = SourceIngestionService(
+                market_provider=_FakeMarketProvider(),
+                news_provider=_SharedNewsProvider(),
+                source_repository=repository,
+                artifact_repository=repository,
+                provider_name=provider_name,
+                now=lambda: now,
+            )
+
+            service.refresh_tickers(("AAPL", "MSFT"), as_of=now, run_type="pre_open")
+
+            rows = session.query(EventNewsItem).filter_by(provider=provider_name).all()
+            keys = {row.dedupe_key for row in rows}
+            assert len(rows) == 2
+            assert len(keys) == 2
+            assert all(key.startswith(("AAPL|", "MSFT|")) for key in keys)
     finally:
         with get_session() as session:
             session.query(ProviderRequestRun).filter_by(provider=provider_name).delete(synchronize_session=False)

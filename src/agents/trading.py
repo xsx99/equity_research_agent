@@ -99,7 +99,7 @@ class TradingAgent(BaseAgent):
             raw_output_text, usage = _normalize_runner_response(response, self.model_name)
             usage_events.append(UsageEventRecord(retry_count=attempt, status="succeeded", **usage))
             try:
-                parsed_output_json = _coerce_json_object(raw_output_text)
+                parsed_output_json = _normalize_trading_output_candidate(_coerce_json_object(raw_output_text))
                 output = TradingDecisionOutput.model_validate(parsed_output_json)
                 prompt_run = PromptRunRecord(
                     pipeline_name="trading",
@@ -242,6 +242,18 @@ def _coerce_json_object(raw_response: Any) -> dict[str, Any]:
         if isinstance(parsed, dict):
             return parsed
     raise ValueError("llm_response_is_not_valid_json_object")
+
+
+def _normalize_trading_output_candidate(payload: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(payload)
+    if "thesis" not in normalized and isinstance(normalized.get("reason"), str):
+        normalized["thesis"] = normalized["reason"]
+    normalized.pop("reason", None)
+    for key in ("entry_plan", "exit_plan"):
+        value = normalized.get(key)
+        if isinstance(value, (dict, list)):
+            normalized[key] = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return normalized
 
 
 def _should_use_gemini_backend(model_name: str) -> bool:
