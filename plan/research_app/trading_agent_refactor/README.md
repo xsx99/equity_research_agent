@@ -43,6 +43,7 @@ This directory is the canonical modular version of the trading-agent refactor pl
 | [PR 10](implementation/pr_10_strategy_evolution.md) | Strategy evolution |
 | [PR 11](implementation/pr_11_today_dashboard_ui.md) | Today dashboard UI |
 | [PR 12](implementation/pr_12_scheduler_smoke_deploy_docs.md) | Scheduler, smoke tests, and deploy docs |
+| [PR 13](implementation/pr_13_live_preopen_pipeline.md) | Live preopen pipeline |
 
 ## Equivalence Policy
 

@@ -53,6 +53,8 @@
    Add `/today`, pinned review, candidate, trade, options, risk exposure, reflection, and learning views.
 13. **PR 12: Scheduler, Smoke Tests, Deploy Docs**
    Wire daily jobs, standalone smoke scripts, and deployment/runbook docs.
+14. **PR 13: Live Preopen Pipeline**
+   Replace the fixture-backed morning runtime with a production-wired preopen pipeline that loads live config from Postgres, uses real providers and broker state, persists trading artifacts, and can safely drive the morning decision path end-to-end.
 
 ## PR Module Files
 
@@ -71,5 +73,6 @@
 | PR 10 | [pr_10_strategy_evolution.md](pr_10_strategy_evolution.md) |
 | PR 11 | [pr_11_today_dashboard_ui.md](pr_11_today_dashboard_ui.md) |
 | PR 12 | [pr_12_scheduler_smoke_deploy_docs.md](pr_12_scheduler_smoke_deploy_docs.md) |
+| PR 13 | [pr_13_live_preopen_pipeline.md](pr_13_live_preopen_pipeline.md) |
 
 ---
