@@ -20,7 +20,11 @@ from src.db.models.trading import (
     PaperOptionPosition as PaperOptionPositionModel,
     PaperOrder,
     PaperPosition,
+    PortfolioRiskSnapshot,
     PortfolioSnapshot as PortfolioSnapshotModel,
+    PositionSizingDecision,
+    RiskDecision,
+    RiskFactorExposure,
     RiskHedgeDecision,
     SignalSnapshot,
     StrategyDefinition,
@@ -30,6 +34,8 @@ from src.db.models.trading import (
     TradeClassification,
     TradingDecision,
     UniverseFilterConfig,
+    UniverseSnapshot,
+    UniverseSymbol,
 )
 from src.trading.data_sources.universe import UniverseFilterConfig as UniverseFilterConfigRecord
 from src.trading.brokers.paper_option import (
@@ -128,6 +134,48 @@ class SQLAlchemyTradingRepository:
             is_active=bool(row.is_active),
         )
 
+    def save_universe_snapshot(self, snapshot: Any) -> None:
+        filter_row = self._require_universe_filter_config_row(snapshot.filter_config)
+        row = self.session.query(UniverseSnapshot).filter_by(
+            universe_snapshot_id=_to_uuid(snapshot.snapshot_id)
+        ).one_or_none()
+        if row is None:
+            row = UniverseSnapshot(universe_snapshot_id=_to_uuid(snapshot.snapshot_id))
+            self.session.add(row)
+        row.universe_filter_config_id = filter_row.universe_filter_config_id
+        row.snapshot_date = snapshot.snapshot_time.date()
+        row.started_at = snapshot.snapshot_time
+        row.completed_at = snapshot.snapshot_time
+        row.provider = str(snapshot.metadata.get("provider", "live"))
+        row.status = "succeeded"
+        row.included_count = len(tuple(snapshot.included))
+        row.excluded_count = len(tuple(snapshot.excluded))
+        row.metadata_json = dict(snapshot.metadata)
+
+        for decision in (*snapshot.included, *snapshot.excluded):
+            symbol_row = self.session.query(UniverseSymbol).filter_by(
+                universe_snapshot_id=_to_uuid(snapshot.snapshot_id),
+                symbol=decision.symbol,
+            ).one_or_none()
+            if symbol_row is None:
+                symbol_row = UniverseSymbol(
+                    universe_symbol_id=uuid.uuid4(),
+                    universe_snapshot_id=_to_uuid(snapshot.snapshot_id),
+                    symbol=decision.symbol,
+                )
+                self.session.add(symbol_row)
+            symbol_row.company_name = decision.asset.company_name
+            symbol_row.asset_type = decision.asset.asset_type
+            symbol_row.exchange = decision.asset.exchange
+            symbol_row.sector = decision.asset.sector
+            symbol_row.industry = decision.asset.industry
+            symbol_row.price = _decimal_or_none(decision.asset.price)
+            symbol_row.avg_dollar_volume = _decimal_or_none(decision.asset.avg_dollar_volume)
+            symbol_row.status = decision.status
+            symbol_row.exclusion_reason = decision.exclusion_reason
+            symbol_row.metadata_json = {}
+        self.session.flush()
+
     def save_strategy_proposal(self, proposal: Any) -> None:
         row = StrategyProposal(
             strategy_proposal_id=_to_uuid(proposal.strategy_proposal_id),
@@ -146,6 +194,17 @@ class SQLAlchemyTradingRepository:
         )
         self.session.add(row)
         self.session.flush()
+
+    def _require_universe_filter_config_row(self, config: UniverseFilterConfigRecord) -> UniverseFilterConfig:
+        row = self.session.query(UniverseFilterConfig).filter_by(
+            profile_name=config.profile_name,
+            version=int(config.version),
+        ).one_or_none()
+        if row is None:
+            raise RuntimeError(
+                f"universe_filter_config_not_found:{config.profile_name}:v{config.version}"
+            )
+        return row
 
     def save_strategy_run(self, run: StrategyRunRecord) -> None:
         row = self.session.query(StrategyRun).filter_by(strategy_run_id=_to_uuid(run.strategy_run_id)).one_or_none()
@@ -284,6 +343,108 @@ class SQLAlchemyTradingRepository:
             row.classification_reason = classification.classification_reason
             row.selected_strategy_context_json = dict(classification.selected_strategy_context_json)
             row.decision_time = classification.decision_time
+        self.session.flush()
+
+    def save_position_sizing_decision(self, decision: Any) -> None:
+        row = self.session.query(PositionSizingDecision).filter_by(
+            position_sizing_decision_id=_to_uuid(decision.position_sizing_decision_id)
+        ).one_or_none()
+        if row is None:
+            row = PositionSizingDecision(
+                position_sizing_decision_id=_to_uuid(decision.position_sizing_decision_id)
+            )
+            self.session.add(row)
+        row.candidate_score_id = _to_uuid_or_none(decision.candidate_score_id)
+        row.trade_classification_id = _to_uuid_or_none(decision.trade_classification_id)
+        row.ticker = decision.ticker
+        row.risk_appetite = decision.risk_appetite
+        row.base_weight = Decimal(str(decision.base_weight))
+        row.volatility_adjusted_weight = Decimal(str(decision.volatility_adjusted_weight))
+        row.liquidity_capped_weight = Decimal(str(decision.liquidity_capped_weight))
+        row.final_weight = Decimal(str(decision.final_weight))
+        row.final_notional = Decimal(str(decision.final_notional))
+        row.applied_caps_json = list(decision.applied_caps)
+        row.binding_constraint = decision.binding_constraint
+        row.decision_time = decision.decision_time
+        row.metadata_json = dict(decision.metadata_json)
+        self.session.flush()
+
+    def save_portfolio_risk_snapshot(self, snapshot: Any) -> None:
+        row = self.session.query(PortfolioRiskSnapshot).filter_by(
+            portfolio_risk_snapshot_id=_to_uuid(snapshot.portfolio_risk_snapshot_id)
+        ).one_or_none()
+        if row is None:
+            row = PortfolioRiskSnapshot(
+                portfolio_risk_snapshot_id=_to_uuid(snapshot.portfolio_risk_snapshot_id)
+            )
+            self.session.add(row)
+        row.decision_time = snapshot.decision_time
+        row.risk_appetite = snapshot.risk_appetite
+        row.resolver_version = snapshot.resolver_version
+        row.margin_model_profile = snapshot.margin_model_profile
+        row.margin_model_version = snapshot.margin_model_version
+        row.account_equity = Decimal(str(snapshot.account_equity))
+        row.cash_balance = Decimal(str(snapshot.cash_balance))
+        row.buying_power = Decimal(str(snapshot.buying_power))
+        row.excess_liquidity = Decimal(str(snapshot.excess_liquidity))
+        row.stock_margin_requirement = Decimal(str(snapshot.stock_margin_requirement))
+        row.option_margin_requirement = Decimal(str(snapshot.option_margin_requirement))
+        row.total_margin_requirement = Decimal(str(snapshot.total_margin_requirement))
+        row.initial_margin_requirement = _decimal_or_none(snapshot.initial_margin_requirement)
+        row.maintenance_margin_requirement = _decimal_or_none(snapshot.maintenance_margin_requirement)
+        row.margin_requirement_source = snapshot.margin_requirement_source
+        row.net_exposure = Decimal(str(snapshot.net_exposure))
+        row.gross_exposure = Decimal(str(snapshot.gross_exposure))
+        row.beta_adjusted_net_exposure = Decimal(str(snapshot.beta_adjusted_net_exposure))
+        row.concentration_flags_json = list(snapshot.concentration_flags)
+        row.metadata_json = dict(snapshot.metadata_json)
+        self.session.flush()
+
+    def save_risk_factor_exposures(
+        self,
+        exposures: list[Any] | tuple[Any, ...],
+    ) -> None:
+        for exposure in exposures:
+            row = RiskFactorExposure(
+                risk_factor_exposure_id=uuid.uuid4(),
+                portfolio_risk_snapshot_id=_to_uuid(exposure.metadata_json["portfolio_risk_snapshot_id"])
+                if "portfolio_risk_snapshot_id" in exposure.metadata_json
+                else _latest_portfolio_risk_snapshot_id(self.session),
+                factor_type=exposure.factor_type,
+                factor_value=exposure.factor_value,
+                gross_exposure=Decimal(str(exposure.gross_exposure)),
+                net_exposure=Decimal(str(exposure.net_exposure)),
+                long_exposure=Decimal(str(exposure.long_exposure)),
+                short_exposure=Decimal(str(exposure.short_exposure)),
+                position_count=int(exposure.position_count),
+                metadata_json=dict(exposure.metadata_json),
+            )
+            self.session.add(row)
+        self.session.flush()
+
+    def save_risk_decision(self, decision: Any) -> None:
+        row = self.session.query(RiskDecision).filter_by(
+            risk_decision_id=_to_uuid(decision.risk_decision_id)
+        ).one_or_none()
+        if row is None:
+            row = RiskDecision(risk_decision_id=_to_uuid(decision.risk_decision_id))
+            self.session.add(row)
+        row.candidate_score_id = _to_uuid_or_none(decision.candidate_score_id)
+        row.trade_classification_id = _to_uuid_or_none(decision.trade_classification_id)
+        row.position_sizing_decision_id = _to_uuid_or_none(decision.position_sizing_decision_id)
+        row.portfolio_risk_snapshot_id = _to_uuid_or_none(decision.portfolio_risk_snapshot_id)
+        row.ticker = decision.ticker
+        row.status = decision.status
+        row.reason_code = decision.reason_code
+        row.approved_weight = Decimal(str(decision.approved_weight))
+        row.approved_notional = Decimal(str(decision.approved_notional))
+        row.approved_quantity = Decimal(str(decision.approved_quantity))
+        row.applied_rules_json = list(decision.applied_rules)
+        row.generated_hedge_action_json = (
+            dict(decision.generated_hedge_action) if decision.generated_hedge_action is not None else None
+        )
+        row.decision_time = decision.decision_time
+        row.metadata_json = dict(decision.metadata_json)
         self.session.flush()
 
     def save_prompt_template(self, template: object) -> None:
@@ -815,3 +976,17 @@ def _decimal_or_none(value: float | None) -> Decimal | None:
     if value is None:
         return None
     return Decimal(str(value))
+
+
+def _latest_portfolio_risk_snapshot_id(session: Any) -> uuid.UUID:
+    rows = session.query(PortfolioRiskSnapshot).all()
+    if not rows:
+        raise RuntimeError("portfolio_risk_snapshot_not_found_for_exposure")
+    latest = max(
+        rows,
+        key=lambda row: (
+            getattr(row, "decision_time", None),
+            getattr(row, "created_at", None),
+        ),
+    )
+    return latest.portfolio_risk_snapshot_id

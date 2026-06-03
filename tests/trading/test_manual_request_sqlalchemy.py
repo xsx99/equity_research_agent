@@ -3,9 +3,14 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
+from src.db.connection import get_session
 from src.db.models.trading import ManualTickerRequest, UniverseFilterConfig
+from src.trading.data_sources.universe import UniverseFilterConfig as UniverseFilterConfigRecord
+from src.trading.data_sources.universe import UniverseSnapshotResult
 from src.trading.manual_review.sqlalchemy import SQLAlchemyManualTickerRequestService
 from src.trading.repositories.sqlalchemy import SqlAlchemyTradingRepository
+from src.trading.signals.sources import InMemorySignalSourceRepository, SourceRecord
+from src.trading.workflows.signal_snapshot import SignalPipeline
 
 
 class _FakeQuery:
@@ -138,3 +143,79 @@ def test_sqlalchemy_manual_request_service_loads_active_requests_and_records_eva
     assert row is not None
     assert row.latest_result_status == "actionable_trade"
     assert str(row.latest_signal_snapshot_id) == str(snapshot_id)
+
+
+def test_signal_pipeline_persists_manual_request_snapshot_before_db_evaluation_update():
+    now = datetime(2026, 6, 3, 12, 45, tzinfo=timezone.utc)
+    ticker = f"T{uuid.uuid4().hex[:4].upper()}"
+    request_id = uuid.uuid4()
+
+    try:
+        with get_session() as session:
+            session.add(
+                ManualTickerRequest(
+                    manual_ticker_request_id=request_id,
+                    ticker=ticker,
+                    reason="live runtime ordering regression",
+                    mode="paper_trade_eligible",
+                    status="active",
+                    created_at=now,
+                )
+            )
+
+        source_repository = InMemorySignalSourceRepository(
+            (
+                SourceRecord(
+                    ticker=ticker,
+                    source_family="technical",
+                    source="fixture",
+                    source_table="market_bars",
+                    source_record_id=f"{ticker}-bars",
+                    event_time=now,
+                    published_at=now,
+                    ingested_at=now,
+                    available_for_decision_at=now,
+                    payload={
+                        "bars": [
+                            {
+                                "date": "2026-06-02",
+                                "open": 99.0,
+                                "high": 101.0,
+                                "low": 98.0,
+                                "close": 100.0,
+                                "volume": 1_000_000,
+                            }
+                        ]
+                    },
+                ),
+            )
+        )
+        universe_result = UniverseSnapshotResult(
+            snapshot_id=str(uuid.uuid4()),
+            snapshot_time=now,
+            filter_config=UniverseFilterConfigRecord(),
+            included=(),
+            excluded=(),
+        )
+
+        with get_session() as session:
+            pipeline = SignalPipeline(
+                source_repository=source_repository,
+                manual_request_service=SQLAlchemyManualTickerRequestService(session, now=lambda: now),
+                snapshot_repository=SqlAlchemyTradingRepository(session),
+            )
+
+            snapshots = pipeline.build_pre_open_snapshots(
+                universe_result=universe_result,
+                decision_time=now,
+            )
+
+            updated = session.query(ManualTickerRequest).filter_by(manual_ticker_request_id=request_id).one_or_none()
+            assert any(snapshot.ticker == ticker for snapshot in snapshots)
+            assert updated is not None
+            assert updated.latest_signal_snapshot_id is not None
+    finally:
+        with get_session() as session:
+            session.query(ManualTickerRequest).filter_by(manual_ticker_request_id=request_id).delete(
+                synchronize_session=False
+            )

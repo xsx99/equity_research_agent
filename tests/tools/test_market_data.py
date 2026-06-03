@@ -38,6 +38,25 @@ class _CapturingClient:
         return _StubResponse(self.payload)
 
 
+class _RoutingClient:
+    def __init__(self, routes: dict[str, dict[str, Any]]) -> None:
+        self.routes = routes
+        self.calls: list[dict[str, Any]] = []
+
+    def get(
+        self,
+        url: str,
+        *,
+        params: dict[str, Any],
+        headers: dict[str, str] | None = None,
+    ) -> _StubResponse:
+        self.calls.append({"url": url, "params": params, "headers": headers})
+        for fragment, payload in self.routes.items():
+            if fragment in url:
+                return _StubResponse(payload)
+        raise AssertionError(f"unexpected_url:{url}")
+
+
 def test_alpaca_provider_reads_secret_key_from_env(monkeypatch):
     monkeypatch.setenv("ALPACA_API_KEY", "test-key")
     monkeypatch.setenv("ALPACA_SECRET_KEY", "test-secret")
@@ -126,6 +145,54 @@ def test_fetch_daily_bars_parses_open_close_and_bar_date():
             "volume": None,
         },
     ]
+
+
+def test_fetch_context_enriches_fundamental_scores_from_finnhub_payloads():
+    client = _RoutingClient(
+        {
+            "stock/profile2": {
+                "name": "Apple Inc.",
+                "finnhubIndustry": "Technology",
+                "marketCapitalization": 3000000,
+            },
+            "stock/metric": {
+                "metric": {
+                    "revenueGrowthTTMYoy": 18.0,
+                    "operatingMarginTTM": 31.0,
+                    "roeTTM": 145.0,
+                    "evSalesTTM": 7.5,
+                    "freeCashFlowMarginTTM": 24.0,
+                    "shortPercentOfFloat": 1.2,
+                    "peTTM": 29.0,
+                    "psTTM": 7.0,
+                }
+            },
+            "calendar/earnings": {
+                "earningsCalendar": [
+                    {"date": "2026-06-10"},
+                ]
+            },
+        }
+    )
+    provider = AlpacaMarketDataProvider(
+        api_key="test-key",
+        secret_key="test-secret",
+        finnhub_api_key="finnhub-key",
+        client=client,
+    )
+
+    context = provider.fetch_context("AAPL")
+
+    assert context["company_name"] == "Apple Inc."
+    assert context["sector"] == "Technology"
+    assert context["market_cap"] == pytest.approx(3_000_000_000_000.0)
+    assert context["revenue_growth_score"] is not None
+    assert context["margin_trend_score"] is not None
+    assert context["quality_score"] is not None
+    assert context["valuation_percentile"] is not None
+    assert context["ev_sales_percentile"] is not None
+    assert context["fcf_margin_score"] is not None
+    assert context["short_interest_pct_float"] == pytest.approx(1.2)
 
 
 def test_fetch_daily_closes_range_returns_chronological_closes():

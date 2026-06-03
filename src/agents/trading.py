@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Optional
@@ -243,5 +244,40 @@ def _coerce_json_object(raw_response: Any) -> dict[str, Any]:
     raise ValueError("llm_response_is_not_valid_json_object")
 
 
+def _should_use_gemini_backend(model_name: str) -> bool:
+    return model_name.strip().lower().startswith("gemini")
+
+
+def _get_google_api_key() -> Optional[str]:
+    return os.getenv("GOOGLE_API_KEY") or getattr(app_config, "GOOGLE_API_KEY", None)
+
+
+def _build_phi_model(model_name: str) -> Any:
+    if _should_use_gemini_backend(model_name):
+        try:
+            from phi.model.google import Gemini
+        except Exception as exc:
+            raise RuntimeError(
+                "Gemini model support requires `google-generativeai` and GOOGLE_API_KEY."
+            ) from exc
+        return Gemini(id=model_name, api_key=_get_google_api_key())
+
+    try:
+        from phi.model.openai import OpenAIChat
+    except Exception as exc:
+        raise RuntimeError(
+            "OpenAI model support requires the `openai` package and OPENAI_API_KEY."
+        ) from exc
+    return OpenAIChat(id=model_name)
+
+
 def _default_agent_runner(prompt: str, model_name: str) -> Any:
-    raise RuntimeError("default_trading_agent_runner_not_configured")
+    try:
+        from phi.agent import Agent
+    except Exception as exc:
+        raise RuntimeError(
+            "Phidata dependencies are required for the default trading agent runner."
+        ) from exc
+    agent = Agent(model=_build_phi_model(model_name), markdown=False)
+    response = agent.run(prompt)
+    return getattr(response, "content", response)

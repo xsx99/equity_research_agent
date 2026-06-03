@@ -3,9 +3,17 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime, timezone
 
+from src.db.connection import get_session
 from src.db.models.trading import EventNewsItem, FundamentalSnapshot, ProviderRequestRun, SourceIngestionRun
+from src.providers.market_data.types import DailyBar
 from src.trading.repositories.source_sqlalchemy import SQLAlchemySignalSourceRepository
-from src.trading.signals.sources import EventNewsItemRecord, FundamentalSnapshotRecord, SourceIngestionRunRecord
+from src.trading.signals.source_ingestion import SourceIngestionService
+from src.trading.signals.sources import (
+    EventNewsItemRecord,
+    FundamentalSnapshotRecord,
+    SourceIngestionRunRecord,
+    SourceRecord,
+)
 from src.trading.data_sources.provider_resilience import ProviderRequestRunRecord
 
 
@@ -45,6 +53,44 @@ class _FakeSession:
 
     def flush(self) -> None:
         self.flush_calls += 1
+
+
+class _FakeMarketProvider:
+    def fetch_daily_bars(self, ticker: str, lookback_days: int) -> list[DailyBar]:
+        del lookback_days
+        return [
+            {
+                "date": date(2026, 6, 2),
+                "open": 198.0,
+                "high": 201.0,
+                "low": 197.5,
+                "close": 200.5,
+                "volume": 1_000_000,
+            }
+        ]
+
+    def fetch_context(self, ticker: str) -> dict[str, object]:
+        del ticker
+        return {
+            "market_cap": 1_000_000_000,
+            "pe_ratio": 30.0,
+            "ps_ratio": 7.0,
+            "earnings_in_days": 14,
+        }
+
+
+class _FakeNewsProvider:
+    def fetch_recent(self, *, ticker: str, limit: int) -> list[dict[str, object]]:
+        del limit
+        return [
+            {
+                "title": f"{ticker} headline",
+                "summary": "Strong print",
+                "source": "fixture-news",
+                "published_at": "2026-06-03T12:30:00+00:00",
+                "signal_type": "earnings_beat_raise",
+            }
+        ]
 
 
 def test_sqlalchemy_signal_source_repository_persists_source_artifacts():
@@ -178,3 +224,72 @@ def test_sqlalchemy_signal_source_repository_reconstructs_point_in_time_records(
     assert len(records) == 1
     assert records[0].ticker == "NVDA"
     assert records[0].source_family == "fundamental"
+
+
+def test_sqlalchemy_signal_source_repository_keeps_runtime_technical_rows_available():
+    session = _FakeSession()
+    repository = SQLAlchemySignalSourceRepository(session)
+    decision_time = datetime(2026, 6, 3, 12, 45, tzinfo=timezone.utc)
+    repository.add(
+        SourceRecord(
+            ticker="AAPL",
+            source_family="technical",
+            source="fixture",
+            source_table="market_bars",
+            source_record_id="market-bars-aapl",
+            event_time=decision_time,
+            published_at=decision_time,
+            ingested_at=decision_time,
+            available_for_decision_at=decision_time,
+            payload={
+                "bars": [
+                    {
+                        "date": "2026-06-02",
+                        "open": 198.0,
+                        "high": 201.0,
+                        "low": 197.5,
+                        "close": 200.5,
+                        "volume": 1_000_000,
+                    }
+                ]
+            },
+        )
+    )
+
+    rows = repository.latest_available_by_family("AAPL", "technical", decision_time)
+
+    assert len(rows) == 1
+    assert rows[0].source_family == "technical"
+    assert rows[0].payload["bars"][0]["close"] == 200.5
+
+
+def test_source_ingestion_service_persists_provider_requests_after_ingestion_run_exists():
+    now = datetime(2026, 6, 3, 12, 45, tzinfo=timezone.utc)
+    provider_name = f"test_provider_{uuid.uuid4().hex}"
+
+    try:
+        with get_session() as session:
+            repository = SQLAlchemySignalSourceRepository(session)
+            service = SourceIngestionService(
+                market_provider=_FakeMarketProvider(),
+                news_provider=_FakeNewsProvider(),
+                source_repository=repository,
+                artifact_repository=repository,
+                provider_name=provider_name,
+                now=lambda: now,
+            )
+
+            result = service.refresh_tickers(("AAPL",), as_of=now, run_type="pre_open")
+
+            provider_requests = (
+                session.query(ProviderRequestRun)
+                .filter_by(source_ingestion_run_id=uuid.UUID(result.ingestion_run.source_ingestion_run_id))
+                .all()
+            )
+            assert len(provider_requests) == 3
+    finally:
+        with get_session() as session:
+            session.query(ProviderRequestRun).filter_by(provider=provider_name).delete(synchronize_session=False)
+            session.query(SourceIngestionRun).filter_by(provider=provider_name).delete(synchronize_session=False)
+            session.query(FundamentalSnapshot).filter_by(provider=provider_name).delete(synchronize_session=False)
+            session.query(EventNewsItem).filter_by(provider=provider_name).delete(synchronize_session=False)

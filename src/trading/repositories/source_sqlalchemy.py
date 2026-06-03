@@ -22,6 +22,7 @@ class SQLAlchemySignalSourceRepository:
 
     def __init__(self, session: Any) -> None:
         self.session = session
+        self._runtime_records: list[SourceRecord] = []
 
     def add(self, *records: SourceRecord) -> None:
         """SourceIngestionService compatibility hook.
@@ -29,6 +30,7 @@ class SQLAlchemySignalSourceRepository:
         Normalized source rows are persisted through dedicated table methods below.
         The live SQL adapter does not need an extra catch-all source table.
         """
+        self._runtime_records.extend(records)
 
     def record_source_ingestion_run(self, run: SourceIngestionRunRecord) -> None:
         row = self.session.query(SourceIngestionRun).filter_by(
@@ -131,9 +133,14 @@ class SQLAlchemySignalSourceRepository:
     def records_for_ticker(self, ticker: str) -> tuple[SourceRecord, ...]:
         symbol = ticker.strip().upper()
         records = [
+            record for record in self._runtime_records if record.ticker == symbol
+        ]
+        records.extend(
+            [
             source_record_from_fundamental_snapshot(self._to_fundamental_record(row))
             for row in self.session.query(FundamentalSnapshot).filter_by(ticker=symbol).all()
-        ]
+            ]
+        )
         records.extend(
             source_record_from_event_news_item(self._to_event_news_record(row))
             for row in self.session.query(EventNewsItem).filter_by(ticker=symbol).all()

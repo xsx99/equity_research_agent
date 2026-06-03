@@ -5,9 +5,15 @@ from datetime import datetime
 from typing import Protocol
 
 from src.trading.manual_review.requests import ManualTickerRequestService
-from src.trading.signals.sources import InMemorySignalSourceRepository
 from src.trading.signals import SignalSnapshotResult, build_signal_snapshot
 from src.trading.data_sources.universe import UniverseSnapshotResult
+
+
+class SignalSourceRepositoryProtocol(Protocol):
+    """Minimal source repository API consumed by the SignalPipeline."""
+
+    def records_for_ticker(self, ticker: str) -> tuple[object, ...]:
+        """Load source records for one ticker."""
 
 
 class SourceIngestionServiceProtocol(Protocol):
@@ -23,19 +29,28 @@ class SourceIngestionServiceProtocol(Protocol):
         """Refresh source rows for the requested tickers."""
 
 
+class SignalSnapshotWriter(Protocol):
+    """Optional snapshot persistence hook for DB-backed manual-review workflows."""
+
+    def save_signal_snapshot(self, snapshot: SignalSnapshotResult) -> None:
+        """Persist one signal snapshot."""
+
+
 class SignalPipeline:
     """Build pre-open signal snapshots for scanner and active manual tickers."""
 
     def __init__(
         self,
         *,
-        source_repository: InMemorySignalSourceRepository,
+        source_repository: SignalSourceRepositoryProtocol,
         manual_request_service: ManualTickerRequestService,
         source_ingestion_service: SourceIngestionServiceProtocol | None = None,
+        snapshot_repository: SignalSnapshotWriter | None = None,
     ) -> None:
         self.source_repository = source_repository
         self.manual_request_service = manual_request_service
         self.source_ingestion_service = source_ingestion_service
+        self.snapshot_repository = snapshot_repository
 
     def build_pre_open_snapshots(
         self,
@@ -68,6 +83,8 @@ class SignalPipeline:
                 manual_request_id=manual_request.request_id if manual_request is not None else None,
             )
             snapshots.append(snapshot)
+            if self.snapshot_repository is not None:
+                self.snapshot_repository.save_signal_snapshot(snapshot)
             if manual_request is not None:
                 result_status = (
                     "blocked_by_missing_data"
@@ -80,4 +97,3 @@ class SignalPipeline:
                     signal_snapshot_id=snapshot.signal_snapshot_id,
                 )
         return tuple(snapshots)
-

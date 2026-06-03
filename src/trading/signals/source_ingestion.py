@@ -98,6 +98,27 @@ class SourceIngestionService:
         families = tuple(dict.fromkeys(source_families))
         ingestion_run_id = str(uuid.uuid4())
         started_at = self.now()
+        provisional_ingestion_run = SourceIngestionRunRecord(
+            source_ingestion_run_id=ingestion_run_id,
+            source_family=families[0] if len(families) == 1 else "all",
+            run_type=run_type,
+            scope_json={"tickers": normalized_tickers, "source_families": list(families)},
+            provider=self.provider_name,
+            as_of=as_of,
+            started_at=started_at,
+            completed_at=None,
+            # The current schema has no "running" state; persist a placeholder parent row first
+            # so provider-request telemetry can reference it through a real FK during the run.
+            status="degraded",
+            coverage_json={
+                "tickers_requested": len(normalized_tickers),
+                "source_records": 0,
+                "fundamental_snapshots": 0,
+                "event_news_items": 0,
+            },
+            metadata_json={"phase": "started"},
+        )
+        self.artifact_repository.record_source_ingestion_run(provisional_ingestion_run)
         recorder = _LinkedProviderRequestRecorder(
             repository=self.artifact_repository,
             source_ingestion_run_id=ingestion_run_id,

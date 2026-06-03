@@ -286,3 +286,37 @@
   - `source ~/.venv/bin/activate && pytest tests/trading/test_sqlalchemy_repository.py tests/trading/test_trading_decision_repository.py tests/trading/test_portfolio_sync.py tests/scripts/test_run_trading_smoke_test.py tests/scripts/test_run_trading_once.py tests/trading/test_runtime_live.py tests/trading/test_manual_request_sqlalchemy.py tests/trading/test_signal_source_sqlalchemy.py -q` passed with 20 tests.
 - 2026-06-03: PR 13 broader relevant verification passed: `source ~/.venv/bin/activate && pytest tests/trading tests/scripts/test_run_trading_smoke_test.py tests/scripts/test_run_trading_once.py -q` passed with 110 tests.
 - 2026-06-03: PR 13 diff whitespace checks passed with `git diff --check`.
+- 2026-06-03: PR 13 live-runtime follow-up fixed production-only integration gaps found during a real preopen run:
+  - persisted a provisional `source_ingestion_runs` parent row before `provider_request_runs` so Postgres FK checks pass under real SQL transactions
+  - allowed `SignalPipeline` to persist signal snapshots before DB-backed manual-request evaluation updates set `latest_signal_snapshot_id`
+  - removed `StrategyPipeline`'s hidden dependency on `repository.candidate_scores`, so SQL-backed repositories can record manual-review results from the current candidate batch
+  - completed missing SQL repository persistence methods for `universe_snapshots` / `universe_symbols` and PR 4 risk artifacts (`portfolio_risk_snapshots`, `risk_factor_exposures`, `position_sizing_decisions`, `risk_decisions`)
+  - changed the live universe path to enrich only explicit `manual_include + active manual request` symbols from real bars/context data, instead of scanning Alpaca's full asset list with missing liquidity fields
+  - hardened targeted live-universe enrichment so one bad manual-request ticker does not abort the whole preopen run
+- 2026-06-03: PR 13 live follow-up targeted verification passed:
+  - `source ~/.venv/bin/activate && pytest tests/trading/test_runtime_live.py tests/trading/test_pipeline.py tests/trading/test_sqlalchemy_repository.py tests/trading/test_manual_request_sqlalchemy.py tests/trading/test_signal_source_sqlalchemy.py tests/scripts/test_run_trading_once.py -q` passed with 23 tests.
+  - `source ~/.venv/bin/activate && git diff --check` passed.
+- 2026-06-03: PR 13 live preopen dry-run verification passed with real Postgres + Alpaca/Finnhub providers:
+  - `source ~/.venv/bin/activate && python -u - <<'PY' ... run_live_preopen_once() ... PY` returned `status=passed`, `phase=preopen`, `signal_snapshot_count=1`, `candidate_count=0`, `classification_count=0`, `risk_decision_count=0`, `trading_decision_count=0`, and `execution.mode=dry_run`.
+  - `SHOW data_directory;` returned `/var/lib/postgresql/data`.
+  - post-run row checks confirmed live artifacts persisted in Postgres, including `universe_snapshots=1`, `universe_symbols=1`, `source_ingestion_runs=3`, `provider_request_runs=9`, `fundamental_snapshots=3`, `event_news_items=5`, `signal_snapshots=11`, `strategy_runs=3`, `portfolio_snapshots=2`, `portfolio_risk_snapshots=2`, and `risk_factor_exposures=2`.
+- 2026-06-03: Alpaca paper execution smoke passed with a real paper order:
+  - `source ~/.venv/bin/activate && python scripts/run_trading_paper_order_smoke.py --ticker AAPL --qty 0.01 --json`
+  - order status was `filled`; `client_order_id=2026-06-03:AAPL:alpaca_paper_smoke_v1:enter_long`; `broker_order_id=40a49ca7-0b20-481d-bf17-1075c631011e`; `paper_execution_id=15b88251-7031-4f82-bbf8-f3bfd80a81b4`; account equity after the smoke was `999999.93`.
+- 2026-06-03: Live signal-quality follow-up fixed two preopen data gaps found during snapshot inspection:
+  - `src/trading/repositories/source_sqlalchemy.py` now keeps runtime-ingested `technical` source rows available through the SQL source repository instead of dropping them on `add()`, so live preopen snapshots can compute technical signals immediately after ingestion.
+  - `src/providers/market_data/alpaca_provider.py` now enriches `fetch_context()` with `market_cap` plus derived `revenue_growth_score`, `margin_trend_score`, `quality_score`, `valuation_percentile`, `ev_sales_percentile`, and `fcf_margin_score` from Finnhub profile/metric payloads when available.
+- 2026-06-03: Live signal-quality targeted verification passed:
+  - `source ~/.venv/bin/activate && pytest tests/trading/test_signal_source_sqlalchemy.py tests/tools/test_market_data.py -q` passed with 21 tests.
+  - `source ~/.venv/bin/activate && pytest tests/trading/test_runtime_live.py tests/trading/test_pipeline.py tests/trading/test_signal_source_sqlalchemy.py tests/tools/test_market_data.py tests/trading/test_sqlalchemy_repository.py tests/trading/test_manual_request_sqlalchemy.py tests/scripts/test_run_trading_once.py -q` passed with 41 tests.
+- 2026-06-03: Live preopen test run after the signal-quality fixes passed:
+  - `source ~/.venv/bin/activate && python -u - <<'PY' ... run_live_preopen_once() ... PY` returned `status=passed`.
+  - the latest `signal_snapshots` row for `AAPL` now shows `source_freshness_json={"technical":"fresh","fundamental":"fresh","events_news":"fresh"}`; `technical` includes non-empty RSI/returns/volume fields and `fundamental` now includes non-null `market_cap_bucket`, `revenue_growth_score`, `margin_trend_score`, `quality_score`, and `valuation_percentile`.
+- 2026-06-03: PR 13 live preopen closing follow-up fixed three remaining production blockers:
+  - `src/trading/runtime_live.py` now bootstraps the initial 24-row strategy catalog into Postgres when `strategy_definitions` is empty, so the live `StrategyPipeline` can produce real `candidate_scores` instead of silently running against an empty catalog.
+  - `src/trading/runtime_live.py` now rewrites each persisted `risk_decision.portfolio_risk_snapshot_id` to the already-saved portfolio risk snapshot from the current run, fixing the real-DB FK failure that previously rolled back the entire live transaction once candidates existed.
+  - `src/agents/trading.py` now uses the same default phi/OpenAI-or-Gemini-backed runner pattern as the research agent, replacing the old `default_trading_agent_runner_not_configured` stub so live trading decisions can run in production without injected test doubles.
+- 2026-06-03: PR 13 live preopen closing verification passed:
+  - `source ~/.venv/bin/activate && pytest tests/agents/test_trading_agent.py tests/trading/test_runtime_live.py tests/trading/test_trading_decision_repository.py tests/trading/test_pipeline.py tests/trading/test_signal_source_sqlalchemy.py tests/tools/test_market_data.py tests/trading/test_sqlalchemy_repository.py tests/trading/test_manual_request_sqlalchemy.py tests/scripts/test_run_trading_once.py -q` passed with 48 tests.
+  - `source ~/.venv/bin/activate && python -u - <<'PY' ... run_live_preopen_once(execute_paper_orders=False) ... PY` returned `status=passed`, `candidate_count=10`, `classification_count=2`, `risk_decision_count=2`, and `trading_decision_count=2`.
+  - post-run row checks confirmed `strategy_definitions=24`, `candidate_scores=10`, `trade_classifications=2`, `risk_decisions=2`, and `trading_decisions=2` in Postgres for the successful live run.

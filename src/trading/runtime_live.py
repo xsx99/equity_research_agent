@@ -1,12 +1,14 @@
 """Live preopen runtime assembly and orchestration."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 import os
 from typing import Any, Callable, Protocol
 
 from src.core import config as app_config
+from src.trading.strategies.catalog import get_initial_strategy_definitions
+from src.trading.strategies.matching import StrategyDefinitionRecord
 
 
 class ActiveUniverseFilterLoader(Protocol):
@@ -233,6 +235,7 @@ def build_live_preopen_dependencies(session: Any | None = None) -> LivePreopenDe
     from src.trading.workflows.trading_decision import TradingDecisionPipeline
 
     trading_repository = SqlAlchemyTradingRepository(session)
+    _bootstrap_seed_strategy_definitions(trading_repository)
     source_repository = SQLAlchemySignalSourceRepository(session)
     manual_request_service = SQLAlchemyManualTickerRequestService(session)
     market_provider = AlpacaMarketDataProvider()
@@ -255,6 +258,7 @@ def build_live_preopen_dependencies(session: Any | None = None) -> LivePreopenDe
             source_repository=source_repository,
             manual_request_service=manual_request_service,
             source_ingestion_service=signal_ingestion,
+            snapshot_repository=trading_repository,
         ),
         strategy_pipeline=StrategyPipeline(
             repository=trading_repository,
@@ -287,6 +291,14 @@ def build_live_preopen_dependencies(session: Any | None = None) -> LivePreopenDe
     )
 
 
+def _bootstrap_seed_strategy_definitions(repository: Any) -> None:
+    """Seed the initial catalog only when the strategy table is empty."""
+    if repository.load_strategy_definitions():
+        return
+    for row in get_initial_strategy_definitions():
+        repository.save_strategy_definition(StrategyDefinitionRecord.from_mapping(row))
+
+
 class _RepositoryUniverseFilterLoader:
     def __init__(self, repository: Any) -> None:
         self.repository = repository
@@ -300,9 +312,24 @@ class _ConfiguredLiveUniverseScanPipeline:
         self.provider = provider
 
     def run(self, *, config: object, decision_time: datetime, manual_requests: tuple[object, ...]) -> object:
+        from src.trading.data_sources.universe import apply_universe_filters
         from src.trading.workflows.universe_scan import UniverseScanPipeline
 
-        del manual_requests
+        target_symbols = tuple(
+            sorted(
+                {
+                    *getattr(config, "manual_include", ()),
+                    *(getattr(request, "ticker", None) for request in manual_requests),
+                }
+                - {None}
+            )
+        )
+        if target_symbols and hasattr(self.provider, "fetch_assets_for_symbols"):
+            return apply_universe_filters(
+                self.provider.fetch_assets_for_symbols(target_symbols),
+                config,
+                snapshot_time=decision_time,
+            )
         return UniverseScanPipeline(
             provider=self.provider,
             config=config,
@@ -368,6 +395,10 @@ class _LiveRiskWorkflow:
             )
             sizing = self.position_sizer.size_position(request, portfolio_context, config)
             decision = self.risk_manager.evaluate(request, sizing, portfolio_context, config)
+            decision = replace(
+                decision,
+                portfolio_risk_snapshot_id=portfolio_snapshot.portfolio_risk_snapshot_id,
+            )
             self.repository.save_position_sizing_decision(sizing)
             self.repository.save_risk_decision(decision)
             decisions.append(decision)

@@ -62,7 +62,7 @@ class StrategyPipeline:
         self.repository.save_strategy_run(strategy_run)
         self.repository.save_candidate_scores(candidates)
         self.repository.save_trade_classifications(classifications)
-        self._record_manual_request_results(classifications)
+        self._record_manual_request_results(candidates, classifications)
         return StrategyPipelineResult(
             strategy_run=strategy_run,
             candidates=candidates,
@@ -70,10 +70,14 @@ class StrategyPipeline:
             classifications=classifications,
         )
 
-    def _record_manual_request_results(self, classifications: tuple[TradeClassificationRecord, ...]) -> None:
+    def _record_manual_request_results(
+        self,
+        candidates: tuple[CandidateScoreRecord, ...],
+        classifications: tuple[TradeClassificationRecord, ...],
+    ) -> None:
         if self.manual_request_service is None:
             return
-        candidate_by_id = {candidate.candidate_score_id: candidate for candidate in self.repository.candidate_scores}
+        candidate_by_id = {candidate.candidate_score_id: candidate for candidate in candidates}
         for classification in classifications:
             candidate = candidate_by_id.get(classification.candidate_score_id)
             if candidate is None or candidate.manual_request_id is None:
@@ -83,4 +87,3 @@ class StrategyPipeline:
                 result_status=classification.result_status,
                 signal_snapshot_id=candidate.signal_snapshot_id,
             )
-

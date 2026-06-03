@@ -1,9 +1,9 @@
 """Live universe provider adapters."""
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Iterable
 
-from src.trading.data_sources.universe import UniverseAsset, UniverseProvider, load_universe_assets_from_env
+from src.trading.data_sources.universe import UniverseAsset, UniverseProvider, load_universe_assets_from_env, normalize_ticker
 
 
 class LiveUniverseProvider:
@@ -21,6 +21,50 @@ class LiveUniverseProvider:
         return load_universe_assets_from_env(
             default_price=100.0,
             default_avg_dollar_volume=50_000_000.0,
+        )
+
+    def fetch_assets_for_symbols(self, symbols: Iterable[str]) -> list[UniverseAsset]:
+        assets: list[UniverseAsset] = []
+        seen: set[str] = set()
+        for raw_symbol in symbols:
+            symbol = normalize_ticker(raw_symbol)
+            if symbol in seen:
+                continue
+            seen.add(symbol)
+            asset = self._build_targeted_asset(symbol)
+            if asset is not None:
+                assets.append(asset)
+        return assets
+
+    def _build_targeted_asset(self, symbol: str) -> UniverseAsset | None:
+        try:
+            bars = self.market_provider.fetch_daily_bars(symbol, lookback_days=20)
+            context = self.market_provider.fetch_context(symbol)
+        except Exception:
+            return None
+        if not isinstance(bars, list) or not bars:
+            return None
+        last_bar = bars[-1]
+        close = last_bar.get("close")
+        if not isinstance(close, (int, float)):
+            return None
+        dollar_volumes = [
+            float(bar["close"]) * float(bar["volume"])
+            for bar in bars
+            if isinstance(bar, dict)
+            and isinstance(bar.get("close"), (int, float))
+            and isinstance(bar.get("volume"), (int, float))
+        ]
+        avg_dollar_volume = sum(dollar_volumes) / len(dollar_volumes) if dollar_volumes else None
+        return UniverseAsset(
+            symbol=symbol,
+            company_name=context.get("company_name") if isinstance(context, dict) else None,
+            asset_type="common_stock",
+            exchange=None,
+            sector=context.get("sector") if isinstance(context, dict) else None,
+            industry=None,
+            price=float(close),
+            avg_dollar_volume=avg_dollar_volume,
         )
 
 

@@ -1,10 +1,19 @@
 from __future__ import annotations
 
+import uuid
 from datetime import date, datetime, timezone
 from typing import Any
 
+from src.db.models.trading import UniverseFilterConfig, UniverseSnapshot, UniverseSymbol
+from src.trading.data_sources.universe import UniverseAsset, UniverseFilterConfig as UniverseFilterConfigRecord
+from src.trading.data_sources.universe import UniverseSnapshotResult, UniverseSymbolDecision
 from src.trading.brokers.paper_option import PaperOptionExecutionRecord, PaperOptionOrderRecord, PaperOptionPosition
 from src.trading.brokers.paper_stock import PaperExecutionRecord, PaperOrderRecord
+from src.trading.risk.context import (
+    PortfolioRiskSnapshotRecord,
+    PositionSizingDecisionRecord,
+    RiskFactorExposureRecord,
+)
 from src.trading.risk.hedges import RiskHedgeDecisionRecord
 from src.trading.risk.options import OptionRiskSnapshotRecord
 from src.trading.options.strategy import OptionStrategyDecisionRecord, OptionStrategyLegRecord
@@ -52,6 +61,162 @@ class _FakeSession:
 
     def flush(self) -> None:
         self.flush_calls += 1
+
+
+def test_sqlalchemy_repository_persists_universe_snapshot_and_symbols():
+    now = datetime(2026, 6, 3, 12, 45, tzinfo=timezone.utc)
+    session = _FakeSession()
+    repository = SqlAlchemyTradingRepository(session)
+    filter_id = uuid.uuid4()
+    session.add(
+        UniverseFilterConfig(
+            universe_filter_config_id=filter_id,
+            profile_name="default",
+            version=1,
+            is_active=True,
+            min_price=5,
+            min_avg_dollar_volume=25_000_000,
+            included_sectors_json=[],
+            excluded_sectors_json=[],
+            included_industries_json=[],
+            excluded_industries_json=[],
+            exchanges_json=[],
+            asset_types_json=["common_stock"],
+            manual_include_json=["AAPL"],
+            manual_exclude_json=[],
+        )
+    )
+    snapshot = UniverseSnapshotResult(
+        snapshot_id=str(uuid.uuid4()),
+        snapshot_time=now,
+        filter_config=UniverseFilterConfigRecord(profile_name="default", version=1, manual_include=("AAPL",)),
+        included=(
+            UniverseSymbolDecision(
+                symbol="AAPL",
+                status="included",
+                exclusion_reason=None,
+                asset=UniverseAsset(
+                    symbol="AAPL",
+                    company_name="Apple Inc.",
+                    asset_type="common_stock",
+                    exchange="NASDAQ",
+                    sector="Technology",
+                    industry="Consumer Electronics",
+                    price=200.0,
+                    avg_dollar_volume=100_000_000.0,
+                ),
+            ),
+        ),
+        excluded=(
+            UniverseSymbolDecision(
+                symbol="XYZ",
+                status="excluded",
+                exclusion_reason="below_min_price",
+                asset=UniverseAsset(
+                    symbol="XYZ",
+                    company_name="Example Co.",
+                    asset_type="common_stock",
+                    exchange="NASDAQ",
+                    sector="Technology",
+                    industry="Software",
+                    price=2.0,
+                    avg_dollar_volume=10_000_000.0,
+                ),
+            ),
+        ),
+        metadata={"provider": "alpaca_live"},
+    )
+
+    repository.save_universe_snapshot(snapshot)
+
+    persisted_snapshot = session.query(UniverseSnapshot).one_or_none()
+    persisted_symbols = session.query(UniverseSymbol).all()
+    assert persisted_snapshot is not None
+    assert persisted_snapshot.provider == "alpaca_live"
+    assert persisted_snapshot.universe_filter_config_id == filter_id
+    assert len(persisted_symbols) == 2
+
+
+def test_sqlalchemy_repository_persists_pr4_risk_artifacts():
+    now = datetime(2026, 6, 3, 12, 45, tzinfo=timezone.utc)
+    session = _FakeSession()
+    repository = SqlAlchemyTradingRepository(session)
+
+    portfolio_snapshot = PortfolioRiskSnapshotRecord(
+        portfolio_risk_snapshot_id="risk-snapshot-1",
+        decision_time=now,
+        risk_appetite="balanced",
+        resolver_version="v1",
+        margin_model_profile="alpaca_paper_account",
+        margin_model_version="broker",
+        account_equity=100000.0,
+        cash_balance=50000.0,
+        buying_power=100000.0,
+        excess_liquidity=50000.0,
+        stock_margin_requirement=1000.0,
+        option_margin_requirement=0.0,
+        total_margin_requirement=1000.0,
+        initial_margin_requirement=1000.0,
+        maintenance_margin_requirement=500.0,
+        margin_requirement_source="broker_reported",
+        net_exposure=10000.0,
+        gross_exposure=10000.0,
+        beta_adjusted_net_exposure=9000.0,
+        concentration_flags=["single_name_warning"],
+        metadata_json={"macro_regime": "risk_on"},
+    )
+    exposures = (
+        RiskFactorExposureRecord(
+            factor_type="sector",
+            factor_value="technology",
+            gross_exposure=10000.0,
+            net_exposure=10000.0,
+            long_exposure=10000.0,
+            short_exposure=0.0,
+            position_count=1,
+            metadata_json={},
+        ),
+    )
+    sizing = PositionSizingDecisionRecord(
+        position_sizing_decision_id="sizing-1",
+        candidate_score_id="candidate-1",
+        trade_classification_id="classification-1",
+        ticker="AAPL",
+        risk_appetite="balanced",
+        base_weight=0.05,
+        volatility_adjusted_weight=0.04,
+        liquidity_capped_weight=0.04,
+        final_weight=0.04,
+        final_notional=4000.0,
+        applied_caps=["liquidity_cap"],
+        binding_constraint="liquidity_cap",
+        decision_time=now,
+        metadata_json={},
+    )
+    risk_decision = RiskDecisionRecord(
+        risk_decision_id="risk-1",
+        candidate_score_id="candidate-1",
+        trade_classification_id="classification-1",
+        position_sizing_decision_id="sizing-1",
+        ticker="AAPL",
+        status="approved",
+        reason_code="within_limits",
+        approved_weight=0.04,
+        approved_notional=4000.0,
+        approved_quantity=20.0,
+        portfolio_risk_snapshot_id="risk-snapshot-1",
+        applied_rules=["liquidity_cap"],
+        generated_hedge_action=None,
+        decision_time=now,
+        metadata_json={},
+    )
+
+    repository.save_portfolio_risk_snapshot(portfolio_snapshot)
+    repository.save_risk_factor_exposures(exposures)
+    repository.save_position_sizing_decision(sizing)
+    repository.save_risk_decision(risk_decision)
+
+    assert session.flush_calls >= 4
 
 
 def test_sqlalchemy_repository_persists_pr6_order_execution_snapshot_and_positions():

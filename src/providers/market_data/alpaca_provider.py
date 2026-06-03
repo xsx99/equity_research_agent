@@ -223,6 +223,7 @@ class AlpacaMarketDataProvider:
     def fetch_context(self, ticker: str) -> dict[str, Any]:
         sector: Optional[str] = None
         company_name: Optional[str] = None
+        market_cap: Optional[float] = None
         metrics: dict[str, Any] = {}
         if self.finnhub_api_key:
             profile = self._fetch_profile_from_finnhub(ticker)
@@ -230,14 +231,64 @@ class AlpacaMarketDataProvider:
             raw_name = profile.get("name")
             if isinstance(raw_name, str) and raw_name.strip():
                 company_name = raw_name.strip()
+            market_cap = self._extract_market_cap_from_profile(profile)
             metrics = self._fetch_metrics_from_finnhub(ticker)
+        pe_ratio = self._extract_metric_value(metrics, "peBasicExclExtraTTM", "peTTM", "peNormalizedAnnual")
+        ps_ratio = self._extract_metric_value(metrics, "psTTM", "psAnnual", "priceToSalesAnnual")
+        short_interest_pct_float = self._extract_metric_value(
+            metrics,
+            "shortPercentOfFloat",
+            "shortInterestPercent",
+            "shortRatio",
+        )
         return {
             "sector": sector,
             "company_name": company_name,
+            "market_cap": market_cap,
             "earnings_in_days": self._fetch_earnings_in_days_from_finnhub(ticker),
-            "pe_ratio": self._extract_metric_value(metrics, "peBasicExclExtraTTM", "peTTM", "peNormalizedAnnual"),
-            "ps_ratio": self._extract_metric_value(metrics, "psTTM", "psAnnual", "priceToSalesAnnual"),
-            "short_interest_pct_float": self._extract_metric_value(metrics, "shortPercentOfFloat", "shortInterestPercent", "shortRatio"),
+            "pe_ratio": pe_ratio,
+            "ps_ratio": ps_ratio,
+            "short_interest_pct_float": short_interest_pct_float,
+            "revenue_growth_score": _normalize_ratio_score(
+                self._extract_metric_value(metrics, "revenueGrowthTTMYoy", "revenueGrowth3Y"),
+                floor=-10.0,
+                ceiling=25.0,
+            ),
+            "margin_trend_score": _normalize_ratio_score(
+                self._extract_metric_value(metrics, "operatingMarginTTM", "netMarginTTM", "grossMarginTTM"),
+                floor=0.0,
+                ceiling=35.0,
+            ),
+            "quality_score": _average_scores(
+                (
+                    _normalize_ratio_score(
+                        self._extract_metric_value(metrics, "operatingMarginTTM", "grossMarginTTM"),
+                        floor=0.0,
+                        ceiling=35.0,
+                    ),
+                    _normalize_ratio_score(
+                        self._extract_metric_value(metrics, "roeTTM", "roeAnnual"),
+                        floor=0.0,
+                        ceiling=30.0,
+                    ),
+                    _normalize_ratio_score(
+                        self._extract_metric_value(metrics, "roaTTM", "roaAnnual"),
+                        floor=0.0,
+                        ceiling=12.0,
+                    ),
+                )
+            ),
+            "valuation_percentile": _valuation_percentile(pe_ratio=pe_ratio, ps_ratio=ps_ratio),
+            "ev_sales_percentile": _normalize_ratio_score(
+                self._extract_metric_value(metrics, "evSalesTTM", "evSalesAnnual"),
+                floor=0.0,
+                ceiling=15.0,
+            ),
+            "fcf_margin_score": _normalize_ratio_score(
+                self._extract_metric_value(metrics, "freeCashFlowMarginTTM", "fcfMarginTTM"),
+                floor=0.0,
+                ceiling=25.0,
+            ),
         }
 
     def fetch_universe_assets(self) -> list[dict[str, Any]]:
@@ -297,6 +348,14 @@ class AlpacaMarketDataProvider:
         if isinstance(raw_sector, str) and raw_sector.strip():
             return raw_sector.strip()
         return None
+
+    @staticmethod
+    def _extract_market_cap_from_profile(profile: dict[str, Any]) -> Optional[float]:
+        raw_market_cap = _to_float_or_none(profile.get("marketCapitalization"))
+        if raw_market_cap is None:
+            return None
+        # Finnhub profile2 reports market cap in millions of USD.
+        return raw_market_cap * 1_000_000.0
 
     def _fetch_metrics_from_finnhub(self, ticker: str) -> dict[str, Any]:
         if not self.finnhub_api_key:
@@ -358,3 +417,27 @@ class AlpacaMarketDataProvider:
     def close(self) -> None:
         if self._owns_client:
             self._client.close()
+
+
+def _normalize_ratio_score(value: Optional[float], *, floor: float, ceiling: float) -> Optional[float]:
+    if value is None:
+        return None
+    if ceiling <= floor:
+        return None
+    clipped = min(max(value, floor), ceiling)
+    return (clipped - floor) / (ceiling - floor)
+
+
+def _average_scores(values: tuple[Optional[float], ...]) -> Optional[float]:
+    present = [value for value in values if value is not None]
+    if not present:
+        return None
+    return sum(present) / len(present)
+
+
+def _valuation_percentile(*, pe_ratio: Optional[float], ps_ratio: Optional[float]) -> Optional[float]:
+    scores = [
+        _normalize_ratio_score(pe_ratio, floor=5.0, ceiling=50.0),
+        _normalize_ratio_score(ps_ratio, floor=1.0, ceiling=15.0),
+    ]
+    return _average_scores(tuple(scores))

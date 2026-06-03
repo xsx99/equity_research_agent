@@ -1,7 +1,9 @@
 from datetime import datetime, timezone
+from types import ModuleType, SimpleNamespace
+import sys
 
 from src.agents.prompt_registry import PromptRegistry
-from src.agents.trading import TradingAgent
+from src.agents.trading import TradingAgent, _default_agent_runner
 from src.tools.context import ToolContext
 
 
@@ -146,3 +148,24 @@ def test_trading_agent_returns_safe_fallback_after_retry_failure(tmp_path):
     assert result.output_data["decision"] == "no_trade"
     assert result.output_data["fallback_action"] == "no_trade"
     assert result.metadata["retry_count"] == 1
+
+
+def test_default_trading_agent_runner_uses_phi_agent(monkeypatch):
+    class _FakeAgent:
+        def __init__(self, *, model, markdown):
+            assert model == "fake-model"
+            assert markdown is False
+
+        def run(self, prompt):
+            assert prompt == "trade prompt"
+            return SimpleNamespace(content='{"decision":"no_trade"}')
+
+    monkeypatch.setattr("src.agents.trading._build_phi_model", lambda model_name: "fake-model")
+    monkeypatch.setitem(sys.modules, "phi", ModuleType("phi"))
+    phi_agent_module = ModuleType("phi.agent")
+    phi_agent_module.Agent = _FakeAgent
+    monkeypatch.setitem(sys.modules, "phi.agent", phi_agent_module)
+
+    response = _default_agent_runner("trade prompt", "gpt-5-mini")
+
+    assert response == '{"decision":"no_trade"}'
