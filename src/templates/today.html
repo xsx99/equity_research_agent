@@ -1,0 +1,376 @@
+{% extends "base.html" %}
+{% block title %}Today Dashboard{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Today Dashboard</h1>
+    <p class="detail-muted">Operator workstation for V2 trading artifacts and controls.</p>
+  </div>
+  <div class="header-metrics">
+    <div class="metric-chip">
+      <span class="metric-label">Trade Date</span>
+      <span class="metric-value">
+        {% if header.trade_date %}
+        {{ header.trade_date }}
+        {% else %}
+        unavailable
+        {% endif %}
+      </span>
+    </div>
+    <div class="metric-chip">
+      <span class="metric-label">Macro Regime</span>
+      <span class="metric-value">{{ header.macro_regime }}</span>
+    </div>
+    <div class="metric-chip">
+      <span class="metric-label">Risk Appetite</span>
+      <span class="metric-value">{{ header.risk_appetite }}</span>
+    </div>
+  </div>
+</div>
+
+<div class="tab-strip">
+  {% for tab in tabs %}
+  <a class="tab-link {% if selected_tab == tab.id %}active{% endif %}" href="/today?tab={{ tab.id }}">{{ tab.label }}</a>
+  {% endfor %}
+</div>
+
+<div class="stats-row">
+  <div class="stat-box"><div class="label">NAV</div><div class="value">{{ header.nav if header.nav is not none else "N/A" }}</div></div>
+  <div class="stat-box"><div class="label">Day PnL</div><div class="value">{{ header.day_pnl if header.day_pnl is not none else "N/A" }}</div></div>
+  <div class="stat-box"><div class="label">Buying Power</div><div class="value">{{ header.buying_power if header.buying_power is not none else "N/A" }}</div></div>
+  <div class="stat-box"><div class="label">Gross Exposure</div><div class="value">{{ header.gross_exposure if header.gross_exposure is not none else "N/A" }}</div></div>
+  <div class="stat-box"><div class="label">Open Alerts</div><div class="value">{{ header.open_alert_count }}</div></div>
+  <div class="stat-box"><div class="label">Signal Changes</div><div class="value">{{ header.material_signal_change_count }}</div></div>
+</div>
+
+<div class="today-grid">
+  <section class="card">
+    <h2>Overview</h2>
+    <div class="section-label">Live Alerts</div>
+    {% if overview.live_alerts %}
+    <table>
+      <thead>
+        <tr><th>Ticker</th><th>Severity</th><th>Headline</th></tr>
+      </thead>
+      <tbody>
+        {% for row in overview.live_alerts %}
+        <tr><td>{{ row.ticker }}</td><td>{{ row.severity }}</td><td>{{ row.headline }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="detail-muted">No live alerts.</p>
+    {% endif %}
+
+    <div class="section-label">Material Signal Changes</div>
+    {% if overview.material_changes %}
+    <table>
+      <thead><tr><th>Ticker</th><th>Summary</th></tr></thead>
+      <tbody>
+        {% for row in overview.material_changes %}
+        <tr><td>{{ row.ticker }}</td><td>{{ row.summary }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="detail-muted">No material changes.</p>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <h2>Portfolio</h2>
+    <div class="section-label">Stock Positions</div>
+    {% if portfolio.positions %}
+    <table>
+      <thead><tr><th>Ticker</th><th>Identity</th><th>Strategy</th><th>Qty</th><th>Market Value</th></tr></thead>
+      <tbody>
+        {% for row in portfolio.positions %}
+        <tr><td>{{ row.ticker }}</td><td>{{ row.trade_identity }}</td><td>{{ row.strategy_id }}</td><td>{{ row.quantity }}</td><td>{{ row.market_value }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="detail-muted">No open stock positions.</p>
+    {% endif %}
+
+    <div class="section-label">Option Positions</div>
+    {% if portfolio.option_positions %}
+    <table>
+      <thead><tr><th>Ticker</th><th>Strategy Type</th><th>Identity</th><th>Max Loss</th></tr></thead>
+      <tbody>
+        {% for row in portfolio.option_positions %}
+        <tr><td>{{ row.ticker }}</td><td>{{ row.option_strategy_type }}</td><td>{{ row.trade_identity }}</td><td>{{ row.max_loss }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="detail-muted">No open option positions.</p>
+    {% endif %}
+
+    <div class="section-label">Hedge Overlays</div>
+    {% if portfolio.hedge_overlays %}
+    <table>
+      <thead><tr><th>Ticker</th><th>Strategy Type</th><th>Protected Notional</th></tr></thead>
+      <tbody>
+        {% for row in portfolio.hedge_overlays %}
+        <tr><td>{{ row.ticker }}</td><td>{{ row.option_strategy_type }}</td><td>{{ row.protected_notional }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="detail-muted">No hedge overlays.</p>
+    {% endif %}
+  </section>
+
+  <section class="card detail-span-2">
+    <h2>Trades</h2>
+    {% if trades.rows %}
+    <table>
+      <thead>
+        <tr><th>Time</th><th>Ticker</th><th>Action</th><th>Instrument</th><th>Identity</th><th>Strategy</th><th>Expression</th><th>Approved Weight</th><th>Confidence</th><th>Risk</th><th>Order</th></tr>
+      </thead>
+      <tbody>
+        {% for row in trades.rows %}
+        <tr>
+          <td><time datetime="{{ row.decision_time | iso_datetime }}" data-local-time-format="datetime">{{ row.decision_time | iso_datetime }}</time></td>
+          <td><a href="/today?tab=trades&decision_id={{ row.trading_decision_id }}">{{ row.ticker }}</a></td>
+          <td>{{ row.decision }}</td>
+          <td>{{ row.instrument_type }}</td>
+          <td>{{ row.trade_identity }}</td>
+          <td>{{ row.selected_strategy_id }}</td>
+          <td>{{ row.expression_bucket_id }}</td>
+          <td>{{ row.approved_weight }}</td>
+          <td>{{ row.confidence }}</td>
+          <td>{{ row.risk_status }}</td>
+          <td>{{ row.order_status }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="detail-muted">No trading decisions yet.</p>
+    {% endif %}
+
+    {% if trades.selected_detail %}
+    <div class="card subcard">
+      <h2>Trade Detail</h2>
+      <p><strong>Ticker:</strong> {{ trades.selected_detail.ticker }}</p>
+      <div class="section-label">Signal Snapshot</div>
+      <pre>{{ trades.selected_detail.signal_snapshot }}</pre>
+      <div class="section-label">LLM Decision JSON</div>
+      <pre>{{ trades.selected_detail.llm_decision_json }}</pre>
+      <div class="section-label">Strategy Scores</div>
+      <table>
+        <thead><tr><th>Strategy</th><th>Candidate Score</th></tr></thead>
+        <tbody>
+          {% for row in trades.selected_detail.strategy_scores %}
+          <tr><td>{{ row.strategy_id }}</td><td>{{ row.candidate_score }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <div class="section-label">Risk Decision</div>
+      {% if trades.selected_detail.risk_decision %}
+      <p>{{ trades.selected_detail.risk_decision.status }} / {{ trades.selected_detail.risk_decision.reason_code }}</p>
+      {% else %}
+      <p class="detail-muted">No linked risk decision.</p>
+      {% endif %}
+    </div>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <h2>Risk &amp; Macro</h2>
+    <p><strong>Risk Config Version:</strong> {{ risk_macro.risk_config_version or "unavailable" }}</p>
+    <div class="section-label">Binding Constraints</div>
+    {% if risk_macro.binding_constraints %}
+    <ul class="output-list">
+      {% for item in risk_macro.binding_constraints %}
+      <li>{{ item }}</li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="detail-muted">No binding constraints recorded.</p>
+    {% endif %}
+    <div class="section-label">Exposures</div>
+    {% if risk_macro.exposures %}
+    <table>
+      <thead><tr><th>Factor Type</th><th>Factor</th><th>Exposure</th></tr></thead>
+      <tbody>
+        {% for row in risk_macro.exposures %}
+        <tr><td>{{ row.factor_type }}</td><td>{{ row.factor_name }}</td><td>{{ row.exposure }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="detail-muted">No factor exposures yet.</p>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <h2>Candidates</h2>
+    <div class="section-label">Active Universe Filter</div>
+    <form method="post" action="/today/universe-filter" class="stack-form">
+      <input type="text" name="profile_name" value="default">
+      <input type="text" name="min_price" value="{{ candidates.active_universe_filter.min_price if candidates.active_universe_filter else '' }}" placeholder="Min price">
+      <input type="text" name="min_avg_dollar_volume" value="{{ candidates.active_universe_filter.min_avg_dollar_volume if candidates.active_universe_filter else '' }}" placeholder="Min ADV">
+      <input type="text" name="included_sectors" value="{{ candidates.active_universe_filter.included_sectors | join(',') if candidates.active_universe_filter else '' }}" placeholder="Included sectors">
+      <input type="text" name="excluded_sectors" value="{{ candidates.active_universe_filter.excluded_sectors | join(',') if candidates.active_universe_filter else '' }}" placeholder="Excluded sectors">
+      <input type="text" name="included_industries" value="{{ candidates.active_universe_filter.included_industries | join(',') if candidates.active_universe_filter else '' }}" placeholder="Included industries">
+      <input type="text" name="excluded_industries" value="{{ candidates.active_universe_filter.excluded_industries | join(',') if candidates.active_universe_filter else '' }}" placeholder="Excluded industries">
+      <input type="text" name="exchanges" value="{{ candidates.active_universe_filter.exchanges | join(',') if candidates.active_universe_filter else '' }}" placeholder="Exchanges">
+      <input type="text" name="asset_types" value="{{ candidates.active_universe_filter.asset_types | join(',') if candidates.active_universe_filter else '' }}" placeholder="Asset types">
+      <input type="text" name="manual_include" value="{{ candidates.active_universe_filter.manual_include | join(',') if candidates.active_universe_filter else '' }}" placeholder="Manual include">
+      <input type="text" name="manual_exclude" value="{{ candidates.active_universe_filter.manual_exclude | join(',') if candidates.active_universe_filter else '' }}" placeholder="Manual exclude">
+      <button class="btn btn-primary" type="submit">Update Filter</button>
+    </form>
+
+    <div class="section-label">Pinned Review</div>
+    <form method="post" action="/today/manual-requests" class="form-row">
+      <input type="text" name="ticker" placeholder="Ticker">
+      <input type="text" name="reason" placeholder="Reason">
+      <select name="mode">
+        <option value="review_only">review_only</option>
+        <option value="paper_trade_eligible">paper_trade_eligible</option>
+      </select>
+      <button class="btn btn-primary" type="submit">Pin Review</button>
+    </form>
+
+    <div class="section-label">Manual Requests</div>
+    {% if candidates.manual_requests %}
+    <table>
+      <thead><tr><th>Ticker</th><th>Reason</th><th>Mode</th><th>Status</th><th>Result</th><th>Action</th></tr></thead>
+      <tbody>
+        {% for row in candidates.manual_requests %}
+        <tr>
+          <td>{{ row.ticker }}</td>
+          <td>{{ row.reason }}</td>
+          <td>{{ row.mode }}</td>
+          <td>{{ row.status }}</td>
+          <td>{{ row.latest_result_status }}</td>
+          <td>
+            <form method="post" action="/today/manual-requests/{{ row.manual_ticker_request_id }}/dismiss">
+              <button class="btn btn-warning btn-sm" type="submit">Dismiss</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="detail-muted">No active manual requests.</p>
+    {% endif %}
+
+    <div class="section-label">Candidates</div>
+    {% if candidates.rows %}
+    <table>
+      <thead><tr><th>Ticker</th><th>Source</th><th>Result</th><th>Identity</th><th>Strategy</th></tr></thead>
+      <tbody>
+        {% for row in candidates.rows %}
+        <tr><td>{{ row.ticker }}</td><td>{{ row.selection_source }}</td><td>{{ row.result_status }}</td><td>{{ row.trade_identity }}</td><td>{{ row.strategy_match }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="detail-muted">No candidate rows.</p>
+    {% endif %}
+
+    <div class="section-label">Portfolio Intents</div>
+    {% for row in candidates.portfolio_intents %}
+    <div class="input-pill"><span class="input-pill-label">{{ row.intent_type }}</span><span class="input-pill-value">{{ row.ticker }} / {{ row.lifecycle_status }}</span></div>
+    {% else %}
+    <p class="detail-muted">No portfolio intents.</p>
+    {% endfor %}
+
+    <div class="section-label">Relationships</div>
+    {% for row in candidates.relationships %}
+    <div class="detail-muted">{{ row.source_ticker }} → {{ row.target_ticker }} ({{ row.relationship_type }})</div>
+    {% else %}
+    <p class="detail-muted">No relationships.</p>
+    {% endfor %}
+
+    <div class="section-label">Peer Baskets</div>
+    {% for row in candidates.peer_baskets %}
+    <div class="detail-muted">{{ row.basket_key }} / {{ row.version }} / {{ row.member_count }} members</div>
+    {% else %}
+    <p class="detail-muted">No peer baskets.</p>
+    {% endfor %}
+
+    <div class="section-label">Themes</div>
+    {% for row in candidates.themes %}
+    <div class="detail-muted">{{ row.display_name }}</div>
+    {% else %}
+    <p class="detail-muted">No themes.</p>
+    {% endfor %}
+  </section>
+
+  <section class="card">
+    <h2>Learning &amp; Strategies</h2>
+    {% if learning_strategies.reflection %}
+    <p><strong>Reflection Status:</strong> {{ learning_strategies.reflection.status }}</p>
+    {% for item in learning_strategies.reflection.what_worked %}
+    <div class="detail-muted">{{ item }}</div>
+    {% endfor %}
+    {% else %}
+    <p class="detail-muted">No reflection recorded.</p>
+    {% endif %}
+
+    <div class="section-label">Learning Factors</div>
+    {% if learning_strategies.learning_factors %}
+    <table>
+      <thead><tr><th>Title</th><th>Status</th><th>Scope</th></tr></thead>
+      <tbody>
+        {% for row in learning_strategies.learning_factors %}
+        <tr><td>{{ row.title }}</td><td>{{ row.status }}</td><td>{{ row.scope }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="detail-muted">No learning factors.</p>
+    {% endif %}
+
+    <div class="section-label">Strategy Performance</div>
+    {% if learning_strategies.strategy_performance %}
+    <table>
+      <thead><tr><th>Strategy</th><th>Status</th><th>Win Rate</th><th>Total PnL</th></tr></thead>
+      <tbody>
+        {% for row in learning_strategies.strategy_performance %}
+        <tr><td>{{ row.strategy_id }}</td><td>{{ row.lifecycle_status }}</td><td>{{ row.win_rate }}</td><td>{{ row.total_pnl }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="detail-muted">No strategy performance rows.</p>
+    {% endif %}
+
+    <div class="section-label">Strategy Proposals</div>
+    {% if learning_strategies.strategy_proposals %}
+    <table>
+      <thead><tr><th>Strategy</th><th>Status</th></tr></thead>
+      <tbody>
+        {% for row in learning_strategies.strategy_proposals %}
+        <tr><td>{{ row.proposed_strategy_id }}</td><td>{{ row.proposal_status }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="detail-muted">No strategy proposals.</p>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <h2>Ops &amp; Cost</h2>
+    {% if ops_cost.llm_usage %}
+    <table>
+      <thead><tr><th>Pipeline</th><th>Provider</th><th>Model</th><th>Estimated Cost</th></tr></thead>
+      <tbody>
+        {% for row in ops_cost.llm_usage %}
+        <tr><td>{{ row.pipeline_name }}</td><td>{{ row.provider }}</td><td>{{ row.model }}</td><td>{{ row.estimated_cost }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="detail-muted">No LLM usage events.</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

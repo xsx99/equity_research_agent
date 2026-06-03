@@ -21,7 +21,7 @@ from fastapi.templating import Jinja2Templates
 
 from src.db.connection import init_db
 from src.web import filters
-from src.web.routers import admin, research, watchlist
+from src.web.routers import admin, research, today, watchlist
 
 _DIR = os.path.dirname(__file__)
 _STATIC_DIR = os.path.join(os.path.dirname(_DIR), "static")
@@ -43,13 +43,15 @@ def create_app() -> FastAPI:
     watchlist.init(templates)
     research.init(templates)
     admin.init(templates)
+    today.init(templates)
 
     app.include_router(watchlist.router)
     app.include_router(research.router)
     app.include_router(admin.router)
+    app.include_router(today.router)
 
     @app.get("/", response_class=HTMLResponse)
     def root():
-        return RedirectResponse("/research", status_code=303)
+        return RedirectResponse("/today", status_code=303)
 
     return app

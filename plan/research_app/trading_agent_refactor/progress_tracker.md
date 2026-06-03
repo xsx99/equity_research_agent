@@ -267,3 +267,7 @@
 - 2026-06-02: PR 10 full verification passed: `source ~/.venv/bin/activate && pytest -q` passed with 351 tests.
 - 2026-06-02: PR 10 Alembic offline SQL generation passed: `source ~/.venv/bin/activate && alembic upgrade head --sql`.
 - 2026-06-02: PR 10 diff whitespace checks passed with `git diff --check`.
+- 2026-06-02: PR 11 implemented the first `/today` operator workstation in `src/web/routers/today.py` and `src/templates/today.html`, wired it into `src/web/__init__.py`, updated top-level nav/root behavior in `src/templates/base.html` and `tests/test_app.py`, extended shared styles in `src/static/style.css`, added route coverage in `tests/web/test_today.py`, and updated `documents/repo_overview.md`.
+- 2026-06-02: PR 11 targeted verification passed: `source ~/.venv/bin/activate && pytest tests/test_app.py tests/web/test_today.py -q` passed with 26 tests.
+- 2026-06-02: PR 11 full verification passed: `source ~/.venv/bin/activate && pytest -q` passed with 357 tests.
+- 2026-06-02: PR 11 diff whitespace checks passed with `git diff --check`.

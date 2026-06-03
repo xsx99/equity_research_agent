@@ -527,7 +527,7 @@ class TestAdminEvalNow:
 
 
 class TestRoot:
-    def test_root_redirects_to_research(self, client):
+    def test_root_redirects_to_today(self, client):
         resp = client.get("/", follow_redirects=False)
         assert resp.status_code == 303
-        assert resp.headers["location"] == "/research"
+        assert resp.headers["location"] == "/today"

@@ -140,3 +140,15 @@ PR 8 adds the first intraday refresh and rebalance path on top of the morning ba
 - repositories, ORM models, and Alembic revision `013` now persist intraday scans, snapshots, alerts, and rebalance decisions
 
 The current PR 8 implementation intentionally keeps intraday rebalance separate from the morning trading-decision pipeline. It reuses prompt telemetry and paper-execution building blocks, but it does not collapse morning and intraday flows into one shared top-level workflow.
+
+## PR 11 Scope
+
+PR 11 adds the first operator-facing V2 trading workstation in the existing FastAPI app:
+
+- `/today` is now the default landing page and renders a tabbed workstation around persisted V2 trading artifacts instead of the legacy research list
+- the page aggregates current portfolio snapshots, risk snapshots, trading decisions, positions, option positions, hedge overlays, candidate rows, manual review requests, learning factors, strategy proposals, and LLM usage into structured tables/cards
+- trade rows support a detail drill-down that surfaces linked signal snapshot, prompt output, strategy-score context, risk decision, and replay outcome summaries when available
+- the `Candidates` tab includes the initial operator mutations allowed by the PR: create/dismiss pinned manual ticker reviews and update the active universe filter profile
+- `/research` remains intact as the legacy audit UI, but top-level navigation now prioritizes the `Today` workstation
+
+This PR intentionally stops at the UI/read-model layer. It does not add new pipeline producers, calendar-event persistence, or a dedicated UI-specific repository abstraction yet.
