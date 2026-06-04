@@ -231,3 +231,16 @@ PR 14 slice 3 migrates the scheduler-facing `intraday_refresh` phase onto an exp
 - fixture-only `intraday_refresh_fixture` behavior remains available under `src/trading/runtime_smoke.py` for standalone smoke checks
 
 This slice intentionally keeps dry-run intraday execution as the default runtime behavior and does not yet add the post-close live reflection or strategy-evolution runtimes.
+
+## PR 14 Slice 4 Scope
+
+PR 14 slice 4 migrates the scheduler-facing `reflection` phase onto an explicit live runtime and introduces real `skipped` semantics for missing same-day post-close prerequisites:
+
+- `src/trading/runtime_reflection_live.py` now owns a dedicated live reflection runtime and entrypoint, `run_live_reflection_once(...)`
+- the new `LiveReflectionRequestLoader` assembles a `ReflectionPipelineRequest` from persisted same-day artifacts through one repository-backed aggregation point instead of relying on fixture payloads
+- when required post-close inputs such as `portfolio_outcome` or `portfolio_snapshots` are missing, the runtime returns `status="skipped"` with explicit reasons instead of fabricating a successful fixture run
+- `src/trading/runtime_dispatch.py` now routes `run_job_phase("reflection")` to the live reflection runtime instead of the fixture smoke handler
+- `src/trading/repositories/sqlalchemy.py` now includes reflection-oriented aggregation and persistence helpers, including `load_reflection_inputs(...)`, `save_daily_reflection(...)`, and `save_learning_factor(...)`
+- fixture-only `reflection_fixture` behavior remains available under `src/trading/runtime_smoke.py` for standalone smoke checks
+
+This slice intentionally stops short of migrating `strategy_evolution`; that remains the next PR 14 task.

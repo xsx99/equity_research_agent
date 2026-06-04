@@ -2,16 +2,19 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any
 
 from src.db.models.trading import (
     CandidateScore,
+    CandidateOutcomeEvaluation,
+    DailyReflection,
     IntradayRebalanceDecision,
     IntradaySignalScan,
     IntradaySignalSnapshot,
+    LearningFactor,
     NewsAlert,
     ManualTickerRequest,
     OptionRiskSnapshot,
@@ -198,6 +201,111 @@ class SQLAlchemyTradingRepository:
         self.session.add(row)
         self.session.flush()
 
+    def load_reflection_inputs(self, *, trade_date: date) -> dict[str, object]:
+        latest_portfolio_snapshot = (
+            self.session.query(PortfolioSnapshotModel)
+            .filter(PortfolioSnapshotModel.snapshot_time >= datetime.combine(trade_date, datetime.min.time()))
+            .all()
+        )
+        portfolio_rows = [row for row in latest_portfolio_snapshot if row.snapshot_time.date() == trade_date]
+        latest_snapshot = max(portfolio_rows, key=lambda row: row.snapshot_time) if portfolio_rows else None
+        latest_risk_snapshot = max(
+            (row for row in self.session.query(PortfolioRiskSnapshot).all() if row.decision_time.date() == trade_date),
+            key=lambda row: row.decision_time,
+            default=None,
+        )
+        risk_snapshot_id = latest_risk_snapshot.portfolio_risk_snapshot_id if latest_risk_snapshot is not None else None
+        latest_reflection = (
+            max(
+                (row for row in self.session.query(DailyReflection).all() if row.trade_date == trade_date),
+                key=lambda row: row.created_at,
+                default=None,
+            )
+        )
+        return {
+            "portfolio_outcome": _portfolio_outcome_payload(latest_snapshot),
+            "morning_macro_snapshot": {},
+            "strategy_candidates": tuple(
+                _candidate_score_payload(row)
+                for row in self.session.query(CandidateScore).all()
+                if row.decision_time.date() == trade_date
+            ),
+            "manual_ticker_requests": tuple(
+                _manual_request_payload(row)
+                for row in self.session.query(ManualTickerRequest).all()
+                if (row.created_at and row.created_at.date() == trade_date)
+                or (row.last_evaluated_at and row.last_evaluated_at.date() == trade_date)
+            ),
+            "trading_decisions": tuple(
+                _trading_decision_payload(row)
+                for row in self.session.query(TradingDecision).all()
+                if row.decision_time.date() == trade_date and row.decision not in {"no_trade", "hold"}
+            ),
+            "rejected_decisions": tuple(
+                _trading_decision_payload(row)
+                for row in self.session.query(TradingDecision).all()
+                if row.decision_time.date() == trade_date and row.decision in {"no_trade", "hold"}
+            ),
+            "intraday_news_alerts": tuple(
+                _news_alert_payload(row)
+                for row in self.session.query(NewsAlert).all()
+                if row.created_at.date() == trade_date
+            ),
+            "intraday_rebalance_decisions": tuple(
+                _intraday_rebalance_payload(row)
+                for row in self.session.query(IntradayRebalanceDecision).all()
+                if row.decision_time.date() == trade_date
+            ),
+            "paper_orders": tuple(
+                _paper_order_payload(row)
+                for row in self.session.query(PaperOrder).all()
+                if row.trade_date == trade_date
+            ),
+            "paper_executions": tuple(
+                _paper_execution_payload(row)
+                for row in self.session.query(PaperExecution).all()
+                if row.trade_date == trade_date
+            ),
+            "risk_snapshots": tuple(
+                _portfolio_risk_snapshot_payload(row)
+                for row in self.session.query(PortfolioRiskSnapshot).all()
+                if row.decision_time.date() == trade_date
+            ),
+            "risk_factor_exposures": tuple(
+                _risk_factor_exposure_payload(row)
+                for row in self.session.query(RiskFactorExposure).all()
+                if risk_snapshot_id is not None and row.portfolio_risk_snapshot_id == risk_snapshot_id
+            ),
+            "portfolio_snapshots": tuple(_portfolio_snapshot_payload(row) for row in portfolio_rows),
+            "candidate_outcome_evaluations": tuple(
+                _candidate_outcome_payload(row)
+                for row in self.session.query(CandidateOutcomeEvaluation).all()
+                if row.decision_time.date() == trade_date
+            ),
+            "benchmark_peer_returns": {},
+            "paper_option_decisions": tuple(
+                _paper_option_decision_payload(row)
+                for row in self.session.query(OptionStrategyDecision).all()
+                if row.created_at.date() == trade_date
+            ),
+            "paper_option_positions": tuple(
+                _paper_option_position_payload(row)
+                for row in self.session.query(PaperOptionPositionModel).all()
+                if row.opened_at.date() == trade_date
+            ),
+            "option_risk_snapshots": tuple(
+                _option_risk_snapshot_payload(row)
+                for row in self.session.query(OptionRiskSnapshot).all()
+                if row.created_at.date() == trade_date
+            ),
+            "worst_case_assignment_snapshots": (),
+            "learning_factors_used": tuple(
+                latest_reflection.metadata_json.get("learning_factors_used", ())
+                if latest_reflection is not None and isinstance(latest_reflection.metadata_json, dict)
+                else ()
+            ),
+        }
+
     def _require_universe_filter_config_row(self, config: UniverseFilterConfigRecord) -> UniverseFilterConfig:
         row = self.session.query(UniverseFilterConfig).filter_by(
             profile_name=config.profile_name,
@@ -218,6 +326,46 @@ class SQLAlchemyTradingRepository:
         row.snapshot_type = run.snapshot_type
         row.status = run.status
         row.metadata_json = dict(run.metadata_json)
+        self.session.flush()
+
+    def save_daily_reflection(self, reflection: Any) -> None:
+        row = self.session.query(DailyReflection).filter_by(
+            daily_reflection_id=_to_uuid(reflection.daily_reflection_id)
+        ).one_or_none()
+        if row is None:
+            row = DailyReflection(daily_reflection_id=_to_uuid(reflection.daily_reflection_id))
+            self.session.add(row)
+        row.trade_date = reflection.trade_date
+        row.prompt_run_id = None
+        row.status = reflection.status
+        row.portfolio_summary_json = dict(reflection.metadata_json.get("portfolio_outcome", {}))
+        row.reflection_json = dict(reflection.reflection_json)
+        row.strategy_proposal_hints_json = list(reflection.strategy_proposal_hints)
+        row.metadata_json = dict(reflection.metadata_json)
+        self.session.flush()
+
+    def save_learning_factor(self, learning_factor: Any) -> None:
+        row = self.session.query(LearningFactor).filter_by(
+            learning_factor_id=_to_uuid(learning_factor.learning_factor_id)
+        ).one_or_none()
+        if row is None:
+            row = LearningFactor(learning_factor_id=_to_uuid(learning_factor.learning_factor_id))
+            self.session.add(row)
+        row.factor_key = learning_factor.factor_key
+        row.daily_reflection_id = _to_uuid_or_none(learning_factor.source_daily_reflection_id)
+        row.trade_date = learning_factor.trade_date
+        row.title = learning_factor.title
+        row.factor_type = learning_factor.factor_type
+        row.scope = learning_factor.scope
+        row.status = learning_factor.status
+        row.strategy_id = learning_factor.strategy_id
+        row.condition = learning_factor.condition
+        row.recommendation = learning_factor.recommendation
+        row.confidence = Decimal(str(learning_factor.confidence))
+        row.activation_policy = learning_factor.activation_policy
+        row.effect_tags_json = list(learning_factor.effect_tags)
+        row.evidence_json = list(learning_factor.evidence)
+        row.metadata_json = dict(learning_factor.metadata_json)
         self.session.flush()
 
     def save_signal_snapshot(self, snapshot: SignalSnapshotResult) -> None:
@@ -1190,6 +1338,189 @@ def _decimal_or_none(value: float | None) -> Decimal | None:
     if value is None:
         return None
     return Decimal(str(value))
+
+
+def _decimal_to_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    return float(value)
+
+
+def _portfolio_snapshot_payload(row: Any) -> dict[str, Any]:
+    return {
+        "snapshot_time": row.snapshot_time.isoformat(),
+        "cash_balance": _decimal_to_float(row.cash_balance),
+        "account_equity": _decimal_to_float(row.account_equity),
+        "net_liquidation_value": _decimal_to_float(row.net_liquidation_value),
+        "buying_power": _decimal_to_float(row.buying_power),
+        "day_pnl": _decimal_to_float(row.day_pnl),
+        "realized_pnl": _decimal_to_float(row.realized_pnl),
+        "unrealized_pnl": _decimal_to_float(row.unrealized_pnl),
+        "metadata_json": dict(row.metadata_json or {}),
+    }
+
+
+def _portfolio_outcome_payload(row: Any | None) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    return {
+        "snapshot_time": row.snapshot_time.isoformat(),
+        "account_equity": _decimal_to_float(row.account_equity),
+        "day_pnl": _decimal_to_float(row.day_pnl),
+        "realized_pnl": _decimal_to_float(row.realized_pnl),
+        "unrealized_pnl": _decimal_to_float(row.unrealized_pnl),
+    }
+
+
+def _candidate_score_payload(row: Any) -> dict[str, Any]:
+    return {
+        "ticker": row.ticker,
+        "strategy_id": row.strategy_id,
+        "strategy_version": row.strategy_version,
+        "candidate_score": _decimal_to_float(row.candidate_score),
+        "selection_source": row.selection_source,
+        "manual_request_id": str(row.manual_request_id) if row.manual_request_id is not None else None,
+        "decision_time": row.decision_time.isoformat(),
+    }
+
+
+def _manual_request_payload(row: Any) -> dict[str, Any]:
+    return {
+        "ticker": row.ticker,
+        "mode": row.mode,
+        "status": row.status,
+        "latest_result_status": row.latest_result_status,
+        "created_at": row.created_at.isoformat() if row.created_at is not None else None,
+        "last_evaluated_at": row.last_evaluated_at.isoformat() if row.last_evaluated_at is not None else None,
+    }
+
+
+def _trading_decision_payload(row: Any) -> dict[str, Any]:
+    return {
+        "ticker": row.ticker,
+        "decision": row.decision,
+        "strategy_id": row.strategy_id,
+        "trade_identity": row.trade_identity,
+        "instrument_type": row.instrument_type,
+        "selection_source": row.selection_source,
+        "confidence": _decimal_to_float(row.confidence),
+        "target_weight": _decimal_to_float(row.target_weight),
+        "approved_weight": _decimal_to_float(row.approved_weight),
+        "decision_time": row.decision_time.isoformat(),
+        "metadata_json": dict(row.metadata_json or {}),
+    }
+
+
+def _news_alert_payload(row: Any) -> dict[str, Any]:
+    return {
+        "ticker": row.ticker,
+        "alert_type": row.alert_type,
+        "severity": row.severity,
+        "sentiment": row.sentiment,
+        "headline": row.headline,
+        "summary": row.summary,
+        "action_required": bool(row.action_required),
+        "published_at": row.published_at.isoformat(),
+    }
+
+
+def _intraday_rebalance_payload(row: Any) -> dict[str, Any]:
+    return {
+        "ticker": row.ticker,
+        "action": row.action,
+        "status": row.status,
+        "reason_code": row.reason_code,
+        "confidence": _decimal_to_float(row.confidence),
+        "decision_time": row.decision_time.isoformat(),
+    }
+
+
+def _paper_order_payload(row: Any) -> dict[str, Any]:
+    return {
+        "ticker": row.ticker,
+        "action": row.action,
+        "quantity": _decimal_to_float(row.quantity),
+        "order_price": _decimal_to_float(row.order_price),
+        "status": row.status,
+        "trade_date": row.trade_date.isoformat(),
+        "created_at": row.created_at.isoformat(),
+    }
+
+
+def _paper_execution_payload(row: Any) -> dict[str, Any]:
+    return {
+        "ticker": row.ticker,
+        "quantity": _decimal_to_float(row.quantity),
+        "fill_price": _decimal_to_float(row.fill_price),
+        "trade_date": row.trade_date.isoformat(),
+        "executed_at": row.executed_at.isoformat(),
+        "net_cash_effect": _decimal_to_float(row.net_cash_effect),
+    }
+
+
+def _portfolio_risk_snapshot_payload(row: Any) -> dict[str, Any]:
+    return {
+        "decision_time": row.decision_time.isoformat(),
+        "account_equity": _decimal_to_float(row.account_equity),
+        "cash_balance": _decimal_to_float(row.cash_balance),
+        "buying_power": _decimal_to_float(row.buying_power),
+        "net_exposure": _decimal_to_float(row.net_exposure),
+        "gross_exposure": _decimal_to_float(row.gross_exposure),
+        "metadata_json": dict(row.metadata_json or {}),
+    }
+
+
+def _risk_factor_exposure_payload(row: Any) -> dict[str, Any]:
+    return {
+        "factor_type": row.factor_type,
+        "factor_value": row.factor_value,
+        "gross_exposure": _decimal_to_float(row.gross_exposure),
+        "net_exposure": _decimal_to_float(row.net_exposure),
+        "metadata_json": dict(row.metadata_json or {}),
+    }
+
+
+def _candidate_outcome_payload(row: Any) -> dict[str, Any]:
+    return {
+        "ticker": row.ticker,
+        "strategy_id": row.strategy_id,
+        "trade_identity": row.trade_identity,
+        "evaluation_status": row.evaluation_status,
+        "candidate_return": _decimal_to_float(row.candidate_return),
+        "alpha": _decimal_to_float(row.alpha),
+        "benchmark_returns": dict(row.benchmark_returns_json or {}),
+        "decision_time": row.decision_time.isoformat(),
+    }
+
+
+def _paper_option_decision_payload(row: Any) -> dict[str, Any]:
+    return {
+        "ticker": row.ticker,
+        "option_strategy_type": row.option_strategy_type,
+        "status": row.status,
+        "decision_action": row.decision_action,
+        "created_at": row.created_at.isoformat(),
+    }
+
+
+def _paper_option_position_payload(row: Any) -> dict[str, Any]:
+    return {
+        "ticker": row.ticker,
+        "option_strategy_type": row.option_strategy_type,
+        "quantity": row.quantity,
+        "status": row.status,
+        "opened_at": row.opened_at.isoformat(),
+    }
+
+
+def _option_risk_snapshot_payload(row: Any) -> dict[str, Any]:
+    return {
+        "ticker": row.ticker,
+        "option_strategy_type": row.option_strategy_type,
+        "risk_status": row.risk_status,
+        "reason_code": row.reason_code,
+        "created_at": row.created_at.isoformat(),
+    }
 
 
 def _latest_portfolio_risk_snapshot_id(session: Any) -> uuid.UUID:

@@ -7,6 +7,7 @@ from typing import Any
 from src.trading.runtime_live import run_live_preopen_once
 from src.trading.runtime_intraday_live import run_live_intraday_refresh_once
 from src.trading.runtime_manual_review_live import run_live_manual_review_once
+from src.trading.runtime_reflection_live import run_live_reflection_once
 from src.trading.runtime_smoke import (
     _run_historical_replay_fixture,
     _run_intraday_refresh_fixture,
@@ -25,7 +26,7 @@ JOB_PHASE_HANDLERS: dict[str, RuntimeHandler] = {
     "preopen": run_live_preopen_once,
     "manual_review": run_live_manual_review_once,
     "intraday_refresh": run_live_intraday_refresh_once,
-    "reflection": _run_reflection_fixture,
+    "reflection": run_live_reflection_once,
     "strategy_evolution": _run_strategy_evolution_fixture,
 }
 
