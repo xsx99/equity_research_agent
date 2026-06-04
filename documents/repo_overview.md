@@ -207,3 +207,15 @@ PR 14 slice 1 lands the runtime-structure split without yet migrating new live p
 - `scripts/run_trading_smoke_test.py` now reads smoke-mode choices from the dedicated smoke module instead of the mixed runtime facade
 
 This slice intentionally does not yet add dedicated live runtimes for manual review, intraday refresh, reflection, or strategy evolution. Those remain follow-up PR 14 tasks.
+
+## PR 14 Slice 2 Scope
+
+PR 14 slice 2 migrates the scheduler-facing `manual_review` phase onto an explicit live runtime without changing the operator-facing phase name:
+
+- `src/trading/runtime_manual_review_live.py` now owns a dedicated live manual-review runtime and entrypoint, `run_live_manual_review_once(...)`
+- the manual-review live runtime reuses the preopen dependency graph, but narrows the universe scope to active manual requests only instead of combining them with scanner-side `manual_include` symbols
+- `src/trading/runtime_dispatch.py` now routes `run_job_phase("manual_review")` to the live manual-review runtime instead of the fixture smoke handler
+- the runtime report now exposes manual-review-specific summary counts such as active request count and `review_only` vs `paper_trade_eligible` mode counts while keeping the common `status` / `phase` / `as_of` / `summary` / `execution` contract intact
+- fixture-only `manual_review_fixture` behavior remains available under `src/trading/runtime_smoke.py` for standalone smoke checks
+
+This slice intentionally stops short of adding dedicated live runtimes for intraday refresh, reflection, or strategy evolution.
