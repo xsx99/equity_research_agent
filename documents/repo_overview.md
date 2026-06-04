@@ -243,4 +243,13 @@ PR 14 slice 4 migrates the scheduler-facing `reflection` phase onto an explicit 
 - `src/trading/repositories/sqlalchemy.py` now includes reflection-oriented aggregation and persistence helpers, including `load_reflection_inputs(...)`, `save_daily_reflection(...)`, and `save_learning_factor(...)`
 - fixture-only `reflection_fixture` behavior remains available under `src/trading/runtime_smoke.py` for standalone smoke checks
 
-This slice intentionally stops short of migrating `strategy_evolution`; that remains the next PR 14 task.
+## PR 14 Slice 5 Scope
+
+PR 14 slice 5 migrates the scheduler-facing `strategy_evolution` phase onto an explicit live runtime and carries the same post-close `skipped` semantics into strategy proposal generation:
+
+- `src/trading/runtime_strategy_evolution_live.py` now owns a dedicated live strategy-evolution runtime and entrypoint, `run_live_strategy_evolution_once(...)`
+- the new `LiveStrategyEvolutionRequestLoader` assembles a `StrategyEvolutionRequest` from persisted same-day `daily_reflections`, `learning_factors`, rejected candidates, and candidate outcome evaluations through one repository-backed aggregation point
+- when the same-day reflection artifact is absent, the runtime returns `status="skipped"` with explicit reasons instead of falling back to fixture success semantics
+- `src/trading/runtime_dispatch.py` now routes `run_job_phase("strategy_evolution")` to the live strategy-evolution runtime instead of the fixture smoke handler
+- `src/trading/repositories/sqlalchemy.py` now includes strategy-evolution aggregation helpers alongside the existing reflection persistence helpers
+- fixture-only `strategy_evolution_fixture` behavior remains available under `src/trading/runtime_smoke.py` for standalone smoke checks

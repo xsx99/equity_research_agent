@@ -56,6 +56,8 @@ from src.trading.risk.hedges import RiskHedgeDecisionRecord
 from src.trading.risk.options import OptionRiskSnapshotRecord
 from src.trading.options.strategy import OptionStrategyDecisionRecord, OptionStrategyLegRecord
 from src.trading.portfolio.state import PortfolioSnapshot, StockPosition
+from src.trading.reflection_pipeline import DailyReflectionRecord, LearningFactorRecord
+from src.trading.replay.outcomes import CandidateOutcomeEvaluationRecord
 from src.trading.signals import SignalSnapshotResult
 from src.trading.strategies.classifier import TradeClassificationRecord
 from src.trading.strategies.matching import CandidateScoreRecord, StrategyRunRecord
@@ -303,6 +305,36 @@ class SQLAlchemyTradingRepository:
                 latest_reflection.metadata_json.get("learning_factors_used", ())
                 if latest_reflection is not None and isinstance(latest_reflection.metadata_json, dict)
                 else ()
+            ),
+        }
+
+    def load_strategy_evolution_inputs(self, *, trade_date: date) -> dict[str, object]:
+        latest_reflection = max(
+            (row for row in self.session.query(DailyReflection).all() if row.trade_date == trade_date),
+            key=lambda row: row.created_at,
+            default=None,
+        )
+        daily_reflections = (
+            (_daily_reflection_record(latest_reflection),)
+            if latest_reflection is not None
+            else ()
+        )
+        return {
+            "daily_reflections": daily_reflections,
+            "learning_factors": tuple(
+                _learning_factor_record(row)
+                for row in self.session.query(LearningFactor).all()
+                if row.trade_date == trade_date
+            ),
+            "rejected_candidates": tuple(
+                _rejected_candidate_payload(row)
+                for row in self.session.query(CandidateScore).all()
+                if row.decision_time.date() == trade_date and row.rejection_reason
+            ),
+            "candidate_outcome_evaluations": tuple(
+                _candidate_outcome_record(row)
+                for row in self.session.query(CandidateOutcomeEvaluation).all()
+                if row.decision_time.date() == trade_date
             ),
         }
 
@@ -1384,6 +1416,19 @@ def _candidate_score_payload(row: Any) -> dict[str, Any]:
     }
 
 
+def _rejected_candidate_payload(row: Any) -> dict[str, Any]:
+    return {
+        "ticker": row.ticker,
+        "strategy_id": row.strategy_id,
+        "strategy_version": row.strategy_version,
+        "rejection_reason": row.rejection_reason,
+        "selection_source": row.selection_source,
+        "selection_reason": row.selection_reason,
+        "core_signal_evidence": dict(row.core_signal_evidence_json or {}),
+        "risk_tags": list(row.risk_tags_json or ()),
+    }
+
+
 def _manual_request_payload(row: Any) -> dict[str, Any]:
     return {
         "ticker": row.ticker,
@@ -1491,6 +1536,72 @@ def _candidate_outcome_payload(row: Any) -> dict[str, Any]:
         "benchmark_returns": dict(row.benchmark_returns_json or {}),
         "decision_time": row.decision_time.isoformat(),
     }
+
+
+def _daily_reflection_record(row: Any) -> DailyReflectionRecord:
+    return DailyReflectionRecord(
+        daily_reflection_id=str(row.daily_reflection_id),
+        trade_date=row.trade_date,
+        status=row.status,
+        prompt_template=None,
+        prompt_run=SimpleNamespace(prompt_run_id=str(row.prompt_run_id) if row.prompt_run_id is not None else None),
+        usage_events=[],
+        reflection_json=dict(row.reflection_json or {}),
+        strategy_proposal_hints=tuple(row.strategy_proposal_hints_json or ()),
+        metadata_json=dict(row.metadata_json or {}),
+    )
+
+
+def _learning_factor_record(row: Any) -> LearningFactorRecord:
+    return LearningFactorRecord(
+        learning_factor_id=str(row.learning_factor_id),
+        factor_key=row.factor_key,
+        trade_date=row.trade_date,
+        title=row.title,
+        factor_type=row.factor_type,
+        scope=row.scope,
+        status=row.status,
+        strategy_id=row.strategy_id,
+        condition=row.condition,
+        recommendation=row.recommendation,
+        confidence=_decimal_to_float(row.confidence) or 0.0,
+        activation_policy=row.activation_policy,
+        effect_tags=tuple(row.effect_tags_json or ()),
+        evidence=tuple(row.evidence_json or ()),
+        source_daily_reflection_id=str(row.daily_reflection_id) if row.daily_reflection_id is not None else "",
+        metadata_json=dict(row.metadata_json or {}),
+    )
+
+
+def _candidate_outcome_record(row: Any) -> CandidateOutcomeEvaluationRecord:
+    return CandidateOutcomeEvaluationRecord(
+        candidate_outcome_evaluation_id=str(row.candidate_outcome_evaluation_id),
+        historical_replay_run_id=str(row.historical_replay_run_id) if row.historical_replay_run_id is not None else None,
+        candidate_score_id=str(row.candidate_score_id) if row.candidate_score_id is not None else None,
+        trade_classification_id=str(row.trade_classification_id) if row.trade_classification_id is not None else None,
+        ticker=row.ticker,
+        strategy_id=row.strategy_id,
+        strategy_version=row.strategy_version,
+        expression_bucket_id=row.expression_bucket_id,
+        trade_identity=row.trade_identity,
+        direction=row.direction,
+        catalyst_type=row.catalyst_type,
+        confidence_bucket=row.confidence_bucket,
+        decision_time=row.decision_time,
+        horizon_start_at=row.horizon_start_at,
+        horizon_end_at=row.horizon_end_at,
+        evaluation_status=row.evaluation_status,
+        candidate_return=_decimal_to_float(row.candidate_return),
+        benchmark_returns={str(key): float(value) for key, value in dict(row.benchmark_returns_json or {}).items()},
+        peer_basket_id=str(row.peer_basket_id) if row.peer_basket_id is not None else None,
+        peer_basket_return=_decimal_to_float(row.peer_basket_return),
+        alpha=_decimal_to_float(row.alpha),
+        max_favorable_excursion=_decimal_to_float(row.max_favorable_excursion),
+        max_adverse_excursion=_decimal_to_float(row.max_adverse_excursion),
+        regime=row.regime,
+        sector_theme=row.sector_theme,
+        metadata_json=dict(row.metadata_json or {}),
+    )
 
 
 def _paper_option_decision_payload(row: Any) -> dict[str, Any]:
