@@ -90,6 +90,14 @@ def _dashboard_payload() -> dict:
         },
         "ticker_workspace": {
             "selected_ticker": "AAPL",
+            "selected_detail_tab": "timeline",
+            "selected_detail_item_index": 0,
+            "selected_detail_item": {
+                "event_type": "decision",
+                "title": "Decision submitted",
+                "summary": "Trading decision entered long",
+                "detail": "The system promoted AAPL from watch to enter_long after risk approval.",
+            },
             "buckets": {
                 "action_now": (
                     {
@@ -159,7 +167,18 @@ def _dashboard_payload() -> dict:
                 },
                 "tabs": {
                     "timeline": (
-                        {"event_type": "decision", "summary": "Trading decision entered long"},
+                        {
+                            "event_type": "decision",
+                            "title": "Decision submitted",
+                            "summary": "Trading decision entered long",
+                            "detail": "The system promoted AAPL from watch to enter_long after risk approval.",
+                        },
+                        {
+                            "event_type": "signal_snapshot",
+                            "title": "Signal snapshot updated",
+                            "summary": "Relative strength improved vs QQQ",
+                            "detail": "Fresh pre-open signal snapshot showed improving relative strength and breakout confirmation.",
+                        },
                     ),
                     "trend": {
                         "technical": (
@@ -309,11 +328,19 @@ class TestTodayDashboard:
         assert response.headers["location"] == "/today"
 
     def test_get_today_dashboard_renders_tabs_and_sections(self, client):
-        with patch("src.web.routers.today.load_today_dashboard", return_value=_dashboard_payload()):
-            response = client.get("/today")
+        payload = _dashboard_payload()
+        payload["selected_tab"] = "overview"
+        with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
+            response = client.get("/today?tab=overview")
 
         assert response.status_code == 200
         assert "Today Dashboard" in response.text
+        assert "today-shell" in response.text
+        assert "operator-strip" in response.text
+        assert "operator-strip-group-primary" in response.text
+        assert "operator-strip-group-context" in response.text
+        assert "today-global-tabs" in response.text
+        assert "today-workspace" in response.text
         assert "Overview" in response.text
         assert "Portfolio" in response.text
         assert "Trades" in response.text
@@ -322,43 +349,199 @@ class TestTodayDashboard:
         assert "Learning &amp; Strategies" in response.text
         assert "Ops &amp; Cost" in response.text
         assert "Raised guidance" in response.text
-        assert "AAPL" in response.text
-        assert "TSLA" in response.text
-        assert "AI Infrastructure" in response.text
-        assert "gpt-5" in response.text
+        assert "Session Watch" in response.text
+        assert "trades-canvas" not in response.text
+        assert "TSLA" not in response.text
+        assert "AI Infrastructure" not in response.text
+        assert "gpt-5" not in response.text
+
+    def test_trades_tab_only_renders_trades_workspace_body(self, client):
+        payload = _dashboard_payload()
+        payload["selected_tab"] = "trades"
+        with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
+            response = client.get("/today?tab=trades&ticker=AAPL")
+
+        assert response.status_code == 200
+        assert "trades-canvas" in response.text
+        assert "Signal Summary" in response.text
+        assert "Breakout confirmed + risk approved" in response.text
+        assert "AI Infrastructure" not in response.text
+        assert "gpt-5" not in response.text
+        assert "Stock Positions" not in response.text
 
     def test_trade_detail_drilldown_renders_when_decision_selected(self, client):
         payload = _dashboard_payload()
+        payload["selected_tab"] = "trades"
         with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
-            response = client.get("/today?tab=trades&decision_id=decision-action")
+            response = client.get("/today?tab=trades&decision_id=decision-action&detail_tab=decisions")
 
         assert response.status_code == 200
         assert "Latest Conclusion" in response.text
         assert "Trade Decision" in response.text
         assert "own_earnings_beat_raise" in response.text
         assert "within_limits" in response.text
-        assert "Primary strategy selected" in response.text
+        assert "Primary strategy selected" not in response.text
 
     def test_today_dashboard_renders_ticker_workspace_sections(self, client):
-        with patch("src.web.routers.today.load_today_dashboard", return_value=_dashboard_payload()):
+        payload = _dashboard_payload()
+        payload["selected_tab"] = "trades"
+        with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
             response = client.get("/today?tab=trades&ticker=AAPL")
 
         assert response.status_code == 200
+        assert "trades-canvas" in response.text
+        assert "ticker-workspace" in response.text
+        assert "ticker-detail-hero" in response.text
+        assert "ticker-support-grid" in response.text
+        assert "ticker-detail-nav" in response.text
         assert "Action Now" in response.text
         assert "In Position" in response.text
         assert "Watch" in response.text
         assert "Latest Conclusion" in response.text
-        assert "Timeline" in response.text
-        assert "Trend" in response.text
-        assert "Decisions" in response.text
-        assert "Risk" in response.text
+        assert 'data-panel="timeline"' in response.text
         assert "Trade Decision" in response.text
         assert "Signal Summary" in response.text
         assert "Risk Manager Summary" in response.text
         assert "Position / Execution State" in response.text
+        assert 'data-panel="trend"' not in response.text
+        assert 'data-panel="decisions"' not in response.text
+        assert 'data-panel="risk"' not in response.text
+
+    def test_trades_detail_tab_renders_only_selected_panel(self, client):
+        payload = _dashboard_payload()
+        payload["selected_tab"] = "trades"
+        payload["ticker_workspace"]["selected_detail_tab"] = "trend"
+        with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
+            response = client.get("/today?tab=trades&ticker=AAPL&detail_tab=trend")
+
+        assert response.status_code == 200
+        assert "ticker-detail-nav" in response.text
+        assert 'data-panel="trend"' in response.text
+        assert "Technical Context" in response.text
+        assert "Relative Strength" in response.text
+        assert 'data-panel="timeline"' not in response.text
+        assert "Primary strategy selected" not in response.text
+
+    def test_decisions_tab_renders_summary_first_structure(self, client):
+        payload = _dashboard_payload()
+        payload["selected_tab"] = "trades"
+        payload["ticker_workspace"]["selected_detail_tab"] = "decisions"
+        with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
+            response = client.get("/today?tab=trades&ticker=AAPL&detail_tab=decisions")
+
+        assert response.status_code == 200
+        assert 'data-panel="decisions"' in response.text
+        assert "Decision Ledger" in response.text
+        assert "Current Call" in response.text
+        assert "Primary strategy selected" in response.text
+        assert 'data-panel="risk"' not in response.text
+
+    def test_risk_tab_renders_summary_first_structure(self, client):
+        payload = _dashboard_payload()
+        payload["selected_tab"] = "trades"
+        payload["ticker_workspace"]["selected_detail_tab"] = "risk"
+        with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
+            response = client.get("/today?tab=trades&ticker=AAPL&detail_tab=risk")
+
+        assert response.status_code == 200
+        assert 'data-panel="risk"' in response.text
+        assert "Risk Posture" in response.text
+        assert "Approval History" in response.text
+        assert "within_limits" in response.text
+        assert 'data-panel="decisions"' not in response.text
+
+    def test_risk_macro_tab_renders_summary_first_structure(self, client):
+        payload = _dashboard_payload()
+        payload["selected_tab"] = "risk-macro"
+        with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
+            response = client.get("/today?tab=risk-macro")
+
+        assert response.status_code == 200
+        assert "Constraint Snapshot" in response.text
+        assert "Exposure Surface" in response.text
+        assert "surface-table-wrap" in response.text
+        assert "trades-canvas" not in response.text
+        assert "AI Infrastructure" not in response.text
+
+    def test_portfolio_tab_renders_summary_first_structure(self, client):
+        payload = _dashboard_payload()
+        payload["selected_tab"] = "portfolio"
+        with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
+            response = client.get("/today?tab=portfolio")
+
+        assert response.status_code == 200
+        assert "Holdings Snapshot" in response.text
+        assert "Stock Book" in response.text
+        assert "surface-table-wrap" in response.text
+        assert "AAPL" in response.text
+        assert "trades-canvas" not in response.text
+
+    def test_candidates_tab_renders_summary_and_operations_modules(self, client):
+        payload = _dashboard_payload()
+        payload["selected_tab"] = "candidates"
+        with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
+            response = client.get("/today?tab=candidates")
+
+        assert response.status_code == 200
+        assert "Universe Snapshot" in response.text
+        assert "Manual Review Queue" in response.text
+        assert "Theme Monitor" in response.text
+        assert "trades-canvas" not in response.text
+        assert "Signal Summary" not in response.text
+
+    def test_learning_tab_renders_summary_first_structure(self, client):
+        payload = _dashboard_payload()
+        payload["selected_tab"] = "learning-strategies"
+        with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
+            response = client.get("/today?tab=learning-strategies")
+
+        assert response.status_code == 200
+        assert "Reflection Snapshot" in response.text
+        assert "Strategy Pipeline" in response.text
+        assert "Performance Snapshot" in response.text
+        assert "Bullish catalyst continuation respected" in response.text
+        assert "trades-canvas" not in response.text
+
+    def test_ops_cost_tab_renders_summary_first_structure(self, client):
+        payload = _dashboard_payload()
+        payload["selected_tab"] = "ops-cost"
+        with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
+            response = client.get("/today?tab=ops-cost")
+
+        assert response.status_code == 200
+        assert "LLM Spend" in response.text
+        assert "Model Footprint" in response.text
+        assert "Usage Ledger" in response.text
+        assert "gpt-5" in response.text
+        assert "trades-canvas" not in response.text
+
+    def test_timeline_tab_renders_list_and_selected_item_detail(self, client):
+        payload = _dashboard_payload()
+        payload["selected_tab"] = "trades"
+        payload["ticker_workspace"]["selected_detail_tab"] = "timeline"
+        payload["ticker_workspace"]["selected_detail_item_index"] = 1
+        payload["ticker_workspace"]["selected_detail_item"] = {
+            "event_type": "signal_snapshot",
+            "title": "Signal snapshot updated",
+            "summary": "Relative strength improved vs QQQ",
+            "detail": "Fresh pre-open signal snapshot showed improving relative strength and breakout confirmation.",
+        }
+        with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
+            response = client.get("/today?tab=trades&ticker=AAPL&detail_tab=timeline&detail_item_index=1")
+
+        assert response.status_code == 200
+        assert 'data-panel="timeline"' in response.text
+        assert "Timeline Detail Sheet" in response.text
+        assert "Selected Event" in response.text
+        assert "Decision submitted" in response.text
+        assert "Signal snapshot updated" in response.text
+        assert "Fresh pre-open signal snapshot showed improving relative strength" in response.text
+        assert 'data-panel="trend"' not in response.text
 
     def test_today_dashboard_renders_selectable_ticker_cards_and_active_marker(self, client):
-        with patch("src.web.routers.today.load_today_dashboard", return_value=_dashboard_payload()):
+        payload = _dashboard_payload()
+        payload["selected_tab"] = "trades"
+        with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
             response = client.get("/today?tab=trades&ticker=AAPL&decision_id=decision-action")
 
         assert response.status_code == 200
@@ -388,7 +571,7 @@ class TestTodayDashboard:
             trade_rows=trade_rows,
             selected_detail=selected_nvda_detail,
         ) as load_trade_detail:
-            response = client.get("/today?ticker=MSFT")
+            response = client.get("/today?tab=trades&ticker=MSFT")
 
         assert response.status_code == 200
         assert 'data-selected-ticker="NVDA"' in response.text
@@ -405,7 +588,7 @@ class TestTodayDashboard:
             trade_rows=trade_rows,
             selected_detail=selected_nvda_detail,
         ) as load_trade_detail:
-            response = client.get("/today")
+            response = client.get("/today?tab=trades")
 
         assert response.status_code == 200
         assert 'data-selected-ticker="NVDA"' in response.text
@@ -420,7 +603,7 @@ class TestTodayDashboard:
             trade_rows=[],
             selected_detail=None,
         ) as load_trade_detail:
-            response = client.get("/today")
+            response = client.get("/today?tab=trades")
 
         assert response.status_code == 200
         assert "No tickers in the workstation yet." in response.text

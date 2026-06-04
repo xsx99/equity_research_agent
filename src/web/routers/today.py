@@ -67,6 +67,8 @@ def today_dashboard(
     tab: str = "overview",
     decision_id: str | None = None,
     ticker: str | None = None,
+    detail_tab: str = "timeline",
+    detail_item_index: int | None = None,
 ):
     with get_session() as session:
         dashboard = load_today_dashboard(
@@ -74,6 +76,8 @@ def today_dashboard(
             selected_tab=tab,
             decision_id=decision_id,
             selected_ticker=ticker,
+            selected_detail_tab=detail_tab,
+            selected_detail_item_index=detail_item_index,
         )
     return _templates.TemplateResponse(
         request,
@@ -152,6 +156,8 @@ def load_today_dashboard(
     selected_tab: str,
     decision_id: str | None,
     selected_ticker: str | None,
+    selected_detail_tab: str = "timeline",
+    selected_detail_item_index: int | None = None,
 ) -> dict[str, Any]:
     selected_tab = _normalize_tab(selected_tab)
     latest_portfolio = session.query(PortfolioSnapshot).order_by(PortfolioSnapshot.snapshot_time.desc()).first()
@@ -184,6 +190,25 @@ def load_today_dashboard(
         )
         if selected_decision_id:
             selected_detail = _load_trade_detail(session, selected_decision_id)
+
+    normalized_detail_tab = _normalize_detail_tab(selected_detail_tab)
+    normalized_detail_item_index = _normalize_detail_item_index(
+        detail=selected_detail,
+        detail_tab=normalized_detail_tab,
+        detail_item_index=selected_detail_item_index,
+    )
+    ticker_workspace = {
+        **ticker_workspace,
+        "selected_detail_tab": normalized_detail_tab,
+        "selected_detail_item_index": normalized_detail_item_index,
+        "selected_detail_item": _select_detail_item(
+            detail=selected_detail,
+            detail_tab=normalized_detail_tab,
+            detail_item_index=normalized_detail_item_index,
+        ),
+    }
+    if selected_detail is not None:
+        ticker_workspace["detail"] = selected_detail
 
     return {
         "selected_tab": selected_tab,
@@ -714,6 +739,55 @@ def _serialize_universe_filter(config: UniverseFilterConfig | None) -> dict[str,
 def _normalize_tab(tab: str) -> str:
     allowed = {tab_id for tab_id, _ in _TAB_LABELS}
     return tab if tab in allowed else "overview"
+
+
+def _normalize_detail_tab(detail_tab: str) -> str:
+    allowed = {"timeline", "trend", "decisions", "risk"}
+    return detail_tab if detail_tab in allowed else "timeline"
+
+
+def _normalize_detail_item_index(
+    *,
+    detail: dict[str, Any] | None,
+    detail_tab: str,
+    detail_item_index: int | None,
+) -> int | None:
+    items = _detail_tab_items(detail=detail, detail_tab=detail_tab)
+    if not items:
+        return None
+    if detail_item_index is None:
+        return 0
+    if 0 <= detail_item_index < len(items):
+        return detail_item_index
+    return 0
+
+
+def _select_detail_item(
+    *,
+    detail: dict[str, Any] | None,
+    detail_tab: str,
+    detail_item_index: int | None,
+) -> dict[str, Any] | None:
+    items = _detail_tab_items(detail=detail, detail_tab=detail_tab)
+    if not items or detail_item_index is None:
+        return None
+    return items[detail_item_index]
+
+
+def _detail_tab_items(
+    *,
+    detail: dict[str, Any] | None,
+    detail_tab: str,
+) -> list[dict[str, Any]]:
+    if not detail:
+        return []
+    tabs = detail.get("tabs") or {}
+    value = tabs.get(detail_tab)
+    if isinstance(value, tuple):
+        return [item for item in value if isinstance(item, dict)]
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, dict)]
+    return []
 
 
 def _to_decimal(value: str) -> Decimal:
