@@ -34,3 +34,5 @@ htmlcov/
 *.log
 .DS_Store
 .worktrees/
+.superpowers
+docs/superpowers
