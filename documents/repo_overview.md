@@ -164,6 +164,18 @@ PR 11A refines the initial `/today` workstation into a ticker-first operator vie
 
 This refinement intentionally keeps FastAPI + Jinja server rendering and does not yet introduce a dedicated front-end state layer.
 
+## PR 11B Scope
+
+PR 11B refreshes the `/today` workstation into a navigation-driven command-center shell without changing the underlying trading artifacts:
+
+- the page header is now grouped into an operator strip with action-driving metrics separated from quieter session context
+- top-level workstation tabs now render one focused surface at a time instead of stacking every major section into one viewport
+- the `Trades` tab remains ticker-first, but now reads as a single selected-ticker canvas with hero/support hierarchy, lighter local detail navigation, and timeline list-to-detail drill-down
+- `Overview`, `Portfolio`, `Risk & Macro`, `Candidates`, `Learning & Strategies`, and `Ops & Cost` now render as focused standalone surfaces with summary-first blocks and denser tables pushed lower
+- `/today` empty states and responsive behavior now use a more consistent low-noise presentation while staying fully server-rendered through FastAPI + Jinja
+
+This refinement intentionally stays presentation-only. It does not add new persistence, new producer pipelines, or a client-side state layer.
+
 ## PR 13 Scope
 
 PR 13 starts the live preopen cutover on top of the existing fixture-first scheduler/runtime layer:

@@ -1,6 +1,6 @@
 # Today Dashboard Visual Refresh Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Refresh `/today` into a hybrid command-center workspace that reduces visual density, establishes clear hierarchy, and only shows the operator the currently selected work surface instead of rendering every section at once.
 
@@ -66,16 +66,16 @@ Out of scope:
 - Modify: `src/web/routers/today.py` if explicit tab-state helpers are needed
 - Modify: `src/templates/today.html`
 
-- [ ] Write failing route assertions that each top-level tab only renders its own major content surface:
+- [x] Write failing route assertions that each top-level tab only renders its own major content surface:
   - `tab=trades` renders the `Trades` workspace and does not render `Overview`, `Portfolio`, `Risk & Macro`, `Candidates`, `Learning & Strategies`, or `Ops & Cost` body content
   - `tab=overview` renders only `Overview` body content
   - at least one additional non-trades tab proves the pattern is general, not special-cased
-- [ ] Add assertions that the top-level tab strip remains visible while non-selected tab bodies are absent from the response.
-- [ ] Run: `source ~/.venv/bin/activate && pytest tests/web/test_today.py -q`
+- [x] Add assertions that the top-level tab strip remains visible while non-selected tab bodies are absent from the response.
+- [x] Run: `source ~/.venv/bin/activate && pytest tests/web/test_today.py -q`
   Expected: FAIL because the current template still renders all major sections on the same page.
-- [ ] Implement the minimum `today.html` restructuring so the top-level `selected_tab` gates body rendering while preserving the shared operator strip and global tab strip.
-- [ ] If needed, add a lightweight route-side helper for normalized top-level render state instead of scattering `selected_tab` conditions throughout the template.
-- [ ] Re-run: `source ~/.venv/bin/activate && pytest tests/web/test_today.py -q`
+- [x] Implement the minimum `today.html` restructuring so the top-level `selected_tab` gates body rendering while preserving the shared operator strip and global tab strip.
+- [x] If needed, add a lightweight route-side helper for normalized top-level render state instead of scattering `selected_tab` conditions throughout the template.
+- [x] Re-run: `source ~/.venv/bin/activate && pytest tests/web/test_today.py -q`
   Expected: PASS for top-level tab scoping, with deeper visual refinements still pending.
 
 ## Task 2: Build the operator strip and grouped header hierarchy
@@ -86,13 +86,13 @@ Out of scope:
 - Modify: `src/web/routers/today.py` only if grouped header helpers are required
 - Modify: `tests/web/test_today.py`
 
-- [ ] Write failing tests that assert the new header grouping semantics:
+- [x] Write failing tests that assert the new header grouping semantics:
   - action-driving status group
   - session-context group
   - demoted explanatory subtitle and metadata labels
-- [ ] Run: `source ~/.venv/bin/activate && pytest tests/web/test_today.py -q`
+- [x] Run: `source ~/.venv/bin/activate && pytest tests/web/test_today.py -q`
   Expected: FAIL because the current header still uses equally weighted chips plus a separate KPI row.
-- [ ] Implement grouped header markup in `today.html` using existing values first:
+- [x] Implement grouped header markup in `today.html` using existing values first:
   - open alerts
   - material changes or action count
   - buying power
@@ -101,12 +101,12 @@ Out of scope:
   - macro regime
   - risk appetite
   - job status when available
-- [ ] If the template becomes too brittle, add minimal route-side convenience fields in `src/web/routers/today.py` to shape header groups without changing underlying meaning.
-- [ ] Add CSS for the operator strip, including:
+- [x] If the template becomes too brittle, add minimal route-side convenience fields in `src/web/routers/today.py` to shape header groups without changing underlying meaning.
+- [x] Add CSS for the operator strip, including:
   - primary vs secondary metric emphasis
   - quieter metadata labels
   - desktop grouping and narrow-screen wrapping
-- [ ] Re-run: `source ~/.venv/bin/activate && pytest tests/web/test_today.py -q`
+- [x] Re-run: `source ~/.venv/bin/activate && pytest tests/web/test_today.py -q`
   Expected: PASS with grouped header landmarks and no broken route rendering.
 
 ## Task 3: Recompose the `Trades` body into ticker buckets and a single selected ticker canvas
@@ -117,28 +117,28 @@ Out of scope:
 - Modify: `src/web/routers/today.py` if route-side selected detail state is needed
 - Modify: `tests/web/test_today.py`
 
-- [ ] Write failing route assertions for the `Trades` composition:
+- [x] Write failing route assertions for the `Trades` composition:
   - `Trades` renders buckets in the intended order: `Action Now`, `In Position`, `Watch`
   - the ticker rail remains a navigator and only one ticker is selected at a time
   - when `ticker` is selected, the main canvas shows that ticker's hero and support modules
-- [ ] Run: `source ~/.venv/bin/activate && pytest tests/web/test_today.py -q`
+- [x] Run: `source ~/.venv/bin/activate && pytest tests/web/test_today.py -q`
   Expected: FAIL because the current `Trades` layout still mixes visible detail surfaces and does not fully enforce the selected-ticker reading flow.
-- [ ] Rework `today.html` so `tab=trades` reads as:
+- [x] Rework `today.html` so `tab=trades` reads as:
   - ticker bucket rail
   - one selected ticker hero block
   - one selected ticker support area
   - one local detail-navigation control
-- [ ] Simplify ticker cards to the intended compact fields:
+- [x] Simplify ticker cards to the intended compact fields:
   - ticker
   - decision
   - `why now`
   - compact state badge
-- [ ] Add or refine CSS layout primitives for:
+- [x] Add or refine CSS layout primitives for:
   - page shell
   - trades-only workspace grid
   - support module stacks
   - ticker navigator readability
-- [ ] Re-run: `source ~/.venv/bin/activate && pytest tests/web/test_today.py -q`
+- [x] Re-run: `source ~/.venv/bin/activate && pytest tests/web/test_today.py -q`
   Expected: PASS, with route tests confirming the selected-ticker-first structure.
 
 ## Task 4: Make local detail tabs render one panel at a time with optional item drill-down
@@ -149,28 +149,28 @@ Out of scope:
 - Modify: `src/web/routers/today.py`
 - Modify: `tests/web/test_today.py`
 
-- [ ] Write failing route assertions for local detail state:
+- [x] Write failing route assertions for local detail state:
   - `detail_tab=timeline` renders `Timeline` and hides `Trend`, `Decisions`, and `Risk` bodies
   - `detail_tab=trend` renders `Trend` and hides the others
   - the local detail control remains visible while only one panel body is rendered
-- [ ] Add failing route assertions for item drill-down behavior:
+- [x] Add failing route assertions for item drill-down behavior:
   - selecting a timeline item renders a dedicated detail panel for that item
   - the list remains a navigator, not a second fully expanded content stream
-- [ ] Run: `source ~/.venv/bin/activate && pytest tests/web/test_today.py -q`
+- [x] Run: `source ~/.venv/bin/activate && pytest tests/web/test_today.py -q`
   Expected: FAIL because the current template renders all local panels together and provides no focused item-detail view.
-- [ ] Extend `/today` route loading to accept explicit local selection state, for example:
+- [x] Extend `/today` route loading to accept explicit local selection state, for example:
   - `detail_tab`
   - `detail_item`
   - `detail_item_index` or another stable presentation-only selector
-- [ ] Rework the selected ticker detail area so it renders:
+- [x] Rework the selected ticker detail area so it renders:
   - one hero conclusion panel
   - one decision-support module group
   - one risk/execution module group
   - one local detail-navigation control
   - one currently selected local panel body
   - one optional item-detail surface beneath the selected local panel when an item is selected
-- [ ] Add CSS for hero, support, selected-panel, list/detail split, and lighter local navigation controls that are visually distinct from the global tab strip.
-- [ ] Re-run: `source ~/.venv/bin/activate && pytest tests/web/test_today.py -q`
+- [x] Add CSS for hero, support, selected-panel, list/detail split, and lighter local navigation controls that are visually distinct from the global tab strip.
+- [x] Re-run: `source ~/.venv/bin/activate && pytest tests/web/test_today.py -q`
   Expected: PASS with local detail scoping and focused item drill-down visible in rendered HTML.
 
 ## Task 5: Rebuild non-trades tabs as focused standalone surfaces instead of same-page secondary cards
@@ -180,24 +180,24 @@ Out of scope:
 - Modify: `src/static/style.css`
 - Modify: `tests/web/test_today.py`
 
-- [ ] Write failing tests for per-tab focused rendering:
+- [x] Write failing tests for per-tab focused rendering:
   - `Overview` only shows overview content blocks
   - `Portfolio` only shows portfolio content blocks
   - `Risk & Macro` only shows risk/macro content blocks
   - `Candidates` only shows candidate/universe/manual-request content blocks
-- [ ] Add lower-noise assertions within those focused tabs:
+- [x] Add lower-noise assertions within those focused tabs:
   - active universe filter summarized before full controls
   - `manual requests` isolated as an operation module
   - `Risk & Macro` surfaces constraints and top summary before long tables
   - quiet empty states for `Overview` and `Portfolio`
-- [ ] Run: `source ~/.venv/bin/activate && pytest tests/web/test_today.py -q`
+- [x] Run: `source ~/.venv/bin/activate && pytest tests/web/test_today.py -q`
   Expected: FAIL because current layout still assumes these surfaces live together on one page.
-- [ ] Recompose each non-trades tab as its own standalone surface with one clear heading, one primary summary zone, and lower-priority tables/controls below.
-- [ ] Recompose `Candidates` so the summary and primary actions precede dense controls and tables.
-- [ ] Recompose `Risk & Macro` so the first read is config + constraints + top exposure context, with long exposure rows visually secondary.
-- [ ] Tighten `Overview` and `Portfolio` headings, spacing, and empty-state rendering so they read as focused destinations rather than leftovers from a composite dashboard.
-- [ ] Add CSS for standalone tab surfaces, quieter section cards, summary rows, compact tables, and subdued empty states.
-- [ ] Re-run: `source ~/.venv/bin/activate && pytest tests/web/test_today.py -q`
+- [x] Recompose each non-trades tab as its own standalone surface with one clear heading, one primary summary zone, and lower-priority tables/controls below.
+- [x] Recompose `Candidates` so the summary and primary actions precede dense controls and tables.
+- [x] Recompose `Risk & Macro` so the first read is config + constraints + top exposure context, with long exposure rows visually secondary.
+- [x] Tighten `Overview` and `Portfolio` headings, spacing, and empty-state rendering so they read as focused destinations rather than leftovers from a composite dashboard.
+- [x] Add CSS for standalone tab surfaces, quieter section cards, summary rows, compact tables, and subdued empty states.
+- [x] Re-run: `source ~/.venv/bin/activate && pytest tests/web/test_today.py -q`
   Expected: PASS with non-trades tabs rendered as focused destinations.
 
 ## Task 6: Finish responsive behavior, empty states, and repo docs
@@ -209,7 +209,7 @@ Out of scope:
 - Modify: `tests/web/test_today.py`
 - Modify: `documents/repo_overview.md` if the implementation materially changes the `/today` architecture description
 
-- [ ] Add or extend route assertions for empty-state and narrow-layout-safe rendering:
+- [x] Add or extend route assertions for empty-state and narrow-layout-safe rendering:
   - no selected ticker
   - no live alerts
   - no material changes
@@ -217,20 +217,20 @@ Out of scope:
   - invalid `tab` falls back safely
   - invalid local `detail_tab` falls back safely
   - invalid `detail_item` falls back safely without rendering a broken detail panel
-- [ ] Run: `source ~/.venv/bin/activate && pytest tests/web/test_today.py -q`
+- [x] Run: `source ~/.venv/bin/activate && pytest tests/web/test_today.py -q`
   Expected: PASS or expose any remaining empty-state regressions.
-- [ ] Finalize CSS responsive behavior for:
+- [x] Finalize CSS responsive behavior for:
   - operator strip wrapping
   - primary workspace collapsing
   - local list/detail drill-down collapsing
   - table overflow handling
   - ticker rail readability
-- [ ] Replace repetitive unavailable/no-update strings where necessary with quieter, standardized empty-state treatments.
-- [ ] Update `documents/repo_overview.md` if the final implementation changes the repo-level description of the `/today` UI architecture.
-- [ ] Run broader web verification:
+- [x] Replace repetitive unavailable/no-update strings where necessary with quieter, standardized empty-state treatments.
+- [x] Update `documents/repo_overview.md` if the final implementation changes the repo-level description of the `/today` UI architecture.
+- [x] Run broader web verification:
   - `source ~/.venv/bin/activate && pytest tests/web/test_today.py tests/web/test_today_workspace.py -q`
   Expected: PASS.
-- [ ] Run final targeted regression check:
+- [x] Run final targeted regression check:
   - `source ~/.venv/bin/activate && pytest tests/web -q`
   Expected: PASS.
 

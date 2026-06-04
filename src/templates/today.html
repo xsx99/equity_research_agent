@@ -127,7 +127,7 @@
                 {% endfor %}
               </div>
               {% else %}
-              <p class="detail-muted quiet-empty">No tickers in this bucket.</p>
+              <p class="detail-muted quiet-empty surface-empty-copy">No tickers in this bucket.</p>
               {% endif %}
             </section>
             {% endfor %}
@@ -362,15 +362,19 @@
                   <h3>{{ workspace.selected_ticker }}</h3>
                 </div>
               </div>
-              <p class="detail-muted quiet-empty">Detailed workspace modules are unavailable for this ticker.</p>
+              <p class="detail-muted quiet-empty surface-empty-copy">Detailed workspace modules are unavailable for this ticker.</p>
             </section>
             {% else %}
-            <p class="detail-muted quiet-empty">No ticker selected.</p>
+            <section class="card subcard empty-state-panel">
+              <p class="detail-muted quiet-empty surface-empty-copy">No ticker selected.</p>
+            </section>
             {% endif %}
           </div>
         </div>
         {% else %}
-        <p class="detail-muted quiet-empty">No tickers in the workstation yet.</p>
+        <section class="card subcard empty-state-panel">
+          <p class="detail-muted quiet-empty surface-empty-copy">No tickers in the workstation yet.</p>
+        </section>
         {% endif %}
       </section>
     </main>
@@ -410,7 +414,7 @@
           </table>
         </div>
         {% else %}
-        <p class="detail-muted quiet-empty">No live alerts.</p>
+        <p class="detail-muted quiet-empty surface-empty-copy">No live alerts.</p>
         {% endif %}
       </section>
       <section class="surface-block">
@@ -430,7 +434,7 @@
           </table>
         </div>
         {% else %}
-        <p class="detail-muted quiet-empty">No material changes.</p>
+        <p class="detail-muted quiet-empty surface-empty-copy">No material changes.</p>
         {% endif %}
       </section>
     </section>

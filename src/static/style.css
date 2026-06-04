@@ -120,6 +120,7 @@ td.mono { font-family: monospace; font-size: 12px; }
   display: flex;
   gap: 0.5rem;
   align-items: center;
+  flex-wrap: wrap;
   margin-bottom: 1rem;
 }
 input[type="text"] {
@@ -908,6 +909,12 @@ a:hover { text-decoration: underline; }
   margin-bottom: 1.1rem;
 }
 
+.empty-state-panel {
+  display: grid;
+  place-items: start;
+  min-height: 5.5rem;
+}
+
 .raw-json-panel {
   border: 1px solid #dfe5ef;
   border-radius: 14px;
@@ -937,6 +944,7 @@ a:hover { text-decoration: underline; }
 
 .surface-table-wrap {
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
   border: 1px solid #e3e9f1;
   border-radius: 14px;
   background: linear-gradient(180deg, #fbfcfe 0%, #f5f8fb 100%);
@@ -1071,5 +1079,17 @@ a:hover { text-decoration: underline; }
 
   .surface-heading {
     flex-direction: column;
+  }
+
+  .today-global-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 0.2rem;
+  }
+
+  .form-row > input[type="text"],
+  .form-row > select,
+  .form-row > button {
+    width: 100%;
   }
 }

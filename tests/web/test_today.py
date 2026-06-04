@@ -580,6 +580,33 @@ class TestTodayDashboard:
         assert "surface-empty-copy" in response.text
         assert "Unavailable." in response.text
 
+    def test_overview_empty_state_uses_quiet_standardized_text(self, client):
+        payload = _dashboard_payload()
+        payload["selected_tab"] = "overview"
+        payload["overview"]["live_alerts"] = ()
+        payload["overview"]["material_changes"] = ()
+        with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
+            response = client.get("/today?tab=overview")
+
+        assert response.status_code == 200
+        assert "No live alerts." in response.text
+        assert "No material changes." in response.text
+        assert response.text.count("surface-empty-copy") >= 2
+
+    def test_trades_no_selected_ticker_empty_state_uses_standardized_copy(self, client):
+        payload = _dashboard_payload()
+        payload["selected_tab"] = "trades"
+        payload["ticker_workspace"]["selected_ticker"] = None
+        payload["ticker_workspace"]["detail"] = None
+        payload["ticker_workspace"]["selected_detail_item"] = None
+        with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
+            response = client.get("/today?tab=trades")
+
+        assert response.status_code == 200
+        assert "No ticker selected." in response.text
+        assert "surface-empty-copy" in response.text
+        assert "Latest Conclusion" not in response.text
+
     def test_today_dashboard_renders_selectable_ticker_cards_and_active_marker(self, client):
         payload = _dashboard_payload()
         payload["selected_tab"] = "trades"
@@ -726,6 +753,73 @@ class TestTodayDashboard:
         assert dashboard["ticker_workspace"]["detail"] is None
         assert dashboard["trades"]["selected_detail"] is None
         load_trade_detail.assert_not_called()
+
+    def test_load_today_dashboard_normalizes_invalid_tab_and_detail_query_state(self):
+        from src.web.routers.today import load_today_dashboard
+
+        session = _query_stub_session()
+        trade_rows = _ticker_selection_trade_rows()
+        selected_nvda_detail = {
+            "ticker": "NVDA",
+            "latest_conclusion": {
+                "trade_decision": {"label": "Enter Long"},
+                "signal_summary": {"summary_bullets": ()},
+                "risk_summary": {},
+                "position_execution": {},
+            },
+            "tabs": {
+                "timeline": (
+                    {
+                        "title": "Decision submitted",
+                        "summary": "Trading decision entered long",
+                        "detail": "Primary timeline detail",
+                    },
+                    {
+                        "title": "Signal snapshot updated",
+                        "summary": "Relative strength improved",
+                        "detail": "Secondary timeline detail",
+                    },
+                ),
+                "trend": {"technical": (), "news": (), "fundamental": ()},
+                "decisions": (),
+                "risk": {"history": (), "raw_json": None},
+                "raw_json": {},
+            },
+        }
+
+        with (
+            patch("src.web.routers.today._load_trade_rows", return_value=trade_rows),
+            patch("src.web.routers.today._load_trade_detail", return_value=selected_nvda_detail),
+            patch("src.web.routers.today._load_positions", return_value=()),
+            patch("src.web.routers.today._load_option_positions", return_value=()),
+            patch("src.web.routers.today._load_hedge_overlays", return_value=()),
+            patch("src.web.routers.today._load_live_alerts", return_value=()),
+            patch("src.web.routers.today._load_material_changes", return_value=()),
+            patch("src.web.routers.today._load_risk_exposures", return_value=()),
+            patch("src.web.routers.today._load_candidate_rows", return_value=()),
+            patch("src.web.routers.today._load_manual_requests", return_value=()),
+            patch("src.web.routers.today._load_portfolio_intents", return_value=()),
+            patch("src.web.routers.today._load_relationships", return_value=()),
+            patch("src.web.routers.today._load_peer_baskets", return_value=()),
+            patch("src.web.routers.today._load_themes", return_value=()),
+            patch("src.web.routers.today._load_learning_factors", return_value=()),
+            patch("src.web.routers.today._load_strategy_performance", return_value=()),
+            patch("src.web.routers.today._load_strategy_proposals", return_value=()),
+            patch("src.web.routers.today._load_llm_usage", return_value=()),
+        ):
+            dashboard = load_today_dashboard(
+                session,
+                selected_tab="not-a-real-tab",
+                decision_id=None,
+                selected_ticker="NVDA",
+                selected_detail_tab="not-a-real-detail-tab",
+                selected_detail_item_index=99,
+            )
+
+        assert dashboard["selected_tab"] == "overview"
+        assert dashboard["ticker_workspace"]["selected_detail_tab"] == "timeline"
+        assert dashboard["ticker_workspace"]["selected_detail_item_index"] == 0
+        assert dashboard["ticker_workspace"]["selected_detail_item"]["title"] == "Decision submitted"
 
 
 class TestTodayDashboardMutations:
