@@ -73,6 +73,22 @@ def test_build_ticker_workspace_prefers_action_now_then_in_position_then_watch()
     assert workspace["selected_ticker"] == "TSLA"
 
 
+def test_build_ticker_workspace_includes_position_only_ticker():
+    workspace = build_ticker_workspace(
+        trade_rows=[],
+        selected_ticker=None,
+        positions_by_ticker={"tsla": {"quantity": 5, "order_status": "accepted"}},
+        risk_by_ticker={},
+        signal_history_by_ticker={},
+        news_by_ticker={},
+        fundamentals_by_ticker={},
+    )
+
+    assert [item["ticker"] for item in workspace["buckets"]["action_now"]] == []
+    assert [item["ticker"] for item in workspace["buckets"]["in_position"]] == ["TSLA"]
+    assert workspace["selected_ticker"] == "TSLA"
+
+
 def test_build_ticker_workspace_does_not_promote_directional_decision_without_actionable_state():
     rows = [
         {
@@ -173,6 +189,94 @@ def test_build_ticker_workspace_aggregates_repeated_rows_by_ticker():
     assert workspace["selected_ticker"] == "NVDA"
 
 
+def test_build_ticker_workspace_uses_newer_row_when_duplicate_priorities_tie():
+    workspace = build_ticker_workspace(
+        trade_rows=[
+            {
+                "ticker": "nvda",
+                "decision": "no_trade",
+                "risk_status": "approved",
+                "order_status": None,
+                "material_signal_change": False,
+                "confidence": 0.21,
+                "created_at": "2026-06-03T14:20:00Z",
+            },
+            {
+                "ticker": "NVDA",
+                "decision": "no_trade",
+                "risk_status": "approved",
+                "order_status": None,
+                "material_signal_change": False,
+                "confidence": 0.67,
+                "created_at": "2026-06-03T14:35:00Z",
+            },
+        ],
+        selected_ticker=None,
+        positions_by_ticker={},
+        risk_by_ticker={},
+        signal_history_by_ticker={},
+        news_by_ticker={},
+        fundamentals_by_ticker={},
+    )
+
+    assert workspace["buckets"]["watch"] == [
+        {
+            "ticker": "NVDA",
+            "decision": "no_trade",
+            "risk_status": "approved",
+            "order_status": None,
+            "material_signal_change": False,
+            "confidence": 0.67,
+            "created_at": "2026-06-03T14:35:00Z",
+        }
+    ]
+
+
+def test_build_ticker_workspace_uses_latest_row_for_current_bucket_state():
+    workspace = build_ticker_workspace(
+        trade_rows=[
+            {
+                "ticker": "NVDA",
+                "decision": "enter_long",
+                "risk_status": "approved",
+                "order_status": "pending",
+                "material_signal_change": True,
+                "confidence": 0.82,
+                "created_at": "2026-06-03T14:20:00Z",
+            },
+            {
+                "ticker": "NVDA",
+                "decision": "no_trade",
+                "risk_status": "approved",
+                "order_status": None,
+                "material_signal_change": False,
+                "confidence": 0.33,
+                "created_at": "2026-06-03T14:35:00Z",
+            },
+        ],
+        selected_ticker=None,
+        positions_by_ticker={},
+        risk_by_ticker={},
+        signal_history_by_ticker={},
+        news_by_ticker={},
+        fundamentals_by_ticker={},
+    )
+
+    assert [item["ticker"] for item in workspace["buckets"]["action_now"]] == []
+    assert workspace["buckets"]["watch"] == [
+        {
+            "ticker": "NVDA",
+            "decision": "no_trade",
+            "risk_status": "approved",
+            "order_status": None,
+            "material_signal_change": False,
+            "confidence": 0.33,
+            "created_at": "2026-06-03T14:35:00Z",
+        }
+    ]
+    assert workspace["selected_ticker"] == "NVDA"
+
+
 def test_build_ticker_workspace_falls_back_when_selected_ticker_is_missing():
     rows = [
         {
@@ -204,3 +308,593 @@ def test_build_ticker_workspace_falls_back_when_selected_ticker_is_missing():
     assert [item["ticker"] for item in workspace["buckets"]["action_now"]] == ["AAPL"]
     assert [item["ticker"] for item in workspace["buckets"]["watch"]] == ["TSLA"]
     assert workspace["selected_ticker"] == "AAPL"
+
+
+def test_build_ticker_workspace_shapes_latest_conclusion_and_evidence():
+    workspace = build_ticker_workspace(
+        trade_rows=[
+            {
+                "ticker": "NVDA",
+                "decision": "trim",
+                "selected_strategy_id": "valuation_repair_quality_software_v1",
+                "expression_bucket_id": "long_stock",
+                "confidence": 0.52,
+                "risk_status": "approved",
+                "created_at": "2026-06-03T14:20:00Z",
+            },
+            {
+                "ticker": "NVDA",
+                "decision": "enter_long",
+                "selected_strategy_id": "valuation_repair_quality_software_v1",
+                "expression_bucket_id": "long_stock",
+                "confidence": 0.78,
+                "risk_status": "approved",
+                "created_at": "2026-06-03T14:35:00Z",
+            },
+        ],
+        selected_ticker="NVDA",
+        positions_by_ticker={"NVDA": {"pnl": "+2.1%", "order_status": "accepted"}},
+        risk_by_ticker={
+            "NVDA": {
+                "status": "approved",
+                "reason": "within_limits",
+                "history": [{"time": "2026-06-03T14:36:00Z", "status": "approved", "summary": "Within limits"}],
+            }
+        },
+        signal_history_by_ticker={
+            "NVDA": {
+                "technical": [
+                    {"label": "price", "points": [1, 2, 3], "summary": "Above rising support"},
+                    {"label": "relative_strength", "points": [3, 4, 5], "summary": "Trend improving vs QQQ"},
+                ],
+                "summary": ["relative strength improving vs QQQ", "price holding above key breakout"],
+                "timeline": [
+                    {
+                        "time": "2026-06-03T14:40:00Z",
+                        "event_type": "signal",
+                        "summary": "Breakout follow-through confirmed",
+                    },
+                    {
+                        "time": "2026-06-03T14:30:00Z",
+                        "event_type": "signal",
+                        "summary": "Relative strength inflected higher",
+                    }
+                ],
+            }
+        },
+        news_by_ticker={
+            "NVDA": [
+                {"title": "Late headline", "summary": "Follow-through demand", "published_at": "2026-06-03T14:50:00Z"},
+                {"title": "Raised guidance", "summary": "Demand improved", "published_at": "2026-06-03T13:00:00Z"}
+            ]
+        },
+        fundamentals_by_ticker={
+            "NVDA": [{"title": "Margin outlook", "summary": "Gross margin stable", "as_of": "2026-06-02"}]
+        },
+    )
+
+    detail = workspace["detail"]
+    latest_conclusion = detail["latest_conclusion"]
+
+    assert latest_conclusion["trade_decision"]["label"] == "Enter Long"
+    assert latest_conclusion["trade_decision"]["strategy_id"] == "valuation_repair_quality_software_v1"
+    assert latest_conclusion["signal_summary"]["summary_bullets"] == [
+        "relative strength improving vs QQQ",
+        "price holding above key breakout",
+    ]
+    assert latest_conclusion["signal_summary"]["technical_charts"] == [
+        {
+            "chart_type": "price / key level trend",
+            "label": "price",
+            "points": [1, 2, 3],
+            "summary": "Above rising support",
+            "empty": False,
+        },
+        {
+            "chart_type": "relative strength trend",
+            "label": "relative_strength",
+            "points": [3, 4, 5],
+            "summary": "Trend improving vs QQQ",
+            "empty": False,
+        },
+    ]
+    assert {item["title"] for item in latest_conclusion["signal_summary"]["news_snippets"]} == {
+        "Raised guidance",
+        "Late headline",
+    }
+    assert latest_conclusion["signal_summary"]["fundamental_snippets"][0]["title"] == "Margin outlook"
+    assert latest_conclusion["risk_summary"]["status"] == "approved"
+    assert latest_conclusion["position_execution"]["position"]["pnl"] == "+2.1%"
+
+    assert detail["tabs"]["timeline"] == [
+        {
+            "time": "2026-06-03T13:00:00Z",
+            "event_type": "news",
+            "summary": "Raised guidance",
+            "detail_anchor": "news-2",
+        },
+        {
+            "time": "2026-06-03T14:20:00Z",
+            "event_type": "decision",
+            "summary": "Trim",
+            "detail_anchor": "decision-1",
+        },
+        {
+            "time": "2026-06-03T14:30:00Z",
+            "event_type": "signal",
+            "summary": "Relative strength inflected higher",
+            "detail_anchor": "signal-2",
+        },
+        {
+            "time": "2026-06-03T14:35:00Z",
+            "event_type": "decision",
+            "summary": "Enter Long",
+            "detail_anchor": "decision-2",
+        },
+        {
+            "time": "2026-06-03T14:40:00Z",
+            "event_type": "signal",
+            "summary": "Breakout follow-through confirmed",
+            "detail_anchor": "signal-1",
+        },
+        {
+            "time": "2026-06-03T14:50:00Z",
+            "event_type": "news",
+            "summary": "Late headline",
+            "detail_anchor": "news-1",
+        },
+    ]
+    assert detail["tabs"]["trend"]["technical"][0]["chart_type"] == "price / key level trend"
+    assert detail["tabs"]["decisions"] == [
+        {
+            "time": "2026-06-03T14:20:00Z",
+            "decision": "Trim",
+            "confidence": 0.52,
+            "strategy_id": "valuation_repair_quality_software_v1",
+            "expression_bucket_id": "long_stock",
+            "detail_anchor": "decision-1",
+        },
+        {
+            "time": "2026-06-03T14:35:00Z",
+            "decision": "Enter Long",
+            "confidence": 0.78,
+            "strategy_id": "valuation_repair_quality_software_v1",
+            "expression_bucket_id": "long_stock",
+            "detail_anchor": "decision-2",
+        }
+    ]
+    assert latest_conclusion["trade_decision"]["label"] == "Enter Long"
+    assert detail["tabs"]["risk"]["history"][0]["summary"] == "Within limits"
+
+
+def test_build_ticker_workspace_surfaces_later_undated_decision_consistently():
+    workspace = build_ticker_workspace(
+        trade_rows=[
+            {
+                "ticker": "NVDA",
+                "decision": "trim",
+                "selected_strategy_id": "older_strategy",
+                "expression_bucket_id": "long_stock",
+                "confidence": 0.41,
+                "risk_status": "approved",
+                "created_at": "2026-06-03T14:20:00Z",
+            },
+            {
+                "ticker": "NVDA",
+                "decision": "enter_long",
+                "selected_strategy_id": "latest_strategy",
+                "expression_bucket_id": "long_stock",
+                "confidence": 0.78,
+                "risk_status": "approved",
+                "created_at": "2026-06-03T14:35:00Z",
+            },
+            {
+                "ticker": "NVDA",
+                "decision": "exit",
+                "selected_strategy_id": "undated_strategy",
+                "expression_bucket_id": "long_stock",
+                "confidence": 0.12,
+                "risk_status": "approved",
+            },
+        ],
+        selected_ticker="NVDA",
+        positions_by_ticker={},
+        risk_by_ticker={},
+        signal_history_by_ticker={},
+        news_by_ticker={},
+        fundamentals_by_ticker={},
+    )
+
+    detail = workspace["detail"]
+
+    assert detail["latest_conclusion"]["trade_decision"]["label"] == "Exit"
+    assert detail["latest_conclusion"]["trade_decision"]["strategy_id"] == "undated_strategy"
+    assert detail["tabs"]["decisions"] == [
+        {
+            "time": "2026-06-03T14:20:00Z",
+            "decision": "Trim",
+            "confidence": 0.41,
+            "strategy_id": "older_strategy",
+            "expression_bucket_id": "long_stock",
+            "detail_anchor": "decision-1",
+        },
+        {
+            "time": "2026-06-03T14:35:00Z",
+            "decision": "Enter Long",
+            "confidence": 0.78,
+            "strategy_id": "latest_strategy",
+            "expression_bucket_id": "long_stock",
+            "detail_anchor": "decision-2",
+        },
+        {
+            "time": None,
+            "decision": "Exit",
+            "confidence": 0.12,
+            "strategy_id": "undated_strategy",
+            "expression_bucket_id": "long_stock",
+            "detail_anchor": "decision-3",
+        },
+    ]
+    assert detail["tabs"]["timeline"] == [
+        {
+            "time": "2026-06-03T14:20:00Z",
+            "event_type": "decision",
+            "summary": "Trim",
+            "detail_anchor": "decision-1",
+        },
+        {
+            "time": "2026-06-03T14:35:00Z",
+            "event_type": "decision",
+            "summary": "Enter Long",
+            "detail_anchor": "decision-2",
+        },
+        {
+            "time": None,
+            "event_type": "decision",
+            "summary": "Exit",
+            "detail_anchor": "decision-3",
+        },
+    ]
+
+
+def test_build_ticker_workspace_orders_timeline_and_decisions_by_real_datetimes():
+    workspace = build_ticker_workspace(
+        trade_rows=[
+            {
+                "ticker": "NVDA",
+                "decision": "trim",
+                "selected_strategy_id": "offset_plus_two",
+                "expression_bucket_id": "long_stock",
+                "confidence": 0.51,
+                "risk_status": "approved",
+                "created_at": "2026-06-03T10:00:00+02:00",
+            },
+            {
+                "ticker": "NVDA",
+                "decision": "enter_long",
+                "selected_strategy_id": "utc_latest",
+                "expression_bucket_id": "long_stock",
+                "confidence": 0.82,
+                "risk_status": "approved",
+                "created_at": "2026-06-03T13:30:00Z",
+            },
+        ],
+        selected_ticker="NVDA",
+        positions_by_ticker={},
+        risk_by_ticker={},
+        signal_history_by_ticker={
+            "NVDA": {
+                "timeline": [
+                    {
+                        "time": "2026-06-03T08:30:00+01:00",
+                        "event_type": "signal",
+                        "summary": "Signal event should come first",
+                    }
+                ]
+            }
+        },
+        news_by_ticker={
+            "NVDA": [
+                {
+                    "title": "UTC news",
+                    "summary": "Published after first decision",
+                    "published_at": "2026-06-03T13:05:00Z",
+                }
+            ]
+        },
+        fundamentals_by_ticker={},
+    )
+
+    detail = workspace["detail"]
+
+    assert detail["latest_conclusion"]["trade_decision"]["label"] == "Enter Long"
+    assert detail["latest_conclusion"]["trade_decision"]["strategy_id"] == "utc_latest"
+    assert detail["tabs"]["decisions"] == [
+        {
+            "time": "2026-06-03T10:00:00+02:00",
+            "decision": "Trim",
+            "confidence": 0.51,
+            "strategy_id": "offset_plus_two",
+            "expression_bucket_id": "long_stock",
+            "detail_anchor": "decision-1",
+        },
+        {
+            "time": "2026-06-03T13:30:00Z",
+            "decision": "Enter Long",
+            "confidence": 0.82,
+            "strategy_id": "utc_latest",
+            "expression_bucket_id": "long_stock",
+            "detail_anchor": "decision-2",
+        },
+    ]
+    assert detail["tabs"]["timeline"] == [
+        {
+            "time": "2026-06-03T08:30:00+01:00",
+            "event_type": "signal",
+            "summary": "Signal event should come first",
+            "detail_anchor": "signal-1",
+        },
+        {
+            "time": "2026-06-03T10:00:00+02:00",
+            "event_type": "decision",
+            "summary": "Trim",
+            "detail_anchor": "decision-1",
+        },
+        {
+            "time": "2026-06-03T13:05:00Z",
+            "event_type": "news",
+            "summary": "UTC news",
+            "detail_anchor": "news-1",
+        },
+        {
+            "time": "2026-06-03T13:30:00Z",
+            "event_type": "decision",
+            "summary": "Enter Long",
+            "detail_anchor": "decision-2",
+        },
+    ]
+
+
+def test_build_ticker_workspace_keeps_all_undated_decisions_consistent():
+    workspace = build_ticker_workspace(
+        trade_rows=[
+            {
+                "ticker": "NVDA",
+                "decision": "trim",
+                "selected_strategy_id": "first_strategy",
+                "expression_bucket_id": "long_stock",
+                "confidence": 0.41,
+                "risk_status": "approved",
+            },
+            {
+                "ticker": "NVDA",
+                "decision": "enter_long",
+                "selected_strategy_id": "latest_strategy",
+                "expression_bucket_id": "long_stock",
+                "confidence": 0.78,
+                "risk_status": "approved",
+            },
+        ],
+        selected_ticker="NVDA",
+        positions_by_ticker={},
+        risk_by_ticker={},
+        signal_history_by_ticker={},
+        news_by_ticker={},
+        fundamentals_by_ticker={},
+    )
+
+    detail = workspace["detail"]
+
+    assert detail["latest_conclusion"]["trade_decision"]["label"] == "Enter Long"
+    assert detail["latest_conclusion"]["trade_decision"]["strategy_id"] == "latest_strategy"
+    assert detail["tabs"]["decisions"] == [
+        {
+            "time": None,
+            "decision": "Trim",
+            "confidence": 0.41,
+            "strategy_id": "first_strategy",
+            "expression_bucket_id": "long_stock",
+            "detail_anchor": "decision-1",
+        },
+        {
+            "time": None,
+            "decision": "Enter Long",
+            "confidence": 0.78,
+            "strategy_id": "latest_strategy",
+            "expression_bucket_id": "long_stock",
+            "detail_anchor": "decision-2",
+        },
+    ]
+    assert detail["tabs"]["timeline"] == [
+        {
+            "time": None,
+            "event_type": "decision",
+            "summary": "Trim",
+            "detail_anchor": "decision-1",
+        },
+        {
+            "time": None,
+            "event_type": "decision",
+            "summary": "Enter Long",
+            "detail_anchor": "decision-2",
+        },
+    ]
+
+
+def test_build_ticker_workspace_sorts_risk_history_by_real_timestamp():
+    workspace = build_ticker_workspace(
+        trade_rows=[
+            {
+                "ticker": "NVDA",
+                "decision": "enter_long",
+                "risk_status": "approved",
+                "created_at": "2026-06-03T14:35:00Z",
+            },
+        ],
+        selected_ticker="NVDA",
+        positions_by_ticker={},
+        risk_by_ticker={
+            "NVDA": {
+                "status": "approved",
+                "history": [
+                    {"time": "2026-06-03T10:00:00-04:00", "status": "blocked", "summary": "Latest"},
+                    {"time": "2026-06-03T09:30:00Z", "status": "approved", "summary": "Middle"},
+                    {"time": "2026-06-03T10:00:00+02:00", "status": "watch", "summary": "Earliest"},
+                ],
+            }
+        },
+        signal_history_by_ticker={},
+        news_by_ticker={},
+        fundamentals_by_ticker={},
+    )
+
+    assert workspace["detail"]["tabs"]["risk"]["history"] == [
+        {"time": "2026-06-03T10:00:00+02:00", "status": "watch", "summary": "Earliest"},
+        {"time": "2026-06-03T09:30:00Z", "status": "approved", "summary": "Middle"},
+        {"time": "2026-06-03T10:00:00-04:00", "status": "blocked", "summary": "Latest"},
+    ]
+
+
+def test_build_ticker_workspace_sorts_news_and_fundamental_snippets_by_time():
+    workspace = build_ticker_workspace(
+        trade_rows=[
+            {
+                "ticker": "NVDA",
+                "decision": "enter_long",
+                "risk_status": "approved",
+                "created_at": "2026-06-03T14:35:00Z",
+            },
+        ],
+        selected_ticker="NVDA",
+        positions_by_ticker={},
+        risk_by_ticker={},
+        signal_history_by_ticker={},
+        news_by_ticker={
+            "NVDA": [
+                {"title": "Latest news", "summary": "Newest", "published_at": "2026-06-03T10:00:00-04:00"},
+                {"title": "Earliest news", "summary": "Oldest", "published_at": "2026-06-03T10:00:00+02:00"},
+                {"title": "Middle news", "summary": "Middle", "published_at": "2026-06-03T09:30:00Z"},
+            ]
+        },
+        fundamentals_by_ticker={
+            "NVDA": [
+                {"title": "Latest fundamental", "summary": "Newest", "as_of": "2026-06-03T10:00:00-04:00"},
+                {"title": "Earliest fundamental", "summary": "Oldest", "as_of": "2026-06-03T10:00:00+02:00"},
+                {"title": "Middle fundamental", "summary": "Middle", "as_of": "2026-06-03T09:30:00Z"},
+            ]
+        },
+    )
+
+    signal_summary = workspace["detail"]["latest_conclusion"]["signal_summary"]
+
+    assert [item["title"] for item in signal_summary["news_snippets"]] == [
+        "Latest news",
+        "Middle news",
+        "Earliest news",
+    ]
+    assert [item["title"] for item in signal_summary["fundamental_snippets"]] == [
+        "Latest fundamental",
+        "Middle fundamental",
+        "Earliest fundamental",
+    ]
+
+
+def test_build_ticker_workspace_uses_empty_state_markers_when_detail_inputs_are_missing():
+    workspace = build_ticker_workspace(
+        trade_rows=[
+            {
+                "ticker": "AAPL",
+                "decision": "no_trade",
+                "risk_status": "approved",
+                "order_status": None,
+                "material_signal_change": False,
+            },
+        ],
+        selected_ticker="AAPL",
+        positions_by_ticker={},
+        risk_by_ticker={},
+        signal_history_by_ticker={},
+        news_by_ticker={},
+        fundamentals_by_ticker={},
+    )
+
+    detail = workspace["detail"]
+    latest_conclusion = detail["latest_conclusion"]
+
+    assert latest_conclusion["signal_summary"]["summary_bullets"] == ["No material update"]
+    assert latest_conclusion["signal_summary"]["technical_charts"] == [
+        {
+            "chart_type": "price / key level trend",
+            "label": "No material update",
+            "points": [],
+            "summary": "No material update",
+            "empty": True,
+        },
+        {
+            "chart_type": "relative strength trend",
+            "label": "No material update",
+            "points": [],
+            "summary": "No material update",
+            "empty": True,
+        },
+    ]
+    assert latest_conclusion["signal_summary"]["news_snippets"] == [
+        {
+            "title": "No material update",
+            "summary": "No material update",
+            "time": None,
+            "empty": True,
+        }
+    ]
+    assert latest_conclusion["signal_summary"]["fundamental_snippets"] == [
+        {
+            "title": "No material update",
+            "summary": "No material update",
+            "time": None,
+            "empty": True,
+        }
+    ]
+    assert latest_conclusion["risk_summary"]["status"] == "No material update"
+    assert latest_conclusion["position_execution"]["position"]["summary"] == "No material update"
+    assert detail["tabs"]["timeline"] == [
+        {
+            "time": None,
+            "event_type": "decision",
+            "summary": "No Trade",
+            "detail_anchor": "decision-1",
+        }
+    ]
+    assert detail["tabs"]["trend"]["news"] == [
+        {
+            "title": "No material update",
+            "summary": "No material update",
+            "time": None,
+            "empty": True,
+        }
+    ]
+    assert detail["tabs"]["trend"]["fundamental"] == [
+        {
+            "title": "No material update",
+            "summary": "No material update",
+            "time": None,
+            "empty": True,
+        }
+    ]
+    assert detail["tabs"]["decisions"] == [
+        {
+            "time": None,
+            "decision": "No Trade",
+            "confidence": None,
+            "strategy_id": "No material update",
+            "expression_bucket_id": "No material update",
+            "detail_anchor": "decision-1",
+        }
+    ]
+    assert detail["tabs"]["risk"]["history"] == [
+        {
+            "time": None,
+            "status": "No material update",
+            "summary": "No material update",
+            "empty": True,
+        }
+    ]

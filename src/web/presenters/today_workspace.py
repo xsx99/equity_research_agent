@@ -1,10 +1,16 @@
 """Ticker-first presenter helpers for the today workspace."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 _ACTIONABLE_DECISIONS = {"enter_long", "enter_short", "trim", "exit"}
 _ACTIONABLE_ORDER_STATUSES = {"pending", "accepted", "partial_fill"}
+_EMPTY_MARKER = "No material update"
+_TECHNICAL_CHART_SPECS = (
+    ("price / key level trend", {"price", "price_trend", "key_levels"}),
+    ("relative strength trend", {"relative_strength", "relative_strength_trend", "rs"}),
+)
 
 
 def build_ticker_workspace(
@@ -17,10 +23,24 @@ def build_ticker_workspace(
     news_by_ticker,
     fundamentals_by_ticker,
 ):
-    del risk_by_ticker, signal_history_by_ticker, news_by_ticker, fundamentals_by_ticker
-
     normalized_positions = {_normalize_ticker(ticker): payload for ticker, payload in positions_by_ticker.items()}
-    ticker_items = _build_ticker_items(trade_rows)
+    normalized_risk = {_normalize_ticker(ticker): payload for ticker, payload in risk_by_ticker.items()}
+    normalized_signal_history = {
+        _normalize_ticker(ticker): payload for ticker, payload in signal_history_by_ticker.items()
+    }
+    normalized_news = {_normalize_ticker(ticker): payload for ticker, payload in news_by_ticker.items()}
+    normalized_fundamentals = {
+        _normalize_ticker(ticker): payload for ticker, payload in fundamentals_by_ticker.items()
+    }
+    rows_by_ticker = _group_rows_by_ticker(trade_rows)
+    ticker_items = _build_ticker_items(
+        rows_by_ticker=rows_by_ticker,
+        positions_by_ticker=normalized_positions,
+        risk_by_ticker=normalized_risk,
+        signal_history_by_ticker=normalized_signal_history,
+        news_by_ticker=normalized_news,
+        fundamentals_by_ticker=normalized_fundamentals,
+    )
     buckets = {
         "action_now": [],
         "in_position": [],
@@ -44,25 +64,66 @@ def build_ticker_workspace(
     return {
         "selected_ticker": normalized_selected_ticker,
         "buckets": buckets,
-        "detail": None,
+        "detail": _build_detail(
+            selected_ticker=normalized_selected_ticker,
+            rows_by_ticker=rows_by_ticker,
+            positions_by_ticker=normalized_positions,
+            risk_by_ticker=normalized_risk,
+            signal_history_by_ticker=normalized_signal_history,
+            news_by_ticker=normalized_news,
+            fundamentals_by_ticker=normalized_fundamentals,
+        ),
     }
 
 
-def _build_ticker_items(trade_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _build_ticker_items(
+    *,
+    rows_by_ticker: dict[str, list[dict[str, Any]]],
+    positions_by_ticker: dict[str | None, Any],
+    risk_by_ticker: dict[str | None, Any],
+    signal_history_by_ticker: dict[str | None, Any],
+    news_by_ticker: dict[str | None, Any],
+    fundamentals_by_ticker: dict[str | None, Any],
+) -> list[dict[str, Any]]:
     items_by_ticker: dict[str, dict[str, Any]] = {}
+    ticker_keys = list(rows_by_ticker.keys())
+    for ticker_group in (
+        positions_by_ticker,
+        risk_by_ticker,
+        signal_history_by_ticker,
+        news_by_ticker,
+        fundamentals_by_ticker,
+    ):
+        for ticker in ticker_group.keys():
+            if ticker and ticker not in ticker_keys:
+                ticker_keys.append(ticker)
+
+    for ticker in ticker_keys:
+        if not ticker:
+            continue
+
+        row_items = rows_by_ticker.get(ticker) or []
+        if row_items:
+            items_by_ticker[ticker] = _latest_row(row_items, "created_at")
+            continue
+
+        items_by_ticker[ticker] = {"ticker": ticker}
+
+    return list(items_by_ticker.values())
+
+
+def _group_rows_by_ticker(trade_rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    rows_by_ticker: dict[str, list[dict[str, Any]]] = {}
     for row in trade_rows:
         ticker = _normalize_ticker(row.get("ticker"))
         if not ticker:
             continue
 
-        item = dict(row)
-        item["ticker"] = ticker
+        normalized_row = dict(row)
+        normalized_row["ticker"] = ticker
+        rows_by_ticker.setdefault(ticker, []).append(normalized_row)
 
-        existing = items_by_ticker.get(ticker)
-        if existing is None or _item_priority(item) > _item_priority(existing):
-            items_by_ticker[ticker] = item
-
-    return list(items_by_ticker.values())
+    return rows_by_ticker
 
 
 def _normalize_ticker(value: Any) -> str | None:
@@ -126,3 +187,324 @@ def _default_selected_ticker(buckets: dict[str, list[dict[str, Any]]]) -> str | 
         if buckets[bucket_name]:
             return buckets[bucket_name][0]["ticker"]
     return None
+
+
+def _build_detail(
+    *,
+    selected_ticker: str | None,
+    rows_by_ticker: dict[str, list[dict[str, Any]]],
+    positions_by_ticker: dict[str | None, Any],
+    risk_by_ticker: dict[str | None, Any],
+    signal_history_by_ticker: dict[str | None, Any],
+    news_by_ticker: dict[str | None, Any],
+    fundamentals_by_ticker: dict[str | None, Any],
+) -> dict[str, Any] | None:
+    if not selected_ticker:
+        return None
+
+    raw_decisions = rows_by_ticker.get(selected_ticker, [])
+    decision_history = _sort_timestamped_items(raw_decisions, "created_at")
+    latest_decision = _latest_decision(raw_decisions)
+    signal_history = signal_history_by_ticker.get(selected_ticker) or {}
+    technical_charts = _build_technical_charts(signal_history.get("technical"))
+    news_snippets = _build_snippets(news_by_ticker.get(selected_ticker))
+    fundamental_snippets = _build_snippets(fundamentals_by_ticker.get(selected_ticker))
+    position = positions_by_ticker.get(selected_ticker) or {"summary": _EMPTY_MARKER}
+    risk = risk_by_ticker.get(selected_ticker) or {}
+
+    latest_conclusion = {
+        "trade_decision": {
+            "ticker": selected_ticker,
+            "value": latest_decision.get("decision"),
+            "label": _humanize_label(latest_decision.get("decision")) or _EMPTY_MARKER,
+            "strategy_id": latest_decision.get("selected_strategy_id") or _EMPTY_MARKER,
+            "expression_bucket_id": latest_decision.get("expression_bucket_id") or _EMPTY_MARKER,
+            "confidence": latest_decision.get("confidence"),
+        },
+        "signal_summary": {
+            "summary_bullets": _build_summary_bullets(signal_history.get("summary")),
+            "technical_charts": technical_charts,
+            "news_snippets": news_snippets,
+            "fundamental_snippets": fundamental_snippets,
+        },
+        "risk_summary": {
+            "status": risk.get("status") or _EMPTY_MARKER,
+            "reason": risk.get("reason") or _EMPTY_MARKER,
+        },
+        "position_execution": {
+            "position": position,
+            "order_status": position.get("order_status") or latest_decision.get("order_status") or _EMPTY_MARKER,
+        },
+    }
+
+    tabs = {
+        "timeline": _build_timeline(
+            signal_history=signal_history,
+            news_items=news_by_ticker.get(selected_ticker),
+            decisions=decision_history,
+        ),
+        "trend": {
+            "technical": technical_charts,
+            "news": news_snippets,
+            "fundamental": fundamental_snippets,
+        },
+        "decisions": _build_decision_list(decision_history),
+        "risk": {
+            "current_stance": latest_conclusion["risk_summary"],
+            "position_state": position,
+            "history": _build_risk_history(risk.get("history")),
+        },
+    }
+
+    return {
+        "ticker": selected_ticker,
+        "latest_conclusion": latest_conclusion,
+        "tabs": tabs,
+    }
+
+
+def _build_summary_bullets(summary_items: Any) -> list[str]:
+    if isinstance(summary_items, list):
+        bullets = [str(item).strip() for item in summary_items if str(item).strip()]
+        if bullets:
+            return bullets
+    return [_EMPTY_MARKER]
+
+
+def _build_technical_charts(technical_items: Any) -> list[dict[str, Any]]:
+    items = technical_items if isinstance(technical_items, list) else []
+    charts: list[dict[str, Any]] = []
+    for chart_type, labels in _TECHNICAL_CHART_SPECS:
+        source = next(
+            (
+                item
+                for item in items
+                if str(item.get("label") or "").strip().lower() in labels
+            ),
+            None,
+        )
+        if source is None:
+            charts.append(
+                {
+                    "chart_type": chart_type,
+                    "label": _EMPTY_MARKER,
+                    "points": [],
+                    "summary": _EMPTY_MARKER,
+                    "empty": True,
+                }
+            )
+            continue
+
+        charts.append(
+            {
+                "chart_type": chart_type,
+                "label": source.get("label") or _EMPTY_MARKER,
+                "points": list(source.get("points") or []),
+                "summary": source.get("summary") or _EMPTY_MARKER,
+                "empty": False,
+            }
+        )
+    return charts
+
+
+def _build_snippets(items: Any) -> list[dict[str, Any]]:
+    if not isinstance(items, list) or not items:
+        return [_empty_snippet()]
+
+    snippets: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        snippets.append(
+            {
+                "title": item.get("title") or _EMPTY_MARKER,
+                "summary": item.get("summary") or _EMPTY_MARKER,
+                "time": item.get("published_at") or item.get("as_of"),
+                "empty": False,
+            }
+        )
+    snippets.sort(key=lambda item: _sort_key_desc(item.get("time")))
+    return snippets or [_empty_snippet()]
+
+
+def _build_timeline(
+    *,
+    signal_history: dict[str, Any],
+    news_items: Any,
+    decisions: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    timeline: list[dict[str, Any]] = []
+
+    for index, item in enumerate(signal_history.get("timeline") or [], start=1):
+        if not isinstance(item, dict):
+            continue
+        timeline.append(
+            {
+                "time": item.get("time"),
+                "event_type": item.get("event_type") or "signal",
+                "summary": item.get("summary") or _EMPTY_MARKER,
+                "detail_anchor": f"signal-{index}",
+            }
+        )
+
+    for index, item in enumerate(news_items or [], start=1):
+        if not isinstance(item, dict):
+            continue
+        timeline.append(
+            {
+                "time": item.get("published_at"),
+                "event_type": "news",
+                "summary": item.get("title") or _EMPTY_MARKER,
+                "detail_anchor": f"news-{index}",
+            }
+        )
+
+    for index, item in enumerate(decisions, start=1):
+        timeline.append(
+            {
+                "time": item.get("created_at"),
+                "event_type": "decision",
+                "summary": _humanize_label(item.get("decision")) or _EMPTY_MARKER,
+                "detail_anchor": f"decision-{index}",
+            }
+        )
+
+    timeline.sort(key=lambda item: _sort_key(item.get("time")))
+    return timeline or [_empty_timeline_item()]
+
+
+def _build_decision_list(decisions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    decision_items: list[dict[str, Any]] = []
+    for index, item in enumerate(decisions, start=1):
+        decision_items.append(
+            {
+                "time": item.get("created_at"),
+                "decision": _humanize_label(item.get("decision")) or _EMPTY_MARKER,
+                "confidence": item.get("confidence"),
+                "strategy_id": item.get("selected_strategy_id") or _EMPTY_MARKER,
+                "expression_bucket_id": item.get("expression_bucket_id") or _EMPTY_MARKER,
+                "detail_anchor": f"decision-{index}",
+            }
+        )
+    return decision_items or [_empty_decision_item()]
+
+
+def _build_risk_history(history: Any) -> list[dict[str, Any]]:
+    if not isinstance(history, list) or not history:
+        return [_empty_risk_history_item()]
+
+    items: list[dict[str, Any]] = []
+    for item in history:
+        if not isinstance(item, dict):
+            continue
+        items.append(
+            {
+                "time": item.get("time"),
+                "status": item.get("status") or _EMPTY_MARKER,
+                "summary": item.get("summary") or _EMPTY_MARKER,
+            }
+        )
+    items.sort(key=lambda item: _sort_key(item.get("time")))
+    return items or [_empty_risk_history_item()]
+
+
+def _sort_timestamped_items(items: Any, timestamp_key: str) -> list[dict[str, Any]]:
+    if not isinstance(items, list):
+        return []
+
+    normalized_items = [item for item in items if isinstance(item, dict)]
+    return sorted(normalized_items, key=lambda item: _sort_key(item.get(timestamp_key)))
+
+
+def _latest_decision(decisions: list[dict[str, Any]]) -> dict[str, Any]:
+    ordered_decisions = _sort_timestamped_items(decisions, "created_at")
+    return ordered_decisions[-1] if ordered_decisions else {}
+
+
+def _latest_row(rows: list[dict[str, Any]], timestamp_key: str) -> dict[str, Any]:
+    ordered_rows = _sort_timestamped_items(rows, timestamp_key)
+    return ordered_rows[-1] if ordered_rows else {}
+
+
+def _humanize_label(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip().replace("_", " ")
+    if not text:
+        return None
+    return " ".join(part.capitalize() for part in text.split())
+
+
+def _empty_snippet() -> dict[str, Any]:
+    return {
+        "title": _EMPTY_MARKER,
+        "summary": _EMPTY_MARKER,
+        "time": None,
+        "empty": True,
+    }
+
+
+def _empty_timeline_item() -> dict[str, Any]:
+    return {
+        "time": None,
+        "event_type": "empty",
+        "summary": _EMPTY_MARKER,
+        "detail_anchor": "timeline-empty",
+        "empty": True,
+    }
+
+
+def _empty_decision_item() -> dict[str, Any]:
+    return {
+        "time": None,
+        "decision": _EMPTY_MARKER,
+        "confidence": None,
+        "strategy_id": _EMPTY_MARKER,
+        "expression_bucket_id": _EMPTY_MARKER,
+        "detail_anchor": "decision-empty",
+        "empty": True,
+    }
+
+
+def _empty_risk_history_item() -> dict[str, Any]:
+    return {
+        "time": None,
+        "status": _EMPTY_MARKER,
+        "summary": _EMPTY_MARKER,
+        "empty": True,
+    }
+
+
+def _sort_key(value: Any) -> tuple[int, str]:
+    parsed = _parse_timestamp(value)
+    if parsed is None:
+        return (1, datetime.max.replace(tzinfo=timezone.utc).isoformat())
+    return (0, parsed.astimezone(timezone.utc).isoformat())
+
+
+def _sort_key_desc(value: Any) -> tuple[int, float]:
+    parsed = _parse_timestamp(value)
+    if parsed is None:
+        return (1, 0.0)
+    return (0, -parsed.astimezone(timezone.utc).timestamp())
+
+
+def _parse_timestamp(value: Any) -> datetime | None:
+    if value is None:
+        return None
+
+    text = str(value).strip()
+    if not text:
+        return None
+
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed
