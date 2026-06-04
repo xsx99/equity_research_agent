@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
-from src.trading import runtime
 from src.trading.data_sources.universe import UniverseAsset, UniverseFilterConfig
 from src.trading.data_sources.live_universe import LiveUniverseProvider
 from src.trading.risk import RiskDecisionRecord
@@ -12,8 +11,12 @@ from src.trading.runtime_live import (
     LivePreopenRuntime,
     _ConfiguredLiveUniverseScanPipeline,
     _LiveRiskWorkflow,
-    _bootstrap_seed_strategy_definitions,
     run_live_preopen_once,
+)
+from src.trading.runtime_support import (
+    build_execution_report,
+    build_runtime_report,
+    seed_initial_strategy_definitions,
 )
 from src.trading.strategies.catalog import get_initial_strategy_definitions
 from src.trading.strategies.matching import StrategyDefinitionRecord
@@ -220,19 +223,6 @@ def test_live_preopen_runtime_executes_paper_orders_only_when_enabled():
     assert result["execution"]["orders_submitted"] == 1
 
 
-def test_scheduler_preopen_phase_delegates_to_live_runtime(monkeypatch):
-    expected = {"status": "passed", "phase": "preopen", "execution": {"mode": "dry_run", "orders_submitted": 0}}
-
-    def _fake_live_preopen() -> dict[str, object]:
-        return expected
-
-    monkeypatch.setattr(runtime, "run_live_preopen_once", _fake_live_preopen)
-
-    result = runtime.run_job_phase("preopen")
-
-    assert result is expected
-
-
 def test_run_live_preopen_once_builds_default_dependencies_when_not_injected(monkeypatch):
     runtime_instance, _recorder = _build_runtime(execute_paper_orders=False)
 
@@ -329,8 +319,8 @@ def test_bootstrap_seed_strategy_definitions_populates_empty_repository_once():
 
     repository = _Repository()
 
-    _bootstrap_seed_strategy_definitions(repository)
-    _bootstrap_seed_strategy_definitions(repository)
+    seed_initial_strategy_definitions(repository)
+    seed_initial_strategy_definitions(repository)
 
     expected_ids = {row["strategy_id"] for row in get_initial_strategy_definitions()}
     assert len(repository.rows) == len(expected_ids)
@@ -365,10 +355,34 @@ def test_bootstrap_seed_strategy_definitions_preserves_existing_repository_rows(
 
     repository = _Repository()
 
-    _bootstrap_seed_strategy_definitions(repository)
+    seed_initial_strategy_definitions(repository)
 
     assert repository.rows == [existing]
     assert repository.save_calls == 0
+
+
+def test_build_runtime_report_produces_normalized_contract():
+    result = build_runtime_report(
+        phase="preopen",
+        as_of=datetime(2026, 6, 3, 12, 45, tzinfo=timezone.utc),
+        summary={"candidate_count": 1},
+        execution={"mode": "dry_run", "orders_submitted": 0},
+    )
+
+    assert result == {
+        "status": "passed",
+        "phase": "preopen",
+        "as_of": "2026-06-03T12:45:00+00:00",
+        "summary": {"candidate_count": 1},
+        "execution": {"mode": "dry_run", "orders_submitted": 0},
+    }
+
+
+def test_build_execution_report_supports_dry_run_mode():
+    assert build_execution_report(mode="dry_run", orders_submitted=0) == {
+        "mode": "dry_run",
+        "orders_submitted": 0,
+    }
 
 
 def test_live_risk_workflow_reuses_persisted_portfolio_snapshot_id_for_risk_decisions():

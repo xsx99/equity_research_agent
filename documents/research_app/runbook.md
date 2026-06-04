@@ -108,7 +108,7 @@ python scripts/run_trading_once.py --phase reflection --json
 python scripts/run_trading_once.py --phase strategy_evolution --json
 ```
 
-The current PR 12 runtime is intentionally thin and reuses fixture-first workflow assembly under `src/trading/runtime.py`. Scheduler jobs call the same shared phase functions that these manual commands use.
+The trading runtime now uses a split structure: `src/trading/runtime.py` is a thin scheduler/CLI facade, `src/trading/runtime_live.py` owns the live preopen path, and fixture-only smoke helpers live under `src/trading/runtime_smoke.py`. Scheduler jobs and `scripts/run_trading_once.py` still keep the same phase strings and public entrypoint.
 
 ## Trading Smoke Test Modes
 
@@ -137,5 +137,7 @@ PR 12 smoke modes:
 - `intraday_refresh_fixture`: hourly intraday signal delta plus deduped alert generation
 - `reflection_fixture`: post-close reflection and learning-factor extraction
 - `strategy_evolution_fixture`: strategy proposal generation from reflection fixtures
+
+These smoke modes are fixture-only operator checks. Scheduler-facing phases should use live runtimes, while standalone smoke verification should keep using these isolated fixture paths.
 
 Ordinary CI should keep using fixture-backed smoke modes only. Live provider/API checks stay opt-in and should use tiny ticker sets plus explicit request budgets.

@@ -3,12 +3,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
-import os
 from typing import Any, Callable, Protocol
 
 from src.core import config as app_config
-from src.trading.strategies.catalog import get_initial_strategy_definitions
-from src.trading.strategies.matching import StrategyDefinitionRecord
+from src.trading.runtime_support import (
+    build_default_news_provider,
+    build_execution_report,
+    build_runtime_report,
+    seed_initial_strategy_definitions,
+)
 
 
 class ActiveUniverseFilterLoader(Protocol):
@@ -143,11 +146,10 @@ class LivePreopenRuntime:
             risk_decisions=tuple(getattr(risk_result, "risk_decisions", ())),
             as_of=decision_time,
         )
-        return {
-            "status": "passed",
-            "phase": "preopen",
-            "as_of": decision_time.isoformat(),
-            "summary": {
+        return build_runtime_report(
+            phase="preopen",
+            as_of=decision_time,
+            summary={
                 "manual_request_count": len(manual_requests),
                 "signal_snapshot_count": len(snapshots),
                 "candidate_count": len(tuple(getattr(strategy_result, "candidates", ()))),
@@ -155,8 +157,8 @@ class LivePreopenRuntime:
                 "risk_decision_count": len(tuple(getattr(risk_result, "risk_decisions", ()))),
                 "trading_decision_count": len(tuple(getattr(decision_result, "decisions", ()))),
             },
-            "execution": execution,
-        }
+            execution=execution,
+        )
 
     def _run_execution(
         self,
@@ -166,10 +168,7 @@ class LivePreopenRuntime:
         as_of: datetime,
     ) -> dict[str, Any]:
         if not self.execute_paper_orders:
-            return {
-                "mode": "dry_run",
-                "orders_submitted": 0,
-            }
+            return build_execution_report(mode="dry_run", orders_submitted=0)
         workflow = self.dependencies.paper_execution_workflow
         if workflow is None:
             raise RuntimeError("paper_execution_workflow_not_configured")
@@ -179,10 +178,7 @@ class LivePreopenRuntime:
             trade_date=as_of,
         )
         submitted_orders = tuple(getattr(result, "paper_orders", ()))
-        return {
-            "mode": "execute",
-            "orders_submitted": len(submitted_orders),
-        }
+        return build_execution_report(mode="execute", orders_submitted=len(submitted_orders))
 
 
 def run_live_preopen_once(
@@ -235,11 +231,11 @@ def build_live_preopen_dependencies(session: Any | None = None) -> LivePreopenDe
     from src.trading.workflows.trading_decision import TradingDecisionPipeline
 
     trading_repository = SqlAlchemyTradingRepository(session)
-    _bootstrap_seed_strategy_definitions(trading_repository)
+    seed_initial_strategy_definitions(trading_repository)
     source_repository = SQLAlchemySignalSourceRepository(session)
     manual_request_service = SQLAlchemyManualTickerRequestService(session)
     market_provider = AlpacaMarketDataProvider()
-    news_provider = _build_default_news_provider()
+    news_provider = build_default_news_provider()
     broker = PaperStockBroker()
     signal_ingestion = SourceIngestionService(
         market_provider=market_provider,
@@ -289,15 +285,6 @@ def build_live_preopen_dependencies(session: Any | None = None) -> LivePreopenDe
         ),
         trading_repository=trading_repository,
     )
-
-
-def _bootstrap_seed_strategy_definitions(repository: Any) -> None:
-    """Seed the initial catalog only when the strategy table is empty."""
-    if repository.load_strategy_definitions():
-        return
-    for row in get_initial_strategy_definitions():
-        repository.save_strategy_definition(StrategyDefinitionRecord.from_mapping(row))
-
 
 class _RepositoryUniverseFilterLoader:
     def __init__(self, repository: Any) -> None:
@@ -459,16 +446,3 @@ def _latest_price_from_sources(*, source_repository: Any, ticker: str, decision_
     if isinstance(close, (int, float)) and close > 0:
         return float(close)
     return 1.0
-
-
-def _build_default_news_provider() -> Any | None:
-    if os.getenv("FINNHUB_API_KEY"):
-        from src.providers.news_data.finnhub import FinnhubNewsProvider
-
-        return FinnhubNewsProvider()
-    try:
-        from src.providers.news_data.alpaca import AlpacaNewsProvider
-
-        return AlpacaNewsProvider()
-    except Exception:
-        return None
