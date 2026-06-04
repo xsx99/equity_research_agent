@@ -21,7 +21,6 @@ def client():
 
 
 def _dashboard_payload() -> dict:
-    decision_id = str(uuid.uuid4())
     manual_request_id = str(uuid.uuid4())
     universe_filter_id = str(uuid.uuid4())
     return {
@@ -86,36 +85,8 @@ def _dashboard_payload() -> dict:
             ),
         },
         "trades": {
-            "rows": (
-                {
-                    "trading_decision_id": decision_id,
-                    "decision_time": datetime(2026, 6, 2, 13, 45, tzinfo=timezone.utc),
-                    "ticker": "AAPL",
-                    "decision": "enter_long",
-                    "instrument_type": "stock",
-                    "trade_identity": "tactical_stock_trade",
-                    "selected_strategy_id": "earnings_drift_v1",
-                    "expression_bucket_id": "long_stock",
-                    "approved_weight": Decimal("0.05"),
-                    "confidence": Decimal("0.72"),
-                    "risk_status": "approved",
-                    "order_status": "filled",
-                },
-            ),
-            "selected_detail": {
-                "trading_decision_id": decision_id,
-                "ticker": "AAPL",
-                "llm_decision_json": {"decision": "enter_long"},
-                "validation_status": "succeeded",
-                "signal_snapshot": {"fresh_catalyst_type": "own_earnings_beat_raise"},
-                "strategy_scores": (
-                    {"strategy_id": "earnings_drift_v1", "candidate_score": Decimal("0.81")},
-                ),
-                "risk_decision": {"status": "approved", "reason_code": "within_limits"},
-                "outcomes": (
-                    {"evaluation_status": "interim", "alpha": Decimal("0.02")},
-                ),
-            },
+            "rows": (),
+            "selected_detail": None,
         },
         "ticker_workspace": {
             "selected_ticker": "AAPL",
@@ -123,31 +94,99 @@ def _dashboard_payload() -> dict:
                 "action_now": (
                     {
                         "ticker": "AAPL",
-                        "decision": "enter_long",
-                        "confidence": Decimal("0.72"),
+                        "company_name": "Apple Inc.",
+                        "attention_badge": "Strong Buy",
+                        "latest_decision": "Enter Long",
+                        "why_now": "Breakout confirmed + risk approved",
+                        "recency_label": "5m ago",
+                        "position_risk_line": "Filled / risk approved",
                     },
                 ),
-                "in_position": (),
-                "watch": (),
+                "in_position": (
+                    {
+                        "ticker": "NVDA",
+                        "company_name": "NVIDIA Corp.",
+                        "attention_badge": "In Position",
+                        "latest_decision": "Hold",
+                        "why_now": "Monitoring after guidance follow-through",
+                        "recency_label": "25m ago",
+                        "position_risk_line": "Long 20 shares / risk approved",
+                    },
+                ),
+                "watch": (
+                    {
+                        "ticker": "MSFT",
+                        "company_name": "Microsoft Corp.",
+                        "attention_badge": "Watch",
+                        "latest_decision": "No Trade",
+                        "why_now": "Relative strength improving vs QQQ",
+                        "recency_label": "1h ago",
+                        "position_risk_line": None,
+                    },
+                ),
             },
             "detail": {
                 "ticker": "AAPL",
                 "latest_conclusion": {
-                    "trade_decision": {"label": "Enter Long"},
+                    "trade_decision": {
+                        "label": "Enter Long",
+                        "strategy_id": "earnings_drift_v1",
+                        "expression_bucket_id": "long_stock",
+                        "confidence": Decimal("0.72"),
+                        "summary": "Changed from watch to enter_long",
+                    },
                     "signal_summary": {
-                        "summary_bullets": ("Relative strength improved vs QQQ",),
-                        "technical_charts": (),
-                        "news_snippets": (),
-                        "fundamental_snippets": (),
+                        "summary_bullets": (
+                            "Relative strength improved vs QQQ",
+                            "Price broke above preopen resistance",
+                        ),
+                        "technical_charts": (
+                            {"chart_type": "Price / Key Level Trend", "summary": "Higher highs into the open"},
+                        ),
+                        "news_snippets": (
+                            {"title": "Raised guidance", "summary": "Demand improved across core products"},
+                        ),
+                        "fundamental_snippets": (
+                            {"title": "Margin outlook", "summary": "Gross margin remains stable"},
+                        ),
                     },
                     "risk_summary": {"status": "approved", "reason": "within_limits"},
-                    "position_execution": {"order_status": "filled"},
+                    "position_execution": {
+                        "position_label": "Long 10 shares",
+                        "order_status": "filled",
+                        "summary": "Order filled and position established",
+                    },
                 },
                 "tabs": {
-                    "timeline": (),
-                    "trend": {"technical": (), "news": (), "fundamental": ()},
-                    "decisions": (),
-                    "risk": {"current_stance": {}, "position_state": {}, "history": ()},
+                    "timeline": (
+                        {"event_type": "decision", "summary": "Trading decision entered long"},
+                    ),
+                    "trend": {
+                        "technical": (
+                            {"title": "Relative Strength", "summary": "Improving"},
+                        ),
+                        "news": (
+                            {"title": "Raised guidance", "summary": "Positive demand read-through"},
+                        ),
+                        "fundamental": (
+                            {"title": "Margin outlook", "summary": "Stable"},
+                        ),
+                    },
+                    "decisions": (
+                        {"decision": "Enter Long", "summary": "Primary strategy selected"},
+                    ),
+                    "risk": {
+                        "current_stance": {"status": "approved", "reason": "within_limits"},
+                        "position_state": {"summary": "Risk budget available"},
+                        "history": (
+                            {"status": "approved", "summary": "Approved at target size"},
+                        ),
+                        "raw_json": {"status": "approved", "reason_code": "within_limits"},
+                    },
+                    "raw_json": {
+                        "decision": {"decision": "enter_long"},
+                        "signal_snapshot": {"fresh_catalyst_type": "own_earnings_beat_raise"},
+                    },
                 },
             },
         },
@@ -290,15 +329,45 @@ class TestTodayDashboard:
 
     def test_trade_detail_drilldown_renders_when_decision_selected(self, client):
         payload = _dashboard_payload()
-        detail_id = payload["trades"]["rows"][0]["trading_decision_id"]
         with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
-            response = client.get(f"/today?tab=trades&decision_id={detail_id}")
+            response = client.get("/today?tab=trades&decision_id=decision-action")
 
         assert response.status_code == 200
-        assert "Trade Detail" in response.text
+        assert "Latest Conclusion" in response.text
+        assert "Trade Decision" in response.text
         assert "own_earnings_beat_raise" in response.text
         assert "within_limits" in response.text
-        assert "0.81" in response.text
+        assert "Primary strategy selected" in response.text
+
+    def test_today_dashboard_renders_ticker_workspace_sections(self, client):
+        with patch("src.web.routers.today.load_today_dashboard", return_value=_dashboard_payload()):
+            response = client.get("/today?tab=trades&ticker=AAPL")
+
+        assert response.status_code == 200
+        assert "Action Now" in response.text
+        assert "In Position" in response.text
+        assert "Watch" in response.text
+        assert "Latest Conclusion" in response.text
+        assert "Timeline" in response.text
+        assert "Trend" in response.text
+        assert "Decisions" in response.text
+        assert "Risk" in response.text
+        assert "Trade Decision" in response.text
+        assert "Signal Summary" in response.text
+        assert "Risk Manager Summary" in response.text
+        assert "Position / Execution State" in response.text
+
+    def test_today_dashboard_renders_selectable_ticker_cards_and_active_marker(self, client):
+        with patch("src.web.routers.today.load_today_dashboard", return_value=_dashboard_payload()):
+            response = client.get("/today?tab=trades&ticker=AAPL&decision_id=decision-action")
+
+        assert response.status_code == 200
+        assert '/today?tab=trades&ticker=AAPL' in response.text
+        assert '/today?tab=trades&ticker=NVDA' in response.text
+        assert '/today?tab=trades&ticker=MSFT' in response.text
+        assert 'decision_id=decision-action' not in response.text
+        assert 'aria-current="page"' in response.text
+        assert 'data-selected-ticker="AAPL"' in response.text
 
     def test_today_dashboard_passes_selected_ticker_query_param_to_loader(self, client):
         payload = _dashboard_payload()
@@ -322,8 +391,8 @@ class TestTodayDashboard:
             response = client.get("/today?ticker=MSFT")
 
         assert response.status_code == 200
-        assert "Trade Detail" in response.text
-        assert "<strong>Ticker:</strong> NVDA" in response.text
+        assert 'data-selected-ticker="NVDA"' in response.text
+        assert 'aria-current="page"' in response.text
         load_trade_detail.assert_called_once_with(session, "decision-action")
 
     def test_today_dashboard_route_falls_back_to_highest_priority_ticker_when_query_missing(self, client):
@@ -339,8 +408,8 @@ class TestTodayDashboard:
             response = client.get("/today")
 
         assert response.status_code == 200
-        assert "Trade Detail" in response.text
-        assert "<strong>Ticker:</strong> NVDA" in response.text
+        assert 'data-selected-ticker="NVDA"' in response.text
+        assert 'aria-current="page"' in response.text
         load_trade_detail.assert_called_once_with(session, "decision-action")
 
     def test_today_dashboard_route_renders_empty_workspace_when_no_tickers_exist(self, client):
@@ -354,8 +423,8 @@ class TestTodayDashboard:
             response = client.get("/today")
 
         assert response.status_code == 200
-        assert "No trading decisions yet." in response.text
-        assert "Trade Detail" not in response.text
+        assert "No tickers in the workstation yet." in response.text
+        assert "Latest Conclusion" not in response.text
         load_trade_detail.assert_not_called()
 
     def test_load_today_dashboard_falls_back_to_highest_priority_ticker_for_invalid_query(self):
