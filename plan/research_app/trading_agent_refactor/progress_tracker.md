@@ -4,6 +4,10 @@
 
 - Added ticker-first `/today` dashboard redesign spec at `docs/superpowers/specs/2026-06-03-ticker-first-today-dashboard-design.md` and committed it as `5727c2f`.
 - Added follow-up implementation plan `plan/research_app/trading_agent_refactor/implementation/pr_11a_ticker_first_today_dashboard.md` for the ticker-first refinement of PR 11. Planned scope: attention-first ticker rail, latest-conclusion-first ticker detail, technical chart evidence, and news/fundamental snippet summaries.
+- 2026-06-03/04: PR 11A Task 1 completed and committed as `2038cff`; added `src/web/presenters/today_workspace.py` plus `tests/web/test_today_workspace.py` for ticker bucketing, aggregation, current-state selection, and deterministic default ticker selection.
+- 2026-06-03/04: PR 11A Task 2 completed and committed as `46ab0fe`; expanded the ticker presenter to shape `latest_conclusion`, technical/news/fundamental evidence modules, timeline/trend/decisions/risk tabs, explicit empty states, and consistent datetime-aware ordering across rail/detail/history payloads.
+- 2026-06-04: PR 11A Task 3 completed and committed as `6311f2e`; wired `ticker_workspace` into `/today`, added `ticker` query support, built route-side per-ticker collections from persisted trading artifacts, and added route coverage for selected-ticker forwarding plus fallback/empty-workspace behavior.
+- 2026-06-04: PR 11A Task 4 completed and committed as `1b86097`; replaced the flat trades table in `src/templates/today.html` with a ticker-first workstation structure: `Action Now / In Position / Watch` rail, selectable ticker cards, latest-conclusion summary blocks, and timeline/trend/decisions/risk detail sections.
 
 ## 2026-05-29
 

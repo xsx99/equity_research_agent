@@ -153,6 +153,17 @@ PR 11 adds the first operator-facing V2 trading workstation in the existing Fast
 
 This PR intentionally stops at the UI/read-model layer. It does not add new pipeline producers, calendar-event persistence, or a dedicated UI-specific repository abstraction yet.
 
+## PR 11A Scope
+
+PR 11A refines the initial `/today` workstation into a ticker-first operator view without changing the persistence model:
+
+- `src/web/presenters/today_workspace.py` now owns ticker-centric read-model shaping for the workstation, including attention-bucket assignment, current-state ticker selection, summary-first detail payloads, explicit empty states, and deterministic datetime-aware ordering across rail/detail/history sections
+- `src/web/routers/today.py` now builds per-ticker collections from persisted trading, signal, risk, news, and portfolio artifacts and exposes a `ticker_workspace` payload alongside temporary compatibility trade-detail data
+- `src/templates/today.html` now renders the `Trades` section as a ticker-first workstation with `Action Now`, `In Position`, and `Watch` rail buckets plus `Latest Conclusion`, `Timeline`, `Trend`, `Decisions`, and `Risk` detail sections
+- route and presenter coverage now live in `tests/web/test_today.py` and `tests/web/test_today_workspace.py`, with focused assertions around ticker selection, fallback behavior, empty states, and ordering consistency
+
+This refinement intentionally keeps FastAPI + Jinja server rendering and does not yet introduce a dedicated front-end state layer.
+
 ## PR 13 Scope
 
 PR 13 starts the live preopen cutover on top of the existing fixture-first scheduler/runtime layer:
