@@ -5,6 +5,7 @@ from collections.abc import Callable
 from typing import Any
 
 from src.trading.runtime_live import run_live_preopen_once
+from src.trading.runtime_intraday_live import run_live_intraday_refresh_once
 from src.trading.runtime_manual_review_live import run_live_manual_review_once
 from src.trading.runtime_smoke import (
     _run_historical_replay_fixture,
@@ -23,7 +24,7 @@ RuntimeHandler = Callable[[], dict[str, Any]]
 JOB_PHASE_HANDLERS: dict[str, RuntimeHandler] = {
     "preopen": run_live_preopen_once,
     "manual_review": run_live_manual_review_once,
-    "intraday_refresh": _run_intraday_refresh_fixture,
+    "intraday_refresh": run_live_intraday_refresh_once,
     "reflection": _run_reflection_fixture,
     "strategy_evolution": _run_strategy_evolution_fixture,
 }

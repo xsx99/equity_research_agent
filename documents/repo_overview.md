@@ -219,3 +219,15 @@ PR 14 slice 2 migrates the scheduler-facing `manual_review` phase onto an explic
 - fixture-only `manual_review_fixture` behavior remains available under `src/trading/runtime_smoke.py` for standalone smoke checks
 
 This slice intentionally stops short of adding dedicated live runtimes for intraday refresh, reflection, or strategy evolution.
+
+## PR 14 Slice 3 Scope
+
+PR 14 slice 3 migrates the scheduler-facing `intraday_refresh` phase onto an explicit live runtime while keeping the phase name and CLI surface stable:
+
+- `src/trading/runtime_intraday_live.py` now owns a dedicated live intraday runtime and entrypoint, `run_live_intraday_refresh_once(...)`
+- the live intraday runtime builds a scoped ticker set, loads same-day preopen baselines plus prior intraday snapshots, persists `intraday_signal_scans` / `intraday_signal_snapshots` / `news_alerts`, and then runs `IntradayRebalancePipeline`
+- `src/trading/runtime_dispatch.py` now routes `run_job_phase("intraday_refresh")` to the live intraday runtime instead of the fixture smoke handler
+- `src/trading/repositories/sqlalchemy.py` now includes intraday-specific read helpers for same-day scope construction, baseline snapshot lookup, prior intraday snapshot lookup, existing alert dedupe keys, and per-ticker request context assembly
+- fixture-only `intraday_refresh_fixture` behavior remains available under `src/trading/runtime_smoke.py` for standalone smoke checks
+
+This slice intentionally keeps dry-run intraday execution as the default runtime behavior and does not yet add the post-close live reflection or strategy-evolution runtimes.

@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import uuid
+from datetime import date
 from decimal import Decimal
+from types import SimpleNamespace
 from typing import Any
 
 from src.db.models.trading import (
@@ -11,6 +13,7 @@ from src.db.models.trading import (
     IntradaySignalScan,
     IntradaySignalSnapshot,
     NewsAlert,
+    ManualTickerRequest,
     OptionRiskSnapshot,
     OptionStrategyDecision,
     OptionStrategyLeg,
@@ -279,6 +282,43 @@ class SQLAlchemyTradingRepository:
             if current is None or snapshot.available_for_decision_at > current.available_for_decision_at:
                 selected_by_ticker[snapshot.ticker] = snapshot
         return tuple(snapshot for _ticker, snapshot in sorted(selected_by_ticker.items()))
+
+    def load_latest_signal_snapshots_for_tickers(
+        self,
+        *,
+        tickers: tuple[str, ...],
+        snapshot_type: str,
+        trade_date: date,
+    ) -> dict[str, SignalSnapshotResult]:
+        selected_by_ticker: dict[str, SignalSnapshotResult] = {}
+        ticker_set = {ticker.strip().upper() for ticker in tickers}
+        for row in self.session.query(SignalSnapshot).all():
+            if row.snapshot_type != snapshot_type or row.ticker not in ticker_set:
+                continue
+            if row.decision_time.date() != trade_date:
+                continue
+            snapshot = SignalSnapshotResult(
+                signal_snapshot_id=str(row.signal_snapshot_id),
+                ticker=row.ticker,
+                snapshot_type=row.snapshot_type,
+                decision_time=row.decision_time,
+                available_for_decision_at=row.available_for_decision_at,
+                max_input_available_for_decision_at=row.max_input_available_for_decision_at,
+                signal_json=dict(row.signal_json or {}),
+                source_freshness_json=dict(row.source_freshness_json or {}),
+                missing_signals_json=list(row.missing_signals_json or []),
+                stale_signals_json=list(row.stale_signals_json or []),
+                source_record_refs_json=list(row.source_record_refs_json or []),
+                source_available_times_json=dict(row.source_available_times_json or {}),
+                excluded_future_source_count=int(row.excluded_future_source_count or 0),
+                point_in_time_passed=bool(row.point_in_time_passed),
+                selection_source=row.selection_source,
+                manual_request_id=str(row.manual_request_id) if row.manual_request_id is not None else None,
+            )
+            current = selected_by_ticker.get(snapshot.ticker)
+            if current is None or snapshot.available_for_decision_at > current.available_for_decision_at:
+                selected_by_ticker[snapshot.ticker] = snapshot
+        return selected_by_ticker
 
     def save_candidate_scores(self, candidates: list[CandidateScoreRecord] | tuple[CandidateScoreRecord, ...]) -> None:
         for candidate in candidates:
@@ -579,6 +619,41 @@ class SQLAlchemyTradingRepository:
         row.created_at = snapshot.created_at
         self.session.flush()
 
+    def load_latest_intraday_signal_snapshots_for_tickers(
+        self,
+        *,
+        tickers: tuple[str, ...],
+        trade_date: date,
+    ) -> dict[str, IntradaySignalSnapshotRecord]:
+        selected_by_ticker: dict[str, IntradaySignalSnapshotRecord] = {}
+        ticker_set = {ticker.strip().upper() for ticker in tickers}
+        for row in self.session.query(IntradaySignalSnapshot).all():
+            if row.ticker not in ticker_set:
+                continue
+            if row.decision_time.date() != trade_date:
+                continue
+            snapshot = IntradaySignalSnapshotRecord(
+                intraday_signal_snapshot_id=str(row.intraday_signal_snapshot_id),
+                intraday_signal_scan_id=str(row.intraday_signal_scan_id),
+                ticker=row.ticker,
+                decision_time=row.decision_time,
+                baseline_signal_snapshot_id=str(row.baseline_signal_snapshot_id),
+                previous_intraday_snapshot_id=(
+                    str(row.previous_intraday_snapshot_id) if row.previous_intraday_snapshot_id is not None else None
+                ),
+                refreshed_signals_json=dict(row.refreshed_signals_json or {}),
+                carried_forward_signals_json=dict(row.carried_forward_signals_json or {}),
+                delta_vs_baseline_json=dict(row.delta_vs_baseline_json or {}),
+                delta_vs_previous_json=dict(row.delta_vs_previous_json or {}),
+                source_freshness_json=dict(row.source_freshness_json or {}),
+                metadata_json=dict(row.metadata_json or {}),
+                created_at=row.created_at,
+            )
+            current = selected_by_ticker.get(snapshot.ticker)
+            if current is None or snapshot.decision_time > current.decision_time:
+                selected_by_ticker[snapshot.ticker] = snapshot
+        return selected_by_ticker
+
     def save_news_alert(self, alert: NewsAlertRecord) -> None:
         row = self.session.query(NewsAlert).filter_by(dedupe_key=alert.dedupe_key).one_or_none()
         if row is None:
@@ -603,6 +678,19 @@ class SQLAlchemyTradingRepository:
         row.metadata_json = dict(alert.metadata_json)
         row.created_at = alert.created_at
         self.session.flush()
+
+    def load_existing_news_alert_dedupe_keys(
+        self,
+        *,
+        tickers: tuple[str, ...],
+        trade_date: date,
+    ) -> frozenset[str]:
+        ticker_set = {ticker.strip().upper() for ticker in tickers}
+        return frozenset(
+            row.dedupe_key
+            for row in self.session.query(NewsAlert).all()
+            if row.ticker in ticker_set and row.created_at.date() == trade_date
+        )
 
     def save_intraday_rebalance_decision(self, decision: Any) -> None:
         row = self.session.query(IntradayRebalanceDecision).filter_by(
@@ -840,6 +928,132 @@ class SQLAlchemyTradingRepository:
             for row in rows
         ]
         return tuple(sorted(positions, key=lambda item: item.ticker))
+
+    def load_intraday_scope(self, *, trade_date: date) -> tuple[str, ...]:
+        tickers: set[str] = set()
+        tickers.update(position.ticker for position in self.load_paper_positions())
+        tickers.update(position.ticker for position in self.load_paper_option_positions())
+        tickers.update(
+            row.ticker
+            for row in self.session.query(PaperOrder).all()
+            if row.trade_date == trade_date and row.ticker
+        )
+        tickers.update(
+            row.ticker
+            for row in self.session.query(CandidateScore).all()
+            if row.decision_time.date() == trade_date and row.ticker
+        )
+        tickers.update(
+            row.ticker
+            for row in self.session.query(TradingDecision).all()
+            if row.decision_time.date() == trade_date and row.ticker
+        )
+        tickers.update(
+            row.ticker
+            for row in self.session.query(ManualTickerRequest).filter_by(status="active").all()
+            if row.ticker
+        )
+        return tuple(sorted(tickers))
+
+    def load_intraday_request_contexts(
+        self,
+        *,
+        tickers: tuple[str, ...],
+        trade_date: date,
+    ) -> dict[str, Any]:
+        ticker_set = {ticker.strip().upper() for ticker in tickers}
+        contexts: dict[str, Any] = {}
+        positions_by_ticker = {position.ticker: position for position in self.load_paper_positions()}
+        manual_mode_by_ticker = {
+            row.ticker: row.mode
+            for row in self.session.query(ManualTickerRequest).filter_by(status="active").all()
+            if row.ticker in ticker_set
+        }
+        classifications_by_id = {
+            str(row.trade_classification_id): row
+            for row in self.session.query(TradeClassification).all()
+            if row.ticker in ticker_set and row.decision_time.date() == trade_date
+        }
+        latest_candidate_by_ticker: dict[str, Any] = {}
+        for row in self.session.query(CandidateScore).all():
+            if row.ticker not in ticker_set or row.decision_time.date() != trade_date:
+                continue
+            current = latest_candidate_by_ticker.get(row.ticker)
+            if current is None or row.available_for_decision_at > current.available_for_decision_at:
+                latest_candidate_by_ticker[row.ticker] = row
+        latest_decision_by_ticker: dict[str, Any] = {}
+        for row in self.session.query(TradingDecision).all():
+            if row.ticker not in ticker_set or row.decision_time.date() != trade_date:
+                continue
+            current = latest_decision_by_ticker.get(row.ticker)
+            if current is None or row.available_for_decision_at > current.available_for_decision_at:
+                latest_decision_by_ticker[row.ticker] = row
+
+        for ticker in ticker_set:
+            decision = latest_decision_by_ticker.get(ticker)
+            candidate = latest_candidate_by_ticker.get(ticker)
+            position = positions_by_ticker.get(ticker)
+            manual_mode = manual_mode_by_ticker.get(ticker)
+            classification = None
+            if decision is not None and decision.trade_classification_id is not None:
+                classification = classifications_by_id.get(str(decision.trade_classification_id))
+            contexts[ticker] = SimpleNamespace(
+                selection_source=(
+                    "portfolio"
+                    if position is not None
+                    else (decision.selection_source if decision is not None else (candidate.selection_source if candidate is not None else "manual_request"))
+                ),
+                strategy_id=(
+                    decision.strategy_id
+                    if decision is not None
+                    else (candidate.strategy_id if candidate is not None else "intraday_refresh_unknown")
+                ),
+                strategy_version=(
+                    decision.strategy_version
+                    if decision is not None
+                    else (candidate.strategy_version if candidate is not None else "v1")
+                ),
+                expression_bucket_id=(
+                    decision.expression_bucket_id
+                    if decision is not None
+                    else (classification.expression_bucket_id if classification is not None else "long_stock")
+                ),
+                expression_bucket_version=(
+                    decision.expression_bucket_version
+                    if decision is not None
+                    else (classification.expression_bucket_version if classification is not None else "v1")
+                ),
+                trade_identity=(
+                    position.trade_identity
+                    if position is not None
+                    else (
+                        decision.trade_identity
+                        if decision is not None
+                        else (classification.trade_identity if classification is not None else "tactical_stock_trade")
+                    )
+                ),
+                instrument_type=decision.instrument_type if decision is not None else "stock",
+                candidate_score=float(candidate.candidate_score) if candidate is not None else 0.0,
+                target_weight=float(decision.target_weight) if decision is not None else 0.0,
+                allow_open_new=bool(
+                    manual_mode == "paper_trade_eligible"
+                    or (decision is not None and bool(decision.paper_trade_authorized))
+                ),
+            )
+        return contexts
+
+    def load_intraday_candidate_context(
+        self,
+        *,
+        tickers: tuple[str, ...],
+        trade_date: date,
+    ) -> dict[str, tuple[str, ...]]:
+        ticker_set = {ticker.strip().upper() for ticker in tickers}
+        return {
+            row.ticker: (row.ticker,)
+            for row in self.session.query(CandidateScore).all()
+            if row.ticker in ticker_set and row.decision_time.date() == trade_date
+        }
 
     def replace_paper_positions(self, positions: tuple[StockPosition, ...] | list[StockPosition]) -> None:
         latest_by_ticker = {position.ticker: position for position in positions}
