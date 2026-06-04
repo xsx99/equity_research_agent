@@ -768,6 +768,33 @@ a:hover { text-decoration: underline; }
   margin-top: 0.65rem;
 }
 
+.hero-meta-pills {
+  gap: 0.6rem;
+}
+
+.meta-pill {
+  display: inline-grid;
+  gap: 0.15rem;
+  padding: 0.5rem 0.7rem;
+  border-radius: 12px;
+  border: 1px solid #e0d9cb;
+  background: rgba(255, 255, 255, 0.72);
+  min-width: 110px;
+}
+
+.meta-pill strong {
+  color: #1f2937;
+  font-size: 0.92rem;
+}
+
+.meta-pill-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #8a6f4b;
+  font-weight: 700;
+}
+
 .ticker-support-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -776,6 +803,30 @@ a:hover { text-decoration: underline; }
 
 .ticker-support-grid > :first-child {
   grid-column: span 2;
+}
+
+.support-mini-meta {
+  margin-bottom: 0.55rem;
+}
+
+.support-kv-list {
+  display: grid;
+  gap: 0.45rem;
+  margin-bottom: 0.65rem;
+}
+
+.support-kv-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding-bottom: 0.45rem;
+  border-bottom: 1px solid #e6ebf2;
+}
+
+.support-kv-row:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
 }
 
 .ticker-detail-nav {
@@ -904,6 +955,24 @@ a:hover { text-decoration: underline; }
   margin-bottom: 1rem;
 }
 
+.theme-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.theme-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.42rem 0.72rem;
+  border-radius: 999px;
+  border: 1px solid #d7dfeb;
+  background: linear-gradient(180deg, #ffffff 0%, #f6f9fd 100%);
+  color: #334155;
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .surface-summary-row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -919,6 +988,31 @@ a:hover { text-decoration: underline; }
 
 .surface-block:first-of-type {
   margin-top: 0;
+}
+
+.surface-block-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.surface-block-head .section-label {
+  margin: 0;
+}
+
+.surface-block-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.8rem;
+  padding: 0.18rem 0.5rem;
+  border-radius: 999px;
+  background: #eef3f9;
+  border: 1px solid #d7e0ea;
+  color: #516175;
+  font-size: 11px;
+  font-weight: 700;
 }
 
 .summary-tile {

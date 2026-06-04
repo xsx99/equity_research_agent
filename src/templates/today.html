@@ -151,12 +151,15 @@
               {% if detail.latest_conclusion.trade_decision.summary %}
               <p class="hero-summary">{{ detail.latest_conclusion.trade_decision.summary }}</p>
               {% endif %}
-              <div class="hero-meta-row">
+              <div class="hero-meta-row hero-meta-pills">
                 {% if detail.latest_conclusion.trade_decision.strategy_id %}
-                <span class="detail-muted">Strategy: {{ detail.latest_conclusion.trade_decision.strategy_id }}</span>
+                <span class="meta-pill"><span class="meta-pill-label">Strategy</span><strong>{{ detail.latest_conclusion.trade_decision.strategy_id }}</strong></span>
                 {% endif %}
                 {% if detail.latest_conclusion.trade_decision.confidence is not none %}
-                <span class="detail-muted">Confidence: {{ detail.latest_conclusion.trade_decision.confidence }}</span>
+                <span class="meta-pill"><span class="meta-pill-label">Confidence</span><strong>{{ fmt_number(detail.latest_conclusion.trade_decision.confidence) }}</strong></span>
+                {% endif %}
+                {% if detail.latest_conclusion.risk_summary.status %}
+                <span class="meta-pill"><span class="meta-pill-label">Risk</span><strong>{{ detail.latest_conclusion.risk_summary.status }}</strong></span>
                 {% endif %}
               </div>
             </section>
@@ -164,6 +167,9 @@
             <div class="ticker-support-grid">
               <section class="card subcard">
                 <h4>Signal Summary</h4>
+                <div class="support-mini-meta">
+                  <span class="detail-muted">{{ detail.latest_conclusion.signal_summary.summary_bullets | length }} highlighted signal{% if detail.latest_conclusion.signal_summary.summary_bullets|length != 1 %}s{% endif %}</span>
+                </div>
                 {% if detail.latest_conclusion.signal_summary.summary_bullets %}
                 <ul class="output-list">
                   {% for item in detail.latest_conclusion.signal_summary.summary_bullets %}
@@ -177,18 +183,31 @@
 
               <section class="card subcard">
                 <h4>Risk Manager Summary</h4>
-                <p><strong>{{ detail.latest_conclusion.risk_summary.status or "No risk stance" }}</strong></p>
+                <div class="support-kv-list">
+                  <div class="support-kv-row">
+                    <span class="metric-label">Status</span>
+                    <strong>{{ detail.latest_conclusion.risk_summary.status or "Unavailable" }}</strong>
+                  </div>
+                </div>
                 <div class="detail-muted">{{ detail.latest_conclusion.risk_summary.reason or detail.latest_conclusion.risk_summary.summary or "No material update." }}</div>
               </section>
 
               <section class="card subcard">
                 <h4>Position / Execution State</h4>
-                {% if detail.latest_conclusion.position_execution.position_label %}
-                <div>{{ detail.latest_conclusion.position_execution.position_label }}</div>
-                {% endif %}
-                {% if detail.latest_conclusion.position_execution.order_status %}
-                <div class="detail-muted">Order: {{ detail.latest_conclusion.position_execution.order_status }}</div>
-                {% endif %}
+                <div class="support-kv-list">
+                  {% if detail.latest_conclusion.position_execution.position_label %}
+                  <div class="support-kv-row">
+                    <span class="metric-label">Position</span>
+                    <strong>{{ detail.latest_conclusion.position_execution.position_label }}</strong>
+                  </div>
+                  {% endif %}
+                  {% if detail.latest_conclusion.position_execution.order_status %}
+                  <div class="support-kv-row">
+                    <span class="metric-label">Order</span>
+                    <strong>{{ detail.latest_conclusion.position_execution.order_status }}</strong>
+                  </div>
+                  {% endif %}
+                </div>
                 <div class="detail-muted {% if not detail.latest_conclusion.position_execution.summary %}surface-empty-copy quiet-empty{% endif %}">{{ detail.latest_conclusion.position_execution.summary or "Unavailable." }}</div>
               </section>
             </div>
@@ -375,7 +394,10 @@
         </article>
       </div>
       <section class="surface-block">
-        <div class="section-label">Live Alerts</div>
+        <div class="surface-block-head">
+          <div class="section-label">Live Alerts</div>
+          <span class="surface-block-count">{{ overview.live_alerts | length }}</span>
+        </div>
         {% if overview.live_alerts %}
         <div class="surface-table-wrap">
           <table class="compact-table">
@@ -392,7 +414,10 @@
         {% endif %}
       </section>
       <section class="surface-block">
-        <div class="section-label">Material Signal Changes</div>
+        <div class="surface-block-head">
+          <div class="section-label">Material Signal Changes</div>
+          <span class="surface-block-count">{{ overview.material_changes | length }}</span>
+        </div>
         {% if overview.material_changes %}
         <div class="surface-table-wrap">
           <table class="compact-table">
@@ -428,7 +453,10 @@
         </article>
       </div>
       <section class="surface-block">
-        <div class="section-label">Stock Positions</div>
+        <div class="surface-block-head">
+          <div class="section-label">Stock Positions</div>
+          <span class="surface-block-count">{{ portfolio.positions | length }}</span>
+        </div>
         {% if portfolio.positions %}
         <div class="surface-table-wrap">
           <table class="compact-table">
@@ -439,7 +467,10 @@
         {% else %}<p class="detail-muted quiet-empty">No open stock positions.</p>{% endif %}
       </section>
       <section class="surface-block">
-        <div class="section-label">Option Positions</div>
+        <div class="surface-block-head">
+          <div class="section-label">Option Positions</div>
+          <span class="surface-block-count">{{ portfolio.option_positions | length }}</span>
+        </div>
         {% if portfolio.option_positions %}
         <div class="surface-table-wrap">
           <table class="compact-table">
@@ -450,7 +481,10 @@
         {% else %}<p class="detail-muted quiet-empty">No open option positions.</p>{% endif %}
       </section>
       <section class="surface-block">
-        <div class="section-label">Hedge Overlays</div>
+        <div class="surface-block-head">
+          <div class="section-label">Hedge Overlays</div>
+          <span class="surface-block-count">{{ portfolio.hedge_overlays | length }}</span>
+        </div>
         {% if portfolio.hedge_overlays %}
         <div class="surface-table-wrap">
           <table class="compact-table">
@@ -485,7 +519,10 @@
         {% else %}<p class="detail-muted quiet-empty">No binding constraints recorded.</p>{% endif %}
       </section>
       <section class="surface-block">
-        <div class="section-label">Exposures</div>
+        <div class="surface-block-head">
+          <div class="section-label">Exposures</div>
+          <span class="surface-block-count">{{ risk_macro.exposures | length }}</span>
+        </div>
         {% if risk_macro.exposures %}
         <div class="surface-table-wrap">
           <table class="compact-table">
@@ -534,7 +571,10 @@
         </form>
       </section>
       <section class="surface-block">
-        <div class="section-label">Manual Requests</div>
+        <div class="surface-block-head">
+          <div class="section-label">Manual Requests</div>
+          <span class="surface-block-count">{{ candidates.manual_requests | length }}</span>
+        </div>
         {% if candidates.manual_requests %}
         <div class="surface-table-wrap">
           <table class="compact-table">
@@ -545,7 +585,10 @@
         {% else %}<p class="detail-muted quiet-empty">No active manual requests.</p>{% endif %}
       </section>
       <section class="surface-block">
-        <div class="section-label">Candidate Inventory</div>
+        <div class="surface-block-head">
+          <div class="section-label">Candidate Inventory</div>
+          <span class="surface-block-count">{{ candidates.rows | length }}</span>
+        </div>
         {% if candidates.rows %}
         <div class="surface-table-wrap">
           <table class="compact-table">
@@ -557,7 +600,11 @@
       </section>
       <section class="surface-block">
         <div class="section-label">Themes</div>
-        {% for row in candidates.themes %}<div class="detail-muted">{{ row.display_name }}</div>{% else %}<p class="detail-muted quiet-empty">No themes.</p>{% endfor %}
+        {% if candidates.themes %}
+        <div class="theme-chip-list">
+          {% for row in candidates.themes %}<span class="theme-chip">{{ row.display_name }}</span>{% endfor %}
+        </div>
+        {% else %}<p class="detail-muted quiet-empty">No themes.</p>{% endif %}
       </section>
     </section>
 
@@ -577,16 +624,27 @@
           <span class="metric-label">Learning Factors</span>
           <strong>{{ learning_strategies.learning_factors | length }} active factor{% if learning_strategies.learning_factors|length != 1 %}s{% endif %}</strong>
         </article>
+        <article class="summary-tile">
+          <span class="metric-label">Strategy Performance</span>
+          <strong>{{ learning_strategies.strategy_performance | length }} tracked strategy{% if learning_strategies.strategy_performance|length != 1 %}s{% endif %}</strong>
+        </article>
       </div>
       <section class="surface-block">
         <div class="section-label">Performance Snapshot</div>
         {% if learning_strategies.reflection %}
         <p><strong>Reflection Status:</strong> {{ learning_strategies.reflection.status }}</p>
-        {% for item in learning_strategies.reflection.what_worked %}<div class="detail-muted">{{ item }}</div>{% endfor %}
+        {% if learning_strategies.reflection.what_worked %}
+        <ul class="output-list">
+          {% for item in learning_strategies.reflection.what_worked %}<li>{{ item }}</li>{% endfor %}
+        </ul>
+        {% endif %}
         {% else %}<p class="detail-muted quiet-empty">No reflection recorded.</p>{% endif %}
       </section>
       <section class="surface-block">
-        <div class="section-label">Strategy Proposals</div>
+        <div class="surface-block-head">
+          <div class="section-label">Strategy Proposals</div>
+          <span class="surface-block-count">{{ learning_strategies.strategy_proposals | length }}</span>
+        </div>
         {% if learning_strategies.strategy_proposals %}
         <div class="surface-table-wrap">
           <table class="compact-table">
@@ -597,7 +655,10 @@
         {% else %}<p class="detail-muted quiet-empty">No strategy proposals.</p>{% endif %}
       </section>
       <section class="surface-block">
-        <div class="section-label">Strategy Performance</div>
+        <div class="surface-block-head">
+          <div class="section-label">Strategy Performance</div>
+          <span class="surface-block-count">{{ learning_strategies.strategy_performance | length }}</span>
+        </div>
         {% if learning_strategies.strategy_performance %}
         <div class="surface-table-wrap">
           <table class="compact-table">
@@ -608,7 +669,10 @@
         {% else %}<p class="detail-muted quiet-empty">No strategy performance records.</p>{% endif %}
       </section>
       <section class="surface-block">
-        <div class="section-label">Learning Factors</div>
+        <div class="surface-block-head">
+          <div class="section-label">Learning Factors</div>
+          <span class="surface-block-count">{{ learning_strategies.learning_factors | length }}</span>
+        </div>
         {% if learning_strategies.learning_factors %}
         <div class="surface-table-wrap">
           <table class="compact-table">
@@ -632,9 +696,16 @@
           <span class="metric-label">Model Footprint</span>
           <strong>{{ ops_cost.llm_usage[0].model if ops_cost.llm_usage else "Unavailable" }}</strong>
         </article>
+        <article class="summary-tile">
+          <span class="metric-label">Provider Calls</span>
+          <strong>{{ ops_cost.provider_usage | length }} provider event{% if ops_cost.provider_usage|length != 1 %}s{% endif %}</strong>
+        </article>
       </div>
       <section class="surface-block">
-        <div class="section-label">Usage Ledger</div>
+        <div class="surface-block-head">
+          <div class="section-label">Usage Ledger</div>
+          <span class="surface-block-count">{{ ops_cost.llm_usage | length }}</span>
+        </div>
         {% if ops_cost.llm_usage %}
         <div class="surface-table-wrap">
           <table class="compact-table">
@@ -645,7 +716,10 @@
         {% else %}<p class="detail-muted quiet-empty">No LLM usage events.</p>{% endif %}
       </section>
       <section class="surface-block">
-        <div class="section-label">Provider Usage</div>
+        <div class="surface-block-head">
+          <div class="section-label">Provider Usage</div>
+          <span class="surface-block-count">{{ ops_cost.provider_usage | length }}</span>
+        </div>
         {% if ops_cost.provider_usage %}
         <div class="surface-table-wrap">
           <table class="compact-table">

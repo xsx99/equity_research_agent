@@ -356,6 +356,7 @@ class TestTodayDashboard:
         assert "gpt-5" not in response.text
         assert "surface-table-wrap" in response.text
         assert "surface-block" in response.text
+        assert "surface-block-count" in response.text
 
     def test_trades_tab_only_renders_trades_workspace_body(self, client):
         payload = _dashboard_payload()
@@ -368,6 +369,8 @@ class TestTodayDashboard:
         assert "Signal Summary" in response.text
         assert "Breakout confirmed + risk approved" in response.text
         assert "ticker-card-meta" in response.text
+        assert "meta-pill" in response.text
+        assert "support-kv-row" in response.text
         assert "AI Infrastructure" not in response.text
         assert "gpt-5" not in response.text
         assert "Stock Positions" not in response.text
@@ -465,6 +468,7 @@ class TestTodayDashboard:
         assert "surface-table-wrap" in response.text
         assert "5.28" in response.text
         assert "surface-block" in response.text
+        assert "surface-block-count" in response.text
         assert "trades-canvas" not in response.text
         assert "AI Infrastructure" not in response.text
 
@@ -481,6 +485,7 @@ class TestTodayDashboard:
         assert "$2,145.20" in response.text
         assert "$420.00" in response.text
         assert "surface-block" in response.text
+        assert "surface-block-count" in response.text
         assert "trades-canvas" not in response.text
 
     def test_candidates_tab_renders_summary_and_operations_modules(self, client):
@@ -497,6 +502,7 @@ class TestTodayDashboard:
         assert "surface-block" in response.text
         assert "Candidate Inventory" in response.text
         assert "relative_strength_breakout_v1" in response.text
+        assert "theme-chip-list" in response.text
         assert "trades-canvas" not in response.text
         assert "Signal Summary" not in response.text
 
@@ -515,6 +521,7 @@ class TestTodayDashboard:
         assert "Strategy Performance" in response.text
         assert "$4,200.00" in response.text
         assert "Tighten low-volume gap entries" in response.text
+        assert "tracked strategy" in response.text
         assert "trades-canvas" not in response.text
 
     def test_ops_cost_tab_renders_summary_first_structure(self, client):
@@ -529,6 +536,7 @@ class TestTodayDashboard:
         assert "Usage Ledger" in response.text
         assert "$12.30" in response.text
         assert "Provider Usage" in response.text
+        assert "Provider Calls" in response.text
         assert "market_bars" in response.text
         assert "surface-block" in response.text
         assert "gpt-5" in response.text
