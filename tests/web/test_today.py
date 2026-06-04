@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import uuid
+from contextlib import ExitStack, contextmanager
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
@@ -114,6 +115,40 @@ def _dashboard_payload() -> dict:
                 "outcomes": (
                     {"evaluation_status": "interim", "alpha": Decimal("0.02")},
                 ),
+            },
+        },
+        "ticker_workspace": {
+            "selected_ticker": "AAPL",
+            "buckets": {
+                "action_now": (
+                    {
+                        "ticker": "AAPL",
+                        "decision": "enter_long",
+                        "confidence": Decimal("0.72"),
+                    },
+                ),
+                "in_position": (),
+                "watch": (),
+            },
+            "detail": {
+                "ticker": "AAPL",
+                "latest_conclusion": {
+                    "trade_decision": {"label": "Enter Long"},
+                    "signal_summary": {
+                        "summary_bullets": ("Relative strength improved vs QQQ",),
+                        "technical_charts": (),
+                        "news_snippets": (),
+                        "fundamental_snippets": (),
+                    },
+                    "risk_summary": {"status": "approved", "reason": "within_limits"},
+                    "position_execution": {"order_status": "filled"},
+                },
+                "tabs": {
+                    "timeline": (),
+                    "trend": {"technical": (), "news": (), "fundamental": ()},
+                    "decisions": (),
+                    "risk": {"current_stance": {}, "position_state": {}, "history": ()},
+                },
             },
         },
         "risk_macro": {
@@ -265,6 +300,139 @@ class TestTodayDashboard:
         assert "within_limits" in response.text
         assert "0.81" in response.text
 
+    def test_today_dashboard_passes_selected_ticker_query_param_to_loader(self, client):
+        payload = _dashboard_payload()
+        with patch("src.web.routers.today.load_today_dashboard", return_value=payload) as load_today_dashboard:
+            response = client.get("/today?ticker=NVDA")
+
+        assert response.status_code == 200
+        load_today_dashboard.assert_called_once()
+        assert load_today_dashboard.call_args.kwargs["selected_ticker"] == "NVDA"
+
+    def test_today_dashboard_route_falls_back_to_highest_priority_ticker_for_invalid_query(self, client):
+        session = _query_stub_session()
+        trade_rows = _ticker_selection_trade_rows()
+        selected_nvda_detail = _selected_trade_detail("NVDA")
+
+        with _patched_today_route_dependencies(
+            session,
+            trade_rows=trade_rows,
+            selected_detail=selected_nvda_detail,
+        ) as load_trade_detail:
+            response = client.get("/today?ticker=MSFT")
+
+        assert response.status_code == 200
+        assert "Trade Detail" in response.text
+        assert "<strong>Ticker:</strong> NVDA" in response.text
+        load_trade_detail.assert_called_once_with(session, "decision-action")
+
+    def test_today_dashboard_route_falls_back_to_highest_priority_ticker_when_query_missing(self, client):
+        session = _query_stub_session()
+        trade_rows = _ticker_selection_trade_rows()
+        selected_nvda_detail = _selected_trade_detail("NVDA")
+
+        with _patched_today_route_dependencies(
+            session,
+            trade_rows=trade_rows,
+            selected_detail=selected_nvda_detail,
+        ) as load_trade_detail:
+            response = client.get("/today")
+
+        assert response.status_code == 200
+        assert "Trade Detail" in response.text
+        assert "<strong>Ticker:</strong> NVDA" in response.text
+        load_trade_detail.assert_called_once_with(session, "decision-action")
+
+    def test_today_dashboard_route_renders_empty_workspace_when_no_tickers_exist(self, client):
+        session = _query_stub_session()
+
+        with _patched_today_route_dependencies(
+            session,
+            trade_rows=[],
+            selected_detail=None,
+        ) as load_trade_detail:
+            response = client.get("/today")
+
+        assert response.status_code == 200
+        assert "No trading decisions yet." in response.text
+        assert "Trade Detail" not in response.text
+        load_trade_detail.assert_not_called()
+
+    def test_load_today_dashboard_falls_back_to_highest_priority_ticker_for_invalid_query(self):
+        from src.web.routers.today import load_today_dashboard
+
+        session = _query_stub_session()
+        trade_rows = _ticker_selection_trade_rows()
+        selected_nvda_detail = _selected_trade_detail("NVDA")
+
+        with (
+            patch("src.web.routers.today._load_trade_rows", return_value=trade_rows),
+            patch("src.web.routers.today._load_trade_detail", return_value=selected_nvda_detail) as load_trade_detail,
+            patch("src.web.routers.today._load_positions", return_value=()),
+            patch("src.web.routers.today._load_option_positions", return_value=()),
+            patch("src.web.routers.today._load_hedge_overlays", return_value=()),
+            patch("src.web.routers.today._load_live_alerts", return_value=()),
+            patch("src.web.routers.today._load_material_changes", return_value=()),
+            patch("src.web.routers.today._load_risk_exposures", return_value=()),
+            patch("src.web.routers.today._load_candidate_rows", return_value=()),
+            patch("src.web.routers.today._load_manual_requests", return_value=()),
+            patch("src.web.routers.today._load_portfolio_intents", return_value=()),
+            patch("src.web.routers.today._load_relationships", return_value=()),
+            patch("src.web.routers.today._load_peer_baskets", return_value=()),
+            patch("src.web.routers.today._load_themes", return_value=()),
+            patch("src.web.routers.today._load_learning_factors", return_value=()),
+            patch("src.web.routers.today._load_strategy_performance", return_value=()),
+            patch("src.web.routers.today._load_strategy_proposals", return_value=()),
+            patch("src.web.routers.today._load_llm_usage", return_value=()),
+        ):
+            dashboard = load_today_dashboard(
+                session,
+                selected_tab="overview",
+                decision_id=None,
+                selected_ticker="MSFT",
+            )
+
+        assert dashboard["ticker_workspace"]["selected_ticker"] == "NVDA"
+        assert dashboard["trades"]["selected_detail"]["ticker"] == "NVDA"
+        load_trade_detail.assert_called_once_with(session, "decision-action")
+
+    def test_load_today_dashboard_returns_empty_workspace_when_no_tickers_exist(self):
+        from src.web.routers.today import load_today_dashboard
+
+        session = _query_stub_session()
+
+        with (
+            patch("src.web.routers.today._load_trade_rows", return_value=[]),
+            patch("src.web.routers.today._load_positions", return_value=()),
+            patch("src.web.routers.today._load_option_positions", return_value=()),
+            patch("src.web.routers.today._load_hedge_overlays", return_value=()),
+            patch("src.web.routers.today._load_live_alerts", return_value=()),
+            patch("src.web.routers.today._load_material_changes", return_value=()),
+            patch("src.web.routers.today._load_risk_exposures", return_value=()),
+            patch("src.web.routers.today._load_candidate_rows", return_value=()),
+            patch("src.web.routers.today._load_manual_requests", return_value=()),
+            patch("src.web.routers.today._load_portfolio_intents", return_value=()),
+            patch("src.web.routers.today._load_relationships", return_value=()),
+            patch("src.web.routers.today._load_peer_baskets", return_value=()),
+            patch("src.web.routers.today._load_themes", return_value=()),
+            patch("src.web.routers.today._load_learning_factors", return_value=()),
+            patch("src.web.routers.today._load_strategy_performance", return_value=()),
+            patch("src.web.routers.today._load_strategy_proposals", return_value=()),
+            patch("src.web.routers.today._load_llm_usage", return_value=()),
+            patch("src.web.routers.today._load_trade_detail") as load_trade_detail,
+        ):
+            dashboard = load_today_dashboard(
+                session,
+                selected_tab="overview",
+                decision_id=None,
+                selected_ticker="NVDA",
+            )
+
+        assert dashboard["ticker_workspace"]["selected_ticker"] is None
+        assert dashboard["ticker_workspace"]["detail"] is None
+        assert dashboard["trades"]["selected_detail"] is None
+        load_trade_detail.assert_not_called()
+
 
 class TestTodayDashboardMutations:
     def test_add_manual_request_redirects_back_to_candidates(self, client):
@@ -319,3 +487,116 @@ class TestTodayDashboardMutations:
         assert response.status_code == 303
         assert response.headers["location"] == "/today?tab=candidates"
         update_universe_filter.assert_called_once()
+
+
+class _QueryStub:
+    def filter(self, *_args, **_kwargs):
+        return self
+
+    def filter_by(self, **_kwargs):
+        return self
+
+    def order_by(self, *_args, **_kwargs):
+        return self
+
+    def limit(self, *_args, **_kwargs):
+        return self
+
+    def first(self):
+        return None
+
+    def all(self):
+        return []
+
+
+def _query_stub_session() -> MagicMock:
+    session = MagicMock()
+    session.query.return_value = _QueryStub()
+    return session
+
+
+def _ticker_selection_trade_rows() -> list[dict]:
+    return [
+        {
+            "trading_decision_id": "decision-watch",
+            "decision_time": datetime(2026, 6, 2, 12, 0, tzinfo=timezone.utc),
+            "created_at": datetime(2026, 6, 2, 12, 0, tzinfo=timezone.utc),
+            "ticker": "AAPL",
+            "decision": "no_trade",
+            "instrument_type": "watch",
+            "trade_identity": "watch_only",
+            "selected_strategy_id": "watch_strategy_v1",
+            "expression_bucket_id": "watch",
+            "approved_weight": Decimal("0"),
+            "confidence": Decimal("0.25"),
+            "risk_status": "approved",
+            "order_status": None,
+            "material_signal_change": False,
+        },
+        {
+            "trading_decision_id": "decision-action",
+            "decision_time": datetime(2026, 6, 2, 13, 0, tzinfo=timezone.utc),
+            "created_at": datetime(2026, 6, 2, 13, 0, tzinfo=timezone.utc),
+            "ticker": "NVDA",
+            "decision": "enter_long",
+            "instrument_type": "stock",
+            "trade_identity": "tactical_stock_trade",
+            "selected_strategy_id": "breakout_v1",
+            "expression_bucket_id": "long_stock",
+            "approved_weight": Decimal("0.05"),
+            "confidence": Decimal("0.81"),
+            "risk_status": "approved",
+            "order_status": "accepted",
+            "material_signal_change": True,
+        },
+    ]
+
+
+def _selected_trade_detail(ticker: str) -> dict:
+    return {
+        "ticker": ticker,
+        "signal_snapshot": {},
+        "llm_decision_json": {},
+        "strategy_scores": (),
+        "risk_decision": None,
+        "outcomes": (),
+    }
+
+
+def _patched_today_route_dependencies(session: MagicMock, *, trade_rows: list[dict], selected_detail: dict | None):
+    stack = ExitStack()
+    stack.enter_context(
+        patch("src.web.routers.today.get_session", return_value=_session_context(session))
+    )
+    stack.enter_context(patch("src.web.routers.today._load_trade_rows", return_value=trade_rows))
+    load_trade_detail = stack.enter_context(
+        patch("src.web.routers.today._load_trade_detail", return_value=selected_detail)
+    )
+    stack.enter_context(patch("src.web.routers.today._load_positions", return_value=()))
+    stack.enter_context(patch("src.web.routers.today._load_option_positions", return_value=()))
+    stack.enter_context(patch("src.web.routers.today._load_hedge_overlays", return_value=()))
+    stack.enter_context(patch("src.web.routers.today._load_live_alerts", return_value=()))
+    stack.enter_context(patch("src.web.routers.today._load_material_changes", return_value=()))
+    stack.enter_context(patch("src.web.routers.today._load_risk_exposures", return_value=()))
+    stack.enter_context(patch("src.web.routers.today._load_candidate_rows", return_value=()))
+    stack.enter_context(patch("src.web.routers.today._load_manual_requests", return_value=()))
+    stack.enter_context(patch("src.web.routers.today._load_portfolio_intents", return_value=()))
+    stack.enter_context(patch("src.web.routers.today._load_relationships", return_value=()))
+    stack.enter_context(patch("src.web.routers.today._load_peer_baskets", return_value=()))
+    stack.enter_context(patch("src.web.routers.today._load_themes", return_value=()))
+    stack.enter_context(patch("src.web.routers.today._load_learning_factors", return_value=()))
+    stack.enter_context(patch("src.web.routers.today._load_strategy_performance", return_value=()))
+    stack.enter_context(patch("src.web.routers.today._load_strategy_proposals", return_value=()))
+    stack.enter_context(patch("src.web.routers.today._load_llm_usage", return_value=()))
+    return _exit_stack_with_result(stack, load_trade_detail)
+
+
+@contextmanager
+def _session_context(session: MagicMock):
+    yield session
+
+
+@contextmanager
+def _exit_stack_with_result(stack: ExitStack, result):
+    with stack:
+        yield result

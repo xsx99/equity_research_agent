@@ -40,6 +40,7 @@ from src.db.models.trading import (
     UniverseFilterConfig,
 )
 from src.web.flash import flash, get_flash
+from src.web.presenters.today_workspace import build_ticker_workspace
 
 router = APIRouter()
 _templates: Jinja2Templates | None = None
@@ -65,9 +66,15 @@ def today_dashboard(
     request: Request,
     tab: str = "overview",
     decision_id: str | None = None,
+    ticker: str | None = None,
 ):
     with get_session() as session:
-        dashboard = load_today_dashboard(session, selected_tab=tab, decision_id=decision_id)
+        dashboard = load_today_dashboard(
+            session,
+            selected_tab=tab,
+            decision_id=decision_id,
+            selected_ticker=ticker,
+        )
     return _templates.TemplateResponse(
         request,
         "today.html",
@@ -139,7 +146,13 @@ def today_update_universe_filter(
     return RedirectResponse("/today?tab=candidates", status_code=303)
 
 
-def load_today_dashboard(session: Any, *, selected_tab: str, decision_id: str | None) -> dict[str, Any]:
+def load_today_dashboard(
+    session: Any,
+    *,
+    selected_tab: str,
+    decision_id: str | None,
+    selected_ticker: str | None,
+) -> dict[str, Any]:
     selected_tab = _normalize_tab(selected_tab)
     latest_portfolio = session.query(PortfolioSnapshot).order_by(PortfolioSnapshot.snapshot_time.desc()).first()
     latest_risk = session.query(PortfolioRiskSnapshot).order_by(PortfolioRiskSnapshot.decision_time.desc()).first()
@@ -152,9 +165,25 @@ def load_today_dashboard(session: Any, *, selected_tab: str, decision_id: str | 
     )
 
     trade_rows = _load_trade_rows(session)
+    positions = _load_positions(session)
+    ticker_workspace = build_ticker_workspace(
+        trade_rows=trade_rows,
+        selected_ticker=selected_ticker,
+        positions_by_ticker=_group_latest_by_ticker(positions),
+        risk_by_ticker=_load_risk_by_ticker(session),
+        signal_history_by_ticker=_load_signal_history_by_ticker(session),
+        news_by_ticker=_load_news_by_ticker(session),
+        fundamentals_by_ticker=_load_fundamentals_by_ticker(session),
+    )
+
     selected_detail = _load_trade_detail(session, decision_id) if decision_id else None
-    if selected_detail is None and trade_rows:
-        selected_detail = _load_trade_detail(session, trade_rows[0]["trading_decision_id"])
+    if selected_detail is None:
+        selected_decision_id = _latest_trade_decision_id_for_ticker(
+            trade_rows,
+            ticker_workspace.get("selected_ticker"),
+        )
+        if selected_decision_id:
+            selected_detail = _load_trade_detail(session, selected_decision_id)
 
     return {
         "selected_tab": selected_tab,
@@ -166,7 +195,7 @@ def load_today_dashboard(session: Any, *, selected_tab: str, decision_id: str | 
             "material_changes": _load_material_changes(session),
         },
         "portfolio": {
-            "positions": _load_positions(session),
+            "positions": positions,
             "option_positions": _load_option_positions(session),
             "hedge_overlays": _load_hedge_overlays(session),
         },
@@ -174,6 +203,7 @@ def load_today_dashboard(session: Any, *, selected_tab: str, decision_id: str | 
             "rows": trade_rows,
             "selected_detail": selected_detail,
         },
+        "ticker_workspace": ticker_workspace,
         "risk_macro": {
             "risk_config_version": latest_risk.resolver_version if latest_risk else None,
             "binding_constraints": tuple((latest_risk.concentration_flags_json or [])) if latest_risk else (),
@@ -392,6 +422,7 @@ def _load_hedge_overlays(session: Any) -> tuple[dict[str, Any], ...]:
 
 
 def _load_trade_rows(session: Any) -> list[dict[str, Any]]:
+    material_change_tickers = _load_material_signal_change_tickers(session)
     rows = (
         session.query(TradingDecision)
         .order_by(TradingDecision.decision_time.desc())
@@ -402,6 +433,7 @@ def _load_trade_rows(session: Any) -> list[dict[str, Any]]:
         {
             "trading_decision_id": str(row.trading_decision_id),
             "decision_time": row.decision_time,
+            "created_at": row.created_at or row.decision_time,
             "ticker": row.ticker,
             "decision": row.decision,
             "instrument_type": row.instrument_type,
@@ -412,6 +444,7 @@ def _load_trade_rows(session: Any) -> list[dict[str, Any]]:
             "confidence": row.confidence,
             "risk_status": row.risk_decision.status if row.risk_decision else None,
             "order_status": _load_order_status(session, row.trading_decision_id),
+            "material_signal_change": str(row.ticker).upper() in material_change_tickers,
         }
         for row in rows
     ]
@@ -420,15 +453,26 @@ def _load_trade_rows(session: Any) -> list[dict[str, Any]]:
 def _load_order_status(session: Any, trading_decision_id: uuid.UUID) -> str | None:
     paper_order = session.query(PaperOrder).filter(PaperOrder.trading_decision_id == trading_decision_id).first()
     if paper_order is not None:
-        return paper_order.status
+        return _normalize_order_status(paper_order.status)
     option_order = (
         session.query(PaperOptionOrder)
         .filter(PaperOptionOrder.trading_decision_id == trading_decision_id)
         .first()
     )
     if option_order is not None:
-        return option_order.status
+        return _normalize_order_status(option_order.status)
     return None
+
+
+def _normalize_order_status(status: str | None) -> str | None:
+    normalized = str(status or "").strip().lower()
+    if not normalized:
+        return None
+    mapping = {
+        "pending_new": "pending",
+        "partially_filled": "partial_fill",
+    }
+    return mapping.get(normalized, normalized)
 
 
 def _load_trade_detail(session: Any, decision_id: str) -> dict[str, Any] | None:
@@ -687,3 +731,196 @@ def _split_csv(raw: str, *, uppercase: bool = False) -> list[str]:
             continue
         parts.append(normalized.upper() if uppercase else normalized)
     return parts
+
+
+def _group_latest_by_ticker(rows: tuple[dict[str, Any], ...]) -> dict[str, dict[str, Any]]:
+    grouped: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        ticker = str(row.get("ticker") or "").strip().upper()
+        if not ticker:
+            continue
+        if ticker not in grouped:
+            grouped[ticker] = dict(row)
+    return grouped
+
+
+def _latest_trade_decision_id_for_ticker(
+    trade_rows: list[dict[str, Any]],
+    ticker: str | None,
+) -> str | None:
+    normalized_ticker = str(ticker or "").strip().upper()
+    if not normalized_ticker:
+        return None
+
+    matching_rows = [row for row in trade_rows if str(row.get("ticker") or "").strip().upper() == normalized_ticker]
+    if not matching_rows:
+        return None
+
+    latest_row = max(
+        matching_rows,
+        key=lambda row: row.get("decision_time") or row.get("created_at") or "",
+    )
+    return str(latest_row.get("trading_decision_id") or "") or None
+
+
+def _load_material_signal_change_tickers(session: Any) -> set[str]:
+    rows = (
+        session.query(IntradaySignalSnapshot)
+        .order_by(IntradaySignalSnapshot.decision_time.desc())
+        .limit(100)
+        .all()
+    )
+    tickers: set[str] = set()
+    for row in rows:
+        if row.delta_vs_baseline_json:
+            tickers.add(str(row.ticker).upper())
+    return tickers
+
+
+def _load_risk_by_ticker(session: Any) -> dict[str, dict[str, Any]]:
+    rows = (
+        session.query(RiskDecision)
+        .order_by(RiskDecision.decision_time.desc(), RiskDecision.created_at.desc())
+        .limit(100)
+        .all()
+    )
+    grouped: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        ticker = str(row.ticker or "").strip().upper()
+        if not ticker or ticker in grouped:
+            continue
+        grouped[ticker] = {
+            "status": row.status,
+            "reason": row.reason_code,
+            "history": [
+                {
+                    "time": row.decision_time or row.created_at,
+                    "status": row.status,
+                    "summary": row.reason_code,
+                }
+            ],
+        }
+    return grouped
+
+
+def _load_signal_history_by_ticker(session: Any) -> dict[str, dict[str, Any]]:
+    signal_rows = (
+        session.query(SignalSnapshot)
+        .order_by(SignalSnapshot.decision_time.desc(), SignalSnapshot.created_at.desc())
+        .limit(100)
+        .all()
+    )
+    intraday_rows = (
+        session.query(IntradaySignalSnapshot)
+        .order_by(IntradaySignalSnapshot.decision_time.desc(), IntradaySignalSnapshot.created_at.desc())
+        .limit(100)
+        .all()
+    )
+
+    grouped: dict[str, dict[str, Any]] = {}
+    for row in signal_rows:
+        ticker = str(row.ticker or "").strip().upper()
+        if not ticker:
+            continue
+        entry = grouped.setdefault(ticker, {"technical": [], "summary": [], "timeline": []})
+        signal_json = row.signal_json if isinstance(row.signal_json, dict) else {}
+
+        technical_items = signal_json.get("technical")
+        if isinstance(technical_items, list):
+            for item in technical_items:
+                if isinstance(item, dict):
+                    entry["technical"].append(item)
+
+        summary_items = signal_json.get("summary")
+        if isinstance(summary_items, list):
+            for item in summary_items:
+                if str(item).strip():
+                    entry["summary"].append(str(item).strip())
+
+        entry["timeline"].append(
+            {
+                "time": row.decision_time,
+                "event_type": row.snapshot_type or "signal_snapshot",
+                "summary": _timeline_summary_from_signal(signal_json),
+            }
+        )
+
+    for row in intraday_rows:
+        ticker = str(row.ticker or "").strip().upper()
+        if not ticker:
+            continue
+        entry = grouped.setdefault(ticker, {"technical": [], "summary": [], "timeline": []})
+        delta = row.delta_vs_baseline_json if isinstance(row.delta_vs_baseline_json, dict) else {}
+        if delta:
+            entry["summary"].append(", ".join(sorted(delta.keys())))
+        entry["timeline"].append(
+            {
+                "time": row.decision_time,
+                "event_type": "intraday",
+                "summary": ", ".join(sorted(delta.keys())) if delta else "Intraday refresh",
+            }
+        )
+
+    return grouped
+
+
+def _load_news_by_ticker(session: Any) -> dict[str, list[dict[str, Any]]]:
+    rows = (
+        session.query(NewsAlert)
+        .order_by(NewsAlert.published_at.desc(), NewsAlert.created_at.desc())
+        .limit(100)
+        .all()
+    )
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        ticker = str(row.ticker or "").strip().upper()
+        if not ticker:
+            continue
+        grouped.setdefault(ticker, []).append(
+            {
+                "title": row.headline,
+                "summary": row.summary,
+                "published_at": row.published_at,
+            }
+        )
+    return grouped
+
+
+def _load_fundamentals_by_ticker(session: Any) -> dict[str, list[dict[str, Any]]]:
+    rows = (
+        session.query(SignalSnapshot)
+        .order_by(SignalSnapshot.decision_time.desc(), SignalSnapshot.created_at.desc())
+        .limit(100)
+        .all()
+    )
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        ticker = str(row.ticker or "").strip().upper()
+        if not ticker:
+            continue
+        signal_json = row.signal_json if isinstance(row.signal_json, dict) else {}
+        fundamentals = signal_json.get("fundamentals")
+        if not isinstance(fundamentals, list):
+            continue
+        items = grouped.setdefault(ticker, [])
+        for item in fundamentals:
+            if not isinstance(item, dict):
+                continue
+            items.append(
+                {
+                    "title": item.get("title"),
+                    "summary": item.get("summary"),
+                    "as_of": row.decision_time,
+                }
+            )
+    return grouped
+
+
+def _timeline_summary_from_signal(signal_json: dict[str, Any]) -> str:
+    summary_items = signal_json.get("summary")
+    if isinstance(summary_items, list):
+        for item in summary_items:
+            text = str(item).strip()
+            if text:
+                return text
+    return "Signal snapshot updated"
