@@ -31,11 +31,11 @@
           </article>
           <article class="operator-metric">
             <span class="metric-label">Buying Power</span>
-            <strong class="operator-value">{{ header.buying_power if header.buying_power is not none else "Unavailable" }}</strong>
+          <strong class="operator-value">{{ fmt_currency(header.buying_power) if header.buying_power is not none else "Unavailable" }}</strong>
           </article>
           <article class="operator-metric">
             <span class="metric-label">Gross Exposure</span>
-            <strong class="operator-value">{{ header.gross_exposure if header.gross_exposure is not none else "Unavailable" }}</strong>
+          <strong class="operator-value">{{ fmt_number(header.gross_exposure) if header.gross_exposure is not none else "Unavailable" }}</strong>
           </article>
         </div>
       </section>
@@ -120,7 +120,7 @@
                   </div>
                   <div class="ticker-card-decision">{{ item.latest_decision or item.decision or "No Decision" }}</div>
                   <div class="detail-muted">{{ item.why_now or "No material update." }}</div>
-                  <div class="ticker-card-footer">
+                  <div class="ticker-card-meta ticker-card-footer">
                     <span class="detail-muted">{{ item.recency_label or item.last_updated_label or "Recency unavailable" }}</span>
                   </div>
                 </a>
@@ -171,7 +171,7 @@
                   {% endfor %}
                 </ul>
                 {% else %}
-                <p class="detail-muted quiet-empty">No material update.</p>
+                <p class="detail-muted quiet-empty surface-empty-copy">Unavailable.</p>
                 {% endif %}
               </section>
 
@@ -189,7 +189,7 @@
                 {% if detail.latest_conclusion.position_execution.order_status %}
                 <div class="detail-muted">Order: {{ detail.latest_conclusion.position_execution.order_status }}</div>
                 {% endif %}
-                <div class="detail-muted">{{ detail.latest_conclusion.position_execution.summary or "No material update." }}</div>
+                <div class="detail-muted {% if not detail.latest_conclusion.position_execution.summary %}surface-empty-copy quiet-empty{% endif %}">{{ detail.latest_conclusion.position_execution.summary or "Unavailable." }}</div>
               </section>
             </div>
 
@@ -259,21 +259,21 @@
               {% for item in detail.tabs.trend.technical %}
               <div class="detail-muted">{{ item.title or item.label }}{% if item.summary %}: {{ item.summary }}{% endif %}</div>
               {% else %}
-              <p class="detail-muted quiet-empty">No material update.</p>
+              <p class="detail-muted quiet-empty surface-empty-copy">Unavailable.</p>
               {% endfor %}
 
               <div class="section-label">News</div>
               {% for item in detail.tabs.trend.news %}
               <div class="detail-muted">{{ item.title or item.label }}{% if item.summary %}: {{ item.summary }}{% endif %}</div>
               {% else %}
-              <p class="detail-muted quiet-empty">No material update.</p>
+              <p class="detail-muted quiet-empty surface-empty-copy">Unavailable.</p>
               {% endfor %}
 
               <div class="section-label">Fundamental</div>
               {% for item in detail.tabs.trend.fundamental %}
               <div class="detail-muted">{{ item.title or item.label }}{% if item.summary %}: {{ item.summary }}{% endif %}</div>
               {% else %}
-              <p class="detail-muted quiet-empty">No material update.</p>
+              <p class="detail-muted quiet-empty surface-empty-copy">Unavailable.</p>
               {% endfor %}
             </section>
             {% elif selected_detail_tab == "decisions" %}
@@ -374,32 +374,40 @@
           <strong>{{ overview.material_changes | length }} active ticker{% if overview.material_changes|length != 1 %}s{% endif %}</strong>
         </article>
       </div>
-      <div class="section-label">Live Alerts</div>
-      {% if overview.live_alerts %}
-      <table class="compact-table">
-        <thead><tr><th>Ticker</th><th>Severity</th><th>Headline</th></tr></thead>
-        <tbody>
-          {% for row in overview.live_alerts %}
-          <tr><td>{{ row.ticker }}</td><td>{{ row.severity }}</td><td>{{ row.headline }}</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
-      {% else %}
-      <p class="detail-muted quiet-empty">No live alerts.</p>
-      {% endif %}
-      <div class="section-label">Material Signal Changes</div>
-      {% if overview.material_changes %}
-      <table class="compact-table">
-        <thead><tr><th>Ticker</th><th>Summary</th></tr></thead>
-        <tbody>
-          {% for row in overview.material_changes %}
-          <tr><td>{{ row.ticker }}</td><td>{{ row.summary }}</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
-      {% else %}
-      <p class="detail-muted quiet-empty">No material changes.</p>
-      {% endif %}
+      <section class="surface-block">
+        <div class="section-label">Live Alerts</div>
+        {% if overview.live_alerts %}
+        <div class="surface-table-wrap">
+          <table class="compact-table">
+            <thead><tr><th>Ticker</th><th>Severity</th><th>Headline</th></tr></thead>
+            <tbody>
+              {% for row in overview.live_alerts %}
+              <tr><td>{{ row.ticker }}</td><td>{{ row.severity }}</td><td>{{ row.headline }}</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <p class="detail-muted quiet-empty">No live alerts.</p>
+        {% endif %}
+      </section>
+      <section class="surface-block">
+        <div class="section-label">Material Signal Changes</div>
+        {% if overview.material_changes %}
+        <div class="surface-table-wrap">
+          <table class="compact-table">
+            <thead><tr><th>Ticker</th><th>Summary</th></tr></thead>
+            <tbody>
+              {% for row in overview.material_changes %}
+              <tr><td>{{ row.ticker }}</td><td>{{ row.summary }}</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <p class="detail-muted quiet-empty">No material changes.</p>
+        {% endif %}
+      </section>
     </section>
 
     {% elif selected_tab == "portfolio" %}
@@ -419,33 +427,39 @@
           <strong>{{ portfolio.hedge_overlays | length }} overlay{% if portfolio.hedge_overlays|length != 1 %}s{% endif %}</strong>
         </article>
       </div>
-      <div class="section-label">Stock Positions</div>
-      {% if portfolio.positions %}
-      <div class="surface-table-wrap">
-        <table class="compact-table">
-          <thead><tr><th>Ticker</th><th>Identity</th><th>Strategy</th><th>Qty</th><th>Market Value</th></tr></thead>
-          <tbody>{% for row in portfolio.positions %}<tr><td>{{ row.ticker }}</td><td>{{ row.trade_identity }}</td><td>{{ row.strategy_id }}</td><td>{{ row.quantity }}</td><td>{{ row.market_value }}</td></tr>{% endfor %}</tbody>
-        </table>
-      </div>
-      {% else %}<p class="detail-muted quiet-empty">No open stock positions.</p>{% endif %}
-      <div class="section-label">Option Positions</div>
-      {% if portfolio.option_positions %}
-      <div class="surface-table-wrap">
-        <table class="compact-table">
-          <thead><tr><th>Ticker</th><th>Strategy Type</th><th>Identity</th><th>Max Loss</th></tr></thead>
-          <tbody>{% for row in portfolio.option_positions %}<tr><td>{{ row.ticker }}</td><td>{{ row.option_strategy_type }}</td><td>{{ row.trade_identity }}</td><td>{{ row.max_loss }}</td></tr>{% endfor %}</tbody>
-        </table>
-      </div>
-      {% else %}<p class="detail-muted quiet-empty">No open option positions.</p>{% endif %}
-      <div class="section-label">Hedge Overlays</div>
-      {% if portfolio.hedge_overlays %}
-      <div class="surface-table-wrap">
-        <table class="compact-table">
-          <thead><tr><th>Ticker</th><th>Strategy Type</th><th>Protected Notional</th></tr></thead>
-          <tbody>{% for row in portfolio.hedge_overlays %}<tr><td>{{ row.ticker }}</td><td>{{ row.option_strategy_type }}</td><td>{{ row.protected_notional }}</td></tr>{% endfor %}</tbody>
-        </table>
-      </div>
-      {% else %}<p class="detail-muted quiet-empty">No hedge overlays.</p>{% endif %}
+      <section class="surface-block">
+        <div class="section-label">Stock Positions</div>
+        {% if portfolio.positions %}
+        <div class="surface-table-wrap">
+          <table class="compact-table">
+            <thead><tr><th>Ticker</th><th>Identity</th><th>Strategy</th><th>Qty</th><th>Market Value</th></tr></thead>
+            <tbody>{% for row in portfolio.positions %}<tr><td>{{ row.ticker }}</td><td>{{ row.trade_identity }}</td><td>{{ row.strategy_id }}</td><td>{{ fmt_number(row.quantity) }}</td><td>{{ fmt_currency(row.market_value) }}</td></tr>{% endfor %}</tbody>
+          </table>
+        </div>
+        {% else %}<p class="detail-muted quiet-empty">No open stock positions.</p>{% endif %}
+      </section>
+      <section class="surface-block">
+        <div class="section-label">Option Positions</div>
+        {% if portfolio.option_positions %}
+        <div class="surface-table-wrap">
+          <table class="compact-table">
+            <thead><tr><th>Ticker</th><th>Strategy Type</th><th>Identity</th><th>Max Loss</th></tr></thead>
+            <tbody>{% for row in portfolio.option_positions %}<tr><td>{{ row.ticker }}</td><td>{{ row.option_strategy_type }}</td><td>{{ row.trade_identity }}</td><td>{{ fmt_currency(row.max_loss) }}</td></tr>{% endfor %}</tbody>
+          </table>
+        </div>
+        {% else %}<p class="detail-muted quiet-empty">No open option positions.</p>{% endif %}
+      </section>
+      <section class="surface-block">
+        <div class="section-label">Hedge Overlays</div>
+        {% if portfolio.hedge_overlays %}
+        <div class="surface-table-wrap">
+          <table class="compact-table">
+            <thead><tr><th>Ticker</th><th>Strategy Type</th><th>Protected Notional</th></tr></thead>
+            <tbody>{% for row in portfolio.hedge_overlays %}<tr><td>{{ row.ticker }}</td><td>{{ row.option_strategy_type }}</td><td>{{ fmt_currency(row.protected_notional) }}</td></tr>{% endfor %}</tbody>
+          </table>
+        </div>
+        {% else %}<p class="detail-muted quiet-empty">No hedge overlays.</p>{% endif %}
+      </section>
     </section>
 
     {% elif selected_tab == "risk-macro" %}
@@ -461,20 +475,26 @@
           <strong>{{ risk_macro.exposures | length }} exposure row{% if risk_macro.exposures|length != 1 %}s{% endif %}</strong>
         </article>
       </div>
-      <p><strong>Risk Config Version:</strong> {{ risk_macro.risk_config_version or "unavailable" }}</p>
-      <div class="section-label">Binding Constraints</div>
-      {% if risk_macro.binding_constraints %}
-      <ul class="output-list">{% for item in risk_macro.binding_constraints %}<li>{{ item }}</li>{% endfor %}</ul>
-      {% else %}<p class="detail-muted quiet-empty">No binding constraints recorded.</p>{% endif %}
-      <div class="section-label">Exposures</div>
-      {% if risk_macro.exposures %}
-      <div class="surface-table-wrap">
-        <table class="compact-table">
-          <thead><tr><th>Factor Type</th><th>Factor</th><th>Exposure</th></tr></thead>
-          <tbody>{% for row in risk_macro.exposures %}<tr><td>{{ row.factor_type }}</td><td>{{ row.factor_name }}</td><td>{{ row.exposure }}</td></tr>{% endfor %}</tbody>
-        </table>
-      </div>
-      {% else %}<p class="detail-muted quiet-empty">No factor exposures yet.</p>{% endif %}
+      <section class="surface-block">
+        <p><strong>Risk Config Version:</strong> {{ risk_macro.risk_config_version or "unavailable" }}</p>
+      </section>
+      <section class="surface-block">
+        <div class="section-label">Binding Constraints</div>
+        {% if risk_macro.binding_constraints %}
+        <ul class="output-list">{% for item in risk_macro.binding_constraints %}<li>{{ item }}</li>{% endfor %}</ul>
+        {% else %}<p class="detail-muted quiet-empty">No binding constraints recorded.</p>{% endif %}
+      </section>
+      <section class="surface-block">
+        <div class="section-label">Exposures</div>
+        {% if risk_macro.exposures %}
+        <div class="surface-table-wrap">
+          <table class="compact-table">
+            <thead><tr><th>Factor Type</th><th>Factor</th><th>Exposure</th></tr></thead>
+            <tbody>{% for row in risk_macro.exposures %}<tr><td>{{ row.factor_type }}</td><td>{{ row.factor_name }}</td><td>{{ fmt_number(row.exposure) }}</td></tr>{% endfor %}</tbody>
+          </table>
+        </div>
+        {% else %}<p class="detail-muted quiet-empty">No factor exposures yet.</p>{% endif %}
+      </section>
     </section>
 
     {% elif selected_tab == "candidates" %}
@@ -501,25 +521,44 @@
         <div class="input-pill"><span class="input-pill-label">Min Price</span><span class="input-pill-value">{{ candidates.active_universe_filter.min_price if candidates.active_universe_filter else "Unavailable" }}</span></div>
         <div class="input-pill"><span class="input-pill-label">Min ADV</span><span class="input-pill-value">{{ candidates.active_universe_filter.min_avg_dollar_volume if candidates.active_universe_filter else "Unavailable" }}</span></div>
       </div>
-      <div class="section-label">Pinned Review</div>
-      <form method="post" action="/today/manual-requests" class="form-row">
-        <input type="text" name="ticker" placeholder="Ticker">
-        <input type="text" name="reason" placeholder="Reason">
-        <select name="mode">
-          <option value="review_only">review_only</option>
-          <option value="paper_trade_eligible">paper_trade_eligible</option>
-        </select>
-        <button class="btn btn-primary" type="submit">Pin Review</button>
-      </form>
-      <div class="section-label">Manual Requests</div>
-      {% if candidates.manual_requests %}
-      <table class="compact-table">
-        <thead><tr><th>Ticker</th><th>Reason</th><th>Mode</th><th>Status</th><th>Result</th></tr></thead>
-        <tbody>{% for row in candidates.manual_requests %}<tr><td>{{ row.ticker }}</td><td>{{ row.reason }}</td><td>{{ row.mode }}</td><td>{{ row.status }}</td><td>{{ row.latest_result_status }}</td></tr>{% endfor %}</tbody>
-      </table>
-      {% else %}<p class="detail-muted quiet-empty">No active manual requests.</p>{% endif %}
-      <div class="section-label">Themes</div>
-      {% for row in candidates.themes %}<div class="detail-muted">{{ row.display_name }}</div>{% else %}<p class="detail-muted quiet-empty">No themes.</p>{% endfor %}
+      <section class="surface-block">
+        <div class="section-label">Pinned Review</div>
+        <form method="post" action="/today/manual-requests" class="form-row">
+          <input type="text" name="ticker" placeholder="Ticker">
+          <input type="text" name="reason" placeholder="Reason">
+          <select name="mode">
+            <option value="review_only">review_only</option>
+            <option value="paper_trade_eligible">paper_trade_eligible</option>
+          </select>
+          <button class="btn btn-primary" type="submit">Pin Review</button>
+        </form>
+      </section>
+      <section class="surface-block">
+        <div class="section-label">Manual Requests</div>
+        {% if candidates.manual_requests %}
+        <div class="surface-table-wrap">
+          <table class="compact-table">
+            <thead><tr><th>Ticker</th><th>Reason</th><th>Mode</th><th>Status</th><th>Result</th></tr></thead>
+            <tbody>{% for row in candidates.manual_requests %}<tr><td>{{ row.ticker }}</td><td>{{ row.reason }}</td><td>{{ row.mode }}</td><td>{{ row.status }}</td><td>{{ row.latest_result_status }}</td></tr>{% endfor %}</tbody>
+          </table>
+        </div>
+        {% else %}<p class="detail-muted quiet-empty">No active manual requests.</p>{% endif %}
+      </section>
+      <section class="surface-block">
+        <div class="section-label">Candidate Inventory</div>
+        {% if candidates.rows %}
+        <div class="surface-table-wrap">
+          <table class="compact-table">
+            <thead><tr><th>Ticker</th><th>Source</th><th>Status</th><th>Identity</th><th>Strategy Match</th></tr></thead>
+            <tbody>{% for row in candidates.rows %}<tr><td>{{ row.ticker }}</td><td>{{ row.selection_source }}</td><td>{{ row.result_status }}</td><td>{{ row.trade_identity }}</td><td>{{ row.strategy_match }}</td></tr>{% endfor %}</tbody>
+          </table>
+        </div>
+        {% else %}<p class="detail-muted quiet-empty">No candidates in the active universe.</p>{% endif %}
+      </section>
+      <section class="surface-block">
+        <div class="section-label">Themes</div>
+        {% for row in candidates.themes %}<div class="detail-muted">{{ row.display_name }}</div>{% else %}<p class="detail-muted quiet-empty">No themes.</p>{% endfor %}
+      </section>
     </section>
 
     {% elif selected_tab == "learning-strategies" %}
@@ -539,20 +578,46 @@
           <strong>{{ learning_strategies.learning_factors | length }} active factor{% if learning_strategies.learning_factors|length != 1 %}s{% endif %}</strong>
         </article>
       </div>
-      <div class="section-label">Performance Snapshot</div>
-      {% if learning_strategies.reflection %}
-      <p><strong>Reflection Status:</strong> {{ learning_strategies.reflection.status }}</p>
-      {% for item in learning_strategies.reflection.what_worked %}<div class="detail-muted">{{ item }}</div>{% endfor %}
-      {% else %}<p class="detail-muted quiet-empty">No reflection recorded.</p>{% endif %}
-      <div class="section-label">Strategy Proposals</div>
-      {% if learning_strategies.strategy_proposals %}
-      <div class="surface-table-wrap">
-        <table class="compact-table">
-          <thead><tr><th>Strategy</th><th>Status</th></tr></thead>
-          <tbody>{% for row in learning_strategies.strategy_proposals %}<tr><td>{{ row.proposed_strategy_id }}</td><td>{{ row.proposal_status }}</td></tr>{% endfor %}</tbody>
-        </table>
-      </div>
-      {% else %}<p class="detail-muted quiet-empty">No strategy proposals.</p>{% endif %}
+      <section class="surface-block">
+        <div class="section-label">Performance Snapshot</div>
+        {% if learning_strategies.reflection %}
+        <p><strong>Reflection Status:</strong> {{ learning_strategies.reflection.status }}</p>
+        {% for item in learning_strategies.reflection.what_worked %}<div class="detail-muted">{{ item }}</div>{% endfor %}
+        {% else %}<p class="detail-muted quiet-empty">No reflection recorded.</p>{% endif %}
+      </section>
+      <section class="surface-block">
+        <div class="section-label">Strategy Proposals</div>
+        {% if learning_strategies.strategy_proposals %}
+        <div class="surface-table-wrap">
+          <table class="compact-table">
+            <thead><tr><th>Strategy</th><th>Status</th></tr></thead>
+            <tbody>{% for row in learning_strategies.strategy_proposals %}<tr><td>{{ row.proposed_strategy_id }}</td><td>{{ row.proposal_status }}</td></tr>{% endfor %}</tbody>
+          </table>
+        </div>
+        {% else %}<p class="detail-muted quiet-empty">No strategy proposals.</p>{% endif %}
+      </section>
+      <section class="surface-block">
+        <div class="section-label">Strategy Performance</div>
+        {% if learning_strategies.strategy_performance %}
+        <div class="surface-table-wrap">
+          <table class="compact-table">
+            <thead><tr><th>Strategy</th><th>Status</th><th>Win Rate</th><th>Total P&amp;L</th></tr></thead>
+            <tbody>{% for row in learning_strategies.strategy_performance %}<tr><td>{{ row.strategy_id }}</td><td>{{ row.lifecycle_status }}</td><td>{{ fmt_number(row.win_rate) }}</td><td>{{ fmt_currency(row.total_pnl) }}</td></tr>{% endfor %}</tbody>
+          </table>
+        </div>
+        {% else %}<p class="detail-muted quiet-empty">No strategy performance records.</p>{% endif %}
+      </section>
+      <section class="surface-block">
+        <div class="section-label">Learning Factors</div>
+        {% if learning_strategies.learning_factors %}
+        <div class="surface-table-wrap">
+          <table class="compact-table">
+            <thead><tr><th>Title</th><th>Status</th><th>Scope</th></tr></thead>
+            <tbody>{% for row in learning_strategies.learning_factors %}<tr><td>{{ row.title }}</td><td>{{ row.status }}</td><td>{{ row.scope }}</td></tr>{% endfor %}</tbody>
+          </table>
+        </div>
+        {% else %}<p class="detail-muted quiet-empty">No active learning factors.</p>{% endif %}
+      </section>
     </section>
 
     {% else %}
@@ -568,15 +633,28 @@
           <strong>{{ ops_cost.llm_usage[0].model if ops_cost.llm_usage else "Unavailable" }}</strong>
         </article>
       </div>
-      <div class="section-label">Usage Ledger</div>
-      {% if ops_cost.llm_usage %}
-      <div class="surface-table-wrap">
-        <table class="compact-table">
-          <thead><tr><th>Pipeline</th><th>Provider</th><th>Model</th><th>Estimated Cost</th></tr></thead>
-          <tbody>{% for row in ops_cost.llm_usage %}<tr><td>{{ row.pipeline_name }}</td><td>{{ row.provider }}</td><td>{{ row.model }}</td><td>{{ row.estimated_cost }}</td></tr>{% endfor %}</tbody>
-        </table>
-      </div>
-      {% else %}<p class="detail-muted quiet-empty">No LLM usage events.</p>{% endif %}
+      <section class="surface-block">
+        <div class="section-label">Usage Ledger</div>
+        {% if ops_cost.llm_usage %}
+        <div class="surface-table-wrap">
+          <table class="compact-table">
+            <thead><tr><th>Pipeline</th><th>Provider</th><th>Model</th><th>Estimated Cost</th></tr></thead>
+            <tbody>{% for row in ops_cost.llm_usage %}<tr><td>{{ row.pipeline_name }}</td><td>{{ row.provider }}</td><td>{{ row.model }}</td><td>{{ fmt_currency(row.estimated_cost) }}</td></tr>{% endfor %}</tbody>
+          </table>
+        </div>
+        {% else %}<p class="detail-muted quiet-empty">No LLM usage events.</p>{% endif %}
+      </section>
+      <section class="surface-block">
+        <div class="section-label">Provider Usage</div>
+        {% if ops_cost.provider_usage %}
+        <div class="surface-table-wrap">
+          <table class="compact-table">
+            <thead><tr><th>Provider</th><th>Endpoint</th><th>Status</th><th>Cache</th></tr></thead>
+            <tbody>{% for row in ops_cost.provider_usage %}<tr><td>{{ row.provider }}</td><td>{{ row.endpoint }}</td><td>{{ row.status }}</td><td>{{ row.cache_status }}</td></tr>{% endfor %}</tbody>
+          </table>
+        </div>
+        {% else %}<p class="detail-muted quiet-empty">No provider usage events.</p>{% endif %}
+      </section>
     </section>
     {% endif %}
   </div>

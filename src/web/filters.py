@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
 
 
@@ -21,6 +22,17 @@ def fmt_currency(value: Optional[float]) -> str:
     if value is None:
         return "—"
     return f"${value:,.2f}"
+
+
+def fmt_number(value: Any, decimals: int = 2) -> str:
+    if value is None or value == "":
+        return "—"
+    try:
+        number = Decimal(str(value))
+    except (InvalidOperation, ValueError, TypeError):
+        return str(value)
+    quantized = number.quantize(Decimal(1).scaleb(-decimals))
+    return f"{quantized:,.{decimals}f}"
 
 
 def _coerce_datetime(value: Any) -> Optional[datetime]:
@@ -73,5 +85,6 @@ def register(templates) -> None:
     templates.env.globals["pct"] = pct
     templates.env.globals["fmt_conf"] = fmt_conf
     templates.env.globals["fmt_currency"] = fmt_currency
+    templates.env.globals["fmt_number"] = fmt_number
     templates.env.filters["iso_datetime"] = iso_datetime
     templates.env.filters["local_time"] = local_time

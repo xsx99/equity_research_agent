@@ -223,7 +223,7 @@ def _dashboard_payload() -> dict:
                 },
             ),
             "exposures": (
-                {"factor_type": "sector", "factor_name": "Technology", "exposure": Decimal("0.37")},
+                {"factor_type": "sector", "factor_name": "Technology", "exposure": Decimal("5.2757000000000005")},
             ),
         },
         "candidates": {
@@ -354,6 +354,8 @@ class TestTodayDashboard:
         assert "TSLA" not in response.text
         assert "AI Infrastructure" not in response.text
         assert "gpt-5" not in response.text
+        assert "surface-table-wrap" in response.text
+        assert "surface-block" in response.text
 
     def test_trades_tab_only_renders_trades_workspace_body(self, client):
         payload = _dashboard_payload()
@@ -365,6 +367,7 @@ class TestTodayDashboard:
         assert "trades-canvas" in response.text
         assert "Signal Summary" in response.text
         assert "Breakout confirmed + risk approved" in response.text
+        assert "ticker-card-meta" in response.text
         assert "AI Infrastructure" not in response.text
         assert "gpt-5" not in response.text
         assert "Stock Positions" not in response.text
@@ -460,6 +463,8 @@ class TestTodayDashboard:
         assert "Constraint Snapshot" in response.text
         assert "Exposure Surface" in response.text
         assert "surface-table-wrap" in response.text
+        assert "5.28" in response.text
+        assert "surface-block" in response.text
         assert "trades-canvas" not in response.text
         assert "AI Infrastructure" not in response.text
 
@@ -473,7 +478,9 @@ class TestTodayDashboard:
         assert "Holdings Snapshot" in response.text
         assert "Stock Book" in response.text
         assert "surface-table-wrap" in response.text
-        assert "AAPL" in response.text
+        assert "$2,145.20" in response.text
+        assert "$420.00" in response.text
+        assert "surface-block" in response.text
         assert "trades-canvas" not in response.text
 
     def test_candidates_tab_renders_summary_and_operations_modules(self, client):
@@ -486,6 +493,10 @@ class TestTodayDashboard:
         assert "Universe Snapshot" in response.text
         assert "Manual Review Queue" in response.text
         assert "Theme Monitor" in response.text
+        assert "surface-table-wrap" in response.text
+        assert "surface-block" in response.text
+        assert "Candidate Inventory" in response.text
+        assert "relative_strength_breakout_v1" in response.text
         assert "trades-canvas" not in response.text
         assert "Signal Summary" not in response.text
 
@@ -499,7 +510,11 @@ class TestTodayDashboard:
         assert "Reflection Snapshot" in response.text
         assert "Strategy Pipeline" in response.text
         assert "Performance Snapshot" in response.text
+        assert "surface-block" in response.text
         assert "Bullish catalyst continuation respected" in response.text
+        assert "Strategy Performance" in response.text
+        assert "$4,200.00" in response.text
+        assert "Tighten low-volume gap entries" in response.text
         assert "trades-canvas" not in response.text
 
     def test_ops_cost_tab_renders_summary_first_structure(self, client):
@@ -512,6 +527,10 @@ class TestTodayDashboard:
         assert "LLM Spend" in response.text
         assert "Model Footprint" in response.text
         assert "Usage Ledger" in response.text
+        assert "$12.30" in response.text
+        assert "Provider Usage" in response.text
+        assert "market_bars" in response.text
+        assert "surface-block" in response.text
         assert "gpt-5" in response.text
         assert "trades-canvas" not in response.text
 
@@ -537,6 +556,21 @@ class TestTodayDashboard:
         assert "Signal snapshot updated" in response.text
         assert "Fresh pre-open signal snapshot showed improving relative strength" in response.text
         assert 'data-panel="trend"' not in response.text
+
+    def test_trades_empty_support_copy_uses_quiet_standardized_text(self, client):
+        payload = _dashboard_payload()
+        payload["selected_tab"] = "trades"
+        payload["ticker_workspace"]["detail"]["latest_conclusion"]["signal_summary"]["summary_bullets"] = ()
+        payload["ticker_workspace"]["detail"]["latest_conclusion"]["signal_summary"]["technical_charts"] = ()
+        payload["ticker_workspace"]["detail"]["latest_conclusion"]["signal_summary"]["news_snippets"] = ()
+        payload["ticker_workspace"]["detail"]["latest_conclusion"]["signal_summary"]["fundamental_snippets"] = ()
+        payload["ticker_workspace"]["detail"]["latest_conclusion"]["position_execution"]["summary"] = None
+        with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
+            response = client.get("/today?tab=trades&ticker=AAPL")
+
+        assert response.status_code == 200
+        assert "surface-empty-copy" in response.text
+        assert "Unavailable." in response.text
 
     def test_today_dashboard_renders_selectable_ticker_cards_and_active_marker(self, client):
         payload = _dashboard_payload()
