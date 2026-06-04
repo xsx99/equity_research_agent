@@ -55,6 +55,8 @@
    Wire daily jobs, standalone smoke scripts, and deployment/runbook docs.
 14. **PR 13: Live Preopen Pipeline**
    Replace the fixture-backed morning runtime with a production-wired preopen pipeline that loads live config from Postgres, uses real providers and broker state, persists trading artifacts, and can safely drive the morning decision path end-to-end.
+15. **PR 14: Runtime Structure And Live Phase Roadmap**
+   Split the mixed scheduler/runtime shell into a dispatch-only facade plus phase-specific live runtime modules, preserve the existing scheduler/CLI operator surface, migrate manual review/intraday/reflection/strategy-evolution onto dedicated live runtimes, and keep fixture behavior smoke-only.
 
 ## PR Module Files
 
@@ -74,5 +76,6 @@
 | PR 11 | [pr_11_today_dashboard_ui.md](pr_11_today_dashboard_ui.md) |
 | PR 12 | [pr_12_scheduler_smoke_deploy_docs.md](pr_12_scheduler_smoke_deploy_docs.md) |
 | PR 13 | [pr_13_live_preopen_pipeline.md](pr_13_live_preopen_pipeline.md) |
+| PR 14 | [pr_14_runtime_structure_live_phase_roadmap.md](pr_14_runtime_structure_live_phase_roadmap.md) |
 
 ---

@@ -45,6 +45,8 @@ Then read only the design modules listed for the target PR below. Expand beyond 
 | PR 10 | [Strategy Evolution](pr_10_strategy_evolution.md) | D03, D05, D07, D08 | G2, G3; strategy proposals, duplicate control, lifecycle gates | PR 9 learning/proposal hints; PR 3 outcome evidence |
 | PR 11 | [Today Dashboard UI](pr_11_today_dashboard_ui.md) | D08, D09 | UI contract; read-only audit views; limited user config/manual-request mutations | All implemented repositories/read models for tabs being built |
 | PR 12 | [Scheduler, Smoke Tests, Deploy Docs](pr_12_scheduler_smoke_deploy_docs.md) | D04, D05, D06, D09 | Operational flow, standalone smoke tests, persistent Postgres storage | All completed pipeline entrypoints and existing scheduler/deploy docs |
+| PR 13 | [Live Preopen Pipeline](pr_13_live_preopen_pipeline.md) | D02, D04, D05, D06, D08, D09 | Live morning runtime, Postgres-backed source/signal/trading persistence, broker-backed portfolio context, guarded paper execution | PR 12 scheduler/runtime shell; PR 2/3/5 persistence contracts; PR 6 broker portfolio state |
+| PR 14 | [Runtime Structure And Live Phase Roadmap](pr_14_runtime_structure_live_phase_roadmap.md) | D02, D05, D06, D07, D08, D09 | Runtime boundaries, phase dispatch, intraday/manual-review live assembly, post-close request assembly, stable operator surface | PR 12 runtime/scheduler shell; PR 13 preopen live runtime; PR 8/9/10 phase pipelines and persistence |
 
 ## PR 11 Tab-Specific Expansion
 

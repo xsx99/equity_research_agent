@@ -44,6 +44,7 @@ This directory is the canonical modular version of the trading-agent refactor pl
 | [PR 11](implementation/pr_11_today_dashboard_ui.md) | Today dashboard UI |
 | [PR 12](implementation/pr_12_scheduler_smoke_deploy_docs.md) | Scheduler, smoke tests, and deploy docs |
 | [PR 13](implementation/pr_13_live_preopen_pipeline.md) | Live preopen pipeline |
+| [PR 14](implementation/pr_14_runtime_structure_live_phase_roadmap.md) | Runtime structure and live phase roadmap |
 
 ## Equivalence Policy
 
