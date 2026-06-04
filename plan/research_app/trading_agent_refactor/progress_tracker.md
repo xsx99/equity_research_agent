@@ -1,5 +1,10 @@
 # Trading Agent Refactor Progress Tracker
 
+## 2026-06-03
+
+- Added ticker-first `/today` dashboard redesign spec at `docs/superpowers/specs/2026-06-03-ticker-first-today-dashboard-design.md` and committed it as `5727c2f`.
+- Added follow-up implementation plan `plan/research_app/trading_agent_refactor/implementation/pr_11a_ticker_first_today_dashboard.md` for the ticker-first refinement of PR 11. Planned scope: attention-first ticker rail, latest-conclusion-first ticker detail, technical chart evidence, and news/fundamental snippet summaries.
+
 ## 2026-05-29
 
 - Created the V2 staged implementation plan, now modularized under `plan/research_app/trading_agent_refactor/implementation/`.
