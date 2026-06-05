@@ -1012,6 +1012,40 @@ class TestTodayDashboard:
         assert "direct negative catalyst" in history["UBER"]["summary"][0].lower()
         assert "below sma20" in history["UBER"]["technical"][0]["summary"].lower()
 
+    def test_load_candidate_rows_translates_operator_facing_labels(self):
+        from src.web.routers.today import _load_candidate_rows
+
+        session = MagicMock()
+        session.query.return_value = _ListQuery(
+            [
+                SimpleNamespace(
+                    ticker="UBER",
+                    selection_source="direct_negative_catalyst",
+                    rejection_reason="blocked_by_missing_data",
+                    strategy_id="valuation_repair_quality_software_v1",
+                    trade_classifications=[SimpleNamespace(trade_identity="watch_only")],
+                    decision_time=datetime(2026, 6, 3, 23, 25, 34, tzinfo=timezone.utc),
+                    candidate_score=Decimal("0.32"),
+                )
+            ]
+        )
+
+        rows = _load_candidate_rows(session)
+
+        assert rows == (
+            {
+                "ticker": "UBER",
+                "selection_source": "direct_negative_catalyst",
+                "selection_source_label": "Negative catalyst detected",
+                "result_status": "blocked_by_missing_data",
+                "result_status_label": "Blocked: required data unavailable",
+                "trade_identity": "watch_only",
+                "trade_identity_label": "Watch Only",
+                "strategy_match": "valuation_repair_quality_software_v1",
+                "strategy_match_label": "Valuation repair setup",
+            },
+        )
+
     def test_load_news_and_fundamentals_by_ticker_map_real_snapshot_and_event_rows(self):
         from src.web.routers.today import _load_fundamentals_by_ticker, _load_news_by_ticker
 

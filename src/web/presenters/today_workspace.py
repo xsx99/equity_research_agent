@@ -4,6 +4,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from src.web.presenters.today_copy import expression_bucket_label, risk_status_label, strategy_label
+
 _ACTIONABLE_DECISIONS = {"enter_long", "enter_short", "trim", "exit"}
 _ACTIONABLE_ORDER_STATUSES = {"pending", "accepted", "partial_fill"}
 _EMPTY_MARKER = "No material update"
@@ -220,7 +222,9 @@ def _build_detail(
             "value": latest_decision.get("decision"),
             "label": _humanize_label(latest_decision.get("decision")) or _EMPTY_MARKER,
             "strategy_id": latest_decision.get("selected_strategy_id") or _EMPTY_MARKER,
+            "strategy_label": strategy_label(latest_decision.get("selected_strategy_id")) or _EMPTY_MARKER,
             "expression_bucket_id": latest_decision.get("expression_bucket_id") or _EMPTY_MARKER,
+            "expression_bucket_label": expression_bucket_label(latest_decision.get("expression_bucket_id")) or _EMPTY_MARKER,
             "confidence": latest_decision.get("confidence"),
         },
         "signal_summary": {
@@ -231,6 +235,7 @@ def _build_detail(
         },
         "risk_summary": {
             "status": risk.get("status") or _EMPTY_MARKER,
+            "status_label": risk_status_label(risk.get("status")) or _EMPTY_MARKER,
             "reason": risk.get("reason") or _EMPTY_MARKER,
         },
         "position_execution": {
@@ -396,7 +401,9 @@ def _build_decision_list(decisions: list[dict[str, Any]]) -> list[dict[str, Any]
             "decision": _humanize_label(item.get("decision")) or _EMPTY_MARKER,
             "confidence": item.get("confidence"),
             "strategy_id": item.get("selected_strategy_id") or _EMPTY_MARKER,
+            "strategy_label": strategy_label(item.get("selected_strategy_id")) or _EMPTY_MARKER,
             "expression_bucket_id": item.get("expression_bucket_id") or _EMPTY_MARKER,
+            "expression_bucket_label": expression_bucket_label(item.get("expression_bucket_id")) or _EMPTY_MARKER,
             "detail_anchor": f"decision-{index}",
         }
         summary = _decision_list_summary(item)

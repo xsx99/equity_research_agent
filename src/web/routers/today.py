@@ -41,6 +41,11 @@ from src.db.models.trading import (
     UniverseFilterConfig,
 )
 from src.web.flash import flash, get_flash
+from src.web.presenters.today_copy import (
+    candidate_result_label,
+    strategy_label,
+    trade_identity_label,
+)
 from src.web.presenters.today_workspace import build_ticker_workspace
 
 router = APIRouter()
@@ -645,9 +650,15 @@ def _load_candidate_rows(session: Any) -> tuple[dict[str, Any], ...]:
         {
             "ticker": row.ticker,
             "selection_source": row.selection_source,
+            "selection_source_label": strategy_label(row.selection_source),
             "result_status": row.rejection_reason or "candidate",
+            "result_status_label": candidate_result_label(row.rejection_reason or "candidate"),
             "trade_identity": row.trade_classifications[0].trade_identity if row.trade_classifications else None,
+            "trade_identity_label": trade_identity_label(
+                row.trade_classifications[0].trade_identity if row.trade_classifications else None
+            ),
             "strategy_match": row.strategy_id,
+            "strategy_match_label": strategy_label(row.strategy_id),
         }
         for row in rows
     )

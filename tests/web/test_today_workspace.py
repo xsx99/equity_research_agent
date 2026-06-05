@@ -378,6 +378,8 @@ def test_build_ticker_workspace_shapes_latest_conclusion_and_evidence():
 
     assert latest_conclusion["trade_decision"]["label"] == "Enter Long"
     assert latest_conclusion["trade_decision"]["strategy_id"] == "valuation_repair_quality_software_v1"
+    assert latest_conclusion["trade_decision"]["strategy_label"] == "Valuation repair setup"
+    assert latest_conclusion["trade_decision"]["expression_bucket_label"] == "Long Stock"
     assert latest_conclusion["signal_summary"]["summary_bullets"] == [
         "relative strength improving vs QQQ",
         "price holding above key breakout",
@@ -404,6 +406,7 @@ def test_build_ticker_workspace_shapes_latest_conclusion_and_evidence():
     }
     assert latest_conclusion["signal_summary"]["fundamental_snippets"][0]["title"] == "Margin outlook"
     assert latest_conclusion["risk_summary"]["status"] == "approved"
+    assert latest_conclusion["risk_summary"]["status_label"] == "Approved"
     assert latest_conclusion["position_execution"]["position"]["pnl"] == "+2.1%"
 
     assert detail["tabs"]["timeline"] == [
@@ -451,7 +454,9 @@ def test_build_ticker_workspace_shapes_latest_conclusion_and_evidence():
             "decision": "Trim",
             "confidence": 0.52,
             "strategy_id": "valuation_repair_quality_software_v1",
+            "strategy_label": "Valuation repair setup",
             "expression_bucket_id": "long_stock",
+            "expression_bucket_label": "Long Stock",
             "detail_anchor": "decision-1",
         },
         {
@@ -459,7 +464,9 @@ def test_build_ticker_workspace_shapes_latest_conclusion_and_evidence():
             "decision": "Enter Long",
             "confidence": 0.78,
             "strategy_id": "valuation_repair_quality_software_v1",
+            "strategy_label": "Valuation repair setup",
             "expression_bucket_id": "long_stock",
+            "expression_bucket_label": "Long Stock",
             "detail_anchor": "decision-2",
         }
     ]
@@ -515,7 +522,9 @@ def test_build_ticker_workspace_surfaces_later_undated_decision_consistently():
             "decision": "Trim",
             "confidence": 0.41,
             "strategy_id": "older_strategy",
+            "strategy_label": "Older Strategy",
             "expression_bucket_id": "long_stock",
+            "expression_bucket_label": "Long Stock",
             "detail_anchor": "decision-1",
         },
         {
@@ -523,7 +532,9 @@ def test_build_ticker_workspace_surfaces_later_undated_decision_consistently():
             "decision": "Enter Long",
             "confidence": 0.78,
             "strategy_id": "latest_strategy",
+            "strategy_label": "Latest Strategy",
             "expression_bucket_id": "long_stock",
+            "expression_bucket_label": "Long Stock",
             "detail_anchor": "decision-2",
         },
         {
@@ -531,7 +542,9 @@ def test_build_ticker_workspace_surfaces_later_undated_decision_consistently():
             "decision": "Exit",
             "confidence": 0.12,
             "strategy_id": "undated_strategy",
+            "strategy_label": "Undated Strategy",
             "expression_bucket_id": "long_stock",
+            "expression_bucket_label": "Long Stock",
             "detail_anchor": "decision-3",
         },
     ]
@@ -615,7 +628,9 @@ def test_build_ticker_workspace_orders_timeline_and_decisions_by_real_datetimes(
             "decision": "Trim",
             "confidence": 0.51,
             "strategy_id": "offset_plus_two",
+            "strategy_label": "Offset Plus Two",
             "expression_bucket_id": "long_stock",
+            "expression_bucket_label": "Long Stock",
             "detail_anchor": "decision-1",
         },
         {
@@ -623,7 +638,9 @@ def test_build_ticker_workspace_orders_timeline_and_decisions_by_real_datetimes(
             "decision": "Enter Long",
             "confidence": 0.82,
             "strategy_id": "utc_latest",
+            "strategy_label": "Utc Latest",
             "expression_bucket_id": "long_stock",
+            "expression_bucket_label": "Long Stock",
             "detail_anchor": "decision-2",
         },
     ]
@@ -693,7 +710,9 @@ def test_build_ticker_workspace_keeps_all_undated_decisions_consistent():
             "decision": "Trim",
             "confidence": 0.41,
             "strategy_id": "first_strategy",
+            "strategy_label": "First Strategy",
             "expression_bucket_id": "long_stock",
+            "expression_bucket_label": "Long Stock",
             "detail_anchor": "decision-1",
         },
         {
@@ -701,7 +720,9 @@ def test_build_ticker_workspace_keeps_all_undated_decisions_consistent():
             "decision": "Enter Long",
             "confidence": 0.78,
             "strategy_id": "latest_strategy",
+            "strategy_label": "Latest Strategy",
             "expression_bucket_id": "long_stock",
+            "expression_bucket_label": "Long Stock",
             "detail_anchor": "decision-2",
         },
     ]
@@ -886,7 +907,9 @@ def test_build_ticker_workspace_uses_empty_state_markers_when_detail_inputs_are_
             "decision": "No Trade",
             "confidence": None,
             "strategy_id": "No material update",
+            "strategy_label": "No material update",
             "expression_bucket_id": "No material update",
+            "expression_bucket_label": "No material update",
             "detail_anchor": "decision-1",
         }
     ]
@@ -947,7 +970,9 @@ def test_build_ticker_workspace_surfaces_trade_reasoning_in_latest_conclusion_an
             "decision": "No Trade",
             "confidence": 0.35,
             "strategy_id": "valuation_repair_quality_software_v1",
+            "strategy_label": "Valuation repair setup",
             "expression_bucket_id": "long_stock",
+            "expression_bucket_label": "Long Stock",
             "summary": "direct company-level negative catalyst blocks bullish candidate",
             "detail_anchor": "decision-1",
         }
