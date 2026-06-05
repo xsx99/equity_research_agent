@@ -124,12 +124,12 @@ Every scheduler-facing phase report should normalize onto:
 - Modify: `src/trading/runtime.py`
 - Modify: `scripts/run_trading_smoke_test.py`
 
-- [ ] Write failing dispatch tests that prove `run_job_phase(...)` and `run_smoke_mode(...)` still expose the same public contract while delegating to external handlers.
-- [ ] Run the new focused dispatch tests and confirm they fail because the runtime facade still contains inline logic.
-- [ ] Move smoke-only fixture handlers, fixture builders, and fake helper data out of `src/trading/runtime.py` into `src/trading/runtime_smoke.py`.
-- [ ] Reduce `src/trading/runtime.py` to exported constants and stable dispatch functions only.
-- [ ] Keep all current smoke-mode names unchanged.
-- [ ] Re-run the focused dispatch tests and confirm they pass.
+- [x] Write failing dispatch tests that prove `run_job_phase(...)` and `run_smoke_mode(...)` still expose the same public contract while delegating to external handlers.
+- [x] Run the new focused dispatch tests and confirm they fail because the runtime facade still contains inline logic.
+- [x] Move smoke-only fixture handlers, fixture builders, and fake helper data out of `src/trading/runtime.py` into `src/trading/runtime_smoke.py`.
+- [x] Reduce `src/trading/runtime.py` to exported constants and stable dispatch functions only.
+- [x] Keep all current smoke-mode names unchanged.
+- [x] Re-run the focused dispatch tests and confirm they pass.
 
 ## Task 2: Extract Shared Live Runtime Support
 
@@ -139,15 +139,15 @@ Every scheduler-facing phase report should normalize onto:
 - Test: `tests/trading/test_runtime_live.py`
 - Test: `tests/trading/test_runtime_dispatch.py`
 
-- [ ] Write failing tests that lock the preopen live runtime public behavior before extracting shared helpers.
-- [ ] Run the preopen runtime tests and confirm the expected RED state for any new helper boundaries.
-- [ ] Extract shared bootstrap utilities only where multiple live phase modules will reuse them:
+- [x] Write failing tests that lock the preopen live runtime public behavior before extracting shared helpers.
+- [x] Run the preopen runtime tests and confirm the expected RED state for any new helper boundaries.
+- [x] Extract shared bootstrap utilities only where multiple live phase modules will reuse them:
   - session-scoped repository/provider construction
   - prompt-registry/model bootstrap
   - standardized runtime report helpers
   - optional paper-execution policy helpers
-- [ ] Keep `run_live_preopen_once(...)` and `build_live_preopen_dependencies(...)` externally compatible.
-- [ ] Re-run the focused preopen and dispatch tests and confirm they pass.
+- [x] Keep `run_live_preopen_once(...)` and `build_live_preopen_dependencies(...)` externally compatible.
+- [x] Re-run the focused preopen and dispatch tests and confirm they pass.
 
 ## Task 3: Add The Live Manual Review Runtime
 
@@ -158,15 +158,15 @@ Every scheduler-facing phase report should normalize onto:
 - Modify: `src/trading/runtime.py`
 - Test: `tests/trading/test_runtime_manual_review_live.py`
 
-- [ ] Write failing orchestration tests for a live manual-review runtime that:
+- [x] Write failing orchestration tests for a live manual-review runtime that:
   - loads active manual requests from Postgres
   - evaluates only requested tickers
   - respects `review_only` vs `paper_trade_eligible`
   - records evaluation metadata/status back to `manual_ticker_requests`
-- [ ] Run the focused manual-review runtime tests and confirm failure for the expected missing module/API reasons.
-- [ ] Implement a dedicated live manual-review runtime that reuses the same signal, strategy, trading-decision, sizing, and risk path as preopen, but with request-scoped ticker loading instead of a full universe scan.
-- [ ] Keep scheduler-facing `run_job_phase("manual_review")` stable while routing it to the new runtime.
-- [ ] Re-run the focused manual-review runtime tests and confirm they pass.
+- [x] Run the focused manual-review runtime tests and confirm failure for the expected missing module/API reasons.
+- [x] Implement a dedicated live manual-review runtime that reuses the same signal, strategy, trading-decision, sizing, and risk path as preopen, but with request-scoped ticker loading instead of a full universe scan.
+- [x] Keep scheduler-facing `run_job_phase("manual_review")` stable while routing it to the new runtime.
+- [x] Re-run the focused manual-review runtime tests and confirm they pass.
 
 ## Task 4: Add The Live Intraday Refresh And Rebalance Runtime
 
@@ -177,17 +177,17 @@ Every scheduler-facing phase report should normalize onto:
 - Modify: `src/trading/runtime.py`
 - Test: `tests/trading/test_runtime_intraday_live.py`
 
-- [ ] Write failing orchestration tests for a live intraday runtime that:
+- [x] Write failing orchestration tests for a live intraday runtime that:
   - loads the intraday ticker scope from open positions, same-day trades/open orders, top morning candidates, active manual requests, and relevant option positions/exposures
   - loads each ticker’s preopen baseline and prior intraday snapshot
   - persists `intraday_signal_scans`, `intraday_signal_snapshots`, and `news_alerts`
   - runs `IntradayRebalancePipeline`
   - flows rebalance outputs through sizing/risk and optional paper execution
-- [ ] Run the focused intraday runtime tests and confirm failure for the expected missing assembly logic.
-- [ ] Implement the live intraday runtime with dry-run execution by default.
-- [ ] Remove fixture-based scheduler behavior so `run_job_phase("intraday_refresh")` always uses the live path.
-- [ ] Preserve `intraday_refresh_fixture` as a smoke mode only.
-- [ ] Re-run the focused intraday runtime tests and confirm they pass.
+- [x] Run the focused intraday runtime tests and confirm failure for the expected missing assembly logic.
+- [x] Implement the live intraday runtime with dry-run execution by default.
+- [x] Remove fixture-based scheduler behavior so `run_job_phase("intraday_refresh")` always uses the live path.
+- [x] Preserve `intraday_refresh_fixture` as a smoke mode only.
+- [x] Re-run the focused intraday runtime tests and confirm they pass.
 
 ## Task 5: Add The Live Reflection Runtime
 
@@ -197,7 +197,7 @@ Every scheduler-facing phase report should normalize onto:
 - Modify: `src/trading/runtime.py`
 - Test: `tests/trading/test_runtime_reflection_live.py`
 
-- [ ] Write failing tests for reflection request assembly from persisted same-trade-date artifacts:
+- [x] Write failing tests for reflection request assembly from persisted same-trade-date artifacts:
   - portfolio outcome and portfolio snapshots
   - morning macro snapshot
   - strategy candidates and trading decisions
@@ -207,11 +207,11 @@ Every scheduler-facing phase report should normalize onto:
   - risk snapshots/exposures
   - candidate outcome evaluations
   - option artifacts and learning factors used
-- [ ] Run the focused reflection runtime tests and confirm failure because no live request-assembly layer exists yet.
-- [ ] Implement the live reflection runtime and request builder.
-- [ ] Return `status="skipped"` with explicit reasons when minimum required post-close inputs are unavailable.
-- [ ] Keep scheduler-facing `run_job_phase("reflection")` stable while routing it to the new live runtime.
-- [ ] Re-run the focused reflection runtime tests and confirm they pass.
+- [x] Run the focused reflection runtime tests and confirm failure because no live request-assembly layer exists yet.
+- [x] Implement the live reflection runtime and request builder.
+- [x] Return `status="skipped"` with explicit reasons when minimum required post-close inputs are unavailable.
+- [x] Keep scheduler-facing `run_job_phase("reflection")` stable while routing it to the new live runtime.
+- [x] Re-run the focused reflection runtime tests and confirm they pass.
 
 ## Task 6: Add The Live Strategy Evolution Runtime
 
@@ -221,12 +221,12 @@ Every scheduler-facing phase report should normalize onto:
 - Modify: `src/trading/runtime.py`
 - Test: `tests/trading/test_runtime_strategy_evolution_live.py`
 
-- [ ] Write failing tests for strategy-evolution request assembly from persisted reflection outputs, learning factors, rejected candidates, and outcome evaluations.
-- [ ] Run the focused strategy-evolution runtime tests and confirm failure because no live request builder exists yet.
-- [ ] Implement the live strategy-evolution runtime and request builder.
-- [ ] Return `status="skipped"` when same-day reflection or other minimum prerequisites are absent.
-- [ ] Keep scheduler-facing `run_job_phase("strategy_evolution")` stable while routing it to the new live runtime.
-- [ ] Re-run the focused strategy-evolution runtime tests and confirm they pass.
+- [x] Write failing tests for strategy-evolution request assembly from persisted reflection outputs, learning factors, rejected candidates, and outcome evaluations.
+- [x] Run the focused strategy-evolution runtime tests and confirm failure because no live request builder exists yet.
+- [x] Implement the live strategy-evolution runtime and request builder.
+- [x] Return `status="skipped"` when same-day reflection or other minimum prerequisites are absent.
+- [x] Keep scheduler-facing `run_job_phase("strategy_evolution")` stable while routing it to the new live runtime.
+- [x] Re-run the focused strategy-evolution runtime tests and confirm they pass.
 
 ## Task 7: Normalize CLI, Scheduler, And Reporting Semantics
 
@@ -240,12 +240,12 @@ Every scheduler-facing phase report should normalize onto:
 - Test: `tests/scripts/test_run_trading_once.py`
 - Test: `tests/test_scheduler_jobs.py`
 
-- [ ] Write failing tests that lock the existing public CLI/scheduler contract while allowing `skipped` runtime results.
-- [ ] Run the focused CLI/scheduler tests and confirm the expected RED state if result semantics changed.
-- [ ] Ensure every scheduler job still calls `run_job_phase(...)` with the same phase strings.
-- [ ] Make `scripts/run_trading_once.py` continue to accept the existing `--phase` surface, with only minimal additions if a phase needs an explicit execution flag.
-- [ ] Make sure `status="skipped"` is surfaced clearly in JSON output and logs without pretending the phase passed.
-- [ ] Re-run the focused CLI/scheduler tests and confirm they pass.
+- [x] Write failing tests that lock the existing public CLI/scheduler contract while allowing `skipped` runtime results.
+- [x] Run the focused CLI/scheduler tests and confirm the expected RED state if result semantics changed.
+- [x] Ensure every scheduler job still calls `run_job_phase(...)` with the same phase strings.
+- [x] Make `scripts/run_trading_once.py` continue to accept the existing `--phase` surface, with only minimal additions if a phase needs an explicit execution flag.
+- [x] Make sure `status="skipped"` is surfaced clearly in JSON output and logs without pretending the phase passed.
+- [x] Re-run the focused CLI/scheduler tests and confirm they pass.
 
 ## Task 8: Update Operational Docs And Final Verification
 
@@ -254,10 +254,10 @@ Every scheduler-facing phase report should normalize onto:
 - Modify: `documents/repo_overview.md`
 - Modify: `plan/research_app/trading_agent_refactor/progress_tracker.md`
 
-- [ ] Update the runbook to clarify that scheduler-facing trading phases now use live runtimes, fixture paths are smoke-only, and post-close phases can return `skipped` when prerequisites are absent.
-- [ ] Update `documents/repo_overview.md` to reflect the new phase-oriented runtime structure.
-- [ ] Append the implementation results and verification commands to the progress tracker after the code lands.
-- [ ] Run the focused runtime test files, the scheduler/CLI tests, the relevant broader trading suites, and `git diff --check`.
+- [x] Update the runbook to clarify that scheduler-facing trading phases now use live runtimes, fixture paths are smoke-only, and post-close phases can return `skipped` when prerequisites are absent.
+- [x] Update `documents/repo_overview.md` to reflect the new phase-oriented runtime structure.
+- [x] Append the implementation results and verification commands to the progress tracker after the code lands.
+- [x] Run the focused runtime test files, the scheduler/CLI tests, the relevant broader trading suites, and `git diff --check`.
 - [ ] Run at least one opt-in live smoke for `preopen` and one for `intraday_refresh`, and record exact commands/results in the tracker.
 
 ## Verification Expectations
