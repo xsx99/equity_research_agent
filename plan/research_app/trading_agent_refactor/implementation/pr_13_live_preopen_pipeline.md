@@ -1,5 +1,7 @@
 # Live Preopen Pipeline Implementation Plan
 
+> **Current path note:** the canonical preopen runtime now lives under `src/trading/runtime/preopen.py`. Historical references in this slice to `src/trading/runtime_live.py` reflect the original landing path before the runtime package cleanup.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Upgrade the PR 12 fixture-backed trading preopen runtime into a real live preopen pipeline that loads production configuration from Postgres, uses real providers/broker state, persists trading artifacts to Postgres, and can safely drive the morning decision path end-to-end.

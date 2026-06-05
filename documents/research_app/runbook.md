@@ -108,7 +108,7 @@ python scripts/run_trading_once.py --phase reflection --json
 python scripts/run_trading_once.py --phase strategy_evolution --json
 ```
 
-The trading runtime now uses a split structure: `src/trading/runtime.py` is a thin scheduler/CLI facade, `src/trading/runtime_live.py` owns the live preopen path, `src/trading/runtime_manual_review_live.py` owns the live manual-review path, `src/trading/runtime_intraday_live.py` owns the live intraday refresh path, `src/trading/runtime_reflection_live.py` owns the live post-close reflection path, `src/trading/runtime_strategy_evolution_live.py` owns the live strategy-evolution path, and fixture-only smoke helpers live under `src/trading/runtime_smoke.py`. Scheduler jobs and `scripts/run_trading_once.py` still keep the same phase strings and public entrypoint.
+The trading runtime now uses a split package structure: `src/trading/runtime/__init__.py` exposes the stable scheduler/CLI facade, `src/trading/runtime/preopen.py` owns the live preopen path, `src/trading/runtime/manual_review.py` owns the live manual-review path, `src/trading/runtime/intraday_refresh.py` owns the live intraday refresh path, `src/trading/runtime/reflection.py` owns the live post-close reflection path, `src/trading/runtime/strategy_evolution.py` owns the live strategy-evolution path, and fixture-only smoke helpers live under `src/trading/runtime/smoke.py`. Scheduler jobs and `scripts/run_trading_once.py` still keep the same phase strings and public entrypoint.
 
 ## Trading Smoke Test Modes
 

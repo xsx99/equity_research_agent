@@ -1,5 +1,7 @@
 # Runtime Structure And Live Phase Roadmap Implementation Plan
 
+> **Current path note:** the canonical runtime implementation now lives under `src/trading/runtime/`. Historical references in this slice to root-level files such as `src/trading/runtime_live.py` or `src/trading/runtime_dispatch.py` map to `src/trading/runtime/preopen.py` and `src/trading/runtime/dispatch.py`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace the mixed scheduler/fixture runtime shell with a phase-oriented trading runtime structure, keep the public scheduler/CLI surface stable, and migrate every scheduler-facing trading phase onto explicit live runtime modules.

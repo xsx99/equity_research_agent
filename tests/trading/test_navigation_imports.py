@@ -8,8 +8,6 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_trading_workflow_paths_export_pipeline_entrypoints():
-    from src.trading.reflection_pipeline import ReflectionPipeline
-    from src.trading.strategy_evolution import StrategyEvolutionPipeline
     from src.trading.workflows.paper_execution import PaperExecutionWorkflow
     from src.trading.workflows.signal_snapshot import SignalPipeline
     from src.trading.workflows.strategy_scoring import StrategyPipeline
@@ -21,8 +19,6 @@ def test_trading_workflow_paths_export_pipeline_entrypoints():
     assert SignalPipeline.__name__ == "SignalPipeline"
     assert StrategyPipeline.__name__ == "StrategyPipeline"
     assert TradingDecisionPipeline.__name__ == "TradingDecisionPipeline"
-    assert ReflectionPipeline.__name__ == "ReflectionPipeline"
-    assert StrategyEvolutionPipeline.__name__ == "StrategyEvolutionPipeline"
 
 
 def test_trading_canonical_runtime_and_post_close_paths_export_entrypoints():
@@ -146,10 +142,21 @@ def test_trading_root_no_longer_contains_compatibility_modules():
         "src/trading/primary_strategy_selector.py",
         "src/trading/provider_resilience.py",
         "src/trading/repository.py",
+        "src/trading/reflection",
+        "src/trading/reflection_pipeline.py",
         "src/trading/relationships.py",
+        "src/trading/runtime_dispatch.py",
+        "src/trading/runtime_intraday_live.py",
+        "src/trading/runtime_live.py",
+        "src/trading/runtime_manual_review_live.py",
+        "src/trading/runtime_reflection_live.py",
+        "src/trading/runtime_smoke.py",
+        "src/trading/runtime_strategy_evolution_live.py",
+        "src/trading/runtime_support.py",
         "src/trading/signal_sources.py",
         "src/trading/source_ingestion.py",
         "src/trading/strategy_catalog.py",
+        "src/trading/strategy_evolution.py",
         "src/trading/strategy_matching.py",
         "src/trading/technical_signals.py",
         "src/trading/trade_classifier.py",
