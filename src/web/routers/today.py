@@ -178,7 +178,9 @@ def load_today_dashboard(
 
     trade_rows = _load_trade_rows(session)
     positions = _load_positions(session)
+    closed_positions = _load_recent_closed_positions(session)
     positions_by_ticker = _group_latest_by_ticker(positions)
+    closed_positions_by_ticker = _group_latest_by_ticker(closed_positions)
     risk_by_ticker = _load_risk_by_ticker(session)
     signal_history_by_ticker = _load_signal_history_by_ticker(session)
     news_by_ticker = _load_news_by_ticker(session)
@@ -187,6 +189,7 @@ def load_today_dashboard(
         trade_rows=trade_rows,
         selected_ticker=selected_ticker,
         positions_by_ticker=positions_by_ticker,
+        closed_positions_by_ticker=closed_positions_by_ticker,
         risk_by_ticker=risk_by_ticker,
         signal_history_by_ticker=signal_history_by_ticker,
         news_by_ticker=news_by_ticker,
@@ -201,6 +204,7 @@ def load_today_dashboard(
         trade_rows=trade_rows,
         selected_ticker=ticker_workspace.get("selected_ticker"),
         positions_by_ticker=positions_by_ticker,
+        closed_positions_by_ticker=closed_positions_by_ticker,
         risk_by_ticker=risk_by_ticker,
         signal_history_by_ticker=signal_history_by_ticker,
         news_by_ticker=news_by_ticker,
@@ -436,6 +440,30 @@ def _load_positions(session: Any) -> tuple[dict[str, Any], ...]:
             "strategy_id": row.strategy_id,
             "quantity": row.quantity,
             "market_value": row.market_value,
+        }
+        for row in rows
+    )
+
+
+def _load_recent_closed_positions(session: Any) -> tuple[dict[str, Any], ...]:
+    rows = (
+        session.query(PaperPosition)
+        .filter(PaperPosition.status == "closed")
+        .order_by(PaperPosition.closed_at.desc(), PaperPosition.updated_at.desc())
+        .limit(25)
+        .all()
+    )
+    return tuple(
+        {
+            "ticker": row.ticker,
+            "trade_identity": row.trade_identity,
+            "strategy_id": row.strategy_id,
+            "quantity": row.quantity,
+            "market_value": row.market_value,
+            "opened_at": row.opened_at,
+            "updated_at": row.updated_at,
+            "closed_at": row.closed_at,
+            "status": row.status,
         }
         for row in rows
     )

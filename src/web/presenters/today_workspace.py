@@ -20,12 +20,16 @@ def build_ticker_workspace(
     trade_rows,
     selected_ticker,
     positions_by_ticker,
+    closed_positions_by_ticker=None,
     risk_by_ticker,
     signal_history_by_ticker,
     news_by_ticker,
     fundamentals_by_ticker,
 ):
     normalized_positions = {_normalize_ticker(ticker): payload for ticker, payload in positions_by_ticker.items()}
+    normalized_closed_positions = {
+        _normalize_ticker(ticker): payload for ticker, payload in (closed_positions_by_ticker or {}).items()
+    }
     normalized_risk = {_normalize_ticker(ticker): payload for ticker, payload in risk_by_ticker.items()}
     normalized_signal_history = {
         _normalize_ticker(ticker): payload for ticker, payload in signal_history_by_ticker.items()
@@ -38,6 +42,7 @@ def build_ticker_workspace(
     ticker_items = _build_ticker_items(
         rows_by_ticker=rows_by_ticker,
         positions_by_ticker=normalized_positions,
+        closed_positions_by_ticker=normalized_closed_positions,
         risk_by_ticker=normalized_risk,
         signal_history_by_ticker=normalized_signal_history,
         news_by_ticker=normalized_news,
@@ -45,18 +50,32 @@ def build_ticker_workspace(
     )
     buckets = {
         "action_now": [],
-        "in_position": [],
+        "open_positions": [],
+        "closed_today": [],
+        "reviewing": [],
         "watch": [],
     }
 
     for item in ticker_items:
         ticker = item["ticker"]
         if _is_action_now(item):
+            item["primary_state"] = "action_now"
             buckets["action_now"].append(item)
+        elif ticker in normalized_closed_positions:
+            item["primary_state"] = "closed"
+            buckets["closed_today"].append(item)
         elif ticker in normalized_positions:
-            buckets["in_position"].append(item)
+            item["primary_state"] = "open_position"
+            buckets["open_positions"].append(item)
+        elif _is_reviewing(item):
+            item["primary_state"] = "reviewing"
+            buckets["reviewing"].append(item)
         else:
+            item["primary_state"] = "watch"
             buckets["watch"].append(item)
+        item["attention_flags"] = _attention_flags(item)
+
+    buckets["in_position"] = buckets["open_positions"]
 
     normalized_selected_ticker = _normalize_ticker(selected_ticker)
     available_tickers = {item["ticker"] for items in buckets.values() for item in items}
@@ -82,6 +101,7 @@ def _build_ticker_items(
     *,
     rows_by_ticker: dict[str, list[dict[str, Any]]],
     positions_by_ticker: dict[str | None, Any],
+    closed_positions_by_ticker: dict[str | None, Any],
     risk_by_ticker: dict[str | None, Any],
     signal_history_by_ticker: dict[str | None, Any],
     news_by_ticker: dict[str | None, Any],
@@ -91,6 +111,7 @@ def _build_ticker_items(
     ticker_keys = list(rows_by_ticker.keys())
     for ticker_group in (
         positions_by_ticker,
+        closed_positions_by_ticker,
         risk_by_ticker,
         signal_history_by_ticker,
         news_by_ticker,
@@ -161,7 +182,7 @@ def _is_action_now(row: dict[str, Any]) -> bool:
     if "reduced" in risk_status:
         return True
 
-    return has_material_signal_change
+    return False
 
 
 def _item_priority(row: dict[str, Any]) -> tuple[int, int, int, int]:
@@ -185,10 +206,45 @@ def _item_priority(row: dict[str, Any]) -> tuple[int, int, int, int]:
 
 
 def _default_selected_ticker(buckets: dict[str, list[dict[str, Any]]]) -> str | None:
-    for bucket_name in ("action_now", "in_position", "watch"):
+    for bucket_name in ("action_now", "open_positions", "reviewing", "watch", "closed_today"):
         if buckets[bucket_name]:
             return buckets[bucket_name][0]["ticker"]
     return None
+
+
+def _is_reviewing(row: dict[str, Any]) -> bool:
+    if bool(row.get("material_signal_change")):
+        return True
+
+    risk_status = str(row.get("risk_status") or "").strip().lower()
+    if risk_status in {"high", "critical", "blocked"}:
+        return True
+    if "high" in risk_status or "critical" in risk_status or "blocked" in risk_status or "reduced" in risk_status:
+        return True
+
+    return False
+
+
+def _attention_flags(row: dict[str, Any]) -> list[str]:
+    flags: list[str] = []
+    if bool(row.get("material_signal_change")):
+        flags.append("material_change")
+
+    order_status = str(row.get("order_status") or "").strip().lower()
+    if order_status in _ACTIONABLE_ORDER_STATUSES:
+        flags.append("pending_execution")
+
+    risk_status = str(row.get("risk_status") or "").strip().lower()
+    if (
+        risk_status in {"high", "critical", "blocked"}
+        or "high" in risk_status
+        or "critical" in risk_status
+        or "blocked" in risk_status
+        or "reduced" in risk_status
+    ):
+        flags.append("risk_attention")
+
+    return flags
 
 
 def _build_detail(

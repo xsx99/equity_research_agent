@@ -1046,6 +1046,42 @@ class TestTodayDashboard:
             },
         )
 
+    def test_load_recent_closed_positions_returns_latest_closed_rows_by_ticker(self):
+        from src.web.routers.today import _load_recent_closed_positions
+
+        session = MagicMock()
+        session.query.return_value = _ListQuery(
+            [
+                SimpleNamespace(
+                    ticker="NVDA",
+                    trade_identity="tactical_stock_trade",
+                    strategy_id="breakout_v1",
+                    quantity=Decimal("0"),
+                    market_value=Decimal("0"),
+                    opened_at=datetime(2026, 6, 5, 14, 31, tzinfo=timezone.utc),
+                    updated_at=datetime(2026, 6, 5, 20, 5, tzinfo=timezone.utc),
+                    closed_at=datetime(2026, 6, 5, 20, 5, tzinfo=timezone.utc),
+                    status="closed",
+                )
+            ]
+        )
+
+        rows = _load_recent_closed_positions(session)
+
+        assert rows == (
+            {
+                "ticker": "NVDA",
+                "trade_identity": "tactical_stock_trade",
+                "strategy_id": "breakout_v1",
+                "quantity": Decimal("0"),
+                "market_value": Decimal("0"),
+                "opened_at": datetime(2026, 6, 5, 14, 31, tzinfo=timezone.utc),
+                "updated_at": datetime(2026, 6, 5, 20, 5, tzinfo=timezone.utc),
+                "closed_at": datetime(2026, 6, 5, 20, 5, tzinfo=timezone.utc),
+                "status": "closed",
+            },
+        )
+
     def test_load_news_and_fundamentals_by_ticker_map_real_snapshot_and_event_rows(self):
         from src.web.routers.today import _load_fundamentals_by_ticker, _load_news_by_ticker
 

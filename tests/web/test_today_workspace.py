@@ -39,6 +39,43 @@ def test_build_ticker_workspace_groups_attention_buckets():
     assert workspace["selected_ticker"] == "NVDA"
 
 
+def test_build_ticker_workspace_keeps_closed_ticker_visible_in_closed_today_bucket():
+    workspace = build_ticker_workspace(
+        trade_rows=[
+            {"ticker": "NVDA", "decision": "exit", "order_status": "filled", "created_at": "2026-06-05T19:58:00Z"},
+            {"ticker": "AAPL", "decision": "enter_long", "order_status": "filled", "created_at": "2026-06-05T14:31:00Z"},
+        ],
+        selected_ticker=None,
+        positions_by_ticker={"AAPL": {"status": "open"}},
+        closed_positions_by_ticker={"NVDA": {"status": "closed", "closed_at": "2026-06-05T20:05:00Z"}},
+        risk_by_ticker={},
+        signal_history_by_ticker={},
+        news_by_ticker={},
+        fundamentals_by_ticker={},
+    )
+
+    assert [item["ticker"] for item in workspace["buckets"]["closed_today"]] == ["NVDA"]
+    assert workspace["selected_ticker"] == "AAPL"
+
+
+def test_build_ticker_workspace_assigns_primary_lifecycle_state_and_attention_flags():
+    workspace = build_ticker_workspace(
+        trade_rows=[{"ticker": "MSFT", "decision": "no_trade", "risk_status": "approved", "material_signal_change": True}],
+        selected_ticker="MSFT",
+        positions_by_ticker={},
+        closed_positions_by_ticker={},
+        risk_by_ticker={"MSFT": {"status": "approved", "reason": "within_limits"}},
+        signal_history_by_ticker={},
+        news_by_ticker={},
+        fundamentals_by_ticker={},
+    )
+
+    item = workspace["buckets"]["reviewing"][0]
+
+    assert item["primary_state"] == "reviewing"
+    assert item["attention_flags"] == ["material_change"]
+
+
 def test_build_ticker_workspace_prefers_action_now_then_in_position_then_watch():
     rows = [
         {
@@ -228,6 +265,8 @@ def test_build_ticker_workspace_uses_newer_row_when_duplicate_priorities_tie():
             "material_signal_change": False,
             "confidence": 0.67,
             "created_at": "2026-06-03T14:35:00Z",
+            "primary_state": "watch",
+            "attention_flags": [],
         }
     ]
 
@@ -272,6 +311,8 @@ def test_build_ticker_workspace_uses_latest_row_for_current_bucket_state():
             "material_signal_change": False,
             "confidence": 0.33,
             "created_at": "2026-06-03T14:35:00Z",
+            "primary_state": "watch",
+            "attention_flags": [],
         }
     ]
     assert workspace["selected_ticker"] == "NVDA"
