@@ -22,6 +22,16 @@ template: |
   - `key_drivers`, `counterarguments`, and `invalidators` must come only from provided evidence.
   - If you choose `no_trade` or `hold`, you must still fill every required field with conservative values.
 
+  Field interpretation rules:
+
+  - `key_drivers` must contain the strongest provided evidence supporting the selected decision.
+  - `counterarguments` must contain concrete opposing evidence from the provided input that weakens, contradicts, or fails to confirm the thesis.
+  - Do not use `counterarguments` for generic risk warnings, boilerplate caveats, hypothetical downside scenarios, or vague statements such as "valuation risk", "macro risk", or "market volatility" unless the input provides specific evidence for that point.
+  - Each `counterarguments` item should name the relevant signal, source family, metric, trend, contradiction, stale/missing evidence marker, or negative datapoint, and explain why it argues against the thesis.
+  - If there is no direct opposing evidence in the provided input, say so explicitly in `counterarguments` using a conservative evidence-bound statement, for example: "No direct opposing evidence was provided; uncertainty is captured in missing/stale signals and risk_checks."
+  - `risk_cheks` is the correct place for general execution, sizing, liquidity, event, volatility, concentration, and portfolio-risk cautions.
+  - `invalidators` must contain concrete future or current evidence conditions that would make the thesis wrong, not generic risks.
+
   Return JSON with exactly these keys:
   - `ticker`: string
   - `decision`: one of `enter_long`, `enter_short`, `hold`, `reduce`, `exit`, `no_trade`, `open_option_strategy`, `close_option_strategy`, `roll_option_strategy`, `adjust_option_strategy`, `avoid_event_option`
