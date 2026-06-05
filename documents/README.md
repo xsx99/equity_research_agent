@@ -6,6 +6,7 @@ This directory contains operational and repository-wide documentation.
 
 - [general_instructions.md](general_instructions.md): repository-wide instructions that every coding agent must read.
 - [raspberry_pi_service_checks.md](raspberry_pi_service_checks.md): required service-health checks for Raspberry Pi operations.
+- [ui_design_learnings.md](ui_design_learnings.md): reusable UI design heuristics gathered from operator-workstation iterations.
 
 ## App-Specific Docs
 

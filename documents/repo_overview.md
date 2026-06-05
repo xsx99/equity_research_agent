@@ -176,6 +176,18 @@ PR 11B refreshes the `/today` workstation into a navigation-driven command-cente
 
 This refinement intentionally stays presentation-only. It does not add new persistence, new producer pipelines, or a client-side state layer.
 
+## PR 11C Scope
+
+PR 11C keeps the same persisted trading artifacts but makes `/today` lifecycle-aware and more operator-facing:
+
+- `src/web/presenters/today_copy.py` now centralizes operator-facing translations for candidate outcomes, manual-review modes/statuses, strategy labels, lifecycle labels, and risk labels so primary UI surfaces do not expose raw internal IDs by default
+- `src/web/presenters/today_workspace.py` now derives lifecycle-aware `Trades` buckets (`Action Now`, `Open Positions`, `Closed Today`, `Reviewing`, `Watch`), keeps closed positions visible after exit, and shapes selected-ticker lifecycle detail with open/close timing, realized P&L, and entry/exit summaries
+- `src/web/routers/today.py` now loads recent closed positions, builds command-center overview cards, summary-first risk/macro payloads, and operator-first candidates payloads including translated manual-review queue rows and advanced internal-ID disclosure
+- `src/templates/today.html` now renders `Overview` as a command center, `Risk & Macro` as summary-first with advanced audit tables collapsed, and `Candidates` as an action queue plus decision cards with universe/config internals demoted into advanced context
+- `/today` route coverage now also locks translated copy, lifecycle persistence, and candidate/risk summary behavior in `tests/web/test_today_copy.py`, `tests/web/test_today_workspace.py`, and `tests/web/test_today.py`
+
+This refinement still stays within the existing FastAPI + Jinja server-rendered architecture. It does not add schema changes, client-side state management, or new trading logic.
+
 ## PR 13 Scope
 
 PR 13 starts the live preopen cutover on top of the existing fixture-first scheduler/runtime layer:

@@ -10,7 +10,9 @@ _STRATEGY_LABELS = {
 
 _CANDIDATE_RESULT_LABELS = {
     "blocked_by_missing_data": "Blocked: required data unavailable",
-    "no_trade": "No trade",
+    "candidate": "Ready for review",
+    "no_trade": "No clean entry, so no trade",
+    "ordinary_watch": "Still on watch",
 }
 
 _LIFECYCLE_LABELS = {
@@ -25,6 +27,17 @@ _RISK_STATUS_LABELS = {
 
 _TRADE_IDENTITY_LABELS = {
     "watch_only": "Watch Only",
+}
+
+_MANUAL_REQUEST_MODE_LABELS = {
+    "review_only": "Review Only",
+    "paper_trade_eligible": "Paper Trade Eligible",
+}
+
+_MANUAL_REQUEST_STATUS_LABELS = {
+    "active": "Pinned",
+    "dismissed": "Dismissed",
+    "cancelled": "Cancelled",
 }
 
 
@@ -50,6 +63,14 @@ def expression_bucket_label(value: Any) -> str:
 
 def trade_identity_label(value: Any) -> str:
     return _mapped_or_humanized(value, _TRADE_IDENTITY_LABELS)
+
+
+def manual_request_mode_label(value: Any) -> str:
+    return _mapped_or_humanized(value, _MANUAL_REQUEST_MODE_LABELS)
+
+
+def manual_request_status_label(value: Any) -> str:
+    return _mapped_or_humanized(value, _MANUAL_REQUEST_STATUS_LABELS)
 
 
 def _mapped_or_humanized(value: Any, mapping: dict[str, str]) -> str:

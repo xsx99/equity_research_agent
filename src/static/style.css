@@ -963,6 +963,55 @@ a:hover { text-decoration: underline; }
   margin-bottom: 1rem;
 }
 
+.candidate-queue-list,
+.candidate-decision-list {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.candidate-queue-card,
+.candidate-decision-card {
+  display: grid;
+  gap: 0.7rem;
+  padding: 0.95rem;
+  border-radius: 16px;
+  border: 1px solid #dfe6ef;
+  background:
+    radial-gradient(circle at top right, rgba(170, 187, 211, 0.14), transparent 28%),
+    linear-gradient(180deg, #ffffff 0%, #f9fbfd 100%);
+  box-shadow: 0 10px 22px rgba(36, 50, 65, 0.05);
+}
+
+.candidate-card-head {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.candidate-queue-card p,
+.candidate-decision-card p {
+  margin: 0;
+  color: #334155;
+}
+
+.candidate-meta-grid,
+.candidate-decision-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.7rem;
+}
+
+.candidate-meta-grid > div,
+.candidate-decision-grid > div {
+  display: grid;
+  gap: 0.22rem;
+  padding: 0.7rem 0.75rem;
+  border-radius: 12px;
+  border: 1px solid #e3e9f1;
+  background: rgba(255, 255, 255, 0.82);
+}
+
 .theme-chip-list {
   display: flex;
   flex-wrap: wrap;

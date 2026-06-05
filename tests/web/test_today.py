@@ -115,6 +115,8 @@ def _dashboard_payload() -> dict:
                     {
                         "ticker": "AAPL",
                         "company_name": "Apple Inc.",
+                        "primary_state": "action_now",
+                        "attention_flags": ("pending_execution",),
                         "attention_badge": "Strong Buy",
                         "latest_decision": "Enter Long",
                         "why_now": "Breakout confirmed + risk approved",
@@ -122,10 +124,51 @@ def _dashboard_payload() -> dict:
                         "position_risk_line": "Filled / risk approved",
                     },
                 ),
+                "open_positions": (
+                    {
+                        "ticker": "NVDA",
+                        "company_name": "NVIDIA Corp.",
+                        "primary_state": "open_position",
+                        "attention_flags": (),
+                        "attention_badge": "In Position",
+                        "latest_decision": "Hold",
+                        "why_now": "Monitoring after guidance follow-through",
+                        "recency_label": "25m ago",
+                        "position_risk_line": "Long 20 shares / risk approved",
+                    },
+                ),
+                "closed_today": (
+                    {
+                        "ticker": "AMD",
+                        "company_name": "Advanced Micro Devices",
+                        "primary_state": "closed",
+                        "attention_flags": (),
+                        "attention_badge": "Closed",
+                        "latest_decision": "Exit",
+                        "why_now": "Target reached before close",
+                        "recency_label": "42m ago",
+                        "position_risk_line": "Realized P&L locked in",
+                    },
+                ),
+                "reviewing": (
+                    {
+                        "ticker": "TSLA",
+                        "company_name": "Tesla",
+                        "primary_state": "reviewing",
+                        "attention_flags": ("material_change",),
+                        "attention_badge": "Reviewing",
+                        "latest_decision": "No Trade",
+                        "why_now": "Material signal change needs review",
+                        "recency_label": "14m ago",
+                        "position_risk_line": None,
+                    },
+                ),
                 "in_position": (
                     {
                         "ticker": "NVDA",
                         "company_name": "NVIDIA Corp.",
+                        "primary_state": "open_position",
+                        "attention_flags": (),
                         "attention_badge": "In Position",
                         "latest_decision": "Hold",
                         "why_now": "Monitoring after guidance follow-through",
@@ -137,6 +180,8 @@ def _dashboard_payload() -> dict:
                     {
                         "ticker": "MSFT",
                         "company_name": "Microsoft Corp.",
+                        "primary_state": "watch",
+                        "attention_flags": (),
                         "attention_badge": "Watch",
                         "latest_decision": "No Trade",
                         "why_now": "Relative strength improving vs QQQ",
@@ -147,11 +192,22 @@ def _dashboard_payload() -> dict:
             },
             "detail": {
                 "ticker": "AAPL",
+                "lifecycle": {
+                    "state": "open_position",
+                    "state_label": "Open Position",
+                    "opened_at": "2026-06-05T14:32:00Z",
+                    "closed_at": None,
+                    "realized_pnl": None,
+                    "entry_summary": "Breakout confirmed + risk approved",
+                    "exit_summary": "No material update",
+                },
                 "latest_conclusion": {
                     "trade_decision": {
                         "label": "Enter Long",
                         "strategy_id": "earnings_drift_v1",
+                        "strategy_label": "Earnings drift setup",
                         "expression_bucket_id": "long_stock",
+                        "expression_bucket_label": "Long Stock",
                         "confidence": Decimal("0.72"),
                         "summary": "Changed from watch to enter_long",
                     },
@@ -170,7 +226,7 @@ def _dashboard_payload() -> dict:
                             {"title": "Margin outlook", "summary": "Gross margin remains stable"},
                         ),
                     },
-                    "risk_summary": {"status": "approved", "reason": "within_limits"},
+                    "risk_summary": {"status": "approved", "status_label": "Approved", "reason": "within_limits"},
                     "position_execution": {
                         "position_label": "Long 10 shares",
                         "order_status": "filled",
@@ -224,6 +280,15 @@ def _dashboard_payload() -> dict:
         "risk_macro": {
             "risk_config_version": "risk_config_resolver_v1",
             "binding_constraints": ("theme cap near limit",),
+            "summary": {
+                "risk_status": "Within Limits",
+                "top_risk_sources": (
+                    {"label": "Technology concentration", "summary": "Theme cap near limit"},
+                ),
+                "availability_issues": (
+                    {"label": "Macro regime unavailable", "summary": "Global macro regime data is unavailable."},
+                ),
+            },
             "events": (
                 {
                     "scheduled_at": datetime(2026, 6, 3, 18, 0, tzinfo=timezone.utc),
@@ -252,13 +317,39 @@ def _dashboard_payload() -> dict:
                 "manual_include": ("AAPL",),
                 "manual_exclude": ("GME",),
             },
+            "summary": {
+                "action_queue": (
+                    {
+                        "ticker": "TSLA",
+                        "label": "Pinned",
+                        "summary": "Review Only because post-event review. Latest result: Still on watch.",
+                    },
+                    {
+                        "ticker": "MSFT",
+                        "label": "No clean entry, so no trade",
+                        "summary": "Negative catalyst detected. No clean entry, so no trade. Watch Only.",
+                    },
+                ),
+                "theme_count": 1,
+            },
             "rows": (
                 {
                     "ticker": "MSFT",
-                    "selection_source": "scanner",
-                    "result_status": "ordinary_watch",
+                    "selection_source": "direct_negative_catalyst",
+                    "why_reviewed_label": "Negative catalyst detected",
+                    "result_status": "no_trade",
+                    "current_outcome_label": "No clean entry, so no trade",
                     "trade_identity": "watch_only",
-                    "strategy_match": "relative_strength_breakout_v1",
+                    "trade_identity_label": "Watch Only",
+                    "strategy_match": "valuation_repair_quality_software_v1",
+                    "strategy_label": "Valuation repair setup",
+                    "operator_summary": "Negative catalyst detected. No clean entry, so no trade. Watch Only.",
+                    "detail_internal_ids": {
+                        "selection_source": "direct_negative_catalyst",
+                        "result_status": "no_trade",
+                        "trade_identity": "watch_only",
+                        "strategy_match": "valuation_repair_quality_software_v1",
+                    },
                 },
             ),
             "manual_requests": (
@@ -267,8 +358,12 @@ def _dashboard_payload() -> dict:
                     "ticker": "TSLA",
                     "reason": "post-event review",
                     "mode": "review_only",
+                    "mode_label": "Review Only",
                     "status": "active",
+                    "status_label": "Pinned",
                     "latest_result_status": "ordinary_watch",
+                    "latest_result_label": "Still on watch",
+                    "operator_summary": "Review Only because post-event review. Latest result: Still on watch.",
                 },
             ),
             "portfolio_intents": (
@@ -415,9 +510,13 @@ class TestTodayDashboard:
         assert "ticker-support-grid" in response.text
         assert "ticker-detail-nav" in response.text
         assert "Action Now" in response.text
-        assert "In Position" in response.text
+        assert "Open Positions" in response.text
+        assert "Closed Today" in response.text
+        assert "Reviewing" in response.text
         assert "Watch" in response.text
         assert "Latest Conclusion" in response.text
+        assert "Lifecycle" in response.text
+        assert "Open Position" in response.text
         assert 'data-panel="timeline"' in response.text
         assert "Trade Decision" in response.text
         assert "Signal Summary" in response.text
@@ -477,12 +576,13 @@ class TestTodayDashboard:
             response = client.get("/today?tab=risk-macro")
 
         assert response.status_code == 200
-        assert "Constraint Snapshot" in response.text
-        assert "Exposure Surface" in response.text
-        assert "surface-table-wrap" in response.text
-        assert "5.28" in response.text
-        assert "surface-block" in response.text
-        assert "surface-block-count" in response.text
+        assert "Risk Status" in response.text
+        assert "Top Risk Sources" in response.text
+        assert "Data / Model Availability" in response.text
+        assert "Advanced Risk Audit" in response.text
+        assert "Within Limits" in response.text
+        assert "Technology concentration" in response.text
+        assert "Macro regime unavailable" in response.text
         assert "trades-canvas" not in response.text
         assert "AI Infrastructure" not in response.text
 
@@ -524,13 +624,20 @@ class TestTodayDashboard:
             response = client.get("/today?tab=candidates")
 
         assert response.status_code == 200
-        assert "Universe Snapshot" in response.text
+        assert "Action Queue" in response.text
+        assert "Decision Readout" in response.text
         assert "Manual Review Queue" in response.text
         assert "Theme Monitor" in response.text
-        assert "surface-table-wrap" in response.text
         assert "surface-block" in response.text
-        assert "Candidate Inventory" in response.text
-        assert "relative_strength_breakout_v1" in response.text
+        assert "Manual Review Queue" in response.text
+        assert "Review Only" in response.text
+        assert "Still on watch" in response.text
+        assert "Candidate Decisions" in response.text
+        assert "Negative catalyst detected" in response.text
+        assert "No clean entry, so no trade" in response.text
+        assert "Valuation repair setup" in response.text
+        assert "Advanced Universe Context" in response.text
+        assert "Advanced" in response.text
         assert "theme-chip-list" in response.text
         assert "trades-canvas" not in response.text
         assert "Signal Summary" not in response.text
@@ -1064,13 +1171,55 @@ class TestTodayDashboard:
             {
                 "ticker": "UBER",
                 "selection_source": "direct_negative_catalyst",
-                "selection_source_label": "Negative catalyst detected",
+                "why_reviewed_label": "Negative catalyst detected",
                 "result_status": "blocked_by_missing_data",
-                "result_status_label": "Blocked: required data unavailable",
+                "current_outcome_label": "Blocked: required data unavailable",
                 "trade_identity": "watch_only",
                 "trade_identity_label": "Watch Only",
                 "strategy_match": "valuation_repair_quality_software_v1",
-                "strategy_match_label": "Valuation repair setup",
+                "strategy_label": "Valuation repair setup",
+                "operator_summary": "Negative catalyst detected. Blocked: required data unavailable. Watch Only.",
+                "detail_internal_ids": {
+                    "selection_source": "direct_negative_catalyst",
+                    "result_status": "blocked_by_missing_data",
+                    "trade_identity": "watch_only",
+                    "strategy_match": "valuation_repair_quality_software_v1",
+                },
+            },
+        )
+
+    def test_load_manual_requests_translates_operator_queue_copy(self):
+        from src.web.routers.today import _load_manual_requests
+
+        request_id = uuid.uuid4()
+        session = MagicMock()
+        session.query.return_value = _ListQuery(
+            [
+                SimpleNamespace(
+                    manual_ticker_request_id=request_id,
+                    ticker="TSLA",
+                    reason="post-event review",
+                    mode="review_only",
+                    status="active",
+                    latest_result_status="ordinary_watch",
+                )
+            ]
+        )
+
+        rows = _load_manual_requests(session)
+
+        assert rows == (
+            {
+                "manual_ticker_request_id": str(request_id),
+                "ticker": "TSLA",
+                "reason": "post-event review",
+                "mode": "review_only",
+                "mode_label": "Review Only",
+                "status": "active",
+                "status_label": "Pinned",
+                "latest_result_status": "ordinary_watch",
+                "latest_result_label": "Still on watch",
+                "operator_summary": "Review Only because post-event review. Latest result: Still on watch.",
             },
         )
 
@@ -1175,6 +1324,56 @@ class TestTodayDashboard:
                 {"ticker": "AAPL", "summary": "Open position, risk within limits"},
             ),
             "system_issues": (
+                {"label": "Macro regime unavailable", "summary": "Global macro regime data is unavailable."},
+            ),
+        }
+
+    def test_load_today_dashboard_builds_risk_macro_summary(self):
+        from src.web.routers.today import load_today_dashboard
+
+        session = _query_stub_session()
+        trade_rows = _ticker_selection_trade_rows()
+        selected_nvda_detail = _selected_trade_detail("NVDA")
+
+        with (
+            patch("src.web.routers.today._load_trade_rows", return_value=trade_rows),
+            patch("src.web.routers.today._load_positions", return_value=()),
+            patch("src.web.routers.today._load_recent_closed_positions", return_value=()),
+            patch("src.web.routers.today._load_trade_detail", return_value=selected_nvda_detail),
+            patch("src.web.routers.today._load_option_positions", return_value=()),
+            patch("src.web.routers.today._load_hedge_overlays", return_value=()),
+            patch("src.web.routers.today._load_live_alerts", return_value=()),
+            patch("src.web.routers.today._load_material_changes", return_value=()),
+            patch(
+                "src.web.routers.today._load_risk_exposures",
+                return_value=(
+                    {"factor_type": "sector", "factor_name": "Technology", "exposure": Decimal("5.2757")},
+                ),
+            ),
+            patch("src.web.routers.today._load_candidate_rows", return_value=()),
+            patch("src.web.routers.today._load_manual_requests", return_value=()),
+            patch("src.web.routers.today._load_portfolio_intents", return_value=()),
+            patch("src.web.routers.today._load_relationships", return_value=()),
+            patch("src.web.routers.today._load_peer_baskets", return_value=()),
+            patch("src.web.routers.today._load_themes", return_value=()),
+            patch("src.web.routers.today._load_learning_factors", return_value=()),
+            patch("src.web.routers.today._load_strategy_performance", return_value=()),
+            patch("src.web.routers.today._load_strategy_proposals", return_value=()),
+            patch("src.web.routers.today._load_llm_usage", return_value=()),
+        ):
+            dashboard = load_today_dashboard(
+                session,
+                selected_tab="risk-macro",
+                decision_id=None,
+                selected_ticker="NVDA",
+            )
+
+        assert dashboard["risk_macro"]["summary"] == {
+            "risk_status": "Within Limits",
+            "top_risk_sources": (
+                {"label": "Technology concentration", "summary": "theme cap near limit"},
+            ),
+            "availability_issues": (
                 {"label": "Macro regime unavailable", "summary": "Global macro regime data is unavailable."},
             ),
         }

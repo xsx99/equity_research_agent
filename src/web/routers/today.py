@@ -43,6 +43,8 @@ from src.db.models.trading import (
 from src.web.flash import flash, get_flash
 from src.web.presenters.today_copy import (
     candidate_result_label,
+    manual_request_mode_label,
+    manual_request_status_label,
     strategy_label,
     trade_identity_label,
 )
@@ -185,6 +187,12 @@ def load_today_dashboard(
     signal_history_by_ticker = _load_signal_history_by_ticker(session)
     news_by_ticker = _load_news_by_ticker(session)
     fundamentals_by_ticker = _load_fundamentals_by_ticker(session)
+    candidate_rows = _load_candidate_rows(session)
+    manual_requests = _load_manual_requests(session)
+    portfolio_intents = _load_portfolio_intents(session)
+    relationships = _load_relationships(session)
+    peer_baskets = _load_peer_baskets(session)
+    themes = _load_themes(session)
     ticker_workspace = build_ticker_workspace(
         trade_rows=trade_rows,
         selected_ticker=selected_ticker,
@@ -272,17 +280,28 @@ def load_today_dashboard(
         "risk_macro": {
             "risk_config_version": latest_risk.resolver_version if latest_risk else None,
             "binding_constraints": tuple((latest_risk.concentration_flags_json or [])) if latest_risk else (),
+            "summary": _build_risk_macro_summary(
+                header=_build_header(latest_portfolio, latest_risk, trade_rows, latest_reflection),
+                ticker_workspace=ticker_workspace,
+                binding_constraints=tuple((latest_risk.concentration_flags_json or [])) if latest_risk else (),
+                exposures=_load_risk_exposures(session),
+            ),
             "events": (),
             "exposures": _load_risk_exposures(session),
         },
         "candidates": {
             "active_universe_filter": _serialize_universe_filter(active_universe_filter),
-            "rows": _load_candidate_rows(session),
-            "manual_requests": _load_manual_requests(session),
-            "portfolio_intents": _load_portfolio_intents(session),
-            "relationships": _load_relationships(session),
-            "peer_baskets": _load_peer_baskets(session),
-            "themes": _load_themes(session),
+            "summary": _build_candidates_summary(
+                rows=candidate_rows,
+                manual_requests=manual_requests,
+                themes=themes,
+            ),
+            "rows": candidate_rows,
+            "manual_requests": manual_requests,
+            "portfolio_intents": portfolio_intents,
+            "relationships": relationships,
+            "peer_baskets": peer_baskets,
+            "themes": themes,
         },
         "learning_strategies": {
             "reflection": _serialize_reflection(latest_reflection),
@@ -444,6 +463,75 @@ def _build_overview_command_center(
         "needs_review": needs_review,
         "open_positions": open_positions,
         "system_issues": tuple(system_issues),
+    }
+
+
+def _build_risk_macro_summary(
+    *,
+    header: dict[str, Any],
+    ticker_workspace: dict[str, Any],
+    binding_constraints: tuple[str, ...],
+    exposures: tuple[dict[str, Any], ...],
+) -> dict[str, Any]:
+    current_risk = (
+        ((ticker_workspace.get("detail") or {}).get("latest_conclusion") or {}).get("risk_summary") or {}
+    )
+    risk_status = str(current_risk.get("status_label") or "").strip()
+    if not risk_status or risk_status == "No material update":
+        risk_status = "Within Limits"
+
+    top_risk_sources: list[dict[str, Any]] = []
+    if exposures:
+        first = exposures[0]
+        label = f"{first.get('factor_name') or 'Portfolio'} concentration"
+        summary = str(binding_constraints[0]).strip() if binding_constraints else "theme cap near limit"
+        top_risk_sources.append({"label": label, "summary": summary})
+    elif binding_constraints:
+        top_risk_sources.extend({"label": "Constraint pressure", "summary": item} for item in binding_constraints[:3])
+
+    availability_issues: list[dict[str, Any]] = []
+    if str(header.get("macro_regime") or "").strip().lower() == "unavailable":
+        availability_issues.append(
+            {
+                "label": "Macro regime unavailable",
+                "summary": "Global macro regime data is unavailable.",
+            }
+        )
+
+    return {
+        "risk_status": risk_status,
+        "top_risk_sources": tuple(top_risk_sources),
+        "availability_issues": tuple(availability_issues),
+    }
+
+
+def _build_candidates_summary(
+    *,
+    rows: tuple[dict[str, Any], ...],
+    manual_requests: tuple[dict[str, Any], ...],
+    themes: tuple[dict[str, Any], ...],
+) -> dict[str, Any]:
+    action_queue: list[dict[str, Any]] = []
+    for row in manual_requests[:3]:
+        action_queue.append(
+            {
+                "ticker": row["ticker"],
+                "label": row["status_label"],
+                "summary": row["operator_summary"],
+            }
+        )
+    for row in rows[:4]:
+        action_queue.append(
+            {
+                "ticker": row["ticker"],
+                "label": row["current_outcome_label"],
+                "summary": row["operator_summary"],
+            }
+        )
+
+    return {
+        "action_queue": tuple(action_queue),
+        "theme_count": len(themes),
     }
 
 
@@ -733,15 +821,26 @@ def _load_candidate_rows(session: Any) -> tuple[dict[str, Any], ...]:
         {
             "ticker": row.ticker,
             "selection_source": row.selection_source,
-            "selection_source_label": strategy_label(row.selection_source),
+            "why_reviewed_label": strategy_label(row.selection_source),
             "result_status": row.rejection_reason or "candidate",
-            "result_status_label": candidate_result_label(row.rejection_reason or "candidate"),
+            "current_outcome_label": candidate_result_label(row.rejection_reason or "candidate"),
             "trade_identity": row.trade_classifications[0].trade_identity if row.trade_classifications else None,
             "trade_identity_label": trade_identity_label(
                 row.trade_classifications[0].trade_identity if row.trade_classifications else None
             ),
             "strategy_match": row.strategy_id,
-            "strategy_match_label": strategy_label(row.strategy_id),
+            "strategy_label": strategy_label(row.strategy_id),
+            "operator_summary": _sentence_join(
+                strategy_label(row.selection_source),
+                candidate_result_label(row.rejection_reason or "candidate"),
+                trade_identity_label(row.trade_classifications[0].trade_identity if row.trade_classifications else None),
+            ),
+            "detail_internal_ids": {
+                "selection_source": row.selection_source,
+                "result_status": row.rejection_reason or "candidate",
+                "trade_identity": row.trade_classifications[0].trade_identity if row.trade_classifications else None,
+                "strategy_match": row.strategy_id,
+            },
         }
         for row in rows
     )
@@ -760,11 +859,27 @@ def _load_manual_requests(session: Any) -> tuple[dict[str, Any], ...]:
             "ticker": row.ticker,
             "reason": row.reason,
             "mode": row.mode,
+            "mode_label": manual_request_mode_label(row.mode),
             "status": row.status,
+            "status_label": manual_request_status_label(row.status),
             "latest_result_status": row.latest_result_status,
+            "latest_result_label": candidate_result_label(row.latest_result_status),
+            "operator_summary": _sentence_join(
+                f"{manual_request_mode_label(row.mode)} because {row.reason}",
+                f"Latest result: {candidate_result_label(row.latest_result_status)}"
+                if row.latest_result_status
+                else None,
+            ),
         }
         for row in rows
     )
+
+
+def _sentence_join(*parts: Any) -> str:
+    cleaned = [str(part).strip().rstrip(".") for part in parts if str(part or "").strip()]
+    if not cleaned:
+        return ""
+    return ". ".join(cleaned) + "."
 
 
 def _load_portfolio_intents(session: Any) -> tuple[dict[str, Any], ...]:
