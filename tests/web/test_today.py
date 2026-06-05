@@ -5,6 +5,7 @@ import uuid
 from contextlib import ExitStack, contextmanager
 from datetime import date, datetime, timezone
 from decimal import Decimal
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -821,6 +822,245 @@ class TestTodayDashboard:
         assert dashboard["ticker_workspace"]["selected_detail_item_index"] == 0
         assert dashboard["ticker_workspace"]["selected_detail_item"]["title"] == "Decision submitted"
 
+    def test_load_today_dashboard_preserves_rich_workspace_detail_and_attaches_audit_detail(self):
+        from src.web.routers.today import load_today_dashboard
+
+        session = _query_stub_session()
+        trade_rows = _ticker_selection_trade_rows()
+        selected_nvda_detail = _selected_trade_detail("NVDA")
+
+        with ExitStack() as stack:
+            stack.enter_context(patch("src.web.routers.today._load_trade_rows", return_value=trade_rows))
+            stack.enter_context(patch("src.web.routers.today._load_trade_detail", return_value=selected_nvda_detail))
+            stack.enter_context(patch("src.web.routers.today._load_positions", return_value=()))
+            stack.enter_context(
+                patch(
+                    "src.web.routers.today._load_signal_history_by_ticker",
+                    return_value={
+                        "NVDA": {
+                            "technical": [
+                                {"label": "price", "points": [1, 2, 3], "summary": "Above support"},
+                                {
+                                    "label": "relative_strength",
+                                    "points": [3, 4, 5],
+                                    "summary": "Improving vs QQQ",
+                                },
+                            ],
+                            "summary": ["Relative strength improving vs QQQ"],
+                            "timeline": [],
+                        }
+                    },
+                )
+            )
+            stack.enter_context(
+                patch(
+                    "src.web.routers.today._load_risk_by_ticker",
+                    return_value={"NVDA": {"status": "approved", "reason": "within_limits"}},
+                )
+            )
+            stack.enter_context(patch("src.web.routers.today._load_news_by_ticker", return_value={}))
+            stack.enter_context(patch("src.web.routers.today._load_fundamentals_by_ticker", return_value={}))
+            stack.enter_context(patch("src.web.routers.today._load_option_positions", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_hedge_overlays", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_live_alerts", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_material_changes", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_risk_exposures", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_candidate_rows", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_manual_requests", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_portfolio_intents", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_relationships", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_peer_baskets", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_themes", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_learning_factors", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_strategy_performance", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_strategy_proposals", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_llm_usage", return_value=()))
+            dashboard = load_today_dashboard(
+                session,
+                selected_tab="trades",
+                decision_id=None,
+                selected_ticker="NVDA",
+            )
+
+        assert dashboard["ticker_workspace"]["detail"]["latest_conclusion"]["trade_decision"]["strategy_id"] == "breakout_v1"
+        assert dashboard["ticker_workspace"]["audit_detail"] == selected_nvda_detail
+        assert dashboard["trades"]["selected_detail"] == selected_nvda_detail
+
+    def test_load_today_dashboard_backfills_selected_ticker_trade_row_outside_recent_trade_rows(self):
+        from src.db.models.trading import TradingDecision
+        from src.web.routers.today import load_today_dashboard
+
+        session = _query_stub_session()
+        session.query.side_effect = lambda model: (
+            _ListQuery(
+                [
+                    SimpleNamespace(
+                        trading_decision_id=uuid.uuid4(),
+                        decision_time=datetime(2026, 6, 3, 23, 25, 34, tzinfo=timezone.utc),
+                        created_at=datetime(2026, 6, 3, 23, 25, 34, tzinfo=timezone.utc),
+                        ticker="UBER",
+                        decision="no_trade",
+                        instrument_type="watch",
+                        trade_identity="watch_only",
+                        strategy_id="valuation_repair_quality_software_v1",
+                        expression_bucket_id="long_stock",
+                        approved_weight=Decimal("0"),
+                        confidence=Decimal("0.35"),
+                        thesis="Direct negative catalyst identified; prefer to monitor.",
+                        invalidators_json=["valuation repair reverses"],
+                        metadata_json={"selection_reason": "direct company-level negative catalyst blocks bullish candidate"},
+                        risk_decision=SimpleNamespace(status="approved"),
+                    )
+                ]
+            )
+            if model is TradingDecision
+            else _QueryStub()
+        )
+
+        with ExitStack() as stack:
+            stack.enter_context(patch("src.web.routers.today._load_trade_rows", return_value=_ticker_selection_trade_rows()))
+            stack.enter_context(patch("src.web.routers.today._load_trade_detail", return_value=None))
+            stack.enter_context(patch("src.web.routers.today._load_positions", return_value=()))
+            stack.enter_context(
+                patch(
+                    "src.web.routers.today._load_risk_by_ticker",
+                    return_value={"UBER": {"status": "approved", "reason": "within_limits"}},
+                )
+            )
+            stack.enter_context(
+                patch(
+                    "src.web.routers.today._load_signal_history_by_ticker",
+                    return_value={"UBER": {"technical": [], "summary": [], "timeline": []}},
+                )
+            )
+            stack.enter_context(patch("src.web.routers.today._load_news_by_ticker", return_value={}))
+            stack.enter_context(patch("src.web.routers.today._load_fundamentals_by_ticker", return_value={}))
+            stack.enter_context(patch("src.web.routers.today._load_option_positions", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_hedge_overlays", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_live_alerts", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_material_changes", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_risk_exposures", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_candidate_rows", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_manual_requests", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_portfolio_intents", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_relationships", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_peer_baskets", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_themes", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_learning_factors", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_strategy_performance", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_strategy_proposals", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_llm_usage", return_value=()))
+            dashboard = load_today_dashboard(
+                session,
+                selected_tab="trades",
+                decision_id=None,
+                selected_ticker="UBER",
+            )
+
+        assert dashboard["ticker_workspace"]["selected_ticker"] == "UBER"
+        assert (
+            dashboard["ticker_workspace"]["detail"]["latest_conclusion"]["trade_decision"]["strategy_id"]
+            == "valuation_repair_quality_software_v1"
+        )
+        assert (
+            dashboard["ticker_workspace"]["detail"]["latest_conclusion"]["trade_decision"]["summary"]
+            == "Direct negative catalyst identified; prefer to monitor."
+        )
+
+    def test_load_signal_history_by_ticker_maps_real_signal_snapshot_schema(self):
+        from src.web.routers.today import _load_signal_history_by_ticker
+
+        session = MagicMock()
+        session.query.side_effect = [
+            _ListQuery(
+                [
+                    SimpleNamespace(
+                        ticker="UBER",
+                        decision_time=datetime(2026, 6, 3, 23, 25, 34, tzinfo=timezone.utc),
+                        created_at=datetime(2026, 6, 3, 23, 25, 34, tzinfo=timezone.utc),
+                        snapshot_type="pre_open",
+                        signal_json={
+                            "technical": {
+                                "return_20d": -0.0173,
+                                "price_vs_sma_20": -0.0291,
+                                "price_vs_sma_50": -0.0267,
+                                "price_vs_sma_200": -0.1403,
+                                "relative_volume": 1.0133,
+                                "rs_vs_spy_1d": None,
+                            },
+                            "fundamental": {
+                                "quality_score": 0.7777,
+                                "margin_trend_score": 0.3331,
+                                "revenue_growth_score": 0.8088,
+                                "valuation_percentile": 0.1957,
+                            },
+                            "events_news": {
+                                "sentiment_direction": "negative",
+                                "direct_negative_catalyst_type": "general_news",
+                                "catalyst_quality_score": 0.0,
+                            },
+                        },
+                    )
+                ]
+            ),
+            _ListQuery([]),
+        ]
+
+        history = _load_signal_history_by_ticker(session)
+
+        assert [item["label"] for item in history["UBER"]["technical"]] == ["price", "relative_strength"]
+        assert "direct negative catalyst" in history["UBER"]["summary"][0].lower()
+        assert "below sma20" in history["UBER"]["technical"][0]["summary"].lower()
+
+    def test_load_news_and_fundamentals_by_ticker_map_real_snapshot_and_event_rows(self):
+        from src.web.routers.today import _load_fundamentals_by_ticker, _load_news_by_ticker
+
+        signal_session = MagicMock()
+        signal_session.query.side_effect = [
+            _ListQuery(
+                [
+                    SimpleNamespace(
+                        ticker="UBER",
+                        decision_time=datetime(2026, 6, 3, 23, 25, 34, tzinfo=timezone.utc),
+                        created_at=datetime(2026, 6, 3, 23, 25, 34, tzinfo=timezone.utc),
+                        signal_json={
+                            "fundamental": {
+                                "quality_score": 0.7777,
+                                "margin_trend_score": 0.3331,
+                                "revenue_growth_score": 0.8088,
+                                "valuation_percentile": 0.1957,
+                            }
+                        },
+                    )
+                ]
+            )
+        ]
+        news_session = MagicMock()
+        news_session.query.side_effect = [
+            _ListQuery([]),
+            _ListQuery(
+                [
+                    SimpleNamespace(
+                        ticker="UBER",
+                        headline="Uber layoffs: HR and workplace division cut 23%",
+                        summary="The cuts affect recruitment and HR staff.",
+                        published_at=datetime(2026, 6, 3, 0, 0, tzinfo=timezone.utc),
+                    )
+                ]
+            ),
+        ]
+
+        fundamentals = _load_fundamentals_by_ticker(signal_session)
+        news = _load_news_by_ticker(news_session)
+
+        assert [item["title"] for item in fundamentals["UBER"]] == [
+            "Quality",
+            "Margin Trend",
+            "Revenue Growth",
+            "Valuation Percentile",
+        ]
+        assert news["UBER"][0]["title"] == "Uber layoffs: HR and workplace division cut 23%"
+
 
 class TestTodayDashboardMutations:
     def test_add_manual_request_redirects_back_to_candidates(self, client):
@@ -895,6 +1135,17 @@ class _QueryStub:
 
     def all(self):
         return []
+
+
+class _ListQuery(_QueryStub):
+    def __init__(self, rows):
+        self._rows = list(rows)
+
+    def first(self):
+        return self._rows[0] if self._rows else None
+
+    def all(self):
+        return list(self._rows)
 
 
 def _query_stub_session() -> MagicMock:

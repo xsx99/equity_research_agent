@@ -211,6 +211,8 @@ def _build_detail(
     fundamental_snippets = _build_snippets(fundamentals_by_ticker.get(selected_ticker))
     position = positions_by_ticker.get(selected_ticker) or {"summary": _EMPTY_MARKER}
     risk = risk_by_ticker.get(selected_ticker) or {}
+    trade_summary = _decision_summary(latest_decision)
+    invalidators = _decision_invalidators(latest_decision)
 
     latest_conclusion = {
         "trade_decision": {
@@ -233,9 +235,15 @@ def _build_detail(
         },
         "position_execution": {
             "position": position,
+            "position_label": position.get("position_label"),
             "order_status": position.get("order_status") or latest_decision.get("order_status") or _EMPTY_MARKER,
+            "summary": position.get("summary") or _EMPTY_MARKER,
         },
     }
+    if trade_summary != _EMPTY_MARKER:
+        latest_conclusion["trade_decision"]["summary"] = trade_summary
+    if invalidators:
+        latest_conclusion["trade_decision"]["invalidators"] = invalidators
 
     tabs = {
         "timeline": _build_timeline(
@@ -265,7 +273,14 @@ def _build_detail(
 
 def _build_summary_bullets(summary_items: Any) -> list[str]:
     if isinstance(summary_items, list):
-        bullets = [str(item).strip() for item in summary_items if str(item).strip()]
+        bullets = []
+        seen: set[str] = set()
+        for item in summary_items:
+            bullet = str(item).strip()
+            if not bullet or bullet in seen:
+                continue
+            seen.add(bullet)
+            bullets.append(bullet)
         if bullets:
             return bullets
     return [_EMPTY_MARKER]
@@ -376,16 +391,18 @@ def _build_timeline(
 def _build_decision_list(decisions: list[dict[str, Any]]) -> list[dict[str, Any]]:
     decision_items: list[dict[str, Any]] = []
     for index, item in enumerate(decisions, start=1):
-        decision_items.append(
-            {
-                "time": item.get("created_at"),
-                "decision": _humanize_label(item.get("decision")) or _EMPTY_MARKER,
-                "confidence": item.get("confidence"),
-                "strategy_id": item.get("selected_strategy_id") or _EMPTY_MARKER,
-                "expression_bucket_id": item.get("expression_bucket_id") or _EMPTY_MARKER,
-                "detail_anchor": f"decision-{index}",
-            }
-        )
+        decision_item = {
+            "time": item.get("created_at"),
+            "decision": _humanize_label(item.get("decision")) or _EMPTY_MARKER,
+            "confidence": item.get("confidence"),
+            "strategy_id": item.get("selected_strategy_id") or _EMPTY_MARKER,
+            "expression_bucket_id": item.get("expression_bucket_id") or _EMPTY_MARKER,
+            "detail_anchor": f"decision-{index}",
+        }
+        summary = _decision_list_summary(item)
+        if summary != _EMPTY_MARKER:
+            decision_item["summary"] = summary
+        decision_items.append(decision_item)
     return decision_items or [_empty_decision_item()]
 
 
@@ -433,6 +450,36 @@ def _humanize_label(value: Any) -> str | None:
     if not text:
         return None
     return " ".join(part.capitalize() for part in text.split())
+
+
+def _decision_summary(row: dict[str, Any]) -> str:
+    thesis = str(row.get("thesis") or "").strip()
+    if thesis:
+        return thesis
+
+    metadata = row.get("metadata_json")
+    if isinstance(metadata, dict):
+        selection_reason = str(metadata.get("selection_reason") or "").strip()
+        if selection_reason:
+            return selection_reason
+
+    return _EMPTY_MARKER
+
+
+def _decision_list_summary(row: dict[str, Any]) -> str:
+    metadata = row.get("metadata_json")
+    if isinstance(metadata, dict):
+        selection_reason = str(metadata.get("selection_reason") or "").strip()
+        if selection_reason:
+            return selection_reason
+    return _decision_summary(row)
+
+
+def _decision_invalidators(row: dict[str, Any]) -> list[str]:
+    invalidators = row.get("invalidators")
+    if isinstance(invalidators, list):
+        return [str(item).strip() for item in invalidators if str(item).strip()]
+    return []
 
 
 def _empty_snippet() -> dict[str, Any]:

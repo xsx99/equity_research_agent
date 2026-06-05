@@ -898,3 +898,92 @@ def test_build_ticker_workspace_uses_empty_state_markers_when_detail_inputs_are_
             "empty": True,
         }
     ]
+
+
+def test_build_ticker_workspace_surfaces_trade_reasoning_in_latest_conclusion_and_decisions():
+    workspace = build_ticker_workspace(
+        trade_rows=[
+            {
+                "ticker": "UBER",
+                "decision": "no_trade",
+                "selected_strategy_id": "valuation_repair_quality_software_v1",
+                "expression_bucket_id": "long_stock",
+                "confidence": 0.35,
+                "risk_status": "approved",
+                "created_at": "2026-06-03T14:35:00Z",
+                "thesis": "Direct negative catalyst identified; prefer to monitor instead of opening a trade.",
+                "invalidators": [
+                    "estimate stabilization fails",
+                    "valuation repair reverses",
+                ],
+                "metadata_json": {
+                    "selection_reason": "direct company-level negative catalyst blocks bullish candidate",
+                    "classification_result_status": "no_trade",
+                    "risk_checks": ["direct_negative_catalyst"],
+                },
+            },
+        ],
+        selected_ticker="UBER",
+        positions_by_ticker={},
+        risk_by_ticker={"UBER": {"status": "approved", "reason": "within_limits"}},
+        signal_history_by_ticker={},
+        news_by_ticker={},
+        fundamentals_by_ticker={},
+    )
+
+    detail = workspace["detail"]
+
+    assert (
+        detail["latest_conclusion"]["trade_decision"]["summary"]
+        == "Direct negative catalyst identified; prefer to monitor instead of opening a trade."
+    )
+    assert detail["latest_conclusion"]["trade_decision"]["invalidators"] == [
+        "estimate stabilization fails",
+        "valuation repair reverses",
+    ]
+    assert detail["tabs"]["decisions"] == [
+        {
+            "time": "2026-06-03T14:35:00Z",
+            "decision": "No Trade",
+            "confidence": 0.35,
+            "strategy_id": "valuation_repair_quality_software_v1",
+            "expression_bucket_id": "long_stock",
+            "summary": "direct company-level negative catalyst blocks bullish candidate",
+            "detail_anchor": "decision-1",
+        }
+    ]
+
+
+def test_build_ticker_workspace_deduplicates_repeated_summary_bullets():
+    workspace = build_ticker_workspace(
+        trade_rows=[
+            {
+                "ticker": "AAPL",
+                "decision": "no_trade",
+                "risk_status": "approved",
+                "created_at": "2026-06-05T12:50:00Z",
+            },
+        ],
+        selected_ticker="AAPL",
+        positions_by_ticker={},
+        risk_by_ticker={"AAPL": {"status": "approved", "reason": "within_limits"}},
+        signal_history_by_ticker={
+            "AAPL": {
+                "summary": [
+                    "Events/news sentiment positive.",
+                    "Technical: 20d return 8.26%.",
+                    "Events/news sentiment positive.",
+                    "Technical: 20d return 8.26%.",
+                    "Fundamental: quality 0.98.",
+                ]
+            }
+        },
+        news_by_ticker={},
+        fundamentals_by_ticker={},
+    )
+
+    assert workspace["detail"]["latest_conclusion"]["signal_summary"]["summary_bullets"] == [
+        "Events/news sentiment positive.",
+        "Technical: 20d return 8.26%.",
+        "Fundamental: quality 0.98.",
+    ]

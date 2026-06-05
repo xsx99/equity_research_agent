@@ -14,6 +14,7 @@ from src.db.models.trading import (
     CandidateOutcomeEvaluation,
     CandidateScore,
     DailyReflection,
+    EventNewsItem,
     IntradayRebalanceDecision,
     IntradaySignalSnapshot,
     LearningFactor,
@@ -172,43 +173,67 @@ def load_today_dashboard(
 
     trade_rows = _load_trade_rows(session)
     positions = _load_positions(session)
+    positions_by_ticker = _group_latest_by_ticker(positions)
+    risk_by_ticker = _load_risk_by_ticker(session)
+    signal_history_by_ticker = _load_signal_history_by_ticker(session)
+    news_by_ticker = _load_news_by_ticker(session)
+    fundamentals_by_ticker = _load_fundamentals_by_ticker(session)
     ticker_workspace = build_ticker_workspace(
         trade_rows=trade_rows,
         selected_ticker=selected_ticker,
-        positions_by_ticker=_group_latest_by_ticker(positions),
-        risk_by_ticker=_load_risk_by_ticker(session),
-        signal_history_by_ticker=_load_signal_history_by_ticker(session),
-        news_by_ticker=_load_news_by_ticker(session),
-        fundamentals_by_ticker=_load_fundamentals_by_ticker(session),
+        positions_by_ticker=positions_by_ticker,
+        risk_by_ticker=risk_by_ticker,
+        signal_history_by_ticker=signal_history_by_ticker,
+        news_by_ticker=news_by_ticker,
+        fundamentals_by_ticker=fundamentals_by_ticker,
+    )
+    trade_rows = _ensure_trade_rows_include_ticker(
+        session,
+        trade_rows,
+        ticker_workspace.get("selected_ticker"),
+    )
+    ticker_workspace = build_ticker_workspace(
+        trade_rows=trade_rows,
+        selected_ticker=ticker_workspace.get("selected_ticker"),
+        positions_by_ticker=positions_by_ticker,
+        risk_by_ticker=risk_by_ticker,
+        signal_history_by_ticker=signal_history_by_ticker,
+        news_by_ticker=news_by_ticker,
+        fundamentals_by_ticker=fundamentals_by_ticker,
     )
 
-    selected_detail = _load_trade_detail(session, decision_id) if decision_id else None
-    if selected_detail is None:
+    audit_detail = _load_trade_detail(session, decision_id) if decision_id else None
+    if audit_detail is None:
         selected_decision_id = _latest_trade_decision_id_for_ticker(
             trade_rows,
             ticker_workspace.get("selected_ticker"),
         )
         if selected_decision_id:
-            selected_detail = _load_trade_detail(session, selected_decision_id)
+            audit_detail = _load_trade_detail(session, selected_decision_id)
+
+    merged_detail = _merge_audit_detail_into_workspace_detail(
+        ticker_workspace.get("detail"),
+        audit_detail,
+    )
 
     normalized_detail_tab = _normalize_detail_tab(selected_detail_tab)
     normalized_detail_item_index = _normalize_detail_item_index(
-        detail=selected_detail,
+        detail=merged_detail,
         detail_tab=normalized_detail_tab,
         detail_item_index=selected_detail_item_index,
     )
     ticker_workspace = {
         **ticker_workspace,
+        "detail": merged_detail,
+        "audit_detail": audit_detail,
         "selected_detail_tab": normalized_detail_tab,
         "selected_detail_item_index": normalized_detail_item_index,
         "selected_detail_item": _select_detail_item(
-            detail=selected_detail,
+            detail=merged_detail,
             detail_tab=normalized_detail_tab,
             detail_item_index=normalized_detail_item_index,
         ),
     }
-    if selected_detail is not None:
-        ticker_workspace["detail"] = selected_detail
 
     return {
         "selected_tab": selected_tab,
@@ -226,7 +251,7 @@ def load_today_dashboard(
         },
         "trades": {
             "rows": trade_rows,
-            "selected_detail": selected_detail,
+            "selected_detail": audit_detail,
         },
         "ticker_workspace": ticker_workspace,
         "risk_macro": {
@@ -454,25 +479,57 @@ def _load_trade_rows(session: Any) -> list[dict[str, Any]]:
         .limit(25)
         .all()
     )
-    return [
-        {
-            "trading_decision_id": str(row.trading_decision_id),
-            "decision_time": row.decision_time,
-            "created_at": row.created_at or row.decision_time,
-            "ticker": row.ticker,
-            "decision": row.decision,
-            "instrument_type": row.instrument_type,
-            "trade_identity": row.trade_identity,
-            "selected_strategy_id": row.strategy_id,
-            "expression_bucket_id": row.expression_bucket_id,
-            "approved_weight": row.approved_weight,
-            "confidence": row.confidence,
-            "risk_status": row.risk_decision.status if row.risk_decision else None,
-            "order_status": _load_order_status(session, row.trading_decision_id),
-            "material_signal_change": str(row.ticker).upper() in material_change_tickers,
-        }
-        for row in rows
-    ]
+    return [_serialize_trade_row(session, row, material_change_tickers) for row in rows]
+
+
+def _serialize_trade_row(
+    session: Any,
+    row: TradingDecision,
+    material_change_tickers: set[str],
+) -> dict[str, Any]:
+    return {
+        "trading_decision_id": str(row.trading_decision_id),
+        "decision_time": row.decision_time,
+        "created_at": row.created_at or row.decision_time,
+        "ticker": row.ticker,
+        "decision": row.decision,
+        "instrument_type": row.instrument_type,
+        "trade_identity": row.trade_identity,
+        "selected_strategy_id": row.strategy_id,
+        "expression_bucket_id": row.expression_bucket_id,
+        "approved_weight": row.approved_weight,
+        "confidence": row.confidence,
+        "risk_status": row.risk_decision.status if row.risk_decision else None,
+        "order_status": _load_order_status(session, row.trading_decision_id),
+        "material_signal_change": str(row.ticker).upper() in material_change_tickers,
+        "thesis": row.thesis,
+        "invalidators": list(row.invalidators_json or []),
+        "metadata_json": dict(row.metadata_json or {}),
+    }
+
+
+def _ensure_trade_rows_include_ticker(
+    session: Any,
+    trade_rows: list[dict[str, Any]],
+    ticker: str | None,
+) -> list[dict[str, Any]]:
+    normalized_ticker = str(ticker or "").strip().upper()
+    if not normalized_ticker:
+        return trade_rows
+    if any(str(row.get("ticker") or "").strip().upper() == normalized_ticker for row in trade_rows):
+        return trade_rows
+
+    material_change_tickers = _load_material_signal_change_tickers(session)
+    latest_row = (
+        session.query(TradingDecision)
+        .filter(TradingDecision.ticker == normalized_ticker)
+        .order_by(TradingDecision.decision_time.desc())
+        .first()
+    )
+    if latest_row is None:
+        return trade_rows
+
+    return [*trade_rows, _serialize_trade_row(session, latest_row, material_change_tickers)]
 
 
 def _load_order_status(session: Any, trading_decision_id: uuid.UUID) -> str | None:
@@ -531,6 +588,15 @@ def _load_trade_detail(session: Any, decision_id: str) -> dict[str, Any] | None:
     return {
         "trading_decision_id": str(row.trading_decision_id),
         "ticker": row.ticker,
+        "decision": row.decision,
+        "decision_time": row.decision_time,
+        "strategy_id": row.strategy_id,
+        "expression_bucket_id": row.expression_bucket_id,
+        "trade_identity": row.trade_identity,
+        "confidence": row.confidence,
+        "thesis": row.thesis,
+        "invalidators": list(row.invalidators_json or []),
+        "metadata_json": dict(row.metadata_json or {}),
         "llm_decision_json": row.prompt_run.parsed_output_json if row.prompt_run else {},
         "validation_status": row.prompt_run.parse_status if row.prompt_run else "unavailable",
         "signal_snapshot": signal_snapshot.signal_json if signal_snapshot else {},
@@ -790,6 +856,74 @@ def _detail_tab_items(
     return []
 
 
+def _merge_audit_detail_into_workspace_detail(
+    detail: dict[str, Any] | None,
+    audit_detail: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if detail is None:
+        return None
+    if audit_detail is None:
+        return detail
+    if "latest_conclusion" in audit_detail and "tabs" in audit_detail:
+        return audit_detail
+
+    latest_conclusion = dict(detail.get("latest_conclusion") or {})
+    trade_decision = dict(latest_conclusion.get("trade_decision") or {})
+    risk_summary = dict(latest_conclusion.get("risk_summary") or {})
+    tabs = dict(detail.get("tabs") or {})
+    risk_tab = dict(tabs.get("risk") or {})
+
+    trade_decision["summary"] = (
+        trade_decision.get("summary")
+        if str(trade_decision.get("summary") or "").strip() and trade_decision.get("summary") != "No material update"
+        else _audit_trade_summary(audit_detail)
+    )
+    if not trade_decision.get("invalidators"):
+        trade_decision["invalidators"] = list(audit_detail.get("invalidators") or [])
+    if not trade_decision.get("strategy_id") or trade_decision.get("strategy_id") == "No material update":
+        trade_decision["strategy_id"] = audit_detail.get("strategy_id") or trade_decision.get("strategy_id")
+    if (
+        not trade_decision.get("expression_bucket_id")
+        or trade_decision.get("expression_bucket_id") == "No material update"
+    ):
+        trade_decision["expression_bucket_id"] = (
+            audit_detail.get("expression_bucket_id") or trade_decision.get("expression_bucket_id")
+        )
+    if trade_decision.get("confidence") is None:
+        trade_decision["confidence"] = audit_detail.get("confidence")
+
+    if (
+        not risk_summary.get("reason")
+        or risk_summary.get("reason") == "No material update"
+    ) and isinstance(audit_detail.get("risk_decision"), dict):
+        risk_summary["reason"] = audit_detail["risk_decision"].get("reason_code") or risk_summary.get("reason")
+
+    latest_conclusion["trade_decision"] = trade_decision
+    latest_conclusion["risk_summary"] = risk_summary
+
+    tabs["raw_json"] = audit_detail
+    risk_tab["raw_json"] = audit_detail.get("risk_decision")
+    tabs["risk"] = risk_tab
+
+    return {
+        **detail,
+        "latest_conclusion": latest_conclusion,
+        "tabs": tabs,
+    }
+
+
+def _audit_trade_summary(audit_detail: dict[str, Any]) -> str:
+    thesis = str(audit_detail.get("thesis") or "").strip()
+    if thesis:
+        return thesis
+    metadata = audit_detail.get("metadata_json")
+    if isinstance(metadata, dict):
+        selection_reason = str(metadata.get("selection_reason") or "").strip()
+        if selection_reason:
+            return selection_reason
+    return "No material update"
+
+
 def _to_decimal(value: str) -> Decimal:
     try:
         return Decimal(value.strip())
@@ -904,12 +1038,16 @@ def _load_signal_history_by_ticker(session: Any) -> dict[str, dict[str, Any]]:
             for item in technical_items:
                 if isinstance(item, dict):
                     entry["technical"].append(item)
+        elif isinstance(technical_items, dict):
+            entry["technical"].extend(_technical_history_items(technical_items))
 
         summary_items = signal_json.get("summary")
         if isinstance(summary_items, list):
             for item in summary_items:
                 if str(item).strip():
                     entry["summary"].append(str(item).strip())
+        else:
+            entry["summary"].extend(_signal_summary_items(signal_json))
 
         entry["timeline"].append(
             {
@@ -939,23 +1077,43 @@ def _load_signal_history_by_ticker(session: Any) -> dict[str, dict[str, Any]]:
 
 
 def _load_news_by_ticker(session: Any) -> dict[str, list[dict[str, Any]]]:
-    rows = (
+    alert_rows = (
         session.query(NewsAlert)
         .order_by(NewsAlert.published_at.desc(), NewsAlert.created_at.desc())
         .limit(100)
         .all()
     )
+    event_rows = (
+        session.query(EventNewsItem)
+        .order_by(EventNewsItem.published_at.desc(), EventNewsItem.available_for_decision_at.desc())
+        .limit(100)
+        .all()
+    )
     grouped: dict[str, list[dict[str, Any]]] = {}
-    for row in rows:
+    seen: set[tuple[str, str, str, str | None]] = set()
+    for row in alert_rows:
         ticker = str(row.ticker or "").strip().upper()
         if not ticker:
             continue
-        grouped.setdefault(ticker, []).append(
-            {
-                "title": row.headline,
-                "summary": row.summary,
-                "published_at": row.published_at,
-            }
+        _append_news_snippet(
+            grouped,
+            seen,
+            ticker=ticker,
+            title=row.headline,
+            summary=row.summary,
+            published_at=row.published_at,
+        )
+    for row in event_rows:
+        ticker = str(row.ticker or "").strip().upper()
+        if not ticker:
+            continue
+        _append_news_snippet(
+            grouped,
+            seen,
+            ticker=ticker,
+            title=row.headline,
+            summary=row.summary,
+            published_at=row.published_at,
         )
     return grouped
 
@@ -973,20 +1131,24 @@ def _load_fundamentals_by_ticker(session: Any) -> dict[str, list[dict[str, Any]]
         if not ticker:
             continue
         signal_json = row.signal_json if isinstance(row.signal_json, dict) else {}
-        fundamentals = signal_json.get("fundamentals")
-        if not isinstance(fundamentals, list):
-            continue
         items = grouped.setdefault(ticker, [])
-        for item in fundamentals:
-            if not isinstance(item, dict):
-                continue
-            items.append(
-                {
-                    "title": item.get("title"),
-                    "summary": item.get("summary"),
-                    "as_of": row.decision_time,
-                }
-            )
+        fundamentals = signal_json.get("fundamentals")
+        if isinstance(fundamentals, list):
+            for item in fundamentals:
+                if not isinstance(item, dict):
+                    continue
+                items.append(
+                    {
+                        "title": item.get("title"),
+                        "summary": item.get("summary"),
+                        "as_of": row.decision_time,
+                    }
+                )
+            continue
+
+        fundamental_metrics = signal_json.get("fundamental")
+        if isinstance(fundamental_metrics, dict):
+            items.extend(_fundamental_snippets_from_metrics(fundamental_metrics, row.decision_time))
     return grouped
 
 
@@ -997,4 +1159,184 @@ def _timeline_summary_from_signal(signal_json: dict[str, Any]) -> str:
             text = str(item).strip()
             if text:
                 return text
+    derived_items = _signal_summary_items(signal_json)
+    if derived_items:
+        return derived_items[0]
     return "Signal snapshot updated"
+
+
+def _technical_history_items(technical: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        {
+            "label": "price",
+            "points": [
+                value
+                for value in (
+                    technical.get("price_vs_sma_200"),
+                    technical.get("price_vs_sma_50"),
+                    technical.get("price_vs_sma_20"),
+                    technical.get("return_20d"),
+                )
+                if _is_number(value)
+            ],
+            "summary": _price_technical_summary(technical),
+        },
+        {
+            "label": "relative_strength",
+            "points": [
+                value
+                for value in (
+                    technical.get("rs_vs_spy_1d"),
+                    technical.get("rs_vs_qqq_1d"),
+                    technical.get("relative_volume"),
+                )
+                if _is_number(value)
+            ],
+            "summary": _relative_strength_summary(technical),
+        },
+    ]
+
+
+def _signal_summary_items(signal_json: dict[str, Any]) -> list[str]:
+    items: list[str] = []
+    events_news = signal_json.get("events_news")
+    technical = signal_json.get("technical")
+    fundamental = signal_json.get("fundamental")
+
+    if isinstance(events_news, dict):
+        negative_catalyst = str(events_news.get("direct_negative_catalyst_type") or "").strip()
+        sentiment = str(events_news.get("sentiment_direction") or "").strip()
+        catalyst_quality = events_news.get("catalyst_quality_score")
+        if negative_catalyst:
+            items.append(
+                f"Events/news sentiment {sentiment or 'negative'}; direct negative catalyst: {negative_catalyst}."
+            )
+        elif sentiment:
+            quality_text = (
+                f"; catalyst quality {_format_decimal(catalyst_quality)}"
+                if _is_number(catalyst_quality)
+                else ""
+            )
+            items.append(f"Events/news sentiment {sentiment}{quality_text}.")
+
+    if isinstance(technical, dict):
+        technical_bits: list[str] = []
+        if _is_number(technical.get("return_20d")):
+            technical_bits.append(f"20d return {_format_pct(technical['return_20d'])}")
+        if _is_number(technical.get("relative_volume")):
+            technical_bits.append(f"relative volume {_format_decimal(technical['relative_volume'])}")
+        if technical_bits:
+            items.append(f"Technical: {', '.join(technical_bits)}.")
+
+    if isinstance(fundamental, dict):
+        fundamental_bits: list[str] = []
+        if _is_number(fundamental.get("quality_score")):
+            fundamental_bits.append(f"quality {_format_decimal(fundamental['quality_score'])}")
+        if _is_number(fundamental.get("revenue_growth_score")):
+            fundamental_bits.append(f"revenue growth {_format_decimal(fundamental['revenue_growth_score'])}")
+        if _is_number(fundamental.get("margin_trend_score")):
+            fundamental_bits.append(f"margin trend {_format_decimal(fundamental['margin_trend_score'])}")
+        if _is_number(fundamental.get("valuation_percentile")):
+            fundamental_bits.append(f"valuation percentile {_format_decimal(fundamental['valuation_percentile'])}")
+        if fundamental_bits:
+            items.append(f"Fundamental: {', '.join(fundamental_bits)}.")
+
+    return items
+
+
+def _price_technical_summary(technical: dict[str, Any]) -> str:
+    parts: list[str] = []
+    if _is_number(technical.get("return_20d")):
+        parts.append(f"20d return {_format_pct(technical['return_20d'])}")
+    below_levels = [
+        label
+        for key, label in (
+            ("price_vs_sma_20", "SMA20"),
+            ("price_vs_sma_50", "SMA50"),
+            ("price_vs_sma_200", "SMA200"),
+        )
+        if _is_number(technical.get(key)) and float(technical[key]) < 0
+    ]
+    if below_levels:
+        if len(below_levels) == 1:
+            parts.append(f"below {below_levels[0]}")
+        elif len(below_levels) == 2:
+            parts.append(f"below {below_levels[0]} and {below_levels[1]}")
+        else:
+            parts.append(f"below {', '.join(below_levels[:-1])}, and {below_levels[-1]}")
+    return "; ".join(parts) if parts else "Price trend unavailable"
+
+
+def _relative_strength_summary(technical: dict[str, Any]) -> str:
+    parts: list[str] = []
+    if _is_number(technical.get("rs_vs_spy_1d")):
+        parts.append(f"RS vs SPY {_format_pct(technical['rs_vs_spy_1d'])}")
+    else:
+        parts.append("RS vs SPY unavailable")
+    if _is_number(technical.get("relative_volume")):
+        parts.append(f"relative volume {_format_decimal(technical['relative_volume'])}")
+    return "; ".join(parts)
+
+
+def _fundamental_snippets_from_metrics(
+    metrics: dict[str, Any],
+    as_of: Any,
+) -> list[dict[str, Any]]:
+    mapping = (
+        ("quality_score", "Quality"),
+        ("margin_trend_score", "Margin Trend"),
+        ("revenue_growth_score", "Revenue Growth"),
+        ("valuation_percentile", "Valuation Percentile"),
+    )
+    items: list[dict[str, Any]] = []
+    for key, title in mapping:
+        value = metrics.get(key)
+        if not _is_number(value):
+            continue
+        items.append(
+            {
+                "title": title,
+                "summary": _format_decimal(value),
+                "as_of": as_of,
+            }
+        )
+    return items
+
+
+def _append_news_snippet(
+    grouped: dict[str, list[dict[str, Any]]],
+    seen: set[tuple[str, str, str, str | None]],
+    *,
+    ticker: str,
+    title: Any,
+    summary: Any,
+    published_at: Any,
+) -> None:
+    normalized_title = str(title or "").strip()
+    if not normalized_title:
+        return
+    normalized_summary = str(summary or "").strip()
+    time_key = published_at.isoformat() if hasattr(published_at, "isoformat") else str(published_at or "") or None
+    dedupe_key = (ticker, normalized_title, normalized_summary, time_key)
+    if dedupe_key in seen:
+        return
+    seen.add(dedupe_key)
+    grouped.setdefault(ticker, []).append(
+        {
+            "title": normalized_title,
+            "summary": normalized_summary,
+            "published_at": published_at,
+        }
+    )
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _format_pct(value: Any) -> str:
+    return f"{float(value) * 100:.2f}%"
+
+
+def _format_decimal(value: Any) -> str:
+    return f"{float(value):.2f}"
