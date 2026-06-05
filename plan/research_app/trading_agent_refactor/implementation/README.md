@@ -74,6 +74,9 @@
 | PR 9 | [pr_09_reflection_learning_factors.md](pr_09_reflection_learning_factors.md) |
 | PR 10 | [pr_10_strategy_evolution.md](pr_10_strategy_evolution.md) |
 | PR 11 | [pr_11_today_dashboard_ui.md](pr_11_today_dashboard_ui.md) |
+| PR 11a | [pr_11a_ticker_first_today_dashboard.md](pr_11a_ticker_first_today_dashboard.md) |
+| PR 11b | [pr_11b_today_dashboard_visual_refresh.md](pr_11b_today_dashboard_visual_refresh.md) |
+| PR 11c | [pr_11c_lifecycle_command_center.md](pr_11c_lifecycle_command_center.md) |
 | PR 12 | [pr_12_scheduler_smoke_deploy_docs.md](pr_12_scheduler_smoke_deploy_docs.md) |
 | PR 13 | [pr_13_live_preopen_pipeline.md](pr_13_live_preopen_pipeline.md) |
 | PR 14 | [pr_14_runtime_structure_live_phase_roadmap.md](pr_14_runtime_structure_live_phase_roadmap.md) |

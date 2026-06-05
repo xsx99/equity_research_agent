@@ -2,6 +2,7 @@
 
 ## 2026-06-03
 
+- 2026-06-05: Added follow-up implementation plan `plan/research_app/trading_agent_refactor/implementation/pr_11c_lifecycle_command_center.md`. Planned scope: derive a unified ticker lifecycle model for `/today`, keep closed/rejected work visible in the workstation, translate internal IDs into operator-facing copy, turn `Overview` into a command center, and demote raw risk/candidate internals into advanced audit surfaces.
 - Added ticker-first `/today` dashboard redesign spec at `docs/superpowers/specs/2026-06-03-ticker-first-today-dashboard-design.md` and committed it as `5727c2f`.
 - Added follow-up implementation plan `plan/research_app/trading_agent_refactor/implementation/pr_11a_ticker_first_today_dashboard.md` for the ticker-first refinement of PR 11. Planned scope: attention-first ticker rail, latest-conclusion-first ticker detail, technical chart evidence, and news/fundamental snippet summaries.
 - 2026-06-03/04: PR 11A Task 1 completed and committed as `2038cff`; added `src/web/presenters/today_workspace.py` plus `tests/web/test_today_workspace.py` for ticker bucketing, aggregation, current-state selection, and deterministic default ticker selection.
