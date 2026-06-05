@@ -1113,3 +1113,41 @@ def test_build_ticker_workspace_deduplicates_repeated_summary_bullets():
         "Technical: 20d return 8.26%.",
         "Fundamental: quality 0.98.",
     ]
+
+
+def test_build_ticker_workspace_surfaces_key_drivers_and_counterarguments():
+    workspace = build_ticker_workspace(
+        trade_rows=[
+            {
+                "ticker": "NVDA",
+                "decision": "enter_long",
+                "selected_strategy_id": "relative_strength_rotation_v1",
+                "expression_bucket_id": "long_stock",
+                "confidence": 0.74,
+                "risk_status": "approved",
+                "order_status": None,
+                "material_signal_change": False,
+                "thesis": "Relative strength remains intact.",
+                "key_drivers": ["sector_relative_strength", "relative_volume"],
+                "counterarguments": ["valuation is elevated versus peers"],
+                "invalidators": ["QQQ closes below prior close"],
+                "created_at": "2026-06-05T14:35:00Z",
+            },
+        ],
+        selected_ticker="NVDA",
+        positions_by_ticker={},
+        risk_by_ticker={"NVDA": {"status": "approved", "reason": "within_limits"}},
+        signal_history_by_ticker={},
+        news_by_ticker={},
+        fundamentals_by_ticker={},
+    )
+
+    detail = workspace["detail"]
+
+    assert detail["latest_conclusion"]["trade_decision"]["key_drivers"] == [
+        "sector_relative_strength",
+        "relative_volume",
+    ]
+    assert detail["latest_conclusion"]["trade_decision"]["counterarguments"] == [
+        "valuation is elevated versus peers"
+    ]

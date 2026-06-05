@@ -249,6 +249,9 @@ def _normalize_trading_output_candidate(payload: dict[str, Any]) -> dict[str, An
     if "thesis" not in normalized and isinstance(normalized.get("reason"), str):
         normalized["thesis"] = normalized["reason"]
     normalized.pop("reason", None)
+    if "key_drivers" not in normalized and isinstance(normalized.get("key_signals"), list):
+        normalized["key_drivers"] = list(normalized.get("key_signals") or [])
+    normalized.pop("key_signals", None)
     for key in ("entry_plan", "exit_plan"):
         value = normalized.get(key)
         if isinstance(value, (dict, list)):

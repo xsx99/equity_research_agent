@@ -663,6 +663,11 @@ def _serialize_trade_row(
     row: TradingDecision,
     material_change_tickers: set[str],
 ) -> dict[str, Any]:
+    metadata_json = dict(getattr(row, "metadata_json", {}) or {})
+    key_drivers = list(getattr(row, "key_drivers_json", None) or metadata_json.get("key_drivers") or [])
+    counterarguments = list(
+        getattr(row, "counterarguments_json", None) or metadata_json.get("counterarguments") or []
+    )
     return {
         "trading_decision_id": str(row.trading_decision_id),
         "decision_time": row.decision_time,
@@ -679,8 +684,10 @@ def _serialize_trade_row(
         "order_status": _load_order_status(session, row.trading_decision_id),
         "material_signal_change": str(row.ticker).upper() in material_change_tickers,
         "thesis": row.thesis,
+        "key_drivers": key_drivers,
+        "counterarguments": counterarguments,
         "invalidators": list(row.invalidators_json or []),
-        "metadata_json": dict(row.metadata_json or {}),
+        "metadata_json": metadata_json,
     }
 
 
@@ -742,6 +749,7 @@ def _load_trade_detail(session: Any, decision_id: str) -> dict[str, Any] | None:
     if row is None:
         return None
     signal_snapshot = row.candidate_score.signal_snapshot if row.candidate_score else None
+    metadata_json = dict(getattr(row, "metadata_json", {}) or {})
     score_rows = []
     if row.candidate_score:
         related_scores = (
@@ -771,8 +779,12 @@ def _load_trade_detail(session: Any, decision_id: str) -> dict[str, Any] | None:
         "trade_identity": row.trade_identity,
         "confidence": row.confidence,
         "thesis": row.thesis,
+        "key_drivers": list(getattr(row, "key_drivers_json", None) or metadata_json.get("key_drivers") or []),
+        "counterarguments": list(
+            getattr(row, "counterarguments_json", None) or metadata_json.get("counterarguments") or []
+        ),
         "invalidators": list(row.invalidators_json or []),
-        "metadata_json": dict(row.metadata_json or {}),
+        "metadata_json": metadata_json,
         "llm_decision_json": row.prompt_run.parsed_output_json if row.prompt_run else {},
         "validation_status": row.prompt_run.parse_status if row.prompt_run else "unavailable",
         "signal_snapshot": signal_snapshot.signal_json if signal_snapshot else {},
@@ -1087,6 +1099,10 @@ def _merge_audit_detail_into_workspace_detail(
         if str(trade_decision.get("summary") or "").strip() and trade_decision.get("summary") != "No material update"
         else _audit_trade_summary(audit_detail)
     )
+    if not trade_decision.get("key_drivers"):
+        trade_decision["key_drivers"] = list(audit_detail.get("key_drivers") or [])
+    if not trade_decision.get("counterarguments"):
+        trade_decision["counterarguments"] = list(audit_detail.get("counterarguments") or [])
     if not trade_decision.get("invalidators"):
         trade_decision["invalidators"] = list(audit_detail.get("invalidators") or [])
     if not trade_decision.get("strategy_id") or trade_decision.get("strategy_id") == "No material update":

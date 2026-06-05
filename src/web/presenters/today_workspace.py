@@ -273,6 +273,8 @@ def _build_detail(
     closed_position = closed_positions_by_ticker.get(selected_ticker) or {}
     risk = risk_by_ticker.get(selected_ticker) or {}
     trade_summary = _decision_summary(latest_decision)
+    key_drivers = _decision_rationale_items(latest_decision, "key_drivers")
+    counterarguments = _decision_rationale_items(latest_decision, "counterarguments")
     invalidators = _decision_invalidators(latest_decision)
 
     latest_conclusion = {
@@ -306,6 +308,10 @@ def _build_detail(
     }
     if trade_summary != _EMPTY_MARKER:
         latest_conclusion["trade_decision"]["summary"] = trade_summary
+    if key_drivers:
+        latest_conclusion["trade_decision"]["key_drivers"] = key_drivers
+    if counterarguments:
+        latest_conclusion["trade_decision"]["counterarguments"] = counterarguments
     if invalidators:
         latest_conclusion["trade_decision"]["invalidators"] = invalidators
 
@@ -606,6 +612,13 @@ def _decision_invalidators(row: dict[str, Any]) -> list[str]:
     invalidators = row.get("invalidators")
     if isinstance(invalidators, list):
         return [str(item).strip() for item in invalidators if str(item).strip()]
+    return []
+
+
+def _decision_rationale_items(row: dict[str, Any], key: str) -> list[str]:
+    values = row.get(key)
+    if isinstance(values, list):
+        return [str(item).strip() for item in values if str(item).strip()]
     return []
 
 

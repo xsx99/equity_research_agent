@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import uuid
 from datetime import date, datetime, timezone
+from decimal import Decimal
+from types import SimpleNamespace
 from typing import Any
 
 from src.db.models.trading import UniverseFilterConfig, UniverseSnapshot, UniverseSymbol
@@ -18,7 +20,7 @@ from src.trading.risk.hedges import RiskHedgeDecisionRecord
 from src.trading.risk.options import OptionRiskSnapshotRecord
 from src.trading.options.strategy import OptionStrategyDecisionRecord, OptionStrategyLegRecord
 from src.trading.portfolio.state import PortfolioSnapshot, StockPosition
-from src.trading.repositories.sqlalchemy import SqlAlchemyTradingRepository
+from src.trading.repositories.sqlalchemy import SqlAlchemyTradingRepository, _trading_decision_payload
 from src.trading.workflows.paper_execution import PaperExecutionWorkflow
 from src.trading.manual_review.requests import ManualTickerRequestService
 from src.trading.risk import RiskDecisionRecord
@@ -135,6 +137,32 @@ def test_sqlalchemy_repository_persists_universe_snapshot_and_symbols():
     assert persisted_snapshot.provider == "alpaca_live"
     assert persisted_snapshot.universe_filter_config_id == filter_id
     assert len(persisted_symbols) == 2
+
+
+def test_trading_decision_payload_includes_rationale_fields_for_reflection_consumers():
+    now = datetime(2026, 6, 5, 12, 0, tzinfo=timezone.utc)
+    row = SimpleNamespace(
+        ticker="NVDA",
+        decision="enter_long",
+        strategy_id="relative_strength_rotation_v1",
+        trade_identity="tactical_stock_trade",
+        instrument_type="stock",
+        selection_source="scanner",
+        confidence=Decimal("0.74"),
+        target_weight=Decimal("0.04"),
+        approved_weight=Decimal("0.04"),
+        decision_time=now,
+        key_drivers_json=["sector_relative_strength", "relative_volume"],
+        counterarguments_json=["valuation is elevated versus peers"],
+        invalidators_json=["QQQ closes below prior close"],
+        metadata_json={"paper_trade_authorized": True},
+    )
+
+    payload = _trading_decision_payload(row)
+
+    assert payload["key_drivers"] == ["sector_relative_strength", "relative_volume"]
+    assert payload["counterarguments"] == ["valuation is elevated versus peers"]
+    assert payload["invalidators"] == ["QQQ closes below prior close"]
 
 
 def test_sqlalchemy_repository_persists_pr4_risk_artifacts():

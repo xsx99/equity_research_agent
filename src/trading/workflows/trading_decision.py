@@ -10,6 +10,7 @@ from src.agents.trading import PromptRunRecord, TradingAgent, UsageEventRecord
 from src.agents.trading_schemas import TradingDecisionInput
 from src.trading.manual_review.requests import ManualTickerRequestService
 from src.trading.risk import RiskDecisionRecord
+from src.trading.signals import SignalSnapshotResult
 from src.trading.strategies.classifier import TradeClassificationRecord
 from src.trading.strategies.matching import CandidateScoreRecord
 
@@ -38,12 +39,15 @@ class TradingDecisionRecord:
     max_loss_pct: float
     time_horizon: str
     thesis: str
-    invalidators: list[str]
     prompt_template: Any
-    prompt_run: PromptRunRecord
+    prompt_run: PromptRunRecord | None
     usage_events: list[UsageEventRecord]
     decision_time: datetime
     available_for_decision_at: datetime
+    key_drivers: list[str] = field(default_factory=list)
+    counterarguments: list[str] = field(default_factory=list)
+    invalidators: list[str] = field(default_factory=list)
+    context_snapshot_json: dict[str, Any] = field(default_factory=dict)
     metadata_json: dict[str, Any] = field(default_factory=dict)
 
 
@@ -89,11 +93,30 @@ class TradingDecisionPipeline:
             for decision in risk_decisions
             if decision.trade_classification_id is not None
         }
+        signal_snapshot_by_id = {
+            snapshot.signal_snapshot_id: snapshot
+            for snapshot in self.repository.load_signal_snapshots_for_decision(
+                decision_time=decision_time,
+                snapshot_type="pre_open",
+            )
+        }
         decisions: list[TradingDecisionRecord] = []
         for classification in classifications:
             candidate = candidate_by_id[classification.candidate_score_id]
             risk = risk_by_classification_id.get(classification.trade_classification_id)
-            payload = self._build_input_payload(candidate, classification, risk)
+            signal_snapshot = signal_snapshot_by_id.get(candidate.signal_snapshot_id)
+            if signal_snapshot is None:
+                decision = self._build_missing_signal_snapshot_decision(
+                    candidate=candidate,
+                    classification=classification,
+                    risk=risk,
+                    decision_time=decision_time,
+                )
+                self.repository.save_trading_decision(decision)
+                self._record_manual_result(candidate, classification, risk)
+                decisions.append(decision)
+                continue
+            payload = self._build_input_payload(candidate, classification, risk, signal_snapshot)
             result = self.agent.run(payload, context=None)  # ToolContext is unused here.
             prompt_template = result.metadata["prompt_template"]
             prompt_run = result.metadata["prompt_run"]
@@ -126,16 +149,19 @@ class TradingDecisionPipeline:
                 max_loss_pct=float(final_output.get("max_loss_pct", 0.0)),
                 time_horizon=str(final_output.get("time_horizon", classification.intended_horizon)),
                 thesis=str(final_output.get("thesis", "")),
+                key_drivers=list(final_output.get("key_drivers", [])),
+                counterarguments=list(final_output.get("counterarguments", [])),
                 invalidators=list(final_output.get("invalidators", [])),
                 prompt_template=prompt_template,
                 prompt_run=prompt_run,
                 usage_events=list(usage_events),
                 decision_time=decision_time,
                 available_for_decision_at=candidate.available_for_decision_at,
+                context_snapshot_json=payload,
                 metadata_json={
                     "paper_trade_authorized": bool(
                         candidate.manual_request_id is None
-                        or payload["manual_request_mode"] == "paper_trade_eligible"
+                        or payload["manual_request_context"].get("manual_request_mode") == "paper_trade_eligible"
                     )
                     and candidate.strategy_lifecycle_status in {"active", "experimental"}
                     and str(final_output["decision"]) not in {"no_trade", "hold"},
@@ -146,13 +172,16 @@ class TradingDecisionPipeline:
                     "risk_status": risk.status if risk is not None else None,
                     "confidence_basis": final_output.get("confidence_basis", {}),
                     "benchmark_context": final_output.get("benchmark_context", {}),
-                    "key_signals": final_output.get("key_signals", []),
+                    "key_drivers": final_output.get("key_drivers", []),
+                    "counterarguments": final_output.get("counterarguments", []),
                     "risk_checks": final_output.get("risk_checks", []),
                     "learning_factors_used": final_output.get("learning_factors_used", []),
-                    "source_availability": payload["source_availability"],
-                    "selected_strategy_context": payload["selected_strategy_context"],
-                    "historical_outcomes": payload["historical_outcomes"],
+                    "signal_snapshot_id": signal_snapshot.signal_snapshot_id,
+                    "source_freshness": signal_snapshot.source_freshness_json,
+                    "selected_strategy_context": payload["classification_context"].get("selected_strategy_context", {}),
+                    "historical_outcomes": payload["candidate_context"].get("historical_outcomes", []),
                     "fallback_action": final_output.get("fallback_action"),
+                    "fallback_reason": None,
                 },
             )
             self.repository.save_prompt_template(prompt_template)
@@ -168,33 +197,151 @@ class TradingDecisionPipeline:
         candidate: CandidateScoreRecord,
         classification: TradeClassificationRecord,
         risk: RiskDecisionRecord | None,
+        signal_snapshot: SignalSnapshotResult,
     ) -> dict[str, Any]:
         input_model = TradingDecisionInput(
             ticker=candidate.ticker,
-            strategy_id=candidate.strategy_id,
-            expression_bucket_id=classification.expression_bucket_id,
-            trade_identity=classification.trade_identity,
-            instrument_type="stock" if classification.trade_identity != "watch_only" else "watch",
-            selection_source=candidate.selection_source,
-            manual_request_id=candidate.manual_request_id,
-            manual_request_mode=self._manual_request_mode(candidate.manual_request_id),
             decision_time=candidate.decision_time,
             available_for_decision_at=candidate.available_for_decision_at,
             has_existing_position=False,
-            candidate_score=candidate.candidate_score,
-            classification_result_status=classification.result_status,
-            benchmark_context=candidate.benchmark_context,
-            confidence_basis={},
+            signal_snapshot={
+                "signal_snapshot_id": signal_snapshot.signal_snapshot_id,
+                "snapshot_type": signal_snapshot.snapshot_type,
+                "decision_time": signal_snapshot.decision_time,
+                "available_for_decision_at": signal_snapshot.available_for_decision_at,
+                "signal_json": signal_snapshot.signal_json,
+                "source_freshness_json": signal_snapshot.source_freshness_json,
+                "missing_signals_json": signal_snapshot.missing_signals_json,
+                "stale_signals_json": signal_snapshot.stale_signals_json,
+                "source_available_times_json": signal_snapshot.source_available_times_json,
+                "source_record_refs_json": signal_snapshot.source_record_refs_json,
+            },
+            candidate_context={
+                "candidate_score": candidate.candidate_score,
+                "strategy_id": candidate.strategy_id,
+                "strategy_version": candidate.strategy_version,
+                "selection_source": candidate.selection_source,
+                "selection_reason": candidate.selection_reason,
+                "benchmark_context": candidate.benchmark_context,
+                "core_signal_evidence": candidate.core_signal_evidence,
+                "historical_outcomes": [],
+            },
+            classification_context={
+                "expression_bucket_id": classification.expression_bucket_id,
+                "trade_identity": classification.trade_identity,
+                "classification_result_status": classification.result_status,
+                "instrument_type": "stock" if classification.trade_identity != "watch_only" else "watch",
+                "selected_strategy_context": classification.selected_strategy_context_json,
+            },
             risk_context={
                 "status": risk.status if risk is not None else None,
                 "approved_weight": float(risk.approved_weight) if risk is not None else 0.0,
                 "reason_code": risk.reason_code if risk is not None else None,
             },
-            source_availability={"source_record_refs_count": len(candidate.source_record_refs_json)},
-            historical_outcomes=[],
-            selected_strategy_context=classification.selected_strategy_context_json,
+            manual_request_context={
+                "manual_request_id": candidate.manual_request_id,
+                "manual_request_mode": self._manual_request_mode(candidate.manual_request_id),
+            },
         )
         return input_model.model_dump(mode="json")
+
+    def _build_missing_signal_snapshot_decision(
+        self,
+        *,
+        candidate: CandidateScoreRecord,
+        classification: TradeClassificationRecord,
+        risk: RiskDecisionRecord | None,
+        decision_time: datetime,
+    ) -> TradingDecisionRecord:
+        fallback_action = "no_trade"
+        manual_request_mode = self._manual_request_mode(candidate.manual_request_id)
+        context_snapshot = {
+            "ticker": candidate.ticker,
+            "decision_time": decision_time.isoformat(),
+            "available_for_decision_at": candidate.available_for_decision_at.isoformat(),
+            "has_existing_position": False,
+            "signal_snapshot": {
+                "signal_snapshot_id": candidate.signal_snapshot_id,
+                "missing": True,
+            },
+            "candidate_context": {
+                "candidate_score": candidate.candidate_score,
+                "strategy_id": candidate.strategy_id,
+                "strategy_version": candidate.strategy_version,
+                "selection_source": candidate.selection_source,
+                "selection_reason": candidate.selection_reason,
+                "benchmark_context": candidate.benchmark_context,
+                "core_signal_evidence": candidate.core_signal_evidence,
+                "historical_outcomes": [],
+            },
+            "classification_context": {
+                "expression_bucket_id": classification.expression_bucket_id,
+                "trade_identity": classification.trade_identity,
+                "classification_result_status": classification.result_status,
+                "instrument_type": "stock" if classification.trade_identity != "watch_only" else "watch",
+                "selected_strategy_context": classification.selected_strategy_context_json,
+            },
+            "risk_context": {
+                "status": risk.status if risk is not None else None,
+                "approved_weight": float(risk.approved_weight) if risk is not None else 0.0,
+                "reason_code": risk.reason_code if risk is not None else None,
+            },
+            "manual_request_context": {
+                "manual_request_id": candidate.manual_request_id,
+                "manual_request_mode": manual_request_mode,
+            },
+        }
+        return TradingDecisionRecord(
+            trading_decision_id=str(uuid.uuid4()),
+            candidate_score_id=candidate.candidate_score_id,
+            trade_classification_id=classification.trade_classification_id,
+            risk_decision_id=risk.risk_decision_id if risk is not None else None,
+            ticker=candidate.ticker,
+            decision=fallback_action,
+            strategy_id=candidate.strategy_id,
+            strategy_version=candidate.strategy_version,
+            expression_bucket_id=classification.expression_bucket_id,
+            expression_bucket_version=classification.expression_bucket_version,
+            trade_identity=classification.trade_identity,
+            instrument_type="stock" if classification.trade_identity != "watch_only" else "watch",
+            selection_source=candidate.selection_source,
+            manual_request_id=candidate.manual_request_id,
+            confidence=0.0,
+            target_weight=0.0,
+            approved_weight=float(risk.approved_weight if risk is not None else 0.0),
+            max_loss_pct=0.0,
+            time_horizon="monitor_only",
+            thesis="Signal snapshot context was unavailable at decision time.",
+            key_drivers=[],
+            counterarguments=["Signal snapshot context was unavailable at decision time."],
+            invalidators=list(candidate.invalidators),
+            prompt_template=None,
+            prompt_run=None,
+            usage_events=[],
+            decision_time=decision_time,
+            available_for_decision_at=candidate.available_for_decision_at,
+            context_snapshot_json=context_snapshot,
+            metadata_json={
+                "paper_trade_authorized": False,
+                "selection_reason": candidate.selection_reason,
+                "strategy_lifecycle_status": candidate.strategy_lifecycle_status,
+                "strategy_source": candidate.strategy_source,
+                "classification_result_status": classification.result_status,
+                "risk_status": risk.status if risk is not None else None,
+                "confidence_basis": {},
+                "benchmark_context": candidate.benchmark_context,
+                "key_drivers": [],
+                "counterarguments": ["Signal snapshot context was unavailable at decision time."],
+                "risk_checks": [],
+                "learning_factors_used": [],
+                "signal_snapshot_id": candidate.signal_snapshot_id,
+                "source_freshness": {},
+                "selected_strategy_context": classification.selected_strategy_context_json,
+                "historical_outcomes": [],
+                "fallback_action": fallback_action,
+                "fallback_reason": "missing_signal_snapshot_context",
+            },
+        )
 
     def _apply_guardrails(
         self,

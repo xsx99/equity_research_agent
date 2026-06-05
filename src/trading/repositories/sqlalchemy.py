@@ -702,11 +702,14 @@ class SQLAlchemyTradingRepository:
         row.max_loss_pct = Decimal(str(decision.max_loss_pct))
         row.time_horizon = decision.time_horizon
         row.thesis = decision.thesis
+        row.key_drivers_json = list(decision.key_drivers)
+        row.counterarguments_json = list(decision.counterarguments)
         row.invalidators_json = list(decision.invalidators)
         row.prompt_run_id = None
         row.fallback_action = decision.metadata_json.get("fallback_action")
         row.paper_trade_authorized = bool(decision.metadata_json.get("paper_trade_authorized", False))
         row.context_snapshot_json = {
+            **dict(decision.context_snapshot_json),
             "prompt_template": {
                 "prompt_id": getattr(decision.prompt_template, "prompt_id", None),
                 "prompt_version": getattr(decision.prompt_template, "prompt_version", None),
@@ -1441,6 +1444,7 @@ def _manual_request_payload(row: Any) -> dict[str, Any]:
 
 
 def _trading_decision_payload(row: Any) -> dict[str, Any]:
+    metadata_json = dict(getattr(row, "metadata_json", {}) or {})
     return {
         "ticker": row.ticker,
         "decision": row.decision,
@@ -1451,8 +1455,13 @@ def _trading_decision_payload(row: Any) -> dict[str, Any]:
         "confidence": _decimal_to_float(row.confidence),
         "target_weight": _decimal_to_float(row.target_weight),
         "approved_weight": _decimal_to_float(row.approved_weight),
+        "key_drivers": list(getattr(row, "key_drivers_json", None) or metadata_json.get("key_drivers") or []),
+        "counterarguments": list(
+            getattr(row, "counterarguments_json", None) or metadata_json.get("counterarguments") or []
+        ),
+        "invalidators": list(getattr(row, "invalidators_json", None) or []),
         "decision_time": row.decision_time.isoformat(),
-        "metadata_json": dict(row.metadata_json or {}),
+        "metadata_json": metadata_json,
     }
 
 

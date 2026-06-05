@@ -29,21 +29,43 @@ def _payload():
     now = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
     return {
         "ticker": "NVDA",
-        "strategy_id": "relative_strength_rotation_v1",
-        "expression_bucket_id": "long_stock",
-        "trade_identity": "tactical_stock_trade",
-        "instrument_type": "stock",
-        "selection_source": "scanner",
-        "manual_request_id": None,
         "decision_time": now.isoformat(),
         "available_for_decision_at": now.isoformat(),
         "has_existing_position": False,
-        "candidate_score": 0.81,
-        "benchmark_context": {"primary_benchmark": "QQQ"},
-        "confidence_basis": {"calibration_bucket": "bullish_relative_strength"},
-        "risk_context": {"status": "approved", "approved_weight": 0.04},
-        "source_availability": {"technical": "fresh", "fundamental": "fresh"},
-        "historical_outcomes": [],
+        "signal_snapshot": {
+            "signal_snapshot_id": "snapshot-1",
+            "snapshot_type": "pre_open",
+            "decision_time": now.isoformat(),
+            "available_for_decision_at": now.isoformat(),
+            "signal_json": {
+                "technical": {"rs_vs_spy_1d": 0.02, "relative_volume": 1.6},
+                "fundamental": {"quality_score": 0.92},
+                "events_news": {"catalyst_quality_score": 0.88},
+            },
+            "source_freshness_json": {"technical": "fresh", "fundamental": "fresh", "events_news": "fresh"},
+            "missing_signals_json": [],
+            "stale_signals_json": [],
+            "source_available_times_json": {"market_bars:NVDA": now.isoformat()},
+            "source_record_refs_json": [{"source_record_id": "market_bars:NVDA"}],
+        },
+        "candidate_context": {
+            "candidate_score": 0.81,
+            "strategy_id": "relative_strength_rotation_v1",
+            "strategy_version": "v1",
+            "selection_source": "scanner",
+            "selection_reason": "relative strength confirmed",
+            "benchmark_context": {"primary_benchmark": "QQQ"},
+            "core_signal_evidence": {"technical.rs_vs_spy_1d": 0.02},
+            "historical_outcomes": [],
+        },
+        "classification_context": {
+            "expression_bucket_id": "long_stock",
+            "trade_identity": "tactical_stock_trade",
+            "classification_result_status": "actionable_trade",
+            "selected_strategy_context": {"candidate_score": 0.81},
+        },
+        "risk_context": {"status": "approved", "approved_weight": 0.04, "reason_code": "within_limits"},
+        "manual_request_context": {"manual_request_id": None, "manual_request_mode": None},
     }
 
 
@@ -85,7 +107,8 @@ def test_trading_agent_retries_once_and_returns_validated_output(tmp_path):
                 "entry_plan": "market_open",
                 "exit_plan": "close_or_invalidator",
                 "thesis": "Relative strength remains intact.",
-                "key_signals": ["sector_relative_strength"],
+                "key_drivers": ["sector_relative_strength"],
+                "counterarguments": ["valuation is elevated versus peers"],
                 "risk_checks": ["liquidity_ok"],
                 "invalidators": ["QQQ closes below prior close"],
                 "learning_factors_used": [],
@@ -114,8 +137,12 @@ def test_trading_agent_retries_once_and_returns_validated_output(tmp_path):
 
     assert result.success is True
     assert result.output_data["decision"] == "enter_long"
+    assert result.output_data["key_drivers"] == ["sector_relative_strength"]
+    assert result.output_data["counterarguments"] == ["valuation is elevated versus peers"]
     assert result.metadata["retry_count"] == 1
     assert "previous validation error" in calls[1].lower()
+    assert '"signal_snapshot"' in calls[0]
+    assert '"technical"' in calls[0]
 
 
 def test_trading_agent_returns_safe_fallback_after_retry_failure(tmp_path):
@@ -174,6 +201,7 @@ def test_trading_agent_normalizes_common_model_output_shape_mismatches(tmp_path)
                 "exit_plan": {"type": "stop_loss", "price": None},
                 "reason": "Relative strength remains intact.",
                 "key_signals": ["sector_relative_strength"],
+                "counterarguments": ["valuation is elevated versus peers"],
                 "risk_checks": ["liquidity_ok"],
                 "invalidators": ["QQQ closes below prior close"],
                 "learning_factors_used": [],
@@ -202,6 +230,7 @@ def test_trading_agent_normalizes_common_model_output_shape_mismatches(tmp_path)
 
     assert result.success is True
     assert result.output_data["decision"] == "enter_long"
+    assert result.output_data["key_drivers"] == ["sector_relative_strength"]
     assert result.output_data["thesis"] == "Relative strength remains intact."
     assert result.output_data["entry_plan"] == '{"price":null,"type":"limit_order"}'
     assert result.output_data["exit_plan"] == '{"price":null,"type":"stop_loss"}'

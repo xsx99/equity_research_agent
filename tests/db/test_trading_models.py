@@ -769,6 +769,8 @@ def test_pr_5_models_can_be_instantiated():
         max_loss_pct=0.0,
         time_horizon="2w-3m",
         thesis="Review-only manual request found the setup actionable but did not authorize a trade.",
+        key_drivers_json=["sector_relative_strength"],
+        counterarguments_json=["valuation is elevated versus peers"],
         invalidators_json=["QQQ breaks trend"],
         fallback_action="no_trade",
         paper_trade_authorized=False,
@@ -781,6 +783,7 @@ def test_pr_5_models_can_be_instantiated():
     assert decision.ticker == "NVDA"
     assert decision.decision == "no_trade"
     assert decision.paper_trade_authorized is False
+    assert decision.key_drivers_json == ["sector_relative_strength"]
 
 
 def test_pr_6_models_can_be_instantiated():

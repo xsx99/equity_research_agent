@@ -49,24 +49,14 @@ class TradingDecisionInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     ticker: str
-    strategy_id: str
-    expression_bucket_id: str
-    trade_identity: TradeIdentityLiteral
-    instrument_type: InstrumentTypeLiteral
-    selection_source: SelectionSourceLiteral
-    manual_request_id: str | None = None
-    manual_request_mode: Literal["review_only", "paper_trade_eligible"] | None = None
     decision_time: datetime
     available_for_decision_at: datetime
     has_existing_position: bool = False
-    candidate_score: float = Field(ge=0, le=1)
-    classification_result_status: str | None = None
-    benchmark_context: dict[str, Any] = Field(default_factory=dict)
-    confidence_basis: dict[str, Any] = Field(default_factory=dict)
+    signal_snapshot: dict[str, Any]
+    candidate_context: dict[str, Any]
+    classification_context: dict[str, Any]
     risk_context: dict[str, Any] = Field(default_factory=dict)
-    source_availability: dict[str, Any] = Field(default_factory=dict)
-    historical_outcomes: list[dict[str, Any]] = Field(default_factory=list)
-    selected_strategy_context: dict[str, Any] = Field(default_factory=dict)
+    manual_request_context: dict[str, Any] = Field(default_factory=dict)
 
     @property
     def fallback_action(self) -> FallbackActionLiteral:
@@ -95,9 +85,10 @@ class TradingDecisionOutput(BaseModel):
     entry_plan: str
     exit_plan: str
     thesis: str
-    key_signals: list[str] = Field(default_factory=list)
+    key_drivers: list[str]
+    counterarguments: list[str]
     risk_checks: list[str] = Field(default_factory=list)
-    invalidators: list[str] = Field(default_factory=list)
+    invalidators: list[str]
     learning_factors_used: list[str] = Field(default_factory=list)
     schema_version: str
     generated_at: datetime

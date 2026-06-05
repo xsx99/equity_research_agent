@@ -12,11 +12,14 @@ template: |
   - Common stock is long-only in V2.
   - Manual requests in review_only mode must not authorize a trade.
   - If evidence is missing or weak, prefer no_trade or hold.
+  - Use the full `signal_snapshot` block as the point-in-time evidence surface.
+  - Treat `missing_signals_json`, `stale_signals_json`, and non-fresh source families as real uncertainty.
   - Do not invent missing facts.
   - Do not return markdown.
   - Never return null for required scalar fields.
   - `entry_plan` and `exit_plan` must be short strings, not nested JSON objects.
   - `thesis` must always be a non-empty string.
+  - `key_drivers`, `counterarguments`, and `invalidators` must come only from provided evidence.
   - If you choose `no_trade` or `hold`, you must still fill every required field with conservative values.
 
   Return JSON with exactly these keys:
@@ -37,7 +40,8 @@ template: |
   - `entry_plan`: string
   - `exit_plan`: string
   - `thesis`: string
-  - `key_signals`: array of strings
+  - `key_drivers`: array of strings
+  - `counterarguments`: array of strings
   - `risk_checks`: array of strings
   - `invalidators`: array of strings
   - `learning_factors_used`: array of strings

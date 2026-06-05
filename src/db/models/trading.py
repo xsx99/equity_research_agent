@@ -1482,6 +1482,8 @@ class TradingDecision(Base):
     max_loss_pct = Column(Numeric, nullable=False)
     time_horizon = Column(String(32), nullable=False)
     thesis = Column(Text, nullable=False)
+    key_drivers_json = Column(JSONB, nullable=False, default=list)
+    counterarguments_json = Column(JSONB, nullable=False, default=list)
     invalidators_json = Column(JSONB, nullable=False, default=list)
     fallback_action = Column(String(64), nullable=True)
     paper_trade_authorized = Column(Boolean, nullable=False, default=False, server_default="false")
