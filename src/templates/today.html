@@ -389,14 +389,57 @@
       </div>
       <div class="surface-summary-row">
         <article class="summary-tile">
-          <span class="metric-label">Session Watch</span>
-          <strong>{{ overview.live_alerts | length }} live alert{% if overview.live_alerts|length != 1 %}s{% endif %}</strong>
+          <span class="metric-label">Needs Review</span>
+          <strong>{{ overview.command_center.needs_review | length }} ticker{% if overview.command_center.needs_review|length != 1 %}s{% endif %}</strong>
         </article>
         <article class="summary-tile">
-          <span class="metric-label">Material Changes</span>
-          <strong>{{ overview.material_changes | length }} active ticker{% if overview.material_changes|length != 1 %}s{% endif %}</strong>
+          <span class="metric-label">Open Positions</span>
+          <strong>{{ overview.command_center.open_positions | length }} position{% if overview.command_center.open_positions|length != 1 %}s{% endif %}</strong>
+        </article>
+        <article class="summary-tile">
+          <span class="metric-label">System Issues</span>
+          <strong>{{ overview.command_center.system_issues | length }} issue{% if overview.command_center.system_issues|length != 1 %}s{% endif %}</strong>
         </article>
       </div>
+      <section class="surface-block">
+        <div class="surface-block-head">
+          <div class="section-label">Needs Review</div>
+          <span class="surface-block-count">{{ overview.command_center.needs_review | length }}</span>
+        </div>
+        {% if overview.command_center.needs_review %}
+        {% for row in overview.command_center.needs_review %}
+        <div class="detail-muted"><strong>{{ row.ticker }}</strong>: {{ row.summary }}</div>
+        {% endfor %}
+        {% else %}
+        <p class="detail-muted quiet-empty surface-empty-copy">No tickers need review.</p>
+        {% endif %}
+      </section>
+      <section class="surface-block">
+        <div class="surface-block-head">
+          <div class="section-label">Open Positions</div>
+          <span class="surface-block-count">{{ overview.command_center.open_positions | length }}</span>
+        </div>
+        {% if overview.command_center.open_positions %}
+        {% for row in overview.command_center.open_positions %}
+        <div class="detail-muted"><strong>{{ row.ticker }}</strong>: {{ row.summary }}</div>
+        {% endfor %}
+        {% else %}
+        <p class="detail-muted quiet-empty surface-empty-copy">No open positions need attention.</p>
+        {% endif %}
+      </section>
+      <section class="surface-block">
+        <div class="surface-block-head">
+          <div class="section-label">System Issues</div>
+          <span class="surface-block-count">{{ overview.command_center.system_issues | length }}</span>
+        </div>
+        {% if overview.command_center.system_issues %}
+        {% for row in overview.command_center.system_issues %}
+        <div class="detail-muted"><strong>{{ row.label }}</strong>: {{ row.summary }}</div>
+        {% endfor %}
+        {% else %}
+        <p class="detail-muted quiet-empty surface-empty-copy">No system issues.</p>
+        {% endif %}
+      </section>
       <section class="surface-block">
         <div class="surface-block-head">
           <div class="section-label">Live Alerts</div>

@@ -52,6 +52,17 @@ def _dashboard_payload() -> dict:
             {"label": "Reflection", "status": "succeeded"},
         ),
         "overview": {
+            "command_center": {
+                "needs_review": (
+                    {"ticker": "NVDA", "summary": "Closed today and ready for review"},
+                ),
+                "open_positions": (
+                    {"ticker": "AAPL", "summary": "Open position, risk within limits"},
+                ),
+                "system_issues": (
+                    {"label": "Macro regime unavailable", "summary": "Global macro regime feed has not published yet."},
+                ),
+            },
             "live_alerts": (
                 {"ticker": "NVDA", "severity": "high", "headline": "Raised guidance"},
             ),
@@ -350,7 +361,9 @@ class TestTodayDashboard:
         assert "Learning &amp; Strategies" in response.text
         assert "Ops &amp; Cost" in response.text
         assert "Raised guidance" in response.text
-        assert "Session Watch" in response.text
+        assert "Needs Review" in response.text
+        assert "Open Positions" in response.text
+        assert "System Issues" in response.text
         assert "trades-canvas" not in response.text
         assert "TSLA" not in response.text
         assert "AI Infrastructure" not in response.text
@@ -472,6 +485,21 @@ class TestTodayDashboard:
         assert "surface-block-count" in response.text
         assert "trades-canvas" not in response.text
         assert "AI Infrastructure" not in response.text
+
+    def test_overview_tab_renders_command_center_modules(self, client):
+        payload = _dashboard_payload()
+        payload["selected_tab"] = "overview"
+        with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
+            response = client.get("/today?tab=overview")
+
+        assert response.status_code == 200
+        assert "Needs Review" in response.text
+        assert "Open Positions" in response.text
+        assert "System Issues" in response.text
+        assert "Closed today and ready for review" in response.text
+        assert "Open position, risk within limits" in response.text
+        assert "Macro regime unavailable" in response.text
+        assert "Session Watch" not in response.text
 
     def test_portfolio_tab_renders_summary_first_structure(self, client):
         payload = _dashboard_payload()
@@ -1081,6 +1109,75 @@ class TestTodayDashboard:
                 "status": "closed",
             },
         )
+
+    def test_load_today_dashboard_builds_command_center_overview(self):
+        from src.web.routers.today import load_today_dashboard
+
+        session = _query_stub_session()
+        trade_rows = _ticker_selection_trade_rows()
+        selected_nvda_detail = _selected_trade_detail("NVDA")
+
+        with (
+            patch("src.web.routers.today._load_trade_rows", return_value=trade_rows),
+            patch(
+                "src.web.routers.today._load_positions",
+                return_value=(
+                    {
+                        "ticker": "AAPL",
+                        "trade_identity": "tactical_stock_trade",
+                        "strategy_id": "breakout_v1",
+                        "quantity": Decimal("10"),
+                        "market_value": Decimal("2145.20"),
+                        "summary": "Open position, risk within limits",
+                    },
+                ),
+            ),
+            patch(
+                "src.web.routers.today._load_recent_closed_positions",
+                return_value=(
+                    {
+                        "ticker": "NVDA",
+                        "status": "closed",
+                        "closed_at": datetime(2026, 6, 5, 20, 5, tzinfo=timezone.utc),
+                        "summary": "Closed today and ready for review",
+                    },
+                ),
+            ),
+            patch("src.web.routers.today._load_trade_detail", return_value=selected_nvda_detail),
+            patch("src.web.routers.today._load_option_positions", return_value=()),
+            patch("src.web.routers.today._load_hedge_overlays", return_value=()),
+            patch("src.web.routers.today._load_live_alerts", return_value=()),
+            patch("src.web.routers.today._load_material_changes", return_value=()),
+            patch("src.web.routers.today._load_risk_exposures", return_value=()),
+            patch("src.web.routers.today._load_candidate_rows", return_value=()),
+            patch("src.web.routers.today._load_manual_requests", return_value=()),
+            patch("src.web.routers.today._load_portfolio_intents", return_value=()),
+            patch("src.web.routers.today._load_relationships", return_value=()),
+            patch("src.web.routers.today._load_peer_baskets", return_value=()),
+            patch("src.web.routers.today._load_themes", return_value=()),
+            patch("src.web.routers.today._load_learning_factors", return_value=()),
+            patch("src.web.routers.today._load_strategy_performance", return_value=()),
+            patch("src.web.routers.today._load_strategy_proposals", return_value=()),
+            patch("src.web.routers.today._load_llm_usage", return_value=()),
+        ):
+            dashboard = load_today_dashboard(
+                session,
+                selected_tab="overview",
+                decision_id=None,
+                selected_ticker="NVDA",
+            )
+
+        assert dashboard["overview"]["command_center"] == {
+            "needs_review": (
+                {"ticker": "NVDA", "summary": "Closed today and ready for review"},
+            ),
+            "open_positions": (
+                {"ticker": "AAPL", "summary": "Open position, risk within limits"},
+            ),
+            "system_issues": (
+                {"label": "Macro regime unavailable", "summary": "Global macro regime data is unavailable."},
+            ),
+        }
 
     def test_load_news_and_fundamentals_by_ticker_map_real_snapshot_and_event_rows(self):
         from src.web.routers.today import _load_fundamentals_by_ticker, _load_news_by_ticker

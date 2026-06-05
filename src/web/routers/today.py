@@ -250,6 +250,12 @@ def load_today_dashboard(
         "header": _build_header(latest_portfolio, latest_risk, trade_rows, latest_reflection),
         "job_timeline": _build_job_timeline(latest_reflection),
         "overview": {
+            "command_center": _build_overview_command_center(
+                header=_build_header(latest_portfolio, latest_risk, trade_rows, latest_reflection),
+                positions=positions,
+                closed_positions=closed_positions,
+                ticker_workspace=ticker_workspace,
+            ),
             "live_alerts": _load_live_alerts(session),
             "material_changes": _load_material_changes(session),
         },
@@ -390,6 +396,55 @@ def _build_job_timeline(latest_reflection: DailyReflection | None) -> tuple[dict
     if latest_reflection:
         rows.append({"label": "Reflection", "status": latest_reflection.status})
     return tuple(rows)
+
+
+def _build_overview_command_center(
+    *,
+    header: dict[str, Any],
+    positions: tuple[dict[str, Any], ...],
+    closed_positions: tuple[dict[str, Any], ...],
+    ticker_workspace: dict[str, Any],
+) -> dict[str, tuple[dict[str, Any], ...]]:
+    needs_review = tuple(
+        {
+            "ticker": str(row.get("ticker") or "").strip().upper(),
+            "summary": row.get("summary") or "Closed today and ready for review",
+        }
+        for row in closed_positions
+        if str(row.get("ticker") or "").strip()
+    )
+
+    open_positions = tuple(
+        {
+            "ticker": str(row.get("ticker") or "").strip().upper(),
+            "summary": row.get("summary") or "Open position, risk within limits",
+        }
+        for row in positions
+        if str(row.get("ticker") or "").strip()
+    )
+
+    system_issues: list[dict[str, Any]] = []
+    if str(header.get("macro_regime") or "").strip().lower() == "unavailable":
+        system_issues.append(
+            {
+                "label": "Macro regime unavailable",
+                "summary": "Global macro regime data is unavailable.",
+            }
+        )
+
+    if not system_issues and not needs_review and not open_positions:
+        system_issues.append(
+            {
+                "label": "No active issues",
+                "summary": "No command-center issues are currently active.",
+            }
+        )
+
+    return {
+        "needs_review": needs_review,
+        "open_positions": open_positions,
+        "system_issues": tuple(system_issues),
+    }
 
 
 def _load_live_alerts(session: Any) -> tuple[dict[str, Any], ...]:
