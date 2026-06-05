@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from src.web.presenters.today_copy import expression_bucket_label, risk_status_label, strategy_label
+from src.web.presenters.today_copy import expression_bucket_label, lifecycle_label, risk_status_label, strategy_label
 
 _ACTIONABLE_DECISIONS = {"enter_long", "enter_short", "trim", "exit"}
 _ACTIONABLE_ORDER_STATUSES = {"pending", "accepted", "partial_fill"}
@@ -89,6 +89,7 @@ def build_ticker_workspace(
             selected_ticker=normalized_selected_ticker,
             rows_by_ticker=rows_by_ticker,
             positions_by_ticker=normalized_positions,
+            closed_positions_by_ticker=normalized_closed_positions,
             risk_by_ticker=normalized_risk,
             signal_history_by_ticker=normalized_signal_history,
             news_by_ticker=normalized_news,
@@ -252,6 +253,7 @@ def _build_detail(
     selected_ticker: str | None,
     rows_by_ticker: dict[str, list[dict[str, Any]]],
     positions_by_ticker: dict[str | None, Any],
+    closed_positions_by_ticker: dict[str | None, Any],
     risk_by_ticker: dict[str | None, Any],
     signal_history_by_ticker: dict[str | None, Any],
     news_by_ticker: dict[str | None, Any],
@@ -268,6 +270,7 @@ def _build_detail(
     news_snippets = _build_snippets(news_by_ticker.get(selected_ticker))
     fundamental_snippets = _build_snippets(fundamentals_by_ticker.get(selected_ticker))
     position = positions_by_ticker.get(selected_ticker) or {"summary": _EMPTY_MARKER}
+    closed_position = closed_positions_by_ticker.get(selected_ticker) or {}
     risk = risk_by_ticker.get(selected_ticker) or {}
     trade_summary = _decision_summary(latest_decision)
     invalidators = _decision_invalidators(latest_decision)
@@ -311,6 +314,7 @@ def _build_detail(
             signal_history=signal_history,
             news_items=news_by_ticker.get(selected_ticker),
             decisions=decision_history,
+            closed_position=closed_position,
         ),
         "trend": {
             "technical": technical_charts,
@@ -327,6 +331,12 @@ def _build_detail(
 
     return {
         "ticker": selected_ticker,
+        "lifecycle": _build_lifecycle(
+            latest_decision=latest_decision,
+            decisions=decision_history,
+            position=position,
+            closed_position=closed_position,
+        ),
         "latest_conclusion": latest_conclusion,
         "tabs": tabs,
     }
@@ -408,6 +418,7 @@ def _build_timeline(
     signal_history: dict[str, Any],
     news_items: Any,
     decisions: list[dict[str, Any]],
+    closed_position: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     timeline: list[dict[str, Any]] = []
 
@@ -439,7 +450,7 @@ def _build_timeline(
         timeline.append(
             {
                 "time": item.get("created_at"),
-                "event_type": "decision",
+                "event_type": _timeline_event_type(item, closed_position=closed_position),
                 "summary": _humanize_label(item.get("decision")) or _EMPTY_MARKER,
                 "detail_anchor": f"decision-{index}",
             }
@@ -488,6 +499,49 @@ def _build_risk_history(history: Any) -> list[dict[str, Any]]:
     return items or [_empty_risk_history_item()]
 
 
+def _build_lifecycle(
+    *,
+    latest_decision: dict[str, Any],
+    decisions: list[dict[str, Any]],
+    position: dict[str, Any],
+    closed_position: dict[str, Any],
+) -> dict[str, Any]:
+    entry_decision = next(
+        (item for item in decisions if str(item.get("decision") or "").strip().lower() in {"enter_long", "enter_short"}),
+        {},
+    )
+    exit_decision = next(
+        (item for item in reversed(decisions) if str(item.get("decision") or "").strip().lower() == "exit"),
+        {},
+    )
+
+    if closed_position:
+        state = "closed"
+        opened_at = closed_position.get("opened_at")
+        closed_at = closed_position.get("closed_at")
+        realized_pnl = closed_position.get("realized_pnl")
+    elif position and position.get("summary") != _EMPTY_MARKER:
+        state = "open_position"
+        opened_at = position.get("opened_at")
+        closed_at = None
+        realized_pnl = position.get("realized_pnl")
+    else:
+        state = "watch"
+        opened_at = None
+        closed_at = None
+        realized_pnl = None
+
+    return {
+        "state": state,
+        "state_label": lifecycle_label(state) or _EMPTY_MARKER,
+        "opened_at": opened_at,
+        "closed_at": closed_at,
+        "realized_pnl": realized_pnl,
+        "entry_summary": _decision_summary(entry_decision),
+        "exit_summary": _decision_summary(exit_decision),
+    }
+
+
 def _sort_timestamped_items(items: Any, timestamp_key: str) -> list[dict[str, Any]]:
     if not isinstance(items, list):
         return []
@@ -504,6 +558,16 @@ def _latest_decision(decisions: list[dict[str, Any]]) -> dict[str, Any]:
 def _latest_row(rows: list[dict[str, Any]], timestamp_key: str) -> dict[str, Any]:
     ordered_rows = _sort_timestamped_items(rows, timestamp_key)
     return ordered_rows[-1] if ordered_rows else {}
+
+
+def _timeline_event_type(item: dict[str, Any], *, closed_position: dict[str, Any] | None) -> str:
+    if closed_position:
+        decision = str(item.get("decision") or "").strip().lower()
+        if decision in {"enter_long", "enter_short"}:
+            return "entry"
+        if decision == "exit":
+            return "close"
+    return "decision"
 
 
 def _humanize_label(value: Any) -> str | None:

@@ -515,6 +515,66 @@ def test_build_ticker_workspace_shapes_latest_conclusion_and_evidence():
     assert detail["tabs"]["risk"]["history"][0]["summary"] == "Within limits"
 
 
+def test_build_ticker_workspace_detail_includes_entry_exit_reason_times_and_pnl():
+    workspace = build_ticker_workspace(
+        trade_rows=[
+            {
+                "ticker": "NVDA",
+                "decision": "enter_long",
+                "created_at": "2026-06-05T14:31:00Z",
+                "selected_strategy_id": "breakout_v1",
+                "thesis": "Momentum breakout confirmed",
+            },
+            {
+                "ticker": "NVDA",
+                "decision": "exit",
+                "created_at": "2026-06-05T20:00:00Z",
+                "thesis": "Target reached before close",
+            },
+        ],
+        selected_ticker="NVDA",
+        positions_by_ticker={},
+        closed_positions_by_ticker={
+            "NVDA": {
+                "status": "closed",
+                "opened_at": "2026-06-05T14:32:00Z",
+                "closed_at": "2026-06-05T20:02:00Z",
+                "realized_pnl": 1250.0,
+            }
+        },
+        risk_by_ticker={"NVDA": {"status": "approved", "reason": "within_limits"}},
+        signal_history_by_ticker={},
+        news_by_ticker={},
+        fundamentals_by_ticker={},
+    )
+
+    detail = workspace["detail"]
+
+    assert detail["lifecycle"] == {
+        "state": "closed",
+        "state_label": "Closed",
+        "opened_at": "2026-06-05T14:32:00Z",
+        "closed_at": "2026-06-05T20:02:00Z",
+        "realized_pnl": 1250.0,
+        "entry_summary": "Momentum breakout confirmed",
+        "exit_summary": "Target reached before close",
+    }
+    assert detail["tabs"]["timeline"] == [
+        {
+            "time": "2026-06-05T14:31:00Z",
+            "event_type": "entry",
+            "summary": "Enter Long",
+            "detail_anchor": "decision-1",
+        },
+        {
+            "time": "2026-06-05T20:00:00Z",
+            "event_type": "close",
+            "summary": "Exit",
+            "detail_anchor": "decision-2",
+        },
+    ]
+
+
 def test_build_ticker_workspace_surfaces_later_undated_decision_consistently():
     workspace = build_ticker_workspace(
         trade_rows=[
