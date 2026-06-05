@@ -142,4 +142,6 @@ These smoke modes are fixture-only operator checks. Scheduler-facing `preopen`, 
 
 Post-close phases may now return `status="skipped"` when the same-day persisted inputs required for a real live run are not present yet. That is an operational state, not a fake fixture success.
 
+`python scripts/run_trading_once.py --phase ... --json` now preserves `status="skipped"` in its JSON output and exits non-zero only for `status="failed"`. Scheduler jobs log skipped trading phases as explicit `*_job_skipped` warnings with the reported reasons instead of logging them as completed passes.
+
 Ordinary CI should keep using fixture-backed smoke modes only. Live provider/API checks stay opt-in and should use tiny ticker sets plus explicit request budgets.

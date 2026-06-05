@@ -21,6 +21,13 @@ class TradingPreopenJob(BaseJob):
         logger.info("trading_preopen_job_started")
         try:
             result = run_job_phase("preopen")
-            logger.info("trading_preopen_job_completed", status=result["status"])
+            if result.get("status") == "skipped":
+                logger.warning(
+                    "trading_preopen_job_skipped",
+                    status="skipped",
+                    reasons=list(result.get("summary", {}).get("reasons", [])),
+                )
+            else:
+                logger.info("trading_preopen_job_completed", status=result["status"])
         except Exception as exc:
             logger.error("trading_preopen_job_failed", error=str(exc), exc_info=True)

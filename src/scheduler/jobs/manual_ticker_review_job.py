@@ -21,6 +21,13 @@ class ManualTickerReviewJob(BaseJob):
         logger.info("manual_ticker_review_job_started")
         try:
             result = run_job_phase("manual_review")
-            logger.info("manual_ticker_review_job_completed", status=result["status"])
+            if result.get("status") == "skipped":
+                logger.warning(
+                    "manual_ticker_review_job_skipped",
+                    status="skipped",
+                    reasons=list(result.get("summary", {}).get("reasons", [])),
+                )
+            else:
+                logger.info("manual_ticker_review_job_completed", status=result["status"])
         except Exception as exc:
             logger.error("manual_ticker_review_job_failed", error=str(exc), exc_info=True)

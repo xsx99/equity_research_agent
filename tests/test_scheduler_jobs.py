@@ -18,6 +18,76 @@ from src.scheduler.jobs.trading_reflection_job import TradingReflectionJob
 from src.scheduler.service import build_scheduler_jobs
 
 
+@pytest.mark.parametrize(
+    ("module_path", "job_cls", "phase"),
+    [
+        ("src.scheduler.jobs.trading_preopen_job", TradingPreopenJob, "preopen"),
+        ("src.scheduler.jobs.manual_ticker_review_job", ManualTickerReviewJob, "manual_review"),
+        ("src.scheduler.jobs.intraday_signal_refresh_job", IntradaySignalRefreshJob, "intraday_refresh"),
+        ("src.scheduler.jobs.trading_reflection_job", TradingReflectionJob, "reflection"),
+        ("src.scheduler.jobs.strategy_evolution_job", StrategyEvolutionJob, "strategy_evolution"),
+    ],
+)
+def test_trading_scheduler_jobs_call_run_job_phase(monkeypatch, module_path, job_cls, phase):
+    called: list[str] = []
+    events: list[tuple[str, str, dict[str, object]]] = []
+
+    monkeypatch.setattr(
+        f"{module_path}.run_job_phase",
+        lambda requested_phase: called.append(requested_phase) or {"status": "passed", "phase": requested_phase},
+    )
+    monkeypatch.setattr(
+        f"{module_path}.logger",
+        type(
+            "LoggerStub",
+            (),
+            {
+                "info": staticmethod(lambda event, **kwargs: events.append(("info", event, kwargs))),
+                "warning": staticmethod(lambda event, **kwargs: events.append(("warning", event, kwargs))),
+                "error": staticmethod(lambda event, **kwargs: events.append(("error", event, kwargs))),
+            },
+        )(),
+    )
+
+    job_cls().run()
+
+    assert called == [phase]
+    assert any(level == "info" and event.endswith("_job_started") for level, event, _kwargs in events)
+    assert any(
+        level == "info" and event.endswith("_job_completed") and kwargs.get("status") == "passed"
+        for level, event, kwargs in events
+    )
+
+
+def test_post_close_trading_job_logs_skipped_status_with_reasons(monkeypatch):
+    events: list[tuple[str, str, dict[str, object]]] = []
+
+    monkeypatch.setattr(
+        "src.scheduler.jobs.trading_reflection_job.run_job_phase",
+        lambda _phase: {
+            "status": "skipped",
+            "phase": "reflection",
+            "summary": {"reasons": ["portfolio_outcome_missing"]},
+        },
+    )
+    monkeypatch.setattr(
+        "src.scheduler.jobs.trading_reflection_job.logger",
+        type(
+            "LoggerStub",
+            (),
+            {
+                "info": staticmethod(lambda event, **kwargs: events.append(("info", event, kwargs))),
+                "warning": staticmethod(lambda event, **kwargs: events.append(("warning", event, kwargs))),
+                "error": staticmethod(lambda event, **kwargs: events.append(("error", event, kwargs))),
+            },
+        )(),
+    )
+
+    TradingReflectionJob().run()
+
+    assert ("warning", "trading_reflection_job_skipped", {"status": "skipped", "reasons": ["portfolio_outcome_missing"]}) in events
+
+
 class TestResearchJob:
     def test_job_id(self):
         job = ResearchJob()

@@ -42,7 +42,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(result, indent=2, ensure_ascii=False))
     else:
         print(result)
-    return 0 if result.get("status") == "passed" else 1
+    return 1 if result.get("status") == "failed" else 0
 
 
 if __name__ == "__main__":

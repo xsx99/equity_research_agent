@@ -253,3 +253,8 @@ PR 14 slice 5 migrates the scheduler-facing `strategy_evolution` phase onto an e
 - `src/trading/runtime_dispatch.py` now routes `run_job_phase("strategy_evolution")` to the live strategy-evolution runtime instead of the fixture smoke handler
 - `src/trading/repositories/sqlalchemy.py` now includes strategy-evolution aggregation helpers alongside the existing reflection persistence helpers
 - fixture-only `strategy_evolution_fixture` behavior remains available under `src/trading/runtime_smoke.py` for standalone smoke checks
+
+PR 14 slice 6 then normalizes the operator-facing semantics around these live results:
+
+- `scripts/run_trading_once.py` still accepts the same `--phase` values, but now treats `status="skipped"` as a non-failed operational result and exits non-zero only when a runtime reports `status="failed"`
+- trading scheduler jobs still call `run_job_phase(...)` with the same phase strings, but now emit explicit `*_job_skipped` warnings with propagated reason lists instead of logging skipped post-close runs as normal completions

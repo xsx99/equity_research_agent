@@ -21,6 +21,13 @@ class StrategyEvolutionJob(BaseJob):
         logger.info("strategy_evolution_job_started")
         try:
             result = run_job_phase("strategy_evolution")
-            logger.info("strategy_evolution_job_completed", status=result["status"])
+            if result.get("status") == "skipped":
+                logger.warning(
+                    "strategy_evolution_job_skipped",
+                    status="skipped",
+                    reasons=list(result.get("summary", {}).get("reasons", [])),
+                )
+            else:
+                logger.info("strategy_evolution_job_completed", status=result["status"])
         except Exception as exc:
             logger.error("strategy_evolution_job_failed", error=str(exc), exc_info=True)

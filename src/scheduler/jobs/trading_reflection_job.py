@@ -21,6 +21,13 @@ class TradingReflectionJob(BaseJob):
         logger.info("trading_reflection_job_started")
         try:
             result = run_job_phase("reflection")
-            logger.info("trading_reflection_job_completed", status=result["status"])
+            if result.get("status") == "skipped":
+                logger.warning(
+                    "trading_reflection_job_skipped",
+                    status="skipped",
+                    reasons=list(result.get("summary", {}).get("reasons", [])),
+                )
+            else:
+                logger.info("trading_reflection_job_completed", status=result["status"])
         except Exception as exc:
             logger.error("trading_reflection_job_failed", error=str(exc), exc_info=True)

@@ -21,6 +21,13 @@ class IntradaySignalRefreshJob(BaseJob):
         logger.info("intraday_signal_refresh_job_started")
         try:
             result = run_job_phase("intraday_refresh")
-            logger.info("intraday_signal_refresh_job_completed", status=result["status"])
+            if result.get("status") == "skipped":
+                logger.warning(
+                    "intraday_signal_refresh_job_skipped",
+                    status="skipped",
+                    reasons=list(result.get("summary", {}).get("reasons", [])),
+                )
+            else:
+                logger.info("intraday_signal_refresh_job_completed", status=result["status"])
         except Exception as exc:
             logger.error("intraday_signal_refresh_job_failed", error=str(exc), exc_info=True)
