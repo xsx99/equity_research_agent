@@ -6,11 +6,11 @@ from types import SimpleNamespace
 from src.trading.data_sources.universe import UniverseAsset, UniverseFilterConfig
 from src.trading.data_sources.live_universe import LiveUniverseProvider
 from src.trading.risk import RiskDecisionRecord
+from src.trading.runtime.preopen_dependencies import _ConfiguredLiveUniverseScanPipeline
+from src.trading.runtime.preopen_risk import _LiveRiskWorkflow
 from src.trading.runtime.preopen import (
     LivePreopenDependencies,
     LivePreopenRuntime,
-    _ConfiguredLiveUniverseScanPipeline,
-    _LiveRiskWorkflow,
     run_live_preopen_once,
 )
 from src.trading.runtime.support import (

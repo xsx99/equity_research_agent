@@ -1,0 +1,146 @@
+"""Payload and request assembly helpers for the live intraday runtime."""
+from __future__ import annotations
+
+from datetime import datetime
+from types import SimpleNamespace
+from typing import Any
+
+from src.trading.intraday.rebalance import IntradayRebalanceRequest
+from src.trading.signals.sources import EventNewsItemRecord, SourceRecord
+
+
+def _build_intraday_refresh_payload(
+    *,
+    baseline: Any,
+    technical_rows: tuple[SourceRecord, ...],
+) -> tuple[dict[str, dict[str, Any]], dict[str, str]]:
+    bars = list((technical_rows[-1].payload or {}).get("bars") or []) if technical_rows else []
+    last_bar = bars[-1] if bars else {}
+    refreshed = {
+        "technical": {
+            "last_price": float(
+                last_bar.get("close") or baseline.signal_json.get("technical", {}).get("last_price") or 0.0
+            ),
+            "atr_pct": float(baseline.signal_json.get("technical", {}).get("atr_pct") or 0.0),
+            "dollar_volume": float(baseline.signal_json.get("technical", {}).get("dollar_volume") or 0.0),
+        }
+    }
+    freshness = {"technical": "fresh" if technical_rows else "missing"}
+    return refreshed, freshness
+
+
+def _load_event_items(
+    *,
+    source_repository: Any,
+    tickers: tuple[str, ...],
+    decision_time: datetime,
+) -> tuple[EventNewsItemRecord, ...]:
+    items: list[EventNewsItemRecord] = []
+    for ticker in tickers:
+        rows = source_repository.latest_available_by_family(ticker, "events_news", decision_time)
+        for row in rows:
+            items.append(_event_item_from_source_record(ticker=ticker, record=row))
+    return tuple(items)
+
+
+def _event_item_from_source_record(*, ticker: str, record: SourceRecord) -> EventNewsItemRecord:
+    payload = dict(record.payload or {})
+    return EventNewsItemRecord(
+        event_news_item_id=str(payload.get("event_news_item_id") or record.source_record_id),
+        ticker=str(payload.get("ticker") or ticker),
+        source_ticker=payload.get("source_ticker"),
+        event_type=str(payload.get("event_type") or "news"),
+        direction=payload.get("direction"),
+        sentiment=payload.get("sentiment"),
+        importance=payload.get("importance"),
+        headline=payload.get("headline"),
+        summary=payload.get("summary"),
+        provider=str(payload.get("provider") or record.source),
+        source_refs_json=list(payload.get("source_refs_json") or []),
+        dedupe_key=str(payload.get("dedupe_key") or record.source_record_id),
+        event_time=record.event_time,
+        published_at=record.published_at,
+        ingested_at=record.ingested_at,
+        available_for_decision_at=record.available_for_decision_at,
+        raw_payload_ref=None,
+        metadata_json=dict(payload.get("metadata_json") or {}),
+    )
+
+
+def _build_alert_map(alerts: tuple[object, ...]) -> dict[str, list[dict[str, Any]]]:
+    alert_map: dict[str, list[dict[str, Any]]] = {}
+    for alert in alerts:
+        alert_map.setdefault(alert.ticker, []).append(
+            {
+                "alert_type": alert.alert_type if hasattr(alert, "alert_type") else None,
+                "severity": getattr(alert, "severity", None),
+                "sentiment": getattr(alert, "sentiment", None),
+                "headline": getattr(alert, "headline", None),
+                "summary": getattr(alert, "summary", None),
+            }
+        )
+    return alert_map
+
+
+def _build_rebalance_request(
+    *,
+    ticker: str,
+    baseline: Any,
+    snapshot: Any,
+    context: Any,
+    position: Any | None,
+    alerts: tuple[dict[str, Any], ...],
+) -> IntradayRebalanceRequest:
+    context = context or SimpleNamespace(
+        selection_source=baseline.selection_source,
+        strategy_id="intraday_refresh_unknown",
+        strategy_version="v1",
+        expression_bucket_id="long_stock",
+        expression_bucket_version="v1",
+        trade_identity="tactical_stock_trade",
+        instrument_type="stock",
+        candidate_score=0.0,
+        target_weight=0.0,
+        allow_open_new=False,
+    )
+    technical = dict(snapshot.refreshed_signals_json.get("technical", {}))
+    event_signals = list(alerts)
+    return IntradayRebalanceRequest(
+        ticker=ticker,
+        baseline_signal_snapshot_id=baseline.signal_snapshot_id,
+        intraday_signal_snapshot_id=snapshot.intraday_signal_snapshot_id,
+        previous_intraday_snapshot_id=snapshot.previous_intraday_snapshot_id,
+        selection_source=str(getattr(context, "selection_source", baseline.selection_source)),
+        strategy_id=str(getattr(context, "strategy_id", "intraday_refresh_unknown")),
+        strategy_version=str(getattr(context, "strategy_version", "v1")),
+        expression_bucket_id=str(getattr(context, "expression_bucket_id", "long_stock")),
+        expression_bucket_version=str(getattr(context, "expression_bucket_version", "v1")),
+        trade_identity=str(getattr(context, "trade_identity", "tactical_stock_trade")),
+        instrument_type=str(getattr(context, "instrument_type", "stock")),
+        decision_time=snapshot.decision_time,
+        available_for_decision_at=snapshot.decision_time,
+        current_price=float(technical.get("last_price") or 0.0),
+        atr_pct=float(technical.get("atr_pct") or 0.0),
+        average_daily_dollar_volume=float(technical.get("dollar_volume") or 0.0),
+        existing_position=position is not None,
+        current_position_quantity=float(getattr(position, "quantity", 0.0) or 0.0),
+        current_position_market_value=float(getattr(position, "market_value", 0.0) or 0.0),
+        candidate_score=float(getattr(context, "candidate_score", 0.0) or 0.0),
+        target_weight=float(getattr(context, "target_weight", 0.0) or 0.0),
+        signal_freshness=dict(snapshot.source_freshness_json),
+        delta_vs_baseline_json=dict(snapshot.delta_vs_baseline_json),
+        delta_vs_previous_json=dict(snapshot.delta_vs_previous_json),
+        alerts=event_signals,
+        allow_open_new=bool(getattr(context, "allow_open_new", False)),
+        direct_company_negative_evidence=any(alert.get("sentiment") == "negative" for alert in alerts),
+        bearish_signal_sources=tuple(
+            "events_news"
+            for alert in alerts
+            if alert.get("sentiment") == "negative"
+        ),
+        metadata_json={},
+    )
+
+
+def _position_by_ticker(positions: tuple[object, ...]) -> dict[str, object]:
+    return {getattr(position, "ticker"): position for position in positions}

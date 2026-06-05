@@ -40,6 +40,68 @@ def test_trading_canonical_runtime_and_post_close_paths_export_entrypoints():
     assert LivePreopenRuntime.__name__ == "LivePreopenRuntime"
 
 
+def test_trading_runtime_internal_split_paths_export_navigation_units():
+    from src.trading.runtime.intraday_refresh_dependencies import (
+        LiveIntradayRefreshDependencies,
+        _RepositoryIntradayScopeLoader,
+    )
+    from src.trading.runtime.intraday_refresh_helpers import (
+        _build_rebalance_request,
+        _event_item_from_source_record,
+    )
+    from src.trading.runtime.intraday_refresh_runner import LiveIntradayRefreshRuntime
+    from src.trading.runtime.preopen_dependencies import (
+        LivePreopenDependencies,
+        _ConfiguredLiveUniverseScanPipeline,
+    )
+    from src.trading.runtime.preopen_risk import _LiveRiskWorkflow
+    from src.trading.runtime.preopen_runner import LivePreopenRuntime as CanonicalPreopenRuntime
+
+    assert LivePreopenDependencies.__name__ == "LivePreopenDependencies"
+    assert _ConfiguredLiveUniverseScanPipeline.__name__ == "_ConfiguredLiveUniverseScanPipeline"
+    assert _LiveRiskWorkflow.__name__ == "_LiveRiskWorkflow"
+    assert CanonicalPreopenRuntime.__name__ == "LivePreopenRuntime"
+    assert LiveIntradayRefreshDependencies.__name__ == "LiveIntradayRefreshDependencies"
+    assert _RepositoryIntradayScopeLoader.__name__ == "_RepositoryIntradayScopeLoader"
+    assert callable(_build_rebalance_request)
+    assert callable(_event_item_from_source_record)
+    assert LiveIntradayRefreshRuntime.__name__ == "LiveIntradayRefreshRuntime"
+
+
+def test_trading_runtime_smoke_internal_split_paths_export_navigation_units():
+    from src.trading.runtime.smoke import AVAILABLE_SMOKE_MODES
+    from src.trading.runtime.smoke_entrypoints import (
+        run_intraday_signal_refresh_once,
+        run_strategy_evolution_once,
+        run_trading_preopen_once,
+    )
+    from src.trading.runtime.smoke_fixture_modes import (
+        _run_manual_review_fixture,
+        _run_provider_guardrail_fixture,
+    )
+    from src.trading.runtime.smoke_post_close_modes import (
+        _run_reflection_fixture,
+        _run_strategy_evolution_fixture,
+    )
+    from src.trading.runtime.smoke_support import (
+        _FixtureUniverseProvider,
+        _build_universe_and_snapshots,
+        _reflection_agent_runner,
+    )
+
+    assert "manual_review_fixture" in AVAILABLE_SMOKE_MODES
+    assert callable(run_trading_preopen_once)
+    assert callable(run_intraday_signal_refresh_once)
+    assert callable(run_strategy_evolution_once)
+    assert callable(_run_provider_guardrail_fixture)
+    assert callable(_run_manual_review_fixture)
+    assert callable(_run_reflection_fixture)
+    assert callable(_run_strategy_evolution_fixture)
+    assert callable(_build_universe_and_snapshots)
+    assert callable(_reflection_agent_runner)
+    assert _FixtureUniverseProvider.__name__ == "_FixtureUniverseProvider"
+
+
 def test_trading_repository_path_names_in_memory_store_explicitly():
     from src.trading.repositories.in_memory import InMemoryTradingRepository
     from src.trading.intraday.rebalance import IntradayRebalancePipeline
@@ -165,3 +227,7 @@ def test_trading_root_no_longer_contains_compatibility_modules():
     ]
 
     assert [path for path in removed_paths if (_REPO_ROOT / path).exists()] == []
+
+
+def test_trading_runtime_package_includes_navigation_readme():
+    assert (_REPO_ROOT / "src/trading/runtime/README.md").is_file()
