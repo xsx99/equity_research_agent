@@ -1,9 +1,9 @@
 """Deterministic PR04 position sizing."""
 from __future__ import annotations
 
+from src.trading.post_close.strategy_policy import experimental_strategy_weight_cap
 from src.trading.risk.config import RiskLimitConfig
 from src.trading.risk.context import PortfolioContext, PositionSizingDecisionRecord, TradeRiskRequest
-from src.trading.strategy_evolution import experimental_strategy_weight_cap
 
 
 class PositionSizer:

@@ -37,8 +37,11 @@ from src.trading.data_sources.universe import UniverseSnapshotResult
 
 if TYPE_CHECKING:
     from src.trading.intraday.rebalance import IntradayRebalanceDecisionRecord
-    from src.trading.reflection_pipeline import DailyReflectionRecord, LearningFactorRecord
-    from src.trading.strategy_evolution import StrategyEvaluationResultRecord, StrategyProposalRecord
+    from src.trading.post_close.reflection import DailyReflectionRecord, LearningFactorRecord
+    from src.trading.post_close.strategy_evolution import (
+        StrategyEvaluationResultRecord,
+        StrategyProposalRecord,
+    )
     from src.trading.workflows.trading_decision import TradingDecisionRecord
 
 

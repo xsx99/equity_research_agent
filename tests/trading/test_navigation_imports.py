@@ -25,6 +25,25 @@ def test_trading_workflow_paths_export_pipeline_entrypoints():
     assert StrategyEvolutionPipeline.__name__ == "StrategyEvolutionPipeline"
 
 
+def test_trading_canonical_runtime_and_post_close_paths_export_entrypoints():
+    from src.trading.post_close.reflection import ReflectionPipeline as CanonicalReflectionPipeline
+    from src.trading.post_close.strategy_evolution import (
+        StrategyEvolutionPipeline as CanonicalStrategyEvolutionPipeline,
+    )
+    from src.trading.post_close.strategy_policy import experimental_strategy_weight_cap
+    from src.trading.runtime import TRADING_JOB_PHASES, run_job_phase
+    from src.trading.runtime.dispatch import get_job_phase_handler
+    from src.trading.runtime.preopen import LivePreopenRuntime
+
+    assert CanonicalReflectionPipeline.__name__ == "ReflectionPipeline"
+    assert CanonicalStrategyEvolutionPipeline.__name__ == "StrategyEvolutionPipeline"
+    assert experimental_strategy_weight_cap(0.12) == 0.02
+    assert callable(run_job_phase)
+    assert "preopen" in TRADING_JOB_PHASES
+    assert callable(get_job_phase_handler)
+    assert LivePreopenRuntime.__name__ == "LivePreopenRuntime"
+
+
 def test_trading_repository_path_names_in_memory_store_explicitly():
     from src.trading.repositories.in_memory import InMemoryTradingRepository
     from src.trading.intraday.rebalance import IntradayRebalancePipeline

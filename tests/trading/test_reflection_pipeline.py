@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 
 from src.agents.prompt_registry import PromptRegistry
-from src.trading.reflection_pipeline import ReflectionPipeline, ReflectionPipelineRequest
+from src.trading.post_close.reflection import ReflectionPipeline, ReflectionPipelineRequest
 from src.trading.repositories.in_memory import InMemoryTradingRepository
 
 

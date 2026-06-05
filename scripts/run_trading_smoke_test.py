@@ -10,7 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.trading.runtime import run_smoke_mode
-from src.trading.runtime_smoke import AVAILABLE_SMOKE_MODES
+from src.trading.runtime.smoke import AVAILABLE_SMOKE_MODES
 
 
 def main(argv: list[str] | None = None) -> int:

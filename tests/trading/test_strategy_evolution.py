@@ -3,11 +3,11 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 
 from src.agents.prompt_registry import PromptRegistry
-from src.trading.reflection_pipeline import DailyReflectionRecord, LearningFactorRecord
+from src.trading.post_close.reflection import DailyReflectionRecord, LearningFactorRecord
 from src.trading.repositories.in_memory import InMemoryTradingRepository
 from src.trading.replay.outcomes import CandidateOutcomeEvaluationRecord
 from src.trading.strategies.matching import StrategyDefinitionRecord
-from src.trading.strategy_evolution import StrategyEvolutionPipeline, StrategyEvolutionRequest
+from src.trading.post_close.strategy_evolution import StrategyEvolutionPipeline, StrategyEvolutionRequest
 
 
 def _write_prompt(tmp_path) -> PromptRegistry:

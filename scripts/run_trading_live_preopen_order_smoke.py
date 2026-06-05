@@ -20,7 +20,7 @@ from src.agents.prompt_registry import PromptRegistry
 from src.core import config as app_config  # noqa: F401
 from src.db.connection import SessionLocal
 from src.db.models.trading import ManualTickerRequest, PaperExecution, PaperOrder, TradingDecision
-from src.trading.runtime_live import LivePreopenRuntime, build_live_preopen_dependencies
+from src.trading.runtime.preopen import LivePreopenRuntime, build_live_preopen_dependencies
 from src.trading.strategies.classifier import TradeClassificationRecord
 from src.trading.workflows.strategy_scoring import StrategyPipelineResult
 from src.trading.workflows.trading_decision import TradingDecisionPipeline

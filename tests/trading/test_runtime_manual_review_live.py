@@ -5,13 +5,13 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from src.trading.manual_review.requests import ManualTickerRequest
-from src.trading.runtime_manual_review_live import (
+from src.trading.runtime.dispatch import get_job_phase_handler
+from src.trading.runtime.manual_review import (
     LiveManualReviewDependencies,
     LiveManualReviewRuntime,
     run_live_manual_review_once,
 )
-from src.trading.runtime_support import build_execution_report
-from src.trading.runtime_dispatch import get_job_phase_handler
+from src.trading.runtime.support import build_execution_report
 from src.trading.data_sources.universe import UniverseFilterConfig
 
 
@@ -215,7 +215,7 @@ def test_run_live_manual_review_once_builds_default_dependencies_when_not_inject
     runtime, _recorder = _build_runtime()
 
     monkeypatch.setattr(
-        "src.trading.runtime_manual_review_live.build_live_manual_review_dependencies",
+        "src.trading.runtime.manual_review.build_live_manual_review_dependencies",
         lambda _session: runtime.dependencies,
     )
 
@@ -226,6 +226,6 @@ def test_run_live_manual_review_once_builds_default_dependencies_when_not_inject
 
 
 def test_runtime_dispatch_routes_manual_review_to_live_runtime():
-    from src.trading.runtime_manual_review_live import run_live_manual_review_once as live_handler
+    from src.trading.runtime.manual_review import run_live_manual_review_once as live_handler
 
     assert get_job_phase_handler("manual_review") is live_handler

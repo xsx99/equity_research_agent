@@ -4,9 +4,9 @@ from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from types import SimpleNamespace
 
-from src.trading.reflection_pipeline import ReflectionPipelineRequest
-from src.trading.runtime_dispatch import get_job_phase_handler
-from src.trading.runtime_reflection_live import (
+from src.trading.post_close.reflection import ReflectionPipelineRequest
+from src.trading.runtime.dispatch import get_job_phase_handler
+from src.trading.runtime.reflection import (
     LiveReflectionDependencies,
     LiveReflectionRequestLoader,
     LiveReflectionRuntime,
@@ -160,7 +160,7 @@ def test_run_live_reflection_once_builds_default_dependencies_when_not_injected(
         reflection_pipeline=pipeline,
     )
     monkeypatch.setattr(
-        "src.trading.runtime_reflection_live.build_live_reflection_dependencies",
+        "src.trading.runtime.reflection.build_live_reflection_dependencies",
         lambda _session: dependencies,
     )
 
@@ -171,6 +171,6 @@ def test_run_live_reflection_once_builds_default_dependencies_when_not_injected(
 
 
 def test_runtime_dispatch_routes_reflection_to_live_runtime():
-    from src.trading.runtime_reflection_live import run_live_reflection_once as live_handler
+    from src.trading.runtime.reflection import run_live_reflection_once as live_handler
 
     assert get_job_phase_handler("reflection") is live_handler

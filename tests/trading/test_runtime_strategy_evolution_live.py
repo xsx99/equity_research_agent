@@ -4,9 +4,9 @@ from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from types import SimpleNamespace
 
-from src.trading.runtime_dispatch import get_job_phase_handler
-from src.trading.strategy_evolution import StrategyEvolutionRequest
-from src.trading.runtime_strategy_evolution_live import (
+from src.trading.post_close.strategy_evolution import StrategyEvolutionRequest
+from src.trading.runtime.dispatch import get_job_phase_handler
+from src.trading.runtime.strategy_evolution import (
     LiveStrategyEvolutionDependencies,
     LiveStrategyEvolutionRequestLoader,
     LiveStrategyEvolutionRuntime,
@@ -177,7 +177,7 @@ def test_run_live_strategy_evolution_once_builds_default_dependencies_when_not_i
         strategy_evolution_pipeline=pipeline,
     )
     monkeypatch.setattr(
-        "src.trading.runtime_strategy_evolution_live.build_live_strategy_evolution_dependencies",
+        "src.trading.runtime.strategy_evolution.build_live_strategy_evolution_dependencies",
         lambda _session: dependencies,
     )
 
@@ -188,6 +188,6 @@ def test_run_live_strategy_evolution_once_builds_default_dependencies_when_not_i
 
 
 def test_runtime_dispatch_routes_strategy_evolution_to_live_runtime():
-    from src.trading.runtime_strategy_evolution_live import run_live_strategy_evolution_once as live_handler
+    from src.trading.runtime.strategy_evolution import run_live_strategy_evolution_once as live_handler
 
     assert get_job_phase_handler("strategy_evolution") is live_handler

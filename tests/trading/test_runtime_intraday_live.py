@@ -5,8 +5,8 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from src.trading.intraday.signals import IntradaySignalScanRecord, IntradaySignalSnapshotRecord
-from src.trading.runtime_dispatch import get_job_phase_handler
-from src.trading.runtime_intraday_live import (
+from src.trading.runtime.dispatch import get_job_phase_handler
+from src.trading.runtime.intraday_refresh import (
     LiveIntradayRefreshDependencies,
     LiveIntradayRefreshRuntime,
     run_live_intraday_refresh_once,
@@ -365,7 +365,7 @@ def test_run_live_intraday_refresh_once_builds_default_dependencies_when_not_inj
     runtime, _recorder, _pipeline, _repository = _build_runtime()
 
     monkeypatch.setattr(
-        "src.trading.runtime_intraday_live.build_live_intraday_refresh_dependencies",
+        "src.trading.runtime.intraday_refresh.build_live_intraday_refresh_dependencies",
         lambda _session: runtime.dependencies,
     )
 
@@ -376,6 +376,6 @@ def test_run_live_intraday_refresh_once_builds_default_dependencies_when_not_inj
 
 
 def test_runtime_dispatch_routes_intraday_refresh_to_live_runtime():
-    from src.trading.runtime_intraday_live import run_live_intraday_refresh_once as live_handler
+    from src.trading.runtime.intraday_refresh import run_live_intraday_refresh_once as live_handler
 
     assert get_job_phase_handler("intraday_refresh") is live_handler

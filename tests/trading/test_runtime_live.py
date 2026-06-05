@@ -6,14 +6,14 @@ from types import SimpleNamespace
 from src.trading.data_sources.universe import UniverseAsset, UniverseFilterConfig
 from src.trading.data_sources.live_universe import LiveUniverseProvider
 from src.trading.risk import RiskDecisionRecord
-from src.trading.runtime_live import (
+from src.trading.runtime.preopen import (
     LivePreopenDependencies,
     LivePreopenRuntime,
     _ConfiguredLiveUniverseScanPipeline,
     _LiveRiskWorkflow,
     run_live_preopen_once,
 )
-from src.trading.runtime_support import (
+from src.trading.runtime.support import (
     build_execution_report,
     build_runtime_report,
     seed_initial_strategy_definitions,
@@ -227,7 +227,7 @@ def test_run_live_preopen_once_builds_default_dependencies_when_not_injected(mon
     runtime_instance, _recorder = _build_runtime(execute_paper_orders=False)
 
     monkeypatch.setattr(
-        "src.trading.runtime_live.build_live_preopen_dependencies",
+        "src.trading.runtime.preopen.build_live_preopen_dependencies",
         lambda _session: runtime_instance.dependencies,
     )
 

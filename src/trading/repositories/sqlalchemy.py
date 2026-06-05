@@ -56,7 +56,7 @@ from src.trading.risk.hedges import RiskHedgeDecisionRecord
 from src.trading.risk.options import OptionRiskSnapshotRecord
 from src.trading.options.strategy import OptionStrategyDecisionRecord, OptionStrategyLegRecord
 from src.trading.portfolio.state import PortfolioSnapshot, StockPosition
-from src.trading.reflection_pipeline import DailyReflectionRecord, LearningFactorRecord
+from src.trading.post_close.reflection import DailyReflectionRecord, LearningFactorRecord
 from src.trading.replay.outcomes import CandidateOutcomeEvaluationRecord
 from src.trading.signals import SignalSnapshotResult
 from src.trading.strategies.classifier import TradeClassificationRecord

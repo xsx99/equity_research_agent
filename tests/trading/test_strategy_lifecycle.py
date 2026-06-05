@@ -8,7 +8,7 @@ from src.trading.replay.outcomes import CandidateOutcomeEvaluationRecord
 from src.trading.risk import PortfolioContext, PositionSizer, RiskConfigResolver, RiskDecisionRecord, TradeRiskRequest
 from src.trading.strategies.classifier import TradeClassificationRecord
 from src.trading.strategies.matching import CandidateScoreRecord, StrategyDefinitionRecord
-from src.trading.strategy_evolution import StrategyEvolutionPipeline, StrategyEvolutionRequest
+from src.trading.post_close.strategy_evolution import StrategyEvolutionPipeline, StrategyEvolutionRequest
 from src.trading.workflows.trading_decision import TradingDecisionPipeline
 
 

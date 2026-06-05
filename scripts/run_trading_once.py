@@ -10,7 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.trading.runtime import TRADING_JOB_PHASES, run_job_phase
-from src.trading.runtime_live import run_live_preopen_once
+from src.trading.runtime.preopen import run_live_preopen_once
 
 
 def main(argv: list[str] | None = None) -> int:

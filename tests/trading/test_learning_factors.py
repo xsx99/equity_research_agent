@@ -1,4 +1,4 @@
-from src.trading.reflection_pipeline import derive_learning_factor_status
+from src.trading.post_close.reflection import derive_learning_factor_status
 
 
 def test_risk_tightening_learning_factor_can_auto_activate():
