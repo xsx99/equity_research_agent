@@ -11,6 +11,7 @@ from src.db.models.trading import (
     CandidateScore,
     CandidateOutcomeEvaluation,
     DailyReflection,
+    EventNewsItem,
     IntradayRebalanceDecision,
     IntradaySignalScan,
     IntradaySignalSnapshot,
@@ -59,6 +60,7 @@ from src.trading.portfolio.state import PortfolioSnapshot, StockPosition
 from src.trading.post_close.reflection import DailyReflectionRecord, LearningFactorRecord
 from src.trading.replay.outcomes import CandidateOutcomeEvaluationRecord
 from src.trading.signals import SignalSnapshotResult
+from src.trading.signals.sources import EventNewsItemRecord
 from src.trading.strategies.classifier import TradeClassificationRecord
 from src.trading.strategies.matching import CandidateScoreRecord, StrategyRunRecord
 from src.trading.strategies.matching import StrategyDefinitionRecord
@@ -463,6 +465,21 @@ class SQLAlchemyTradingRepository:
                 selected_by_ticker[snapshot.ticker] = snapshot
         return tuple(snapshot for _ticker, snapshot in sorted(selected_by_ticker.items()))
 
+    def load_event_news_items(
+        self,
+        *,
+        source_record_ids: tuple[str, ...],
+    ) -> tuple[EventNewsItemRecord, ...]:
+        if not source_record_ids:
+            return ()
+        wanted = {_to_uuid(source_record_id) for source_record_id in source_record_ids}
+        rows = [
+            row
+            for row in self.session.query(EventNewsItem).all()
+            if row.event_news_item_id in wanted
+        ]
+        return tuple(self._to_event_news_item_record(row) for row in rows)
+
     def load_latest_signal_snapshots_for_tickers(
         self,
         *,
@@ -499,6 +516,28 @@ class SQLAlchemyTradingRepository:
             if current is None or snapshot.available_for_decision_at > current.available_for_decision_at:
                 selected_by_ticker[snapshot.ticker] = snapshot
         return selected_by_ticker
+
+    def _to_event_news_item_record(self, row: Any) -> EventNewsItemRecord:
+        return EventNewsItemRecord(
+            event_news_item_id=str(row.event_news_item_id),
+            ticker=row.ticker,
+            source_ticker=row.source_ticker,
+            event_type=row.event_type,
+            direction=row.direction,
+            sentiment=row.sentiment,
+            importance=row.importance,
+            headline=row.headline,
+            summary=row.summary,
+            provider=row.provider,
+            source_refs_json=list(row.source_refs_json or []),
+            dedupe_key=row.dedupe_key,
+            event_time=row.event_time,
+            published_at=row.published_at,
+            ingested_at=row.ingested_at,
+            available_for_decision_at=row.available_for_decision_at,
+            raw_payload_ref=row.raw_payload_ref,
+            metadata_json=dict(row.metadata_json or {}),
+        )
 
     def save_candidate_scores(self, candidates: list[CandidateScoreRecord] | tuple[CandidateScoreRecord, ...]) -> None:
         for candidate in candidates:

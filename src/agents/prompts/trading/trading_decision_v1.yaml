@@ -13,6 +13,7 @@ template: |
   - Manual requests in review_only mode must not authorize a trade.
   - If evidence is missing or weak, prefer no_trade or hold.
   - Use the full `signal_snapshot` block as the point-in-time evidence surface.
+  - Treat `signal_snapshot.evidence_items` as the readable source-evidence surface for news-backed reasoning.
   - Treat `missing_signals_json`, `stale_signals_json`, and non-fresh source families as real uncertainty.
   - Do not invent missing facts.
   - Do not return markdown.

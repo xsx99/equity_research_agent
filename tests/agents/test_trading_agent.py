@@ -32,22 +32,29 @@ def _payload():
         "decision_time": now.isoformat(),
         "available_for_decision_at": now.isoformat(),
         "has_existing_position": False,
-        "signal_snapshot": {
-            "signal_snapshot_id": "snapshot-1",
-            "snapshot_type": "pre_open",
-            "decision_time": now.isoformat(),
-            "available_for_decision_at": now.isoformat(),
+            "signal_snapshot": {
+                "signal_snapshot_id": "snapshot-1",
+                "snapshot_type": "pre_open",
+                "decision_time": now.isoformat(),
+                "available_for_decision_at": now.isoformat(),
             "signal_json": {
                 "technical": {"rs_vs_spy_1d": 0.02, "relative_volume": 1.6},
                 "fundamental": {"quality_score": 0.92},
                 "events_news": {"catalyst_quality_score": 0.88},
             },
-            "source_freshness_json": {"technical": "fresh", "fundamental": "fresh", "events_news": "fresh"},
-            "missing_signals_json": [],
-            "stale_signals_json": [],
-            "source_available_times_json": {"market_bars:NVDA": now.isoformat()},
-            "source_record_refs_json": [{"source_record_id": "market_bars:NVDA"}],
-        },
+                "source_freshness_json": {"technical": "fresh", "fundamental": "fresh", "events_news": "fresh"},
+                "missing_signals_json": [],
+                "stale_signals_json": [],
+                "evidence_items": [
+                    {
+                        "source": "alpaca_live",
+                        "source_table": "event_news_items",
+                        "source_record_id": "d8e368ec-7912-538e-bb54-740481024fc0",
+                        "source_text": "NVIDIA raises guidance after AI demand accelerates",
+                        "available_time": now.isoformat(),
+                    }
+                ],
+            },
         "candidate_context": {
             "candidate_score": 0.81,
             "strategy_id": "relative_strength_rotation_v1",
@@ -142,7 +149,8 @@ def test_trading_agent_retries_once_and_returns_validated_output(tmp_path):
     assert result.metadata["retry_count"] == 1
     assert "previous validation error" in calls[1].lower()
     assert '"signal_snapshot"' in calls[0]
-    assert '"technical"' in calls[0]
+    assert "NVIDIA raises guidance after AI demand accelerates" in calls[0]
+    assert '"source_record_refs_json"' not in calls[0]
 
 
 def test_trading_agent_returns_safe_fallback_after_retry_failure(tmp_path):

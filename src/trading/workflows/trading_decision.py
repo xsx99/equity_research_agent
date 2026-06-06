@@ -11,6 +11,7 @@ from src.agents.trading_schemas import TradingDecisionInput
 from src.trading.manual_review.requests import ManualTickerRequestService
 from src.trading.risk import RiskDecisionRecord
 from src.trading.signals import SignalSnapshotResult
+from src.trading.signals.sources import EventNewsItemRecord
 from src.trading.strategies.classifier import TradeClassificationRecord
 from src.trading.strategies.matching import CandidateScoreRecord
 
@@ -199,6 +200,7 @@ class TradingDecisionPipeline:
         risk: RiskDecisionRecord | None,
         signal_snapshot: SignalSnapshotResult,
     ) -> dict[str, Any]:
+        evidence_items = self._build_evidence_items(signal_snapshot)
         input_model = TradingDecisionInput(
             ticker=candidate.ticker,
             decision_time=candidate.decision_time,
@@ -213,8 +215,7 @@ class TradingDecisionPipeline:
                 "source_freshness_json": signal_snapshot.source_freshness_json,
                 "missing_signals_json": signal_snapshot.missing_signals_json,
                 "stale_signals_json": signal_snapshot.stale_signals_json,
-                "source_available_times_json": signal_snapshot.source_available_times_json,
-                "source_record_refs_json": signal_snapshot.source_record_refs_json,
+                "evidence_items": evidence_items,
             },
             candidate_context={
                 "candidate_score": candidate.candidate_score,
@@ -244,6 +245,44 @@ class TradingDecisionPipeline:
             },
         )
         return input_model.model_dump(mode="json")
+
+    def _build_evidence_items(
+        self,
+        signal_snapshot: SignalSnapshotResult,
+    ) -> list[dict[str, str]]:
+        news_refs = [
+            ref
+            for ref in signal_snapshot.source_record_refs_json
+            if ref.get("source_table") == "event_news_items" and ref.get("source_record_id")
+        ]
+        if not news_refs:
+            return []
+        load_event_news_items = getattr(self.repository, "load_event_news_items", None)
+        if load_event_news_items is None:
+            return []
+        news_items = load_event_news_items(
+            source_record_ids=tuple(str(ref["source_record_id"]) for ref in news_refs)
+        )
+        news_by_id = {item.event_news_item_id: item for item in news_items}
+        evidence_items: list[dict[str, str]] = []
+        for ref in news_refs:
+            source_record_id = str(ref["source_record_id"])
+            item = news_by_id.get(source_record_id)
+            if item is None:
+                continue
+            evidence_items.append(
+                {
+                    "source": str(ref.get("source") or item.provider),
+                    "source_table": "event_news_items",
+                    "source_record_id": source_record_id,
+                    "source_text": _render_news_source_text(item),
+                    "available_time": signal_snapshot.source_available_times_json.get(
+                        source_record_id,
+                        item.available_for_decision_at.isoformat(),
+                    ),
+                }
+            )
+        return evidence_items
 
     def _build_missing_signal_snapshot_decision(
         self,
@@ -392,3 +431,8 @@ class TradingDecisionPipeline:
             if request.request_id == request_id:
                 return request.mode
         return None
+
+
+def _render_news_source_text(item: EventNewsItemRecord) -> str:
+    parts = [part.strip() for part in (item.headline, item.summary) if isinstance(part, str) and part.strip()]
+    return "\n\n".join(parts)

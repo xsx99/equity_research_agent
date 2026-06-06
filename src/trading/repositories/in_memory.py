@@ -131,6 +131,14 @@ class InMemoryTradingRepository:
     def save_event_news_item(self, item: EventNewsItemRecord) -> None:
         self.event_news_items.append(item)
 
+    def load_event_news_items(
+        self,
+        *,
+        source_record_ids: tuple[str, ...],
+    ) -> tuple[EventNewsItemRecord, ...]:
+        wanted = set(source_record_ids)
+        return tuple(item for item in self.event_news_items if item.event_news_item_id in wanted)
+
     def save_strategy_definition(self, definition: StrategyDefinitionRecord) -> None:
         self.strategy_definitions = [
             item for item in self.strategy_definitions if item.strategy_definition_id != definition.strategy_definition_id

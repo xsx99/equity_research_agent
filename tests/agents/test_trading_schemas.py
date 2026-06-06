@@ -32,8 +32,15 @@ def test_trading_decision_input_requires_full_signal_snapshot_contract():
                 },
                 "missing_signals_json": [],
                 "stale_signals_json": [],
-                "source_available_times_json": {"market_bars:NVDA": now.isoformat()},
-                "source_record_refs_json": [{"source_record_id": "market_bars:NVDA"}],
+                "evidence_items": [
+                    {
+                        "source": "alpaca_live",
+                        "source_table": "event_news_items",
+                        "source_record_id": "d8e368ec-7912-538e-bb54-740481024fc0",
+                        "source_text": "NVIDIA raises guidance after AI demand accelerates",
+                        "available_time": now.isoformat(),
+                    }
+                ],
             },
             "candidate_context": {
                 "candidate_score": 0.81,
@@ -57,6 +64,7 @@ def test_trading_decision_input_requires_full_signal_snapshot_contract():
     )
 
     assert payload.signal_snapshot["signal_snapshot_id"] == "snapshot-1"
+    assert payload.signal_snapshot["evidence_items"][0]["source_table"] == "event_news_items"
     assert payload.candidate_context["strategy_id"] == "relative_strength_rotation_v1"
 
 
