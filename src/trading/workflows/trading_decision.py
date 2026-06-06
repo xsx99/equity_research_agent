@@ -11,7 +11,11 @@ from src.agents.trading_schemas import TradingDecisionInput
 from src.trading.manual_review.requests import ManualTickerRequestService
 from src.trading.risk import RiskDecisionRecord
 from src.trading.signals import SignalSnapshotResult
-from src.trading.signals.sources import EventNewsItemRecord
+from src.trading.signals.event_news import build_event_news_signals
+from src.trading.signals.sources import (
+    EventNewsItemRecord,
+    source_record_from_event_news_item,
+)
 from src.trading.strategies.classifier import TradeClassificationRecord
 from src.trading.strategies.matching import CandidateScoreRecord
 
@@ -200,7 +204,8 @@ class TradingDecisionPipeline:
         risk: RiskDecisionRecord | None,
         signal_snapshot: SignalSnapshotResult,
     ) -> dict[str, Any]:
-        evidence_items = self._build_evidence_items(signal_snapshot)
+        previous_snapshot = self._load_previous_signal_snapshot(signal_snapshot)
+        windowed_news_items = self._load_windowed_news_items(signal_snapshot, previous_snapshot)
         input_model = TradingDecisionInput(
             ticker=candidate.ticker,
             decision_time=candidate.decision_time,
@@ -211,11 +216,11 @@ class TradingDecisionPipeline:
                 "snapshot_type": signal_snapshot.snapshot_type,
                 "decision_time": signal_snapshot.decision_time,
                 "available_for_decision_at": signal_snapshot.available_for_decision_at,
-                "signal_json": signal_snapshot.signal_json,
+                "signal_json": self._build_llm_signal_json(signal_snapshot, windowed_news_items),
                 "source_freshness_json": signal_snapshot.source_freshness_json,
                 "missing_signals_json": signal_snapshot.missing_signals_json,
                 "stale_signals_json": signal_snapshot.stale_signals_json,
-                "evidence_items": evidence_items,
+                "evidence_items": self._build_evidence_items(windowed_news_items, signal_snapshot),
             },
             candidate_context={
                 "candidate_score": candidate.candidate_score,
@@ -244,45 +249,105 @@ class TradingDecisionPipeline:
                 "manual_request_mode": self._manual_request_mode(candidate.manual_request_id),
             },
         )
-        return input_model.model_dump(mode="json")
+        return _round_nested_floats(input_model.model_dump(mode="json"))
 
     def _build_evidence_items(
         self,
+        news_items: tuple[EventNewsItemRecord, ...],
         signal_snapshot: SignalSnapshotResult,
     ) -> list[dict[str, str]]:
+        evidence_items: list[dict[str, str]] = []
+        for item in news_items:
+            evidence_items.append(
+                {
+                    "source": item.provider,
+                    "source_table": "event_news_items",
+                    "source_record_id": item.event_news_item_id,
+                    "source_text": _render_news_source_text(item),
+                    "available_time": signal_snapshot.source_available_times_json.get(
+                        item.event_news_item_id,
+                        item.available_for_decision_at.isoformat(),
+                    ),
+                }
+            )
+        return evidence_items
+
+    def _build_llm_signal_json(
+        self,
+        signal_snapshot: SignalSnapshotResult,
+        news_items: tuple[EventNewsItemRecord, ...],
+    ) -> dict[str, Any]:
+        signal_json = {
+            family: dict(values)
+            for family, values in signal_snapshot.signal_json.items()
+        }
+        signal_json["events_news"] = self._build_windowed_events_news_view(
+            base_values=signal_json.get("events_news", {}),
+            news_items=news_items,
+            decision_time=signal_snapshot.decision_time,
+        )
+        return signal_json
+
+    def _build_windowed_events_news_view(
+        self,
+        *,
+        base_values: dict[str, Any],
+        news_items: tuple[EventNewsItemRecord, ...],
+        decision_time: datetime,
+    ) -> dict[str, Any]:
+        if not news_items:
+            return dict(base_values)
+        windowed = build_event_news_signals(
+            tuple(source_record_from_event_news_item(item) for item in news_items),
+            decision_time=decision_time,
+        ).values
+        merged = dict(base_values)
+        for key in _WINDOWED_EVENT_NEWS_FIELDS:
+            merged[key] = windowed.get(key)
+        return merged
+
+    def _load_previous_signal_snapshot(
+        self,
+        signal_snapshot: SignalSnapshotResult,
+    ) -> SignalSnapshotResult | None:
+        loader = getattr(self.repository, "load_previous_signal_snapshot", None)
+        if loader is None:
+            return None
+        return loader(
+            ticker=signal_snapshot.ticker,
+            before_decision_time=signal_snapshot.decision_time,
+            snapshot_type=signal_snapshot.snapshot_type,
+        )
+
+    def _load_windowed_news_items(
+        self,
+        signal_snapshot: SignalSnapshotResult,
+        previous_snapshot: SignalSnapshotResult | None,
+    ) -> tuple[EventNewsItemRecord, ...]:
         news_refs = [
             ref
             for ref in signal_snapshot.source_record_refs_json
             if ref.get("source_table") == "event_news_items" and ref.get("source_record_id")
         ]
         if not news_refs:
-            return []
+            return ()
         load_event_news_items = getattr(self.repository, "load_event_news_items", None)
         if load_event_news_items is None:
-            return []
+            return ()
         news_items = load_event_news_items(
             source_record_ids=tuple(str(ref["source_record_id"]) for ref in news_refs)
         )
         news_by_id = {item.event_news_item_id: item for item in news_items}
-        evidence_items: list[dict[str, str]] = []
+        scan_start = previous_snapshot.decision_time if previous_snapshot is not None else None
+        windowed: list[EventNewsItemRecord] = []
         for ref in news_refs:
-            source_record_id = str(ref["source_record_id"])
-            item = news_by_id.get(source_record_id)
+            item = news_by_id.get(str(ref["source_record_id"]))
             if item is None:
                 continue
-            evidence_items.append(
-                {
-                    "source": str(ref.get("source") or item.provider),
-                    "source_table": "event_news_items",
-                    "source_record_id": source_record_id,
-                    "source_text": _render_news_source_text(item),
-                    "available_time": signal_snapshot.source_available_times_json.get(
-                        source_record_id,
-                        item.available_for_decision_at.isoformat(),
-                    ),
-                }
-            )
-        return evidence_items
+            if scan_start is not None and item.available_for_decision_at <= scan_start:
+                continue
+            windowed.append(item)
+        return tuple(windowed)
 
     def _build_missing_signal_snapshot_decision(
         self,
@@ -436,3 +501,33 @@ class TradingDecisionPipeline:
 def _render_news_source_text(item: EventNewsItemRecord) -> str:
     parts = [part.strip() for part in (item.headline, item.summary) if isinstance(part, str) and part.strip()]
     return "\n\n".join(parts)
+
+
+_WINDOWED_EVENT_NEWS_FIELDS = (
+    "own_earnings_event_type",
+    "analyst_upgrade_count",
+    "analyst_downgrade_count",
+    "price_target_revision_score",
+    "guidance_news_flag",
+    "customer_order_news_flag",
+    "regulatory_news_flag",
+    "high_signal_news_count_24h",
+    "high_signal_news_count_7d",
+    "sentiment_direction",
+    "catalyst_quality_score",
+    "direct_negative_catalyst_type",
+)
+
+
+def _round_nested_floats(value: Any) -> Any:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, float):
+        return round(value, 3)
+    if isinstance(value, list):
+        return [_round_nested_floats(item) for item in value]
+    if isinstance(value, tuple):
+        return [_round_nested_floats(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _round_nested_floats(item) for key, item in value.items()}
+    return value

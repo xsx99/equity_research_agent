@@ -201,16 +201,66 @@ def test_trading_decision_pipeline_persists_decisions_and_manual_request_status(
 
 
 def test_trading_decision_pipeline_builds_readable_news_evidence_items_for_llm_input(tmp_path):
-    now = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+    previous_scan = datetime(2026, 6, 3, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 6, 5, 12, 0, tzinfo=timezone.utc)
     registry = _write_prompt(tmp_path)
     repository = InMemoryTradingRepository()
-    news_id = "d8e368ec-7912-538e-bb54-740481024fc0"
+    old_news_id = "d8e368ec-7912-538e-bb54-740481024fc0"
+    new_news_ids = (
+        "3fd6cffe-07a8-4970-b8c9-112233445501",
+        "3fd6cffe-07a8-4970-b8c9-112233445502",
+        "3fd6cffe-07a8-4970-b8c9-112233445503",
+    )
+    repository.save_signal_snapshot(
+        SignalSnapshotResult(
+            signal_snapshot_id="snapshot-prev",
+            ticker="NVDA",
+            snapshot_type="pre_open",
+            decision_time=previous_scan,
+            available_for_decision_at=previous_scan,
+            max_input_available_for_decision_at=previous_scan,
+            signal_json={
+                "technical": {"rs_vs_spy_1d": 0.01, "relative_volume": 1.2},
+                "fundamental": {"quality_score": 0.9},
+                "events_news": {"catalyst_quality_score": 0.5, "sentiment_direction": "negative"},
+            },
+            source_freshness_json={"technical": "fresh", "fundamental": "fresh", "events_news": "fresh"},
+            missing_signals_json=[],
+            stale_signals_json=[],
+            source_record_refs_json=[],
+            source_available_times_json={},
+            excluded_future_source_count=0,
+            point_in_time_passed=True,
+        )
+    )
     repository.save_event_news_item(
         EventNewsItemRecord(
-            event_news_item_id=news_id,
+            event_news_item_id=old_news_id,
             ticker="NVDA",
             source_ticker="NVDA",
-            event_type="earnings",
+            event_type="regulatory_probe",
+            direction="bearish",
+            sentiment="negative",
+            importance="high",
+            headline="Old regulatory headline",
+            summary="This one should be excluded because it was already visible last scan.",
+            provider="alpaca_live",
+            source_refs_json=[],
+            dedupe_key="nvda-old-news",
+            event_time=datetime(2026, 6, 3, 10, 0, tzinfo=timezone.utc),
+            published_at=datetime(2026, 6, 3, 10, 0, tzinfo=timezone.utc),
+            ingested_at=datetime(2026, 6, 3, 10, 0, tzinfo=timezone.utc),
+            available_for_decision_at=datetime(2026, 6, 3, 10, 0, tzinfo=timezone.utc),
+            raw_payload_ref=None,
+            metadata_json={},
+        )
+    )
+    repository.save_event_news_item(
+        EventNewsItemRecord(
+            event_news_item_id=new_news_ids[0],
+            ticker="NVDA",
+            source_ticker="NVDA",
+            event_type="earnings_beat_raise",
             direction="bullish",
             sentiment="positive",
             importance="high",
@@ -218,11 +268,55 @@ def test_trading_decision_pipeline_builds_readable_news_evidence_items_for_llm_i
             summary="Management said datacenter demand remained ahead of expectations.",
             provider="alpaca_live",
             source_refs_json=[],
-            dedupe_key="nvda-earnings-1",
-            event_time=now,
-            published_at=now,
-            ingested_at=now,
-            available_for_decision_at=now,
+            dedupe_key="nvda-new-news-1",
+            event_time=datetime(2026, 6, 5, 8, 0, tzinfo=timezone.utc),
+            published_at=datetime(2026, 6, 5, 8, 0, tzinfo=timezone.utc),
+            ingested_at=datetime(2026, 6, 5, 8, 0, tzinfo=timezone.utc),
+            available_for_decision_at=datetime(2026, 6, 5, 8, 0, tzinfo=timezone.utc),
+            raw_payload_ref=None,
+            metadata_json={},
+        )
+    )
+    repository.save_event_news_item(
+        EventNewsItemRecord(
+            event_news_item_id=new_news_ids[1],
+            ticker="NVDA",
+            source_ticker="NVDA",
+            event_type="analyst_upgrade",
+            direction="bullish",
+            sentiment="positive",
+            importance="high",
+            headline="Analyst lifts target after demand checks improve",
+            summary="Channel checks pointed to sustained acceleration.",
+            provider="alpaca_live",
+            source_refs_json=[],
+            dedupe_key="nvda-new-news-2",
+            event_time=datetime(2026, 6, 5, 9, 0, tzinfo=timezone.utc),
+            published_at=datetime(2026, 6, 5, 9, 0, tzinfo=timezone.utc),
+            ingested_at=datetime(2026, 6, 5, 9, 0, tzinfo=timezone.utc),
+            available_for_decision_at=datetime(2026, 6, 5, 9, 0, tzinfo=timezone.utc),
+            raw_payload_ref=None,
+            metadata_json={},
+        )
+    )
+    repository.save_event_news_item(
+        EventNewsItemRecord(
+            event_news_item_id=new_news_ids[2],
+            ticker="NVDA",
+            source_ticker="NVDA",
+            event_type="general_news",
+            direction="bullish",
+            sentiment="positive",
+            importance="medium",
+            headline="Follow-through demand remains healthy",
+            summary="No new material negatives surfaced in supplier checks.",
+            provider="alpaca_live",
+            source_refs_json=[],
+            dedupe_key="nvda-new-news-3",
+            event_time=datetime(2026, 6, 5, 10, 0, tzinfo=timezone.utc),
+            published_at=datetime(2026, 6, 5, 10, 0, tzinfo=timezone.utc),
+            ingested_at=datetime(2026, 6, 5, 10, 0, tzinfo=timezone.utc),
+            available_for_decision_at=datetime(2026, 6, 5, 10, 0, tzinfo=timezone.utc),
             raw_payload_ref=None,
             metadata_json={},
         )
@@ -234,12 +328,30 @@ def test_trading_decision_pipeline_builds_readable_news_evidence_items_for_llm_i
                 {
                     "source": "alpaca_live",
                     "source_table": "event_news_items",
-                    "source_record_id": news_id,
+                    "source_record_id": old_news_id,
+                },
+                {
+                    "source": "alpaca_live",
+                    "source_table": "event_news_items",
+                    "source_record_id": new_news_ids[0],
+                },
+                {
+                    "source": "alpaca_live",
+                    "source_table": "event_news_items",
+                    "source_record_id": new_news_ids[1],
+                },
+                {
+                    "source": "alpaca_live",
+                    "source_table": "event_news_items",
+                    "source_record_id": new_news_ids[2],
                 },
                 {"source_record_id": "market_bars:NVDA"},
             ],
             source_available_times_json={
-                news_id: now.isoformat(),
+                old_news_id: datetime(2026, 6, 3, 10, 0, tzinfo=timezone.utc).isoformat(),
+                new_news_ids[0]: datetime(2026, 6, 5, 8, 0, tzinfo=timezone.utc).isoformat(),
+                new_news_ids[1]: datetime(2026, 6, 5, 9, 0, tzinfo=timezone.utc).isoformat(),
+                new_news_ids[2]: datetime(2026, 6, 5, 10, 0, tzinfo=timezone.utc).isoformat(),
                 "market_bars:NVDA": now.isoformat(),
             },
         )
@@ -253,11 +365,11 @@ def test_trading_decision_pipeline_builds_readable_news_evidence_items_for_llm_i
         strategy_id="relative_strength_rotation_v1",
         strategy_version="v1",
         strategy_definition_id="definition-1",
-        candidate_score=0.81,
+        candidate_score=0.81234,
         direction="bullish",
         action="enter_long",
         typical_horizon="2w-3m",
-        core_signal_evidence={"events_news.catalyst_quality_score": 0.88},
+        core_signal_evidence={"events_news.catalyst_quality_score": 0.87654},
         missing_required_signals=[],
         unsupported_missing_signal_families=[],
         invalidators=["QQQ breaks trend"],
@@ -267,7 +379,7 @@ def test_trading_decision_pipeline_builds_readable_news_evidence_items_for_llm_i
         manual_request_id=None,
         selection_reason="catalyst confirmed",
         rejection_reason=None,
-        benchmark_context={"primary_benchmark": "QQQ"},
+        benchmark_context={"primary_benchmark": "QQQ", "alpha_vs_peer_basket": 0.012345},
         decision_time=now,
         available_for_decision_at=now,
         source_record_refs_json=[],
@@ -299,7 +411,7 @@ def test_trading_decision_pipeline_builds_readable_news_evidence_items_for_llm_i
         ticker="NVDA",
         status="approved",
         reason_code="within_limits",
-        approved_weight=0.04,
+        approved_weight=0.04123,
         approved_notional=4_000,
         approved_quantity=20,
         portfolio_risk_snapshot_id="snapshot-risk-1",
@@ -367,17 +479,46 @@ def test_trading_decision_pipeline_builds_readable_news_evidence_items_for_llm_i
     signal_snapshot = result.decisions[0].context_snapshot_json["signal_snapshot"]
     assert "source_record_refs_json" not in signal_snapshot
     assert "source_available_times_json" not in signal_snapshot
+    assert signal_snapshot["signal_json"]["technical"]["rs_vs_spy_1d"] == 0.02
+    assert result.decisions[0].context_snapshot_json["candidate_context"]["candidate_score"] == 0.812
+    assert result.decisions[0].context_snapshot_json["candidate_context"]["benchmark_context"]["alpha_vs_peer_basket"] == 0.012
+    assert result.decisions[0].context_snapshot_json["candidate_context"]["core_signal_evidence"]["events_news.catalyst_quality_score"] == 0.877
+    assert result.decisions[0].context_snapshot_json["risk_context"]["approved_weight"] == 0.041
+    assert signal_snapshot["signal_json"]["events_news"]["sentiment_direction"] == "positive"
+    assert signal_snapshot["signal_json"]["events_news"]["catalyst_quality_score"] == 0.667
+    assert signal_snapshot["signal_json"]["events_news"]["high_signal_news_count_24h"] == 2
+    assert signal_snapshot["signal_json"]["events_news"]["high_signal_news_count_7d"] == 2
     assert signal_snapshot["evidence_items"] == [
         {
             "source": "alpaca_live",
             "source_table": "event_news_items",
-            "source_record_id": news_id,
+            "source_record_id": new_news_ids[0],
             "source_text": (
                 "NVIDIA raises guidance after AI demand accelerates\n\n"
                 "Management said datacenter demand remained ahead of expectations."
             ),
-            "available_time": now.isoformat(),
-        }
+            "available_time": datetime(2026, 6, 5, 8, 0, tzinfo=timezone.utc).isoformat(),
+        },
+        {
+            "source": "alpaca_live",
+            "source_table": "event_news_items",
+            "source_record_id": new_news_ids[1],
+            "source_text": (
+                "Analyst lifts target after demand checks improve\n\n"
+                "Channel checks pointed to sustained acceleration."
+            ),
+            "available_time": datetime(2026, 6, 5, 9, 0, tzinfo=timezone.utc).isoformat(),
+        },
+        {
+            "source": "alpaca_live",
+            "source_table": "event_news_items",
+            "source_record_id": new_news_ids[2],
+            "source_text": (
+                "Follow-through demand remains healthy\n\n"
+                "No new material negatives surfaced in supplier checks."
+            ),
+            "available_time": datetime(2026, 6, 5, 10, 0, tzinfo=timezone.utc).isoformat(),
+        },
     ]
 
 

@@ -115,6 +115,26 @@ class InMemoryTradingRepository:
                 selected_by_ticker[snapshot.ticker] = snapshot
         return tuple(snapshot for _ticker, snapshot in sorted(selected_by_ticker.items()))
 
+    def load_previous_signal_snapshot(
+        self,
+        *,
+        ticker: str,
+        before_decision_time: datetime,
+        snapshot_type: str = "pre_open",
+    ) -> SignalSnapshotResult | None:
+        symbol = ticker.strip().upper()
+        previous = [
+            snapshot
+            for snapshot in self.signal_snapshots
+            if snapshot.ticker == symbol
+            and snapshot.snapshot_type == snapshot_type
+            and snapshot.decision_time < before_decision_time
+            and snapshot.available_for_decision_at <= before_decision_time
+        ]
+        if not previous:
+            return None
+        return max(previous, key=lambda snapshot: (snapshot.decision_time, snapshot.available_for_decision_at))
+
     def record_source_ingestion_run(self, run: SourceIngestionRunRecord) -> None:
         self.source_ingestion_runs.append(run)
 

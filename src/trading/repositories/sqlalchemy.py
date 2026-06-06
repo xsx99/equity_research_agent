@@ -465,6 +465,44 @@ class SQLAlchemyTradingRepository:
                 selected_by_ticker[snapshot.ticker] = snapshot
         return tuple(snapshot for _ticker, snapshot in sorted(selected_by_ticker.items()))
 
+    def load_previous_signal_snapshot(
+        self,
+        *,
+        ticker: str,
+        before_decision_time: Any,
+        snapshot_type: str = "pre_open",
+    ) -> SignalSnapshotResult | None:
+        symbol = ticker.strip().upper()
+        previous: list[SignalSnapshotResult] = []
+        for row in self.session.query(SignalSnapshot).all():
+            if row.ticker != symbol or row.snapshot_type != snapshot_type:
+                continue
+            if row.decision_time >= before_decision_time or row.available_for_decision_at > before_decision_time:
+                continue
+            previous.append(
+                SignalSnapshotResult(
+                    signal_snapshot_id=str(row.signal_snapshot_id),
+                    ticker=row.ticker,
+                    snapshot_type=row.snapshot_type,
+                    decision_time=row.decision_time,
+                    available_for_decision_at=row.available_for_decision_at,
+                    max_input_available_for_decision_at=row.max_input_available_for_decision_at,
+                    signal_json=dict(row.signal_json or {}),
+                    source_freshness_json=dict(row.source_freshness_json or {}),
+                    missing_signals_json=list(row.missing_signals_json or []),
+                    stale_signals_json=list(row.stale_signals_json or []),
+                    source_record_refs_json=list(row.source_record_refs_json or []),
+                    source_available_times_json=dict(row.source_available_times_json or {}),
+                    excluded_future_source_count=int(row.excluded_future_source_count or 0),
+                    point_in_time_passed=bool(row.point_in_time_passed),
+                    selection_source=row.selection_source,
+                    manual_request_id=str(row.manual_request_id) if row.manual_request_id is not None else None,
+                )
+            )
+        if not previous:
+            return None
+        return max(previous, key=lambda snapshot: (snapshot.decision_time, snapshot.available_for_decision_at))
+
     def load_event_news_items(
         self,
         *,
