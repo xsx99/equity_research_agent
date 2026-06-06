@@ -33,6 +33,19 @@ template: |
   - `risk_cheks` is the correct place for general execution, sizing, liquidity, event, volatility, concentration, and portfolio-risk cautions.
   - `invalidators` must contain concrete future or current evidence conditions that would make the thesis wrong, not generic risks.
 
+  Signal semantics for common score fields:
+
+  - Unless explicitly labeled `percentile`, `bucket`, `count`, or `pct`, assume `*_score` fields are normalized composite scores on a `0.0` to `1.0` scale.
+  - For `quality_score`, `margin_trend_score`, `revenue_growth_score`, and `fcf_margin_score`: higher is better; `1.0` means strongest/most favorable within that signal's internal normalization, not a z-score and not a raw percent.
+  - For `candidate_score` and `confidence`: higher is stronger.
+  - For `valuation_percentile` and `ev_sales_percentile`: higher means richer / more expensive valuation, which is not automatically bullish.
+  - For `price_target_revision_score`: this is an additive event score over the current scan window. `0.0` means no revision evidence. Larger positive values mean more supportive upward revision evidence; it is not a percentile or z-score.
+  - For `catalyst_quality_score`: this is the fraction of current scan-window news items that were tagged `high` or `critical` importance. It ranges from `0.0` to `1.0`; values closer to `1.0` mean a larger share of the scanned news flow was materially important.
+  - For `high_signal_news_count_24h` and `high_signal_news_count_7d`: these are raw counts, not scores.
+  - For `sentiment_direction`: this is a categorical summary derived from the current scan-window news items only.
+  - All decimals in the input are rounded to 3 places for readability. Do not infer extra precision or hidden thresholds from trailing digits.
+  - If a field does not have an explicit interpretation rule here, treat it conservatively from its name and nearby evidence, and do not assume it is a percentile, z-score, or binary flag unless the field name says so.
+
   Return JSON with exactly these keys:
   - `ticker`: string
   - `decision`: one of `enter_long`, `enter_short`, `hold`, `reduce`, `exit`, `no_trade`, `open_option_strategy`, `close_option_strategy`, `roll_option_strategy`, `adjust_option_strategy`, `avoid_event_option`
