@@ -183,3 +183,25 @@ def test_source_ingestion_service_condenses_news_and_records_run_metadata():
     assert artifact_repository.event_news_items[0].metadata_json["compression_status"] == "kept"
     assert artifact_repository.event_news_items[0].metadata_json["duplicate_count"] == 2
     assert artifact_repository.event_news_items[0].metadata_json["dropped_sources"] == ["Dow Jones"]
+
+
+def test_source_ingestion_service_preserves_legacy_event_typing_when_condenser_disabled(monkeypatch):
+    now = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+    source_repository = InMemorySignalSourceRepository()
+    artifact_repository = InMemoryTradingRepository()
+    monkeypatch.setenv("TRADING_NEWS_CONDENSER_ENABLED", "0")
+
+    result = SourceIngestionService(
+        market_provider=_FakeMarketProvider(),
+        news_provider=_FakeNewsProvider(),
+        source_repository=source_repository,
+        artifact_repository=artifact_repository,
+        provider_name="fixture",
+        now=lambda: now,
+        sleeper=lambda seconds: None,
+    ).refresh_tickers(("AAPL",), as_of=now, run_type="targeted", source_families=("events_news",))
+
+    assert result.event_news_items[0].event_type == "analyst_upgrade"
+    assert result.event_news_items[0].sentiment == "positive"
+    assert result.event_news_items[0].importance == "high"
+    assert result.ingestion_run.metadata_json["news_condensation"]["kept_news_item_count"] == 1

@@ -1,5 +1,9 @@
 from datetime import datetime, timezone
 
+from src.trading.repositories.in_memory import InMemoryTradingRepository
+from src.trading.signals.event_news import build_event_news_signals
+from src.trading.signals.source_ingestion import SourceIngestionService
+from src.trading.signals.sources import InMemorySignalSourceRepository, source_record_from_event_news_item
 from src.trading.signals import SignalSnapshotResult
 from src.trading.strategies.matching import StrategyDefinitionRecord, StrategyMatcher
 
@@ -139,3 +143,68 @@ def test_strategy_matcher_marks_deferred_source_family_strategies_as_unsupported
     assert candidates[0].unsupported_missing_signal_families == [
         "full_transcript_interpretation",
     ]
+
+
+class _DuplicateNewsProvider:
+    def fetch_recent(self, ticker: str, limit: int):
+        return [
+            {
+                "title": "Morgan Stanley upgrades Apple to Overweight, target to $180",
+                "summary": "The analyst cited stronger iPhone demand.",
+                "published_at": "2026-06-01T10:00:00+00:00",
+                "source": "Reuters",
+                "url": "https://example.test/reuters-upgrade",
+                "signal_type": "analyst_rating",
+            },
+            {
+                "title": "Apple upgraded to Overweight at Morgan Stanley; PT raised to $180",
+                "summary": "Demand checks improved and the broker lifted its target.",
+                "published_at": "2026-06-01T10:05:00+00:00",
+                "source": "Dow Jones",
+                "url": "https://example.test/dj-upgrade",
+                "signal_type": "analyst_rating",
+            },
+        ]
+
+
+class _NoopMarketProvider:
+    def fetch_daily_bars(self, ticker: str, lookback_days: int):
+        return []
+
+    def fetch_context(self, ticker: str):
+        return {}
+
+
+def test_strategy_matcher_score_is_not_inflated_by_duplicate_news_volume_after_condensation():
+    now = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+    source_repository = InMemorySignalSourceRepository()
+    artifact_repository = InMemoryTradingRepository()
+    ingestion = SourceIngestionService(
+        market_provider=_NoopMarketProvider(),
+        news_provider=_DuplicateNewsProvider(),
+        source_repository=source_repository,
+        artifact_repository=artifact_repository,
+        provider_name="fixture",
+        now=lambda: now,
+        sleeper=lambda seconds: None,
+    )
+    result = ingestion.refresh_tickers(("AAPL",), as_of=now, run_type="targeted", source_families=("events_news",))
+    signals = build_event_news_signals(
+        tuple(source_record_from_event_news_item(item) for item in result.event_news_items),
+        decision_time=now,
+    )
+    snapshot = _snapshot(
+        events_news=signals.values,
+        technical={"rs_vs_spy_1d": 0.018, "relative_volume": 1.8},
+        fundamental={"quality_score": 0.82},
+    )
+
+    candidates = StrategyMatcher().match_snapshot(
+        snapshot,
+        [_definition("strong_theme_catalyst_continuation_v1")],
+        strategy_run_id="run-1",
+    )
+
+    assert len(result.event_news_items) == 1
+    assert signals.values["high_signal_news_count_24h"] == 1
+    assert candidates[0].core_signal_evidence["events_news.high_signal_news_count_24h"] == 1

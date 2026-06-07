@@ -10,6 +10,8 @@ from typing import Any, Callable, Iterable, Protocol
 from src.providers.market_data.types import DailyBar, MarketDataProvider
 from src.providers.news_data.helpers import (
     condense_news_items,
+    infer_news_event_type,
+    infer_news_sentiment,
     news_importance,
     parse_news_datetime,
 )
@@ -397,8 +399,8 @@ def _event_news_item_from_provider(
     provider_dedupe = (url or title or f"{ticker}:{published_at.isoformat()}").strip().lower()
     dedupe_key = f"{ticker.upper()}|{provider_dedupe}"
     item_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"event_news:{dedupe_key}"))
-    event_type = "general_news"
-    sentiment = None
+    event_type = infer_news_event_type(signal_type, title, summary)
+    sentiment = infer_news_sentiment(title, summary, event_type)
     return EventNewsItemRecord(
         event_news_item_id=item_id,
         ticker=ticker,

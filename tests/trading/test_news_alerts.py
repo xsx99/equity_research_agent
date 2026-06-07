@@ -71,3 +71,31 @@ def test_news_alert_service_normalizes_and_dedupes_repeated_headlines():
     assert alert.affected_candidates == ("candidate-1",)
     assert alert.affected_themes == ("ai_semis",)
     assert alert.action_required is True
+
+
+def test_news_alert_service_keeps_distinct_alerts_for_new_fact_rewrites():
+    now = datetime(2026, 6, 2, 15, 0, tzinfo=timezone.utc)
+    service = NewsAlertService()
+
+    first = _event(
+        event_news_item_id="event-1",
+        headline="NVDA wins large cloud order",
+        published_at=now,
+        dedupe_key="NVDA|customer_order|cloud-order|2026-06-02T12:00:00+00:00",
+    )
+    second = _event(
+        event_news_item_id="event-2",
+        headline="NVDA wins larger cloud order after FDA approval",
+        published_at=now,
+        dedupe_key="NVDA|regulatory_action|cloud-order-approved|2026-06-02T12:00:00+00:00",
+    )
+
+    alerts = service.build_alerts(
+        event_items=(first, second),
+        existing_dedupe_keys=frozenset(),
+        affected_positions_by_ticker={"NVDA": ("position-1",)},
+        affected_candidates_by_ticker={"NVDA": ("candidate-1",)},
+        affected_themes_by_ticker={"NVDA": ("ai_semis",)},
+    )
+
+    assert [alert.event_news_item_id for alert in alerts] == ["event-1", "event-2"]

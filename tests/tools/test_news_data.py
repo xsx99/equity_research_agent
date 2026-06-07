@@ -212,3 +212,63 @@ def test_condense_news_items_prefers_earlier_report_and_emits_metadata():
     assert kept.metadata["retained_rank_reason"] == "earliest_available_then_specificity"
     assert kept.metadata["duplicate_count"] == 2
     assert kept.metadata["dropped_sources"] == ["Newswire"]
+
+
+def test_condense_news_items_keeps_stage_change_as_new_fact():
+    as_of = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+
+    result = condense_news_items(
+        ticker="AAPL",
+        items=[
+            {
+                "title": "FDA announced review of Apple's cardiac feature filing",
+                "summary": "The company said the submission entered formal review.",
+                "published_at": "2026-06-01T08:00:00+00:00",
+                "source": "Reuters",
+                "url": "https://example.com/fda-review",
+                "signal_type": "company_update",
+            },
+            {
+                "title": "FDA approves Apple's cardiac feature filing",
+                "summary": "The approval clears the product for launch.",
+                "published_at": "2026-06-01T10:00:00+00:00",
+                "source": "Reuters",
+                "url": "https://example.com/fda-approval",
+                "signal_type": "company_update",
+            },
+        ],
+        as_of=as_of,
+    )
+
+    assert result.kept_news_item_count == 2
+    assert [item.duplicate_group_key for item in result.kept_items][0] != [item.duplicate_group_key for item in result.kept_items][1]
+
+
+def test_condense_news_items_keeps_later_negative_fact_as_distinct_event():
+    as_of = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+
+    result = condense_news_items(
+        ticker="AAPL",
+        items=[
+            {
+                "title": "Apple launches new device lineup",
+                "summary": "The launch expands the company product family.",
+                "published_at": "2026-06-01T09:00:00+00:00",
+                "source": "Reuters",
+                "url": "https://example.com/launch",
+                "signal_type": "company_update",
+            },
+            {
+                "title": "Apple launches new device lineup after resolving recall issue",
+                "summary": "The company said it resolved a recall affecting the prior model.",
+                "published_at": "2026-06-01T10:00:00+00:00",
+                "source": "Reuters",
+                "url": "https://example.com/launch-recall",
+                "signal_type": "company_update",
+            },
+        ],
+        as_of=as_of,
+    )
+
+    assert result.kept_news_item_count == 2
+    assert result.kept_items[1].event_type == "recall"
