@@ -1,12 +1,18 @@
 """Provider-backed source ingestion adapters for PR02 signal snapshots."""
 from __future__ import annotations
 
+import os
 import uuid
 from dataclasses import dataclass, replace
 from datetime import date, datetime, time, timezone
 from typing import Any, Callable, Iterable, Protocol
 
 from src.providers.market_data.types import DailyBar, MarketDataProvider
+from src.providers.news_data.helpers import (
+    condense_news_items,
+    news_importance,
+    parse_news_datetime,
+)
 from src.providers.news_data.types import NewsItem, NewsProvider
 from src.trading.data_sources.provider_resilience import (
     ProviderRequestRecorder,
@@ -55,6 +61,12 @@ class SourceIngestionResult:
     source_records: tuple[SourceRecord, ...]
     fundamental_snapshots: tuple[FundamentalSnapshotRecord, ...]
     event_news_items: tuple[EventNewsItemRecord, ...]
+
+
+@dataclass(frozen=True)
+class _EventsNewsRefreshResult:
+    items: tuple[EventNewsItemRecord, ...]
+    summary: dict[str, int]
 
 
 class SourceIngestionService:
@@ -129,6 +141,13 @@ class SourceIngestionService:
         source_records: list[SourceRecord] = []
         fundamental_snapshots: list[FundamentalSnapshotRecord] = []
         event_news_items: list[EventNewsItemRecord] = []
+        news_condensation_summary = {
+            "raw_news_item_count": 0,
+            "kept_news_item_count": 0,
+            "dropped_low_signal_count": 0,
+            "dropped_duplicate_count": 0,
+            "dropped_irrelevant_count": 0,
+        }
         errors: list[Exception] = []
 
         for ticker in normalized_tickers:
@@ -149,9 +168,11 @@ class SourceIngestionService:
                     errors.append(exc)
             if "events_news" in families and self.news_provider is not None:
                 try:
-                    items = self._refresh_events_news(ticker, as_of, news_policy)
-                    event_news_items.extend(items)
-                    source_records.extend(source_record_from_event_news_item(item) for item in items)
+                    refresh_result = self._refresh_events_news(ticker, as_of, news_policy)
+                    event_news_items.extend(refresh_result.items)
+                    source_records.extend(source_record_from_event_news_item(item) for item in refresh_result.items)
+                    for key, value in refresh_result.summary.items():
+                        news_condensation_summary[key] += value
                 except Exception as exc:
                     errors.append(exc)
 
@@ -181,7 +202,10 @@ class SourceIngestionService:
             },
             error_code=errors[0].__class__.__name__ if errors else None,
             error_message=str(errors[0]) if errors else None,
-            metadata_json={"error_count": len(errors)},
+            metadata_json={
+                "error_count": len(errors),
+                "news_condensation": news_condensation_summary,
+            },
         )
         self.artifact_repository.record_source_ingestion_run(ingestion_run)
         return SourceIngestionResult(
@@ -292,20 +316,51 @@ class SourceIngestionService:
         ticker: str,
         as_of: datetime,
         policy: ProviderResiliencePolicy,
-    ) -> tuple[EventNewsItemRecord, ...]:
+    ) -> _EventsNewsRefreshResult:
         if self.news_provider is None:
-            return ()
+            return _EventsNewsRefreshResult(
+                items=(),
+                summary=_empty_news_condensation_summary(),
+            )
         items = policy.execute(
             ticker,
             lambda: self.news_provider.fetch_recent(ticker=ticker, limit=self.news_limit),
         )
         if not isinstance(items, list):
-            return ()
+            return _EventsNewsRefreshResult(
+                items=(),
+                summary=_empty_news_condensation_summary(),
+            )
+        if _news_condenser_enabled():
+            condensed = condense_news_items(ticker=ticker, items=items, as_of=as_of)
+            records = tuple(
+                _event_news_item_from_condensed(ticker, item, as_of, self.provider_name)
+                for item in condensed.kept_items
+            )
+            return _EventsNewsRefreshResult(
+                items=records,
+                summary={
+                    "raw_news_item_count": condensed.raw_news_item_count,
+                    "kept_news_item_count": condensed.kept_news_item_count,
+                    "dropped_low_signal_count": condensed.dropped_low_signal_count,
+                    "dropped_duplicate_count": condensed.dropped_duplicate_count,
+                    "dropped_irrelevant_count": condensed.dropped_irrelevant_count,
+                },
+            )
         records: list[EventNewsItemRecord] = []
         for item in items:
             if isinstance(item, dict):
                 records.append(_event_news_item_from_provider(ticker, item, as_of, self.provider_name))
-        return tuple(records)
+        return _EventsNewsRefreshResult(
+            items=tuple(records),
+            summary={
+                "raw_news_item_count": len(items),
+                "kept_news_item_count": len(records),
+                "dropped_low_signal_count": 0,
+                "dropped_duplicate_count": 0,
+                "dropped_irrelevant_count": 0,
+            },
+        )
 
 
 class _LinkedProviderRequestRecorder:
@@ -337,13 +392,13 @@ def _event_news_item_from_provider(
     source = str(item.get("source") or provider_name).strip() or provider_name
     url = str(item.get("url") or "").strip() or None
     signal_type = str(item.get("signal_type") or "general_news")
-    published_at = _parse_datetime(item.get("published_at"), fallback=as_of)
+    published_at = parse_news_datetime(item.get("published_at"), fallback=as_of)
     available_at = max(published_at, as_of)
     provider_dedupe = (url or title or f"{ticker}:{published_at.isoformat()}").strip().lower()
     dedupe_key = f"{ticker.upper()}|{provider_dedupe}"
     item_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"event_news:{dedupe_key}"))
-    event_type = _news_event_type(signal_type, title, summary)
-    sentiment = _news_sentiment(title, summary, event_type)
+    event_type = "general_news"
+    sentiment = None
     return EventNewsItemRecord(
         event_news_item_id=item_id,
         ticker=ticker,
@@ -351,7 +406,7 @@ def _event_news_item_from_provider(
         event_type=event_type,
         direction=sentiment,
         sentiment=sentiment,
-        importance=_news_importance(signal_type),
+        importance=news_importance(signal_type, event_type),
         headline=title or None,
         summary=summary or None,
         provider=provider_name,
@@ -369,6 +424,45 @@ def _event_news_item_from_provider(
         available_for_decision_at=available_at,
         raw_payload_ref=url,
         metadata_json={"signal_type": signal_type},
+    )
+
+
+def _event_news_item_from_condensed(
+    ticker: str,
+    item: Any,
+    as_of: datetime,
+    provider_name: str,
+) -> EventNewsItemRecord:
+    dedupe_key = item.duplicate_group_key
+    item_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"event_news:{dedupe_key}"))
+    source = str(item.source or provider_name).strip() or provider_name
+    metadata_json = dict(item.metadata)
+    metadata_json["signal_type"] = item.signal_type
+    return EventNewsItemRecord(
+        event_news_item_id=item_id,
+        ticker=ticker,
+        source_ticker=ticker,
+        event_type=item.event_type,
+        direction=item.sentiment,
+        sentiment=item.sentiment,
+        importance=item.importance,
+        headline=item.title or None,
+        summary=item.summary or None,
+        provider=provider_name,
+        source_refs_json=[
+            {
+                "source": source,
+                "source_table": "provider_news",
+                "source_record_id": item_id,
+            }
+        ],
+        dedupe_key=dedupe_key,
+        event_time=item.published_at,
+        published_at=item.published_at,
+        ingested_at=as_of,
+        available_for_decision_at=item.available_for_decision_at,
+        raw_payload_ref=item.url,
+        metadata_json=metadata_json,
     )
 
 
@@ -392,71 +486,18 @@ def _latest_bar_event_time(bars: list[DailyBar], *, fallback: datetime) -> datet
         return _ensure_aware(raw_date)
     if isinstance(raw_date, date):
         return datetime.combine(raw_date, time.min, tzinfo=timezone.utc)
-    return _parse_datetime(raw_date, fallback=fallback)
+    return parse_news_datetime(raw_date, fallback=fallback)
+
+def _empty_news_condensation_summary() -> dict[str, int]:
+    return {
+        "raw_news_item_count": 0,
+        "kept_news_item_count": 0,
+        "dropped_low_signal_count": 0,
+        "dropped_duplicate_count": 0,
+        "dropped_irrelevant_count": 0,
+    }
 
 
-def _parse_datetime(value: object, *, fallback: datetime) -> datetime:
-    if isinstance(value, datetime):
-        return _ensure_aware(value)
-    if isinstance(value, date):
-        return datetime.combine(value, time.min, tzinfo=timezone.utc)
-    if isinstance(value, str) and value.strip():
-        raw = value.strip()
-        try:
-            parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
-        except ValueError:
-            try:
-                parsed = datetime.combine(date.fromisoformat(raw), time.min)
-            except ValueError:
-                return fallback
-        return _ensure_aware(parsed)
-    return fallback
-
-
-def _ensure_aware(value: datetime) -> datetime:
-    if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value
-
-
-def _news_event_type(signal_type: str, title: str, summary: str) -> str:
-    text = f"{title} {summary}".casefold()
-    normalized_type = signal_type.strip().casefold()
-    if normalized_type == "analyst_rating":
-        if "downgrade" in text:
-            return "analyst_downgrade"
-        if "upgrade" in text:
-            return "analyst_upgrade"
-        if "price target" in text or "target" in text:
-            return "price_target_revision"
-        return "analyst_rating"
-    if normalized_type == "earnings_guidance":
-        return "guidance_news"
-    if normalized_type == "earnings":
-        return "own_earnings_headline"
-    if normalized_type == "sec_filing":
-        return "sec_filing"
-    if "regulatory" in text or "fda" in text or "antitrust" in text:
-        return "regulatory_news"
-    if "order" in text or "customer" in text or "contract" in text:
-        return "customer_order"
-    if "product" in text or "launch" in text:
-        return "product_launch"
-    return "general_news"
-
-
-def _news_sentiment(title: str, summary: str, event_type: str) -> str | None:
-    text = f"{title} {summary}".casefold()
-    negative_words = ("downgrade", "cut", "miss", "warning", "falls", "declines", "probe")
-    positive_words = ("upgrade", "raise", "beat", "stronger", "wins", "launch", "approval")
-    if event_type == "analyst_downgrade" or any(word in text for word in negative_words):
-        return "negative"
-    if event_type == "analyst_upgrade" or any(word in text for word in positive_words):
-        return "positive"
-    return None
-
-
-def _news_importance(signal_type: str) -> str:
-    if signal_type.strip().casefold() in {"earnings_guidance", "analyst_rating", "earnings", "sec_filing"}:
-        return "high"
-    return "normal"
+def _news_condenser_enabled() -> bool:
+    raw = os.getenv("TRADING_NEWS_CONDENSER_ENABLED", "1").strip().casefold()
+    return raw not in {"0", "false", "off", "no"}

@@ -1,6 +1,7 @@
 """PR05 trading decision workflow."""
 from __future__ import annotations
 
+import os
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -74,9 +75,11 @@ class TradingDecisionPipeline:
         manual_request_service: ManualTickerRequestService | None = None,
         model_name: str,
         agent_runner: Any,
+        news_evidence_limit: int | None = None,
     ) -> None:
         self.repository = repository
         self.manual_request_service = manual_request_service
+        self.news_evidence_limit = max(1, news_evidence_limit or _news_evidence_limit())
         self.agent = TradingAgent(
             tool_registry=None,
             prompt_registry=prompt_registry,
@@ -257,7 +260,7 @@ class TradingDecisionPipeline:
         signal_snapshot: SignalSnapshotResult,
     ) -> list[dict[str, str]]:
         evidence_items: list[dict[str, str]] = []
-        for item in news_items:
+        for item in self._select_evidence_news_items(news_items):
             evidence_items.append(
                 {
                     "source": item.provider,
@@ -271,6 +274,23 @@ class TradingDecisionPipeline:
                 }
             )
         return evidence_items
+
+    def _select_evidence_news_items(
+        self,
+        news_items: tuple[EventNewsItemRecord, ...],
+    ) -> tuple[EventNewsItemRecord, ...]:
+        representatives: dict[str, EventNewsItemRecord] = {}
+        for item in news_items:
+            group_key = str(
+                item.metadata_json.get("duplicate_group_key")
+                or item.dedupe_key
+                or item.event_news_item_id
+            )
+            current = representatives.get(group_key)
+            if current is None or _evidence_priority(item) < _evidence_priority(current):
+                representatives[group_key] = item
+        ranked = sorted(representatives.values(), key=_evidence_priority)
+        return tuple(ranked[: self.news_evidence_limit])
 
     def _build_llm_signal_json(
         self,
@@ -517,6 +537,27 @@ _WINDOWED_EVENT_NEWS_FIELDS = (
     "catalyst_quality_score",
     "direct_negative_catalyst_type",
 )
+
+_EVIDENCE_IMPORTANCE_PRIORITY = {"critical": 0, "high": 1, "medium": 2, "normal": 3, "low": 4}
+
+
+def _news_evidence_limit() -> int:
+    raw = os.getenv("TRADING_NEWS_EVIDENCE_LIMIT", "4").strip()
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return 4
+
+
+def _evidence_priority(item: EventNewsItemRecord) -> tuple[int, int, datetime, str]:
+    importance_rank = _EVIDENCE_IMPORTANCE_PRIORITY.get(str(item.importance or "").casefold(), 5)
+    specificity = int(item.metadata_json.get("specificity_score", 0))
+    return (
+        importance_rank,
+        -specificity,
+        item.available_for_decision_at,
+        item.event_news_item_id,
+    )
 
 
 def _round_nested_floats(value: Any) -> Any:

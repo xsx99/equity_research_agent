@@ -65,7 +65,7 @@ class AlpacaNewsProvider:
             published_at: Optional[str] = None
             raw_date = row.get("created_at")
             if isinstance(raw_date, str) and raw_date:
-                published_at = raw_date[:10]
+                published_at = raw_date
             item = _normalized_news_item(
                 row.get("headline"), row.get("summary"), published_at,
                 source=row.get("source"), url=row.get("url"),

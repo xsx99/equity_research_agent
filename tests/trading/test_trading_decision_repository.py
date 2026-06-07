@@ -522,6 +522,281 @@ def test_trading_decision_pipeline_builds_readable_news_evidence_items_for_llm_i
     ]
 
 
+def test_trading_decision_pipeline_limits_news_evidence_to_representative_budget(tmp_path):
+    now = datetime(2026, 6, 5, 12, 0, tzinfo=timezone.utc)
+    registry = _write_prompt(tmp_path)
+    repository = InMemoryTradingRepository()
+    news_rows = [
+        EventNewsItemRecord(
+            event_news_item_id="event-earnings-primary",
+            ticker="NVDA",
+            source_ticker="NVDA",
+            event_type="earnings_beat_raise",
+            direction="bullish",
+            sentiment="positive",
+            importance="high",
+            headline="NVIDIA beats and raises guidance",
+            summary="The company cited stronger datacenter demand.",
+            provider="alpaca_live",
+            source_refs_json=[],
+            dedupe_key="nvda-earnings-primary",
+            event_time=datetime(2026, 6, 5, 8, 0, tzinfo=timezone.utc),
+            published_at=datetime(2026, 6, 5, 8, 0, tzinfo=timezone.utc),
+            ingested_at=now,
+            available_for_decision_at=datetime(2026, 6, 5, 8, 0, tzinfo=timezone.utc),
+            raw_payload_ref=None,
+            metadata_json={"duplicate_group_key": "group-earnings", "specificity_score": 8},
+        ),
+        EventNewsItemRecord(
+            event_news_item_id="event-earnings-rewrite",
+            ticker="NVDA",
+            source_ticker="NVDA",
+            event_type="earnings_beat_raise",
+            direction="bullish",
+            sentiment="positive",
+            importance="high",
+            headline="NVIDIA rallies after beat-and-raise quarter",
+            summary="A syndicated rewrite of the same earnings event.",
+            provider="alpaca_live",
+            source_refs_json=[],
+            dedupe_key="nvda-earnings-rewrite",
+            event_time=datetime(2026, 6, 5, 9, 0, tzinfo=timezone.utc),
+            published_at=datetime(2026, 6, 5, 9, 0, tzinfo=timezone.utc),
+            ingested_at=now,
+            available_for_decision_at=datetime(2026, 6, 5, 9, 0, tzinfo=timezone.utc),
+            raw_payload_ref=None,
+            metadata_json={"duplicate_group_key": "group-earnings", "specificity_score": 5},
+        ),
+        EventNewsItemRecord(
+            event_news_item_id="event-offering",
+            ticker="NVDA",
+            source_ticker="NVDA",
+            event_type="offering",
+            direction="bearish",
+            sentiment="negative",
+            importance="critical",
+            headline="NVIDIA announces convertible note offering",
+            summary="The company disclosed a new financing transaction.",
+            provider="alpaca_live",
+            source_refs_json=[],
+            dedupe_key="nvda-offering",
+            event_time=datetime(2026, 6, 5, 7, 30, tzinfo=timezone.utc),
+            published_at=datetime(2026, 6, 5, 7, 30, tzinfo=timezone.utc),
+            ingested_at=now,
+            available_for_decision_at=datetime(2026, 6, 5, 7, 30, tzinfo=timezone.utc),
+            raw_payload_ref=None,
+            metadata_json={"duplicate_group_key": "group-offering", "specificity_score": 9},
+        ),
+        EventNewsItemRecord(
+            event_news_item_id="event-analyst",
+            ticker="NVDA",
+            source_ticker="NVDA",
+            event_type="analyst_upgrade",
+            direction="bullish",
+            sentiment="positive",
+            importance="high",
+            headline="Analyst upgrades NVIDIA after channel checks",
+            summary="The broker raised its target price.",
+            provider="alpaca_live",
+            source_refs_json=[],
+            dedupe_key="nvda-analyst",
+            event_time=datetime(2026, 6, 5, 10, 0, tzinfo=timezone.utc),
+            published_at=datetime(2026, 6, 5, 10, 0, tzinfo=timezone.utc),
+            ingested_at=now,
+            available_for_decision_at=datetime(2026, 6, 5, 10, 0, tzinfo=timezone.utc),
+            raw_payload_ref=None,
+            metadata_json={"duplicate_group_key": "group-analyst", "specificity_score": 7},
+        ),
+        EventNewsItemRecord(
+            event_news_item_id="event-customer",
+            ticker="NVDA",
+            source_ticker="NVDA",
+            event_type="customer_order",
+            direction="bullish",
+            sentiment="positive",
+            importance="medium",
+            headline="Cloud customer expands NVIDIA order commitment",
+            summary="The customer expanded a multi-year deployment.",
+            provider="alpaca_live",
+            source_refs_json=[],
+            dedupe_key="nvda-customer",
+            event_time=datetime(2026, 6, 5, 10, 30, tzinfo=timezone.utc),
+            published_at=datetime(2026, 6, 5, 10, 30, tzinfo=timezone.utc),
+            ingested_at=now,
+            available_for_decision_at=datetime(2026, 6, 5, 10, 30, tzinfo=timezone.utc),
+            raw_payload_ref=None,
+            metadata_json={"duplicate_group_key": "group-customer", "specificity_score": 6},
+        ),
+        EventNewsItemRecord(
+            event_news_item_id="event-general",
+            ticker="NVDA",
+            source_ticker="NVDA",
+            event_type="general_news",
+            direction=None,
+            sentiment=None,
+            importance="low",
+            headline="NVIDIA remains in focus among AI names",
+            summary="Generic market recap without a new catalyst.",
+            provider="alpaca_live",
+            source_refs_json=[],
+            dedupe_key="nvda-general",
+            event_time=datetime(2026, 6, 5, 11, 0, tzinfo=timezone.utc),
+            published_at=datetime(2026, 6, 5, 11, 0, tzinfo=timezone.utc),
+            ingested_at=now,
+            available_for_decision_at=datetime(2026, 6, 5, 11, 0, tzinfo=timezone.utc),
+            raw_payload_ref=None,
+            metadata_json={"duplicate_group_key": "group-general", "specificity_score": 2},
+        ),
+    ]
+    for row in news_rows:
+        repository.save_event_news_item(row)
+    repository.save_signal_snapshot(
+        _snapshot(
+            now,
+            source_record_refs_json=[
+                {"source": "alpaca_live", "source_table": "event_news_items", "source_record_id": row.event_news_item_id}
+                for row in news_rows
+            ]
+            + [{"source_record_id": "market_bars:NVDA"}],
+            source_available_times_json={
+                row.event_news_item_id: row.available_for_decision_at.isoformat()
+                for row in news_rows
+            }
+            | {"market_bars:NVDA": now.isoformat()},
+        )
+    )
+
+    candidate = CandidateScoreRecord(
+        candidate_score_id="candidate-1",
+        strategy_run_id="run-1",
+        signal_snapshot_id="snapshot-1",
+        ticker="NVDA",
+        strategy_id="relative_strength_rotation_v1",
+        strategy_version="v1",
+        strategy_definition_id="definition-1",
+        candidate_score=0.81,
+        direction="bullish",
+        action="enter_long",
+        typical_horizon="2w-3m",
+        core_signal_evidence={"events_news.catalyst_quality_score": 0.8},
+        missing_required_signals=[],
+        unsupported_missing_signal_families=[],
+        invalidators=[],
+        risk_tags=[],
+        macro_compatibility="allowed",
+        selection_source="scanner",
+        manual_request_id=None,
+        selection_reason="condensed catalysts remain strong",
+        rejection_reason=None,
+        benchmark_context={"primary_benchmark": "QQQ"},
+        decision_time=now,
+        available_for_decision_at=now,
+        source_record_refs_json=[],
+    )
+    classification = TradeClassificationRecord(
+        trade_classification_id="classification-1",
+        candidate_score_id="candidate-1",
+        strategy_run_id="run-1",
+        ticker="NVDA",
+        selected_strategy_id="relative_strength_rotation_v1",
+        selected_strategy_version="v1",
+        expression_bucket_id="long_stock",
+        expression_bucket_version="v1",
+        trade_identity="tactical_stock_trade",
+        watch_type=None,
+        direction="bullish",
+        intended_horizon="2w-3m",
+        exit_policy="close_or_invalidator",
+        result_status="actionable_trade",
+        classification_reason="eligible",
+        selected_strategy_context_json={"benchmark_context": {"primary_benchmark": "QQQ"}},
+        decision_time=now,
+    )
+    risk = RiskDecisionRecord(
+        risk_decision_id="risk-1",
+        candidate_score_id="candidate-1",
+        trade_classification_id="classification-1",
+        position_sizing_decision_id="sizing-1",
+        ticker="NVDA",
+        status="approved",
+        reason_code="within_limits",
+        approved_weight=0.04,
+        approved_notional=4_000,
+        approved_quantity=20,
+        portfolio_risk_snapshot_id="snapshot-risk-1",
+        applied_rules=["single_name_limit_ok"],
+        generated_hedge_action=None,
+        decision_time=now,
+        metadata_json={},
+    )
+
+    def runner(prompt: str, model_name: str):
+        del prompt, model_name
+        return {
+            "content": {
+                "ticker": "NVDA",
+                "decision": "enter_long",
+                "strategy_id": "relative_strength_rotation_v1",
+                "expression_bucket_id": "long_stock",
+                "trade_identity": "tactical_stock_trade",
+                "instrument_type": "stock",
+                "selection_source": "scanner",
+                "manual_request_id": None,
+                "confidence": 0.74,
+                "confidence_basis": {"calibration_bucket": "bullish_relative_strength"},
+                "benchmark_context": {"primary_benchmark": "QQQ"},
+                "target_weight": 0.04,
+                "max_loss_pct": 0.02,
+                "time_horizon": "2w-3m",
+                "entry_plan": "market_open",
+                "exit_plan": "close_or_invalidator",
+                "thesis": "Condensed event flow remains constructive.",
+                "key_drivers": ["event_flow"],
+                "counterarguments": ["offering risk remains active"],
+                "risk_checks": ["liquidity_ok"],
+                "invalidators": ["earnings momentum fades"],
+                "learning_factors_used": [],
+                "schema_version": "v1",
+                "generated_at": "2026-06-05T12:00:00+00:00",
+            },
+            "usage": {
+                "provider": "openai",
+                "model": "gpt-5-mini",
+                "prompt_tokens": 12,
+                "completion_tokens": 20,
+                "total_tokens": 32,
+                "estimated_cost": 0.002,
+                "latency_ms": 75,
+            },
+        }
+
+    pipeline = TradingDecisionPipeline(
+        repository=repository,
+        prompt_registry=registry,
+        manual_request_service=None,
+        model_name="gpt-5-mini",
+        agent_runner=runner,
+    )
+
+    result = pipeline.run(
+        candidates=(candidate,),
+        classifications=(classification,),
+        risk_decisions=(risk,),
+        decision_time=now,
+    )
+
+    evidence_ids = [
+        item["source_record_id"]
+        for item in result.decisions[0].context_snapshot_json["signal_snapshot"]["evidence_items"]
+    ]
+    assert evidence_ids == [
+        "event-offering",
+        "event-earnings-primary",
+        "event-analyst",
+        "event-customer",
+    ]
+
+
 def test_trading_decision_pipeline_skips_llm_and_falls_back_when_signal_snapshot_is_missing(tmp_path):
     now = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
     registry = _write_prompt(tmp_path)

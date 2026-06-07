@@ -64,6 +64,46 @@ class _FakeNewsProvider:
         ]
 
 
+class _DuplicateNewsProvider:
+    def fetch_recent(self, ticker: str, limit: int):
+        assert ticker == "AAPL"
+        assert limit == 5
+        return [
+            {
+                "title": "Is It Too Late To Buy Apple Stock?",
+                "summary": "Retail commentary without a concrete catalyst.",
+                "published_at": "2026-06-01T09:00:00+00:00",
+                "source": "Retail Blog",
+                "url": "https://example.test/retail-opinion",
+                "signal_type": "general_news",
+            },
+            {
+                "title": "Morgan Stanley upgrades Apple to Overweight, target to $180",
+                "summary": "The analyst cited stronger iPhone demand.",
+                "published_at": "2026-06-01T10:00:00+00:00",
+                "source": "Reuters",
+                "url": "https://example.test/reuters-upgrade",
+                "signal_type": "analyst_rating",
+            },
+            {
+                "title": "Apple upgraded to Overweight at Morgan Stanley; PT raised to $180",
+                "summary": "Demand checks improved and the broker lifted its target.",
+                "published_at": "2026-06-01T10:05:00+00:00",
+                "source": "Dow Jones",
+                "url": "https://example.test/dj-upgrade",
+                "signal_type": "analyst_rating",
+            },
+            {
+                "title": "Morgan Stanley lifts Apple target to $190 and keeps Overweight",
+                "summary": "The revised target reflects stronger services momentum.",
+                "published_at": "2026-06-01T11:00:00+00:00",
+                "source": "Reuters",
+                "url": "https://example.test/reuters-upgrade-190",
+                "signal_type": "analyst_rating",
+            },
+        ]
+
+
 def test_source_ingestion_service_adapts_existing_providers_and_records_metadata():
     now = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
     market_provider = _FakeMarketProvider()
@@ -106,3 +146,40 @@ def test_source_ingestion_service_adapts_existing_providers_and_records_metadata
     assert market_provider.bar_calls == [("AAPL", 252)]
     assert market_provider.context_calls == ["AAPL"]
     assert news_provider.calls == [("AAPL", 5)]
+
+
+def test_source_ingestion_service_condenses_news_and_records_run_metadata():
+    now = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+    source_repository = InMemorySignalSourceRepository()
+    artifact_repository = InMemoryTradingRepository()
+
+    result = SourceIngestionService(
+        market_provider=_FakeMarketProvider(),
+        news_provider=_DuplicateNewsProvider(),
+        source_repository=source_repository,
+        artifact_repository=artifact_repository,
+        provider_name="fixture",
+        now=lambda: now,
+        sleeper=lambda seconds: None,
+    ).refresh_tickers(("AAPL",), as_of=now, run_type="targeted", source_families=("events_news",))
+
+    assert result.ingestion_run.coverage_json == {
+        "tickers_requested": 1,
+        "source_records": 2,
+        "fundamental_snapshots": 0,
+        "event_news_items": 2,
+    }
+    assert result.ingestion_run.metadata_json["news_condensation"] == {
+        "raw_news_item_count": 4,
+        "kept_news_item_count": 2,
+        "dropped_low_signal_count": 1,
+        "dropped_duplicate_count": 1,
+        "dropped_irrelevant_count": 0,
+    }
+    assert [item.headline for item in artifact_repository.event_news_items] == [
+        "Morgan Stanley upgrades Apple to Overweight, target to $180",
+        "Morgan Stanley lifts Apple target to $190 and keeps Overweight",
+    ]
+    assert artifact_repository.event_news_items[0].metadata_json["compression_status"] == "kept"
+    assert artifact_repository.event_news_items[0].metadata_json["duplicate_count"] == 2
+    assert artifact_repository.event_news_items[0].metadata_json["dropped_sources"] == ["Dow Jones"]

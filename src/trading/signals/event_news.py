@@ -7,6 +7,17 @@ from typing import Any
 
 from src.trading.signals.sources import SourceRecord
 
+_NEGATIVE_CATALYST_PRECEDENCE = {
+    "bankruptcy": 7,
+    "fraud": 6,
+    "offering": 5,
+    "guidance_cut": 4,
+    "regulatory_action": 3,
+    "regulatory_probe": 3,
+    "litigation": 2,
+    "recall": 1,
+}
+
 
 REQUIRED_EVENT_NEWS_FIELDS = (
     "earnings_in_days",
@@ -57,6 +68,8 @@ def build_event_news_signals(
     }
     sentiment_score = 0
     high_importance_count = 0
+    negative_catalyst_type: str | None = None
+    negative_catalyst_rank = -1
 
     for record in records:
         payload = record.payload
@@ -91,7 +104,10 @@ def build_event_news_signals(
             sentiment_score += 1
         elif sentiment == "negative":
             sentiment_score -= 1
-            values["direct_negative_catalyst_type"] = values["direct_negative_catalyst_type"] or event_type
+            rank = _NEGATIVE_CATALYST_PRECEDENCE.get(event_type, 0)
+            if rank > negative_catalyst_rank:
+                negative_catalyst_rank = rank
+                negative_catalyst_type = event_type
 
     if sentiment_score > 0:
         values["sentiment_direction"] = "positive"
@@ -101,6 +117,7 @@ def build_event_news_signals(
         values["sentiment_direction"] = "neutral"
     if records:
         values["catalyst_quality_score"] = min(high_importance_count / max(len(records), 1), 1.0)
+    values["direct_negative_catalyst_type"] = negative_catalyst_type
 
     missing = tuple(
         field for field in REQUIRED_EVENT_NEWS_FIELDS

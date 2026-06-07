@@ -82,6 +82,7 @@ def run_smoke(
         "source_records_by_family": dict(sorted(records_by_family.items())),
         "fundamental_snapshots": len(result.fundamental_snapshots),
         "event_news_items": len(result.event_news_items),
+        "news_condensation": dict(result.ingestion_run.metadata_json.get("news_condensation", {})),
         "provider_request_statuses": [run.status for run in artifact_repository.provider_request_runs],
         "provider_requests": [
             {
@@ -256,6 +257,8 @@ def _print_report(report: dict[str, Any]) -> None:
     print(f"source_records_by_family={report['source_records_by_family']}")
     if report["missing_families"]:
         print(f"missing_families={','.join(report['missing_families'])}")
+    if report["news_condensation"]:
+        print(f"news_condensation={report['news_condensation']}")
     print(f"provider_request_statuses={report['provider_request_statuses']}")
     if report["event_news_preview"]:
         print(f"event_news_preview={report['event_news_preview']}")

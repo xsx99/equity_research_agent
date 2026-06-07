@@ -50,7 +50,7 @@ class FinnhubNewsProvider:
             published_at: Optional[str] = None
             ts = row.get("datetime")
             if isinstance(ts, (int, float)) and ts > 0:
-                published_at = datetime.fromtimestamp(ts, tz=timezone.utc).date().isoformat()
+                published_at = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
             item = _normalized_news_item(
                 row.get("headline"), row.get("summary"), published_at,
                 source=row.get("source"), url=row.get("url"),

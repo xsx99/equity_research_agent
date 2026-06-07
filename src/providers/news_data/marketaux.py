@@ -53,7 +53,7 @@ class MarketauxNewsProvider:
             published_at: Optional[str] = None
             raw_date = row.get("published_at")
             if isinstance(raw_date, str) and raw_date:
-                published_at = raw_date[:10]
+                published_at = raw_date
             raw_source = row.get("source")
             if isinstance(raw_source, dict):
                 name = raw_source.get("name")
