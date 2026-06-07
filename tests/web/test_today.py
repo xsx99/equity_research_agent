@@ -1157,8 +1157,10 @@ class TestTodayDashboard:
                     ticker="UBER",
                     selection_source="direct_negative_catalyst",
                     rejection_reason="blocked_by_missing_data",
+                    candidate_status="blocked",
                     strategy_id="valuation_repair_quality_software_v1",
-                    trade_classifications=[SimpleNamespace(trade_identity="watch_only")],
+                    trade_classifications=[],
+                    watch_candidates=[SimpleNamespace(result_status="blocked_by_missing_data")],
                     decision_time=datetime(2026, 6, 3, 23, 25, 34, tzinfo=timezone.utc),
                     candidate_score=Decimal("0.32"),
                 )

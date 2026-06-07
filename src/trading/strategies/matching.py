@@ -10,6 +10,7 @@ from src.trading.signals import SignalSnapshotResult
 
 
 SELECTION_SOURCES = ("scanner", "manual_request", "watchlist_pin")
+DEFAULT_ACTIONABLE_SCORE_THRESHOLD = 0.55
 DEFERRED_SIGNAL_FAMILY_MARKERS = {
     "transcript": "full_transcript_interpretation",
     "option": "option_chain_availability",
@@ -93,13 +94,22 @@ class CandidateScoreRecord:
     decision_time: datetime
     available_for_decision_at: datetime
     source_record_refs_json: list[dict[str, Any]]
+    candidate_status: str = "actionable"
+    actionable_score_threshold: float = DEFAULT_ACTIONABLE_SCORE_THRESHOLD
     strategy_lifecycle_status: str = "active"
     strategy_source: str = "seed"
 
     @property
     def is_actionable(self) -> bool:
         """Return whether this candidate can advance as an actionable primary strategy."""
-        return self.rejection_reason is None and self.macro_compatibility != "blocked"
+        return (
+            self.candidate_status == "actionable"
+            and self.rejection_reason is None
+            and not self.missing_required_signals
+            and self.action != "no_trade"
+            and self.macro_compatibility != "blocked"
+            and self.candidate_score >= self.actionable_score_threshold
+        )
 
 
 class StrategyMatcher:
@@ -117,6 +127,9 @@ class StrategyMatcher:
         for definition in strategy_definitions:
             if not _is_active_tactical_definition(definition):
                 continue
+            actionable_score_threshold = _actionable_score_threshold(definition)
+            direction = _default_candidate_direction(definition)
+            action = _default_candidate_action(definition)
             unsupported = _unsupported_missing_families(definition, snapshot)
             if unsupported:
                 candidates.append(
@@ -128,10 +141,11 @@ class StrategyMatcher:
                         evidence={},
                         missing_required_signals=list(definition.config_json.get("required_signals") or []),
                         unsupported_missing_signal_families=unsupported,
-                        direction="watch",
+                        direction=direction,
                         action="no_trade",
                         selection_reason="strategy requires source families not available in PR03 replay",
                         rejection_reason="unsupported_missing_signal_family",
+                        actionable_score_threshold=actionable_score_threshold,
                     )
                 )
                 continue
@@ -140,8 +154,6 @@ class StrategyMatcher:
             if score <= 0 and not evidence:
                 continue
 
-            direction = "bullish"
-            action = "enter_long"
             rejection_reason = None
             selection_reason = "deterministic PR02 signals matched strategy"
             negative_catalyst = _events(snapshot).get("direct_negative_catalyst_type")
@@ -155,7 +167,14 @@ class StrategyMatcher:
             if definition.strategy_id == "strong_theme_no_clear_near_term_entry_v1" and score > 0:
                 rejection_reason = "no_clean_entry"
                 action = "no_trade"
+                direction = "neutral"
                 selection_reason = "theme/catalyst interest exists but stock entry is not clean"
+
+            macro_compatibility = _macro_compatibility(snapshot, definition)
+            if macro_compatibility == "blocked":
+                action = "no_trade"
+                rejection_reason = rejection_reason or "macro_regime_blocked"
+                selection_reason = "macro regime blocks this strategy"
 
             candidates.append(
                 self._build_candidate(
@@ -170,6 +189,8 @@ class StrategyMatcher:
                     action=action,
                     selection_reason=selection_reason,
                     rejection_reason=rejection_reason,
+                    actionable_score_threshold=actionable_score_threshold,
+                    macro_compatibility=macro_compatibility,
                 )
             )
         return candidates
@@ -204,7 +225,18 @@ class StrategyMatcher:
         action: str,
         selection_reason: str,
         rejection_reason: str | None,
+        actionable_score_threshold: float,
+        macro_compatibility: str = "allowed",
     ) -> CandidateScoreRecord:
+        candidate_status = _resolve_candidate_status(
+            score=score,
+            missing_required_signals=missing_required_signals,
+            action=action,
+            rejection_reason=rejection_reason,
+            macro_compatibility=macro_compatibility,
+            actionable_score_threshold=actionable_score_threshold,
+            unsupported_missing_signal_families=unsupported_missing_signal_families,
+        )
         return CandidateScoreRecord(
             candidate_score_id=str(uuid.uuid4()),
             strategy_run_id=strategy_run_id,
@@ -222,7 +254,7 @@ class StrategyMatcher:
             unsupported_missing_signal_families=unsupported_missing_signal_families,
             invalidators=list(definition.config_json.get("invalidators") or []),
             risk_tags=list(definition.config_json.get("risk_tags") or []),
-            macro_compatibility="allowed",
+            macro_compatibility=macro_compatibility,
             selection_source=_selection_source(snapshot.selection_source),
             manual_request_id=snapshot.manual_request_id,
             selection_reason=selection_reason,
@@ -231,6 +263,8 @@ class StrategyMatcher:
             decision_time=snapshot.decision_time,
             available_for_decision_at=snapshot.available_for_decision_at,
             source_record_refs_json=list(snapshot.source_record_refs_json),
+            candidate_status=candidate_status,
+            actionable_score_threshold=actionable_score_threshold,
             strategy_lifecycle_status=definition.lifecycle_status,
             strategy_source=definition.source,
         )
@@ -425,7 +459,9 @@ def _score_from_available_required_signals(
     missing: list[str] = []
     flattened = _flatten_signal_json(snapshot)
     for signal_name in definition.config_json.get("required_signals") or ():
-        value = flattened.get(signal_name) or flattened.get(str(signal_name).replace(".", "_"))
+        primary = flattened.get(signal_name)
+        fallback = flattened.get(str(signal_name).replace(".", "_"))
+        value = primary if primary is not None else fallback
         if value is None:
             missing.append(str(signal_name))
         else:
@@ -446,6 +482,10 @@ def _fundamental(snapshot: SignalSnapshotResult) -> dict[str, Any]:
 
 def _events(snapshot: SignalSnapshotResult) -> dict[str, Any]:
     return dict(snapshot.signal_json.get("events_news") or {})
+
+
+def _macro(snapshot: SignalSnapshotResult) -> dict[str, Any]:
+    return dict(snapshot.signal_json.get("macro") or {})
 
 
 def _flatten_signal_json(snapshot: SignalSnapshotResult) -> dict[str, Any]:
@@ -469,6 +509,61 @@ def _benchmark_context(snapshot: SignalSnapshotResult) -> dict[str, Any]:
 
 def _selection_source(value: str) -> str:
     return value if value in SELECTION_SOURCES else "scanner"
+
+
+def _selection_policy(definition: StrategyDefinitionRecord) -> dict[str, Any]:
+    return dict(definition.config_json.get("selection_policy") or {})
+
+
+def _actionable_score_threshold(definition: StrategyDefinitionRecord) -> float:
+    raw_value = _selection_policy(definition).get("actionable_score_threshold")
+    if isinstance(raw_value, (int, float)):
+        return float(raw_value)
+    return DEFAULT_ACTIONABLE_SCORE_THRESHOLD
+
+
+def _default_candidate_action(definition: StrategyDefinitionRecord) -> str:
+    return str(_selection_policy(definition).get("default_candidate_action") or "enter_long")
+
+
+def _default_candidate_direction(definition: StrategyDefinitionRecord) -> str:
+    return str(_selection_policy(definition).get("default_candidate_direction") or "bullish")
+
+
+def _macro_compatibility(snapshot: SignalSnapshotResult, definition: StrategyDefinitionRecord) -> str:
+    macro = _macro(snapshot)
+    regime = macro.get("regime")
+    blocked_regimes = {
+        str(item)
+        for item in definition.config_json.get("macro_blocked_regimes") or ()
+    }
+    if regime is not None and str(regime) in blocked_regimes:
+        return "blocked"
+    if bool(macro.get("reduced_size")):
+        return "reduced_size"
+    return "allowed"
+
+
+def _resolve_candidate_status(
+    *,
+    score: float,
+    missing_required_signals: list[str],
+    action: str,
+    rejection_reason: str | None,
+    macro_compatibility: str,
+    actionable_score_threshold: float,
+    unsupported_missing_signal_families: list[str],
+) -> str:
+    if macro_compatibility == "blocked" or unsupported_missing_signal_families:
+        return "blocked"
+    if (
+        rejection_reason is None
+        and not missing_required_signals
+        and action != "no_trade"
+        and score >= actionable_score_threshold
+    ):
+        return "actionable"
+    return "watch"
 
 
 def _compact_evidence(values: dict[str, Any]) -> dict[str, Any]:

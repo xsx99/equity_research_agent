@@ -239,7 +239,7 @@ class TradingDecisionPipeline:
                 "expression_bucket_id": classification.expression_bucket_id,
                 "trade_identity": classification.trade_identity,
                 "classification_result_status": classification.result_status,
-                "instrument_type": "stock" if classification.trade_identity != "watch_only" else "watch",
+                "instrument_type": _classification_instrument_type(classification),
                 "selected_strategy_context": classification.selected_strategy_context_json,
             },
             risk_context={
@@ -402,7 +402,7 @@ class TradingDecisionPipeline:
                 "expression_bucket_id": classification.expression_bucket_id,
                 "trade_identity": classification.trade_identity,
                 "classification_result_status": classification.result_status,
-                "instrument_type": "stock" if classification.trade_identity != "watch_only" else "watch",
+                "instrument_type": _classification_instrument_type(classification),
                 "selected_strategy_context": classification.selected_strategy_context_json,
             },
             "risk_context": {
@@ -427,7 +427,7 @@ class TradingDecisionPipeline:
             expression_bucket_id=classification.expression_bucket_id,
             expression_bucket_version=classification.expression_bucket_version,
             trade_identity=classification.trade_identity,
-            instrument_type="stock" if classification.trade_identity != "watch_only" else "watch",
+            instrument_type=_classification_instrument_type(classification),
             selection_source=candidate.selection_source,
             manual_request_id=candidate.manual_request_id,
             confidence=0.0,
@@ -521,6 +521,14 @@ class TradingDecisionPipeline:
 def _render_news_source_text(item: EventNewsItemRecord) -> str:
     parts = [part.strip() for part in (item.headline, item.summary) if isinstance(part, str) and part.strip()]
     return "\n\n".join(parts)
+
+
+def _classification_instrument_type(classification: TradeClassificationRecord) -> str:
+    if classification.trade_identity == "watch_only":
+        return "watch"
+    if classification.trade_identity == "tactical_option_trade":
+        return "option"
+    return "stock"
 
 
 _WINDOWED_EVENT_NEWS_FIELDS = (

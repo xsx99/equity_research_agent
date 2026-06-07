@@ -4,10 +4,10 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Iterable
+from typing import Iterable
 
 from src.trading.portfolio.intents import PortfolioIntentConfig, is_core_holding_approved
-from src.trading.strategies.selector import SelectedStrategyRecord
+from src.trading.strategies.selector import SelectedTradeRecord
 
 
 @dataclass(frozen=True)
@@ -39,8 +39,11 @@ class TradeClassifier:
     def __init__(self, portfolio_intents: Iterable[PortfolioIntentConfig] = ()) -> None:
         self.portfolio_intents = tuple(portfolio_intents)
 
-    def classify(self, selected: SelectedStrategyRecord) -> TradeClassificationRecord:
+    def classify(self, selected: SelectedTradeRecord) -> TradeClassificationRecord:
         candidate = selected.candidate
+        if not candidate.is_actionable:
+            raise ValueError("trade_classifier_requires_actionable_selected_trade")
+
         default_identity = selected.expression_bucket_config.get("default_trade_identity") or "tactical_stock_trade"
         if default_identity == "risk_hedge_overlay":
             raise ValueError("risk_hedge_overlay_is_risk_manager_owned")
@@ -50,19 +53,8 @@ class TradeClassifier:
         result_status = "actionable_trade"
         reason = "selected candidate is eligible for the expression bucket"
 
-        if candidate.rejection_reason is not None:
-            trade_identity = "watch_only"
-            watch_type, result_status, reason = _watch_state_for_rejection(candidate)
-        elif trade_identity == "core_holding" and not is_core_holding_approved(candidate.ticker, self.portfolio_intents):
-            trade_identity = "watch_only"
-            watch_type = "ordinary_watch"
-            result_status = "no_trade"
-            reason = "core_holding requires an active portfolio intent"
-        elif trade_identity == "tactical_option_trade":
-            trade_identity = "watch_only"
-            watch_type = "catalyst_watch" if _has_high_move_potential(candidate) else "ordinary_watch"
-            result_status = watch_type
-            reason = "option-chain strategy data is deferred until a later PR"
+        if trade_identity == "core_holding" and not is_core_holding_approved(candidate.ticker, self.portfolio_intents):
+            raise ValueError("core_holding_requires_active_portfolio_intent")
 
         return TradeClassificationRecord(
             trade_classification_id=str(uuid.uuid4()),
@@ -93,29 +85,6 @@ class TradeClassifier:
             decision_time=candidate.decision_time,
         )
 
-    def classify_many(self, selected: Iterable[SelectedStrategyRecord]) -> list[TradeClassificationRecord]:
+    def classify_many(self, selected: Iterable[SelectedTradeRecord]) -> list[TradeClassificationRecord]:
         """Classify a batch of selected strategies."""
         return [self.classify(item) for item in selected]
-
-
-def _watch_state_for_rejection(candidate: Any) -> tuple[str, str, str]:
-    if candidate.rejection_reason == "unsupported_missing_signal_family":
-        return "ordinary_watch", "blocked_by_missing_data", "required source family is missing or unsupported"
-    if candidate.rejection_reason == "no_clean_entry" and _has_high_move_potential(candidate):
-        return "catalyst_watch", "catalyst_watch", "move potential is high but direction or entry is uncertain"
-    if candidate.rejection_reason == "direct_negative_catalyst":
-        return "ordinary_watch", "no_trade", "direct negative catalyst blocks the candidate"
-    return "ordinary_watch", "ordinary_watch", "candidate is not actionable"
-
-
-def _has_high_move_potential(candidate: Any) -> bool:
-    catalyst_quality = candidate.core_signal_evidence.get("events_news.catalyst_quality_score")
-    high_signal_count = candidate.core_signal_evidence.get("events_news.high_signal_news_count_24h")
-    return (
-        isinstance(catalyst_quality, (int, float))
-        and catalyst_quality >= 0.75
-    ) or (
-        isinstance(high_signal_count, (int, float))
-        and high_signal_count >= 1
-        and candidate.candidate_score >= 0.55
-    )

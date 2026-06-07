@@ -10,6 +10,7 @@ _STRATEGY_LABELS = {
 
 _CANDIDATE_RESULT_LABELS = {
     "blocked_by_missing_data": "Blocked: required data unavailable",
+    "catalyst_watch": "Catalyst watch",
     "candidate": "Ready for review",
     "no_trade": "No clean entry, so no trade",
     "ordinary_watch": "Still on watch",

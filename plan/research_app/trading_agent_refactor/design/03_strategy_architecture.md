@@ -156,7 +156,7 @@ Every trade decision, watch decision, and risk hedge overlay must carry a `trade
 
 The trade identity decides which risk budget applies, which holding-period assumptions are valid, and which exit rules reflection should grade against. Core holdings must have a separate decision pool from tactical trades. Tactical option trades must be separated from risk hedge overlays, even though both can use options, because the former is an alpha/expression choice and the latter is portfolio insurance.
 
-`catalyst_watch` and `ordinary_watch` should be stored as `watch_type` or result status under `trade_identity = "watch_only"`, not as separate trade identities.
+`catalyst_watch` and `ordinary_watch` remain watch semantics, but they should persist through an explicit `watch_candidates` path instead of being disguised as selected trades. If a downstream component needs a display label, it should use watch status/type rather than fabricate a trade expression.
 
 Do not encode the instrument choice inside the strategy name. A strategy should describe the edge, e.g. `strong_theme_no_clear_near_term_entry_v1` or `valuation_repair_quality_software_v1`. An expression bucket should describe the implementation, e.g. `defined_risk_directional_option`, `defined_risk_income_spread`, `volatility_event_option`, or `long_stock`. Trade identity then decides which portfolio pool owns the exposure, e.g. `tactical_option_trade`, `core_holding`, `tactical_stock_trade`, or `watch_only`.
 
@@ -175,6 +175,7 @@ This prevents the bot from guessing core holdings from the current portfolio or 
 Implementation ownership:
 
 - `TradeClassifier` assigns the field after primary strategy selection and before sizing.
+- `PrimaryStrategySelector` must now split trade-path `selected_trades` from retained `watch_candidates`; only trade-path rows continue into `TradeClassifier`.
 - `TradingPipeline` uses the field when proposing action, horizon, thesis, invalidators, and suggested size.
 - `OptionsStrategyLayer` only builds a paper tactical option expression when the selected expression bucket and `trade_identity = "tactical_option_trade"` make that expression eligible.
 - `RiskManager` owns `risk_hedge_overlay` creation, adjustment, and closure. Hedge overlays can use the same paper option broker, but they are persisted and evaluated separately from tactical option trades.

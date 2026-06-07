@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from src.trading.portfolio.intents import PortfolioIntentConfig
-from src.trading.strategies.selector import SelectedStrategyRecord
+from src.trading.strategies.selector import SelectedTradeRecord
 from src.trading.strategies.matching import CandidateScoreRecord
 from src.trading.strategies.classifier import TradeClassifier
 
@@ -10,6 +10,9 @@ def _candidate(
     *,
     ticker: str = "AAPL",
     score: float = 0.72,
+    action: str = "enter_long",
+    direction: str = "bullish",
+    candidate_status: str = "actionable",
     rejection_reason: str | None = None,
     evidence: dict | None = None,
 ) -> CandidateScoreRecord:
@@ -23,8 +26,8 @@ def _candidate(
         strategy_version="v1",
         strategy_definition_id="definition-1",
         candidate_score=score,
-        direction="bullish",
-        action="enter_long",
+        direction=direction,
+        action=action,
         typical_horizon="2w-3m",
         core_signal_evidence=evidence or {"events_news.catalyst_quality_score": 0.9},
         missing_required_signals=[],
@@ -40,11 +43,12 @@ def _candidate(
         decision_time=now,
         available_for_decision_at=now,
         source_record_refs_json=[],
+        candidate_status=candidate_status,
     )
 
 
-def _selected(candidate: CandidateScoreRecord, expression_bucket_id: str = "long_stock") -> SelectedStrategyRecord:
-    return SelectedStrategyRecord(
+def _selected(candidate: CandidateScoreRecord, expression_bucket_id: str = "long_stock") -> SelectedTradeRecord:
+    return SelectedTradeRecord(
         candidate=candidate,
         expression_bucket_id=expression_bucket_id,
         expression_bucket_version="v1",
@@ -87,17 +91,21 @@ def test_trade_classifier_requires_active_intent_for_core_holding_identity():
     assert classification.exit_policy == "strategy_invalidators_or_target_horizon"
 
 
-def test_trade_classifier_downgrades_high_potential_no_entry_to_catalyst_watch():
-    classification = TradeClassifier().classify(
-        _selected(
-            _candidate(
-                score=0.64,
-                rejection_reason="no_clean_entry",
-                evidence={"events_news.catalyst_quality_score": 0.95},
-            )
+def test_trade_classifier_rejects_watch_candidate_inputs():
+    selected = _selected(
+        _candidate(
+            score=0.64,
+            action="no_trade",
+            direction="neutral",
+            candidate_status="watch",
+            rejection_reason="no_clean_entry",
+            evidence={"events_news.catalyst_quality_score": 0.95},
         )
     )
 
-    assert classification.trade_identity == "watch_only"
-    assert classification.watch_type == "catalyst_watch"
-    assert classification.result_status == "catalyst_watch"
+    try:
+        TradeClassifier().classify(selected)
+    except ValueError as exc:
+        assert str(exc) == "trade_classifier_requires_actionable_selected_trade"
+    else:
+        raise AssertionError("expected watch-path candidate to be rejected")
