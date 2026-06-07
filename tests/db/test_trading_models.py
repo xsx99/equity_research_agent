@@ -58,6 +58,7 @@ from src.db.models.trading import (
     TickerRelationshipType,
     TradeClassification,
     TradingDecision,
+    WatchCandidate,
     UniverseFilterConfig,
     UniverseSnapshot,
     UniverseSymbol,
@@ -671,6 +672,98 @@ def test_pr_3_models_can_be_instantiated():
     assert replay.status == "succeeded"
     assert outcome.trade_classification is classification
     assert outcome.alpha == 0.06
+
+
+def test_candidate_score_persists_candidate_status():
+    now = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+    run = StrategyRun(
+        decision_time=now,
+        snapshot_type="pre_open",
+        status="succeeded",
+        metadata_json={"source": "unit"},
+    )
+    candidate = CandidateScore(
+        strategy_run=run,
+        signal_snapshot_id=None,
+        ticker="AAPL",
+        strategy_id="relative_strength_rotation_v1",
+        strategy_version="v1",
+        strategy_definition_id=None,
+        candidate_score=0.72,
+        candidate_status="actionable",
+        direction="bullish",
+        action="enter_long",
+        typical_horizon="2w-3m",
+        core_signal_evidence_json={"technical.rs_vs_spy_1d": 0.02},
+        missing_required_signals_json=[],
+        unsupported_missing_signal_families_json=[],
+        invalidators_json=["relative strength breaks"],
+        risk_tags_json=["relative_strength"],
+        macro_compatibility="allowed",
+        selection_source="scanner",
+        manual_request_id=None,
+        selection_reason="relative strength confirmed",
+        rejection_reason=None,
+        benchmark_context_json={"primary_benchmark": "QQQ"},
+        decision_time=now,
+        available_for_decision_at=now,
+        source_record_refs_json=[],
+    )
+
+    assert candidate.candidate_status == "actionable"
+
+
+def test_watch_candidate_model_persists_without_expression_bucket():
+    now = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+    run = StrategyRun(
+        decision_time=now,
+        snapshot_type="pre_open",
+        status="succeeded",
+        metadata_json={"source": "unit"},
+    )
+    candidate = CandidateScore(
+        strategy_run=run,
+        signal_snapshot_id=None,
+        ticker="AAPL",
+        strategy_id="strong_theme_no_clear_near_term_entry_v1",
+        strategy_version="v1",
+        strategy_definition_id=None,
+        candidate_score=0.58,
+        candidate_status="watch",
+        direction="neutral",
+        action="no_trade",
+        typical_horizon="2w-3m",
+        core_signal_evidence_json={"events_news.catalyst_quality_score": 0.88},
+        missing_required_signals_json=[],
+        unsupported_missing_signal_families_json=[],
+        invalidators_json=["price confirmation fails"],
+        risk_tags_json=["catalyst_risk"],
+        macro_compatibility="allowed",
+        selection_source="scanner",
+        manual_request_id=None,
+        selection_reason="high interest but no clean entry",
+        rejection_reason="no_clean_entry",
+        benchmark_context_json={"primary_benchmark": "QQQ"},
+        decision_time=now,
+        available_for_decision_at=now,
+        source_record_refs_json=[],
+    )
+    watch = WatchCandidate(
+        candidate_score=candidate,
+        strategy_run=run,
+        ticker="AAPL",
+        watch_strategy_id="strong_theme_no_clear_near_term_entry_v1",
+        watch_strategy_version="v1",
+        watch_type="catalyst_watch",
+        result_status="catalyst_watch",
+        watch_reason="theme interest exists but stock entry is not clean",
+        selection_context_json={"candidate_score": 0.58},
+        decision_time=now,
+    )
+
+    assert watch.candidate_score is candidate
+    assert watch.watch_type == "catalyst_watch"
+    assert watch.result_status == "catalyst_watch"
 
 
 def test_pr_4_models_can_be_instantiated():

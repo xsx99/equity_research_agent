@@ -121,6 +121,12 @@ class MacroCompatibility(ChoiceEnum):
     BLOCKED = "blocked"
 
 
+class CandidateStatus(ChoiceEnum):
+    ACTIONABLE = "actionable"
+    WATCH = "watch"
+    BLOCKED = "blocked"
+
+
 class TradeIdentity(ChoiceEnum):
     CORE_HOLDING = "core_holding"
     TACTICAL_STOCK_TRADE = "tactical_stock_trade"
@@ -899,6 +905,7 @@ class StrategyRun(Base):
 
     candidate_scores = relationship("CandidateScore", back_populates="strategy_run")
     trade_classifications = relationship("TradeClassification", back_populates="strategy_run")
+    watch_candidates = relationship("WatchCandidate", back_populates="strategy_run")
 
     __table_args__ = (
         CheckConstraint(
@@ -940,6 +947,7 @@ class CandidateScore(Base):
         index=True,
     )
     candidate_score = Column(Numeric, nullable=False)
+    candidate_status = Column(String(32), nullable=False, index=True)
     direction = Column(String(32), nullable=False, index=True)
     action = Column(String(64), nullable=False)
     typical_horizon = Column(String(32), nullable=False)
@@ -963,6 +971,7 @@ class CandidateScore(Base):
     signal_snapshot = relationship("SignalSnapshot")
     strategy_definition = relationship("StrategyDefinition")
     trade_classifications = relationship("TradeClassification", back_populates="candidate_score")
+    watch_candidates = relationship("WatchCandidate", back_populates="candidate_score")
     outcome_evaluations = relationship("CandidateOutcomeEvaluation", back_populates="candidate_score")
 
     __table_args__ = (
@@ -977,6 +986,10 @@ class CandidateScore(Base):
             name="ck_candidate_scores_score_range",
         ),
         CheckConstraint(
+            f"candidate_status IN {CandidateStatus.check_in_sql()}",
+            name="ck_candidate_scores_candidate_status",
+        ),
+        CheckConstraint(
             f"macro_compatibility IN {MacroCompatibility.check_in_sql()}",
             name="ck_candidate_scores_macro_compatibility",
         ),
@@ -986,6 +999,46 @@ class CandidateScore(Base):
         ),
         Index("ix_candidate_scores_run_score", "strategy_run_id", "candidate_score"),
         Index("ix_candidate_scores_ticker_strategy", "ticker", "strategy_id"),
+    )
+
+
+class WatchCandidate(Base):
+    """Retained non-trade outcome linked to a scored strategy candidate."""
+
+    __tablename__ = "watch_candidates"
+
+    watch_candidate_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    candidate_score_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("candidate_scores.candidate_score_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    strategy_run_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("strategy_runs.strategy_run_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    ticker = Column(String(16), nullable=False, index=True)
+    watch_strategy_id = Column(String(64), nullable=False, index=True)
+    watch_strategy_version = Column(String(16), nullable=False)
+    watch_type = Column(String(64), nullable=True, index=True)
+    result_status = Column(String(64), nullable=False, index=True)
+    watch_reason = Column(Text, nullable=False)
+    selection_context_json = Column(JSONB, nullable=False, default=dict)
+    decision_time = Column(DateTime(timezone=True), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    candidate_score = relationship("CandidateScore", back_populates="watch_candidates")
+    strategy_run = relationship("StrategyRun", back_populates="watch_candidates")
+
+    __table_args__ = (
+        CheckConstraint(
+            "watch_type IS NULL OR watch_type IN ('catalyst_watch', 'ordinary_watch')",
+            name="ck_watch_candidates_watch_type",
+        ),
+        Index("ix_watch_candidates_ticker_strategy", "ticker", "watch_strategy_id"),
     )
 
 
