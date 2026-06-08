@@ -13,6 +13,7 @@ from .research import (
 from .trading import (
     CandidateOutcomeEvaluation,
     CandidateOutcomeEvaluationStatus,
+    CandidateStatus,
     CandidateScore,
     EventNewsItem,
     FundamentalSnapshot,
@@ -72,6 +73,7 @@ from .trading import (
     UniverseSnapshot,
     UniverseSymbol,
     UniverseSymbolStatus,
+    WatchCandidate,
     WatchType,
 )
 from .watch_list import Watchlist
@@ -80,6 +82,7 @@ __all__ = [
     "Base",
     "CandidateOutcomeEvaluation",
     "CandidateOutcomeEvaluationStatus",
+    "CandidateStatus",
     "CandidateScore",
     "ChoiceEnum",
     "EvalOutcomeLabel",
@@ -150,6 +153,7 @@ __all__ = [
     "UniverseSnapshot",
     "UniverseSymbol",
     "UniverseSymbolStatus",
+    "WatchCandidate",
     "WatchType",
     "Watchlist",
 ]

@@ -834,23 +834,23 @@ def _load_candidate_rows(session: Any) -> tuple[dict[str, Any], ...]:
             "ticker": row.ticker,
             "selection_source": row.selection_source,
             "why_reviewed_label": strategy_label(row.selection_source),
-            "result_status": row.rejection_reason or "candidate",
-            "current_outcome_label": candidate_result_label(row.rejection_reason or "candidate"),
-            "trade_identity": row.trade_classifications[0].trade_identity if row.trade_classifications else None,
+            "result_status": _candidate_result_status(row),
+            "current_outcome_label": candidate_result_label(_candidate_result_status(row)),
+            "trade_identity": _candidate_trade_identity(row),
             "trade_identity_label": trade_identity_label(
-                row.trade_classifications[0].trade_identity if row.trade_classifications else None
+                _candidate_trade_identity(row)
             ),
             "strategy_match": row.strategy_id,
             "strategy_label": strategy_label(row.strategy_id),
             "operator_summary": _sentence_join(
                 strategy_label(row.selection_source),
-                candidate_result_label(row.rejection_reason or "candidate"),
-                trade_identity_label(row.trade_classifications[0].trade_identity if row.trade_classifications else None),
+                candidate_result_label(_candidate_result_status(row)),
+                trade_identity_label(_candidate_trade_identity(row)),
             ),
             "detail_internal_ids": {
                 "selection_source": row.selection_source,
-                "result_status": row.rejection_reason or "candidate",
-                "trade_identity": row.trade_classifications[0].trade_identity if row.trade_classifications else None,
+                "result_status": _candidate_result_status(row),
+                "trade_identity": _candidate_trade_identity(row),
                 "strategy_match": row.strategy_id,
             },
         }
@@ -892,6 +892,22 @@ def _sentence_join(*parts: Any) -> str:
     if not cleaned:
         return ""
     return ". ".join(cleaned) + "."
+
+
+def _candidate_result_status(row: CandidateScore) -> str:
+    if row.trade_classifications:
+        return str(row.trade_classifications[0].result_status or "candidate")
+    if row.watch_candidates:
+        return str(row.watch_candidates[0].result_status or row.rejection_reason or row.candidate_status or "candidate")
+    return str(row.rejection_reason or row.candidate_status or "candidate")
+
+
+def _candidate_trade_identity(row: CandidateScore) -> str | None:
+    if row.trade_classifications:
+        return row.trade_classifications[0].trade_identity
+    if row.watch_candidates:
+        return "watch_only"
+    return None
 
 
 def _load_portfolio_intents(session: Any) -> tuple[dict[str, Any], ...]:

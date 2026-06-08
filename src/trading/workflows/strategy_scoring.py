@@ -5,7 +5,11 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from src.trading.manual_review.requests import ManualTickerRequestService
-from src.trading.strategies.selector import PrimaryStrategySelector, SelectedStrategyRecord
+from src.trading.strategies.selector import (
+    PrimaryStrategySelector,
+    SelectedTradeRecord,
+    WatchCandidateRecord,
+)
 from src.trading.repositories.in_memory import InMemoryTradingRepository
 from src.trading.signals import SignalSnapshotResult
 from src.trading.strategies.matching import CandidateScoreRecord, StrategyMatcher, StrategyRunRecord, create_strategy_run
@@ -18,7 +22,8 @@ class StrategyPipelineResult:
 
     strategy_run: StrategyRunRecord
     candidates: tuple[CandidateScoreRecord, ...]
-    selected: tuple[SelectedStrategyRecord, ...]
+    selected_trades: tuple[SelectedTradeRecord, ...]
+    watch_candidates: tuple[WatchCandidateRecord, ...]
     classifications: tuple[TradeClassificationRecord, ...]
 
 
@@ -57,16 +62,18 @@ class StrategyPipeline:
                 strategy_run_id=strategy_run.strategy_run_id,
             )
         )
-        selected = tuple(self.selector.select(candidates, definitions))
-        classifications = tuple(self.classifier.classify_many(selected))
+        selection = self.selector.select(candidates, definitions)
+        classifications = tuple(self.classifier.classify_many(selection.selected_trades))
         self.repository.save_strategy_run(strategy_run)
         self.repository.save_candidate_scores(candidates)
+        self.repository.save_watch_candidates(selection.watch_candidates)
         self.repository.save_trade_classifications(classifications)
-        self._record_manual_request_results(candidates, classifications)
+        self._record_manual_request_results(candidates, classifications, selection.watch_candidates)
         return StrategyPipelineResult(
             strategy_run=strategy_run,
             candidates=candidates,
-            selected=selected,
+            selected_trades=selection.selected_trades,
+            watch_candidates=selection.watch_candidates,
             classifications=classifications,
         )
 
@@ -74,6 +81,7 @@ class StrategyPipeline:
         self,
         candidates: tuple[CandidateScoreRecord, ...],
         classifications: tuple[TradeClassificationRecord, ...],
+        watch_candidates: tuple[WatchCandidateRecord, ...],
     ) -> None:
         if self.manual_request_service is None:
             return
@@ -85,5 +93,14 @@ class StrategyPipeline:
             self.manual_request_service.record_evaluation(
                 candidate.manual_request_id,
                 result_status=classification.result_status,
+                signal_snapshot_id=candidate.signal_snapshot_id,
+            )
+        for watch in watch_candidates:
+            candidate = watch.candidate
+            if candidate.manual_request_id is None:
+                continue
+            self.manual_request_service.record_evaluation(
+                candidate.manual_request_id,
+                result_status=watch.result_status,
                 signal_snapshot_id=candidate.signal_snapshot_id,
             )

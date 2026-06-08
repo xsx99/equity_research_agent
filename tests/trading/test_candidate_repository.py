@@ -6,6 +6,7 @@ from src.trading.replay.outcomes import CandidateOutcomeEvaluationRecord
 from src.trading.risk import PortfolioRiskSnapshotRecord, PositionSizingDecisionRecord, RiskDecisionRecord, RiskFactorExposureRecord
 from src.trading.repositories.in_memory import InMemoryTradingRepository
 from src.trading.strategies.matching import CandidateScoreRecord, StrategyDefinitionRecord, StrategyRunRecord
+from src.trading.strategies.selector import WatchCandidateRecord
 
 
 def test_in_memory_repository_stores_pr3_artifacts_and_filters_active_definitions():
@@ -106,6 +107,55 @@ def test_in_memory_repository_stores_pr3_artifacts_and_filters_active_definition
     assert repo.strategy_runs == [run]
     assert repo.candidate_scores == [candidate]
     assert repo.candidate_outcome_evaluations == [outcome]
+
+
+def test_candidate_repository_round_trips_watch_candidates():
+    now = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+    repo = InMemoryTradingRepository()
+    candidate = CandidateScoreRecord(
+        candidate_score_id="candidate-watch-1",
+        strategy_run_id="run-1",
+        signal_snapshot_id="snapshot-1",
+        ticker="AAPL",
+        strategy_id="strong_theme_no_clear_near_term_entry_v1",
+        strategy_version="v1",
+        strategy_definition_id="definition-1",
+        candidate_score=0.66,
+        direction="neutral",
+        action="no_trade",
+        typical_horizon="2w-3m",
+        core_signal_evidence={"events_news.catalyst_quality_score": 0.95},
+        missing_required_signals=[],
+        unsupported_missing_signal_families=[],
+        invalidators=[],
+        risk_tags=[],
+        macro_compatibility="allowed",
+        selection_source="scanner",
+        manual_request_id=None,
+        selection_reason="relative strength",
+        rejection_reason="no_clean_entry",
+        benchmark_context={},
+        decision_time=now,
+        available_for_decision_at=now,
+        source_record_refs_json=[],
+        candidate_status="watch",
+    )
+    watch = WatchCandidateRecord(
+        watch_candidate_id="watch-1",
+        candidate=candidate,
+        watch_strategy_id=candidate.strategy_id,
+        watch_strategy_version=candidate.strategy_version,
+        watch_type="catalyst_watch",
+        result_status="catalyst_watch",
+        watch_reason="entry is not clean yet",
+        selection_context={"candidate_score_id": candidate.candidate_score_id},
+    )
+
+    repo.save_candidate_scores([candidate])
+    repo.save_watch_candidates([watch])
+
+    assert repo.candidate_scores == [candidate]
+    assert repo.watch_candidates == [watch]
 
 
 def test_in_memory_repository_stores_pr4_risk_artifacts():

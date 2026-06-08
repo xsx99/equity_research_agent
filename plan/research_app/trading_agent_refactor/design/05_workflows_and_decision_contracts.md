@@ -43,8 +43,8 @@ Morning workflow semantics:
 3. Match each symbol against tactical strategies and strategy expression buckets. Each match carries its own strategy horizon, required evidence, eligible trade identities, and invalidators.
 4. Build benchmark and peer-basket context for each candidate so relative strength is measured against the right opportunity set, not only `SPY`.
 5. Rank candidate scores by strategy fit, catalyst quality, relative strength, signal quality, macro compatibility, liquidity, event risk, confidence calibration, and learning-factor adjustments.
-6. Select one primary tactical strategy and one expression bucket for each ticker/action under consideration.
-7. Classify each selected candidate or existing position into a portfolio-pool trade identity before any order decision.
+6. Select trade-path `selected_trades` and, when needed, separate `watch_candidates` for each ticker/action namespace under consideration.
+7. Classify only selected trade-path candidates plus existing positions into a portfolio-pool trade identity before any order decision.
 8. Build a tactical option plan only when the selected expression bucket and `trade_identity = "tactical_option_trade"` make an option expression eligible.
 9. Pass only the selected candidates plus current positions and paper option positions into `TradingPipeline`.
 10. `TradingPipeline` proposes an action, thesis, invalidators, suggested size, horizon, instrument expression, and trade identity.
@@ -82,10 +82,10 @@ SignalPipeline computes same signal snapshot schema
 StrategyPipeline scores against the same strategy catalog
       |
       v
-PrimaryStrategySelector chooses selected strategy and expression bucket
+PrimaryStrategySelector chooses either `selected_trades` or explicit `watch_candidates`
       |
       v
-TradeClassifier assigns portfolio-pool trade identity
+TradeClassifier assigns portfolio-pool trade identity only for `selected_trades`
       |
       v
 TradingPipeline returns trade / catalyst_watch / ordinary_watch / no_trade / blocked_by_risk

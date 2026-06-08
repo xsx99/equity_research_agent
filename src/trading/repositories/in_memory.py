@@ -33,6 +33,7 @@ from src.trading.signals.sources import (
 from src.trading.signals import SignalSnapshotResult
 from src.trading.strategies.matching import CandidateScoreRecord, StrategyDefinitionRecord, StrategyRunRecord
 from src.trading.strategies.classifier import TradeClassificationRecord
+from src.trading.strategies.selector import WatchCandidateRecord
 from src.trading.data_sources.universe import UniverseSnapshotResult
 
 if TYPE_CHECKING:
@@ -58,6 +59,7 @@ class InMemoryTradingRepository:
         self.strategy_definitions: list[StrategyDefinitionRecord] = []
         self.strategy_runs: list[StrategyRunRecord] = []
         self.candidate_scores: list[CandidateScoreRecord] = []
+        self.watch_candidates: list[WatchCandidateRecord] = []
         self.trade_classifications: list[TradeClassificationRecord] = []
         self.historical_replay_runs: list[HistoricalReplayRunRecord] = []
         self.candidate_outcome_evaluations: list[CandidateOutcomeEvaluationRecord] = []
@@ -181,6 +183,12 @@ class InMemoryTradingRepository:
 
     def save_candidate_scores(self, candidates: list[CandidateScoreRecord] | tuple[CandidateScoreRecord, ...]) -> None:
         self.candidate_scores.extend(candidates)
+
+    def save_watch_candidates(
+        self,
+        watch_candidates: list[WatchCandidateRecord] | tuple[WatchCandidateRecord, ...],
+    ) -> None:
+        self.watch_candidates.extend(watch_candidates)
 
     def save_trade_classifications(
         self,

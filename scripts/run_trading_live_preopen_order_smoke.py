@@ -147,6 +147,9 @@ class _SmokeStrategyPipeline:
             base_candidate,
             strategy_id=f"lpsmoke_{base_candidate.decision_time.strftime('%H%M%S')}",
             strategy_definition_id="live-preopen-order-smoke-definition",
+            action="enter_long",
+            rejection_reason=None,
+            candidate_status="actionable",
             strategy_source="smoke_override",
         )
         candidates = tuple(
@@ -191,7 +194,8 @@ class _SmokeStrategyPipeline:
         return StrategyPipelineResult(
             strategy_run=result.strategy_run,
             candidates=candidates,
-            selected=result.selected,
+            selected_trades=result.selected_trades,
+            watch_candidates=result.watch_candidates,
             classifications=classifications,
         )
 

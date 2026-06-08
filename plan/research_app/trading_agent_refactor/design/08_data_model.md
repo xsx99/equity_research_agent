@@ -27,8 +27,9 @@ Proposed new tables:
 | `strategy_proposals` | Proposed new strategies or revisions derived from reflection/learning, including lifecycle status and evidence |
 | `strategy_evaluation_results` | Shadow/experimental performance and promotion/retirement evidence for strategy definitions |
 | `strategy_runs` | One candidate-scoring batch per day |
-| `candidate_scores` | Ranked ticker candidates by strategy, horizon, evidence, macro compatibility |
-| `trade_classifications` | Portfolio-pool trade identity, expression bucket, watch type, intended horizon, and exit-policy metadata for each candidate/position decision |
+| `candidate_scores` | Ranked ticker candidates by strategy, horizon, explicit `candidate_status`, evidence, and macro compatibility |
+| `watch_candidates` | Retained non-trade outcomes linked to `candidate_scores`, including watch type, result status, watch reason, and selection context without any fake trade expression bucket |
+| `trade_classifications` | Portfolio-pool trade identity, expression bucket, intended horizon, and exit-policy metadata for each trade-path candidate/position decision |
 | `trading_decisions` | Trading agent decisions and context snapshot |
 | `option_strategy_decisions` | Paper-only option strategy actions such as open/close/roll/adjust/avoid-event for whitelisted long call, long put, credit spread, long straddle, and long strangle strategies, with required strategy-level option metadata |
 | `option_strategy_legs` | Per-leg option details for single-leg and multi-leg paper option strategies, including call/put, side, quantity, strike, expiry, Greeks, price, and liquidity fields |
@@ -97,3 +98,5 @@ This keeps strategy identity, horizon, and signal requirements in data. Python s
 Discovered strategies use the same `strategy_definitions` shape once promoted from proposal to catalog entry. They differ only by `source`, `lifecycle_status`, parent/revision metadata, and risk budget limits.
 
 Strategy expression buckets use the same table with `strategy_layer = "expression_bucket"` and include fields such as `default_trade_identity`, `allowed_trade_identities`, `allowed_instruments`, `allowed_option_strategy_types`, `required_option_leg_fields`, `required_assignment_fields`, `earnings_policy`, and `default_exit_policy`. They should not duplicate portfolio-pool semantics or strategy thesis. Names such as `strong_theme_no_clear_near_term_sell_put` are intentionally avoided because they mix the alpha pattern with the instrument expression.
+
+`candidate_scores` should also persist an explicit `candidate_status` such as `actionable`, `watch`, or `blocked` so the matcher contract distinguishes trade eligibility from retained non-trade outcomes before selection.

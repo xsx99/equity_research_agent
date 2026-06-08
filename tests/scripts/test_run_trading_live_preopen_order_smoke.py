@@ -89,7 +89,8 @@ def test_smoke_strategy_pipeline_forces_actionable_trade_for_target_ticker():
             return StrategyPipelineResult(
                 strategy_run=SimpleNamespace(strategy_run_id="run-1"),
                 candidates=(candidate,),
-                selected=(),
+                selected_trades=(),
+                watch_candidates=(),
                 classifications=(existing,),
             )
 

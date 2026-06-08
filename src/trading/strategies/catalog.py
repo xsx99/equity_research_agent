@@ -19,6 +19,7 @@ class StrategyCatalogItem:
     invalidators: tuple[str, ...]
     optional_signals: tuple[str, ...] = ()
     scoring_rules: dict[str, Any] = field(default_factory=dict)
+    selection_policy: dict[str, Any] = field(default_factory=dict)
     macro_blocked_regimes: tuple[str, ...] = ()
     allowed_trade_identities: tuple[str, ...] = ()
     allowed_instruments: tuple[str, ...] = ()
@@ -46,6 +47,7 @@ class StrategyCatalogItem:
             "required_signals": list(self.required_signals),
             "optional_signals": list(self.optional_signals),
             "scoring_rules": self.scoring_rules,
+            "selection_policy": dict(self.selection_policy or _default_selection_policy(self)),
             "risk_tags": list(self.risk_tags),
             "macro_blocked_regimes": list(self.macro_blocked_regimes),
             "invalidators": list(self.invalidators),
@@ -84,6 +86,33 @@ ASSIGNMENT_FIELDS = (
     "underlying_exposure",
     "assignment_plan",
 )
+
+
+def _default_selection_policy(item: StrategyCatalogItem) -> dict[str, Any]:
+    if item.strategy_layer != "tactical_pattern":
+        return {}
+    policy: dict[str, Any] = {
+        "actionable_score_threshold": 0.55,
+        "default_candidate_action": "enter_long",
+        "default_candidate_direction": "bullish",
+        "eligible_expression_bucket_ids": ["long_stock"],
+    }
+    if item.strategy_id == "strong_theme_catalyst_continuation_v1":
+        policy["eligible_expression_bucket_ids"] = ["long_stock", "defined_risk_directional_option"]
+    elif item.strategy_id == "strong_theme_no_clear_near_term_entry_v1":
+        policy.update(
+            {
+                "default_candidate_action": "no_trade",
+                "default_candidate_direction": "neutral",
+                "eligible_expression_bucket_ids": [
+                    "defined_risk_income_spread",
+                    "volatility_event_option",
+                ],
+            }
+        )
+    elif item.strategy_id == "core_accumulation_on_pullback_v1":
+        policy["eligible_expression_bucket_ids"] = ["core_stock_accumulation"]
+    return policy
 
 
 INITIAL_STRATEGY_CATALOG: tuple[StrategyCatalogItem, ...] = (

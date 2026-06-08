@@ -10,7 +10,11 @@ from src.trading.signals.source_ingestion import SourceIngestionService
 from src.trading.data_sources.universe import UniverseAsset, UniverseFilterConfig
 from src.trading.strategies.classifier import TradeClassificationRecord
 from src.trading.strategies.matching import CandidateScoreRecord, StrategyRunRecord
-from src.trading.strategies.selector import SelectedStrategyRecord
+from src.trading.strategies.selector import (
+    PrimarySelectionResult,
+    SelectedTradeRecord,
+    WatchCandidateRecord,
+)
 
 
 class _FakeUniverseProvider:
@@ -42,6 +46,7 @@ class _RepositoryWithoutCandidateScores:
         self.strategy_runs: list[StrategyRunRecord] = []
         self.saved_candidates: list[CandidateScoreRecord] = []
         self.saved_classifications: list[TradeClassificationRecord] = []
+        self.saved_watch_candidates: list[WatchCandidateRecord] = []
 
     def load_active_strategy_definitions(self):
         return []
@@ -55,6 +60,9 @@ class _RepositoryWithoutCandidateScores:
     def save_trade_classifications(self, classifications):
         self.saved_classifications.extend(classifications)
 
+    def save_watch_candidates(self, watch_candidates):
+        self.saved_watch_candidates.extend(watch_candidates)
+
 
 class _FakeMatcher:
     def __init__(self, candidate: CandidateScoreRecord) -> None:
@@ -66,12 +74,12 @@ class _FakeMatcher:
 
 
 class _FakeSelector:
-    def __init__(self, selected: SelectedStrategyRecord) -> None:
-        self.selected = selected
+    def __init__(self, result: PrimarySelectionResult) -> None:
+        self.result = result
 
     def select(self, candidates, definitions):
         del candidates, definitions
-        return [self.selected]
+        return self.result
 
 
 class _FakeClassifier:
@@ -79,8 +87,7 @@ class _FakeClassifier:
         self.classification = classification
 
     def classify_many(self, selected):
-        del selected
-        return [self.classification]
+        return [self.classification] if selected else []
 
 
 def test_signal_pipeline_merges_active_manual_requests_into_snapshot_job():
@@ -193,8 +200,9 @@ def test_strategy_pipeline_records_manual_request_results_without_in_memory_repo
         decision_time=now,
         available_for_decision_at=now,
         source_record_refs_json=[],
+        candidate_status="actionable",
     )
-    selected = SelectedStrategyRecord(
+    selected = SelectedTradeRecord(
         candidate=candidate,
         expression_bucket_id="long_stock",
         expression_bucket_version="v1",
@@ -221,12 +229,16 @@ def test_strategy_pipeline_records_manual_request_results_without_in_memory_repo
         decision_time=now,
     )
     repository = _RepositoryWithoutCandidateScores()
+    selection = PrimarySelectionResult(
+        selected_trades=(selected,),
+        watch_candidates=(),
+    )
 
     result = StrategyPipeline(
         repository=repository,
         manual_request_service=manual_service,
         matcher=_FakeMatcher(candidate),
-        selector=_FakeSelector(selected),
+        selector=_FakeSelector(selection),
         classifier=_FakeClassifier(classification),
     ).run(
         snapshots=(),
@@ -234,4 +246,92 @@ def test_strategy_pipeline_records_manual_request_results_without_in_memory_repo
     )
 
     assert len(result.candidates) == 1
+    assert len(result.selected_trades) == 1
+    assert result.watch_candidates == ()
     assert manual_service.load_active()[0].latest_result_status == "actionable_trade"
+
+
+def test_strategy_pipeline_persists_watch_candidates_separately():
+    now = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+    manual_service = ManualTickerRequestService(now=lambda: now)
+    request = manual_service.create("AAPL", "please review", "review_only")
+    candidate = CandidateScoreRecord(
+        candidate_score_id="candidate-watch-1",
+        strategy_run_id="strategy-run-1",
+        signal_snapshot_id="snapshot-1",
+        ticker="AAPL",
+        strategy_id="strong_theme_no_clear_near_term_entry_v1",
+        strategy_version="v1",
+        strategy_definition_id="definition-1",
+        candidate_score=0.66,
+        direction="neutral",
+        action="no_trade",
+        typical_horizon="swing",
+        core_signal_evidence={"events_news.catalyst_quality_score": 0.95},
+        missing_required_signals=[],
+        unsupported_missing_signal_families=[],
+        invalidators=[],
+        risk_tags=[],
+        macro_compatibility="allowed",
+        selection_source="manual_request",
+        manual_request_id=request.request_id,
+        selection_reason="fixture",
+        rejection_reason="no_clean_entry",
+        benchmark_context={},
+        decision_time=now,
+        available_for_decision_at=now,
+        source_record_refs_json=[],
+        candidate_status="watch",
+    )
+    watch = WatchCandidateRecord(
+        watch_candidate_id="watch-1",
+        candidate=candidate,
+        watch_strategy_id=candidate.strategy_id,
+        watch_strategy_version=candidate.strategy_version,
+        watch_type="catalyst_watch",
+        result_status="catalyst_watch",
+        watch_reason="entry is not clean yet",
+        selection_context={"candidate_score_id": candidate.candidate_score_id},
+    )
+    repository = _RepositoryWithoutCandidateScores()
+    selection = PrimarySelectionResult(
+        selected_trades=(),
+        watch_candidates=(watch,),
+    )
+
+    result = StrategyPipeline(
+        repository=repository,
+        manual_request_service=manual_service,
+        matcher=_FakeMatcher(candidate),
+        selector=_FakeSelector(selection),
+        classifier=_FakeClassifier(
+            TradeClassificationRecord(
+                trade_classification_id="unused",
+                candidate_score_id="unused",
+                strategy_run_id="unused",
+                ticker="AAPL",
+                selected_strategy_id="unused",
+                selected_strategy_version="v1",
+                expression_bucket_id="unused",
+                expression_bucket_version="v1",
+                trade_identity="tactical_stock_trade",
+                watch_type=None,
+                direction="bullish",
+                intended_horizon="swing",
+                exit_policy="unused",
+                result_status="actionable_trade",
+                classification_reason="unused",
+                selected_strategy_context_json={},
+                decision_time=now,
+            )
+        ),
+    ).run(
+        snapshots=(),
+        decision_time=now,
+    )
+
+    assert result.selected_trades == ()
+    assert result.watch_candidates == (watch,)
+    assert repository.saved_classifications == []
+    assert repository.saved_watch_candidates == [watch]
+    assert manual_service.load_active()[0].latest_result_status == "catalyst_watch"

@@ -7,7 +7,11 @@ from datetime import datetime, timezone
 from typing import Any
 
 from src.trading.replay.outcomes import CandidateOutcomeEvaluationRecord, OutcomeEvaluator
-from src.trading.strategies.selector import PrimaryStrategySelector, SelectedStrategyRecord
+from src.trading.strategies.selector import (
+    PrimaryStrategySelector,
+    SelectedTradeRecord,
+    WatchCandidateRecord,
+)
 from src.trading.strategies.matching import (
     CandidateScoreRecord,
     StrategyMatcher,
@@ -39,7 +43,8 @@ class HistoricalReplayResult:
     replay_run: HistoricalReplayRunRecord
     strategy_run: StrategyRunRecord
     candidates: tuple[CandidateScoreRecord, ...]
-    selected: tuple[SelectedStrategyRecord, ...]
+    selected_trades: tuple[SelectedTradeRecord, ...]
+    watch_candidates: tuple[WatchCandidateRecord, ...]
     classifications: tuple[TradeClassificationRecord, ...]
     outcomes: tuple[CandidateOutcomeEvaluationRecord, ...]
 
@@ -105,8 +110,8 @@ class HistoricalReplayRunner:
                 strategy_run_id=strategy_run.strategy_run_id,
             )
         )
-        selected = tuple(self.selector.select(candidates, definitions))
-        classifications = tuple(self.classifier.classify_many(selected))
+        selection = self.selector.select(candidates, definitions)
+        classifications = tuple(self.classifier.classify_many(selection.selected_trades))
         classification_by_candidate = {
             classification.candidate_score_id: classification for classification in classifications
         }
@@ -127,13 +132,15 @@ class HistoricalReplayRunner:
         self.repository.save_historical_replay_run(completed_run)
         self.repository.save_strategy_run(strategy_run)
         self.repository.save_candidate_scores(candidates)
+        self.repository.save_watch_candidates(selection.watch_candidates)
         self.repository.save_trade_classifications(classifications)
         self.repository.save_candidate_outcome_evaluations(outcomes)
         return HistoricalReplayResult(
             replay_run=completed_run,
             strategy_run=strategy_run,
             candidates=candidates,
-            selected=selected,
+            selected_trades=selection.selected_trades,
+            watch_candidates=selection.watch_candidates,
             classifications=classifications,
             outcomes=outcomes,
         )

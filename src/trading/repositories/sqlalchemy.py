@@ -43,6 +43,7 @@ from src.db.models.trading import (
     UniverseFilterConfig,
     UniverseSnapshot,
     UniverseSymbol,
+    WatchCandidate,
 )
 from src.trading.data_sources.universe import UniverseFilterConfig as UniverseFilterConfigRecord
 from src.trading.brokers.paper_option import (
@@ -64,6 +65,7 @@ from src.trading.signals.sources import EventNewsItemRecord
 from src.trading.strategies.classifier import TradeClassificationRecord
 from src.trading.strategies.matching import CandidateScoreRecord, StrategyRunRecord
 from src.trading.strategies.matching import StrategyDefinitionRecord
+from src.trading.strategies.selector import WatchCandidateRecord
 from src.trading.workflows.trading_decision import TradingDecisionRecord
 
 
@@ -592,6 +594,7 @@ class SQLAlchemyTradingRepository:
             row.strategy_version = candidate.strategy_version
             row.strategy_definition_id = _to_uuid_or_none(candidate.strategy_definition_id)
             row.candidate_score = Decimal(str(candidate.candidate_score))
+            row.candidate_status = candidate.candidate_status
             row.direction = candidate.direction
             row.action = candidate.action
             row.typical_horizon = candidate.typical_horizon
@@ -609,6 +612,31 @@ class SQLAlchemyTradingRepository:
             row.decision_time = candidate.decision_time
             row.available_for_decision_at = candidate.available_for_decision_at
             row.source_record_refs_json = list(candidate.source_record_refs_json)
+        self.session.flush()
+
+    def save_watch_candidates(
+        self,
+        watch_candidates: list[WatchCandidateRecord] | tuple[WatchCandidateRecord, ...],
+    ) -> None:
+        for watch in watch_candidates:
+            row = self.session.query(WatchCandidate).filter_by(
+                watch_candidate_id=_to_uuid(watch.watch_candidate_id)
+            ).one_or_none()
+            if row is None:
+                row = WatchCandidate(
+                    watch_candidate_id=_to_uuid(watch.watch_candidate_id)
+                )
+                self.session.add(row)
+            row.candidate_score_id = _to_uuid(watch.candidate.candidate_score_id)
+            row.strategy_run_id = _to_uuid(watch.candidate.strategy_run_id)
+            row.ticker = watch.candidate.ticker
+            row.watch_strategy_id = watch.watch_strategy_id
+            row.watch_strategy_version = watch.watch_strategy_version
+            row.watch_type = watch.watch_type
+            row.result_status = watch.result_status
+            row.watch_reason = watch.watch_reason
+            row.selection_context_json = dict(watch.selection_context)
+            row.decision_time = watch.candidate.decision_time
         self.session.flush()
 
     def save_trade_classifications(

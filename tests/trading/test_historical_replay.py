@@ -51,6 +51,27 @@ def _definition() -> StrategyDefinitionRecord:
     )
 
 
+def _watch_definition() -> StrategyDefinitionRecord:
+    return StrategyDefinitionRecord(
+        strategy_definition_id="watch-definition",
+        strategy_id="strong_theme_no_clear_near_term_entry_v1",
+        version="v1",
+        display_name="Strong Theme No Clear Near-Term Entry",
+        strategy_layer="tactical_pattern",
+        typical_horizon="2w-3m",
+        config_json={
+            "required_signals": [],
+            "selection_policy": {
+                "default_candidate_action": "no_trade",
+                "default_candidate_direction": "neutral",
+                "eligible_expression_bucket_ids": ["defined_risk_income_spread"],
+            },
+        },
+        lifecycle_status="active",
+        is_active=True,
+    )
+
+
 def test_historical_replay_reconstructs_candidates_only_from_decision_available_snapshots():
     decision_time = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
     repo = InMemoryTradingRepository()
@@ -75,3 +96,27 @@ def test_historical_replay_reconstructs_candidates_only_from_decision_available_
     assert repo.historical_replay_runs == [result.replay_run]
     assert repo.candidate_outcome_evaluations == list(result.outcomes)
     assert result.outcomes[0].candidate_return == 0.08
+
+
+def test_historical_replay_persists_watch_candidates():
+    decision_time = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+    repo = InMemoryTradingRepository()
+    repo.save_signal_snapshot(_snapshot("watch-snapshot", decision_time, return_20d=0.08))
+    repo.save_strategy_definition(_watch_definition())
+    evaluator = OutcomeEvaluator(
+        price_points={
+            "AAPL": [PricePoint(decision_time, 100), PricePoint(decision_time + timedelta(days=5), 103)],
+            "QQQ": [PricePoint(decision_time, 400), PricePoint(decision_time + timedelta(days=5), 408)],
+            "SPY": [PricePoint(decision_time, 500), PricePoint(decision_time + timedelta(days=5), 505)],
+        }
+    )
+
+    result = HistoricalReplayRunner(repository=repo, outcome_evaluator=evaluator).run(
+        decision_time=decision_time,
+        horizon_end_at=decision_time + timedelta(days=5),
+    )
+
+    assert result.selected_trades == ()
+    assert len(result.watch_candidates) == 1
+    assert repo.watch_candidates == list(result.watch_candidates)
+    assert repo.trade_classifications == []

@@ -9,7 +9,13 @@ from src.trading.strategies.matching import (
     StrategyRunRecord,
     create_strategy_run,
 )
-from src.trading.strategies.selector import PrimaryStrategySelector, SelectedStrategyRecord
+from src.trading.strategies.selector import (
+    PrimarySelectionResult,
+    PrimaryStrategySelector,
+    SelectedStrategyRecord,
+    SelectedTradeRecord,
+    WatchCandidateRecord,
+)
 from src.trading.strategies.taxonomy import TRADE_IDENTITIES, TradeIdentityPolicy, get_trade_identity_policy
 
 __all__ = [
@@ -18,7 +24,9 @@ __all__ = [
     "ConfidenceCalibrator",
     "INITIAL_STRATEGY_CATALOG",
     "PrimaryStrategySelector",
+    "PrimarySelectionResult",
     "SelectedStrategyRecord",
+    "SelectedTradeRecord",
     "StrategyCatalogItem",
     "StrategyDefinitionRecord",
     "StrategyMatcher",
@@ -27,8 +35,8 @@ __all__ = [
     "TradeClassificationRecord",
     "TradeClassifier",
     "TradeIdentityPolicy",
+    "WatchCandidateRecord",
     "create_strategy_run",
     "get_initial_strategy_definitions",
     "get_trade_identity_policy",
 ]
-
