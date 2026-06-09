@@ -45,7 +45,12 @@ def _candidate(
     )
 
 
-def _expression(expression_id: str, default_trade_identity: str = "tactical_stock_trade") -> StrategyDefinitionRecord:
+def _expression(
+    expression_id: str,
+    default_trade_identity: str = "tactical_stock_trade",
+    *,
+    suitability: dict | None = None,
+) -> StrategyDefinitionRecord:
     return StrategyDefinitionRecord(
         strategy_definition_id=f"{expression_id}-uuid",
         strategy_id=expression_id,
@@ -56,6 +61,7 @@ def _expression(expression_id: str, default_trade_identity: str = "tactical_stoc
         config_json={
             "default_trade_identity": default_trade_identity,
             "default_exit_policy": "strategy_invalidators_or_target_horizon",
+            "suitability": suitability or {},
         },
         lifecycle_status="active",
         is_active=True,
@@ -65,7 +71,7 @@ def _expression(expression_id: str, default_trade_identity: str = "tactical_stoc
 def _strategy(
     strategy_id: str,
     *,
-    eligible_expression_bucket_ids: list[str] | None = None,
+    allowed_expression_bucket_ids: list[str] | None = None,
 ) -> StrategyDefinitionRecord:
     return StrategyDefinitionRecord(
         strategy_definition_id=f"{strategy_id}-definition",
@@ -76,7 +82,7 @@ def _strategy(
         typical_horizon="2w-3m",
         config_json={
             "selection_policy": {
-                "eligible_expression_bucket_ids": eligible_expression_bucket_ids or [],
+                "allowed_expression_bucket_ids": allowed_expression_bucket_ids or [],
             }
         },
         lifecycle_status="active",
@@ -92,9 +98,9 @@ def test_primary_strategy_selector_chooses_best_non_rejected_candidate_and_expre
             _candidate("stronger_v1", 0.78),
         ],
         [
-            _strategy("weaker_v1", eligible_expression_bucket_ids=["long_stock"]),
-            _strategy("blocked_v1", eligible_expression_bucket_ids=["long_stock"]),
-            _strategy("stronger_v1", eligible_expression_bucket_ids=["long_stock"]),
+            _strategy("weaker_v1", allowed_expression_bucket_ids=["long_stock"]),
+            _strategy("blocked_v1", allowed_expression_bucket_ids=["long_stock"]),
+            _strategy("stronger_v1", allowed_expression_bucket_ids=["long_stock"]),
             _expression("long_stock"),
         ],
     )
@@ -104,8 +110,9 @@ def test_primary_strategy_selector_chooses_best_non_rejected_candidate_and_expre
     assert selected.watch_candidates == ()
     primary = selected.selected_trades[0]
     assert primary.strategy_id == "stronger_v1"
-    assert primary.expression_bucket_id == "long_stock"
-    assert primary.expression_bucket_version == "v1"
+    assert primary.selected_expression_bucket_id == "long_stock"
+    assert primary.selected_expression_bucket_version == "v1"
+    assert primary.fallback_expression_bucket_ids == ()
     assert primary.selection_context["candidate_score_id"] == "stronger_v1-candidate"
     assert primary.selection_context["candidate_score"] == 0.78
 
@@ -125,8 +132,8 @@ def test_selector_returns_selected_trades_and_watch_candidates_separately():
             ),
         ],
         [
-            _strategy("trade_v1", eligible_expression_bucket_ids=["long_stock"]),
-            _strategy("watch_v1", eligible_expression_bucket_ids=["defined_risk_income_spread"]),
+            _strategy("trade_v1", allowed_expression_bucket_ids=["long_stock"]),
+            _strategy("watch_v1", allowed_expression_bucket_ids=["defined_risk_income_spread"]),
             _expression("long_stock"),
             _expression("defined_risk_income_spread", default_trade_identity="tactical_option_trade"),
         ],
@@ -153,7 +160,7 @@ def test_selector_does_not_assign_long_stock_to_watch_candidates():
             ),
         ],
         [
-            _strategy("manual_watch_v1", eligible_expression_bucket_ids=["defined_risk_income_spread"]),
+            _strategy("manual_watch_v1", allowed_expression_bucket_ids=["defined_risk_income_spread"]),
             _expression("long_stock"),
             _expression("defined_risk_income_spread", default_trade_identity="tactical_option_trade"),
         ],
@@ -170,7 +177,7 @@ def test_selector_requires_explicit_expression_bucket_mapping():
     selected = PrimaryStrategySelector().select(
         [_candidate("unmapped_v1", 0.78)],
         [
-            _strategy("unmapped_v1", eligible_expression_bucket_ids=[]),
+            _strategy("unmapped_v1", allowed_expression_bucket_ids=[]),
             _expression("long_stock"),
         ],
     )
@@ -179,3 +186,140 @@ def test_selector_requires_explicit_expression_bucket_mapping():
     assert len(selected.watch_candidates) == 1
     assert selected.watch_candidates[0].watch_strategy_id == "unmapped_v1"
     assert selected.watch_candidates[0].result_status == "ordinary_watch"
+
+
+def test_selector_prefers_clean_stock_entry_and_persists_same_strategy_fallbacks():
+    selected = PrimaryStrategySelector().select(
+        [
+            _candidate(
+                "expression_mix_v1",
+                0.83,
+                evidence={
+                    "entry_signal.stock_entry_clean": True,
+                    "risk_shape.defined_risk_preferred": False,
+                    "signal_direction.directional_clarity": True,
+                },
+            ),
+        ],
+        [
+            _strategy(
+                "expression_mix_v1",
+                allowed_expression_bucket_ids=[
+                    "defined_risk_directional_option",
+                    "long_stock",
+                ],
+            ),
+            _expression(
+                "defined_risk_directional_option",
+                default_trade_identity="tactical_option_trade",
+                suitability={
+                    "prefers_defined_risk": True,
+                    "requires_directional_clarity": True,
+                },
+            ),
+            _expression(
+                "long_stock",
+                suitability={"prefers_stock_when_entry_clean": True},
+            ),
+        ],
+    )
+
+    assert len(selected.selected_trades) == 1
+    trade = selected.selected_trades[0]
+    assert trade.selected_expression_bucket_id == "long_stock"
+    assert trade.fallback_expression_bucket_ids == ("defined_risk_directional_option",)
+    assert trade.expression_selection_context["selected_expression_bucket_id"] == "long_stock"
+
+
+def test_selector_can_choose_option_expression_without_downgrading_to_watch():
+    selected = PrimaryStrategySelector().select(
+        [
+            _candidate(
+                "directional_option_v1",
+                0.81,
+                evidence={
+                    "entry_signal.stock_entry_clean": False,
+                    "risk_shape.defined_risk_preferred": True,
+                    "signal_direction.directional_clarity": True,
+                },
+            ),
+        ],
+        [
+            _strategy(
+                "directional_option_v1",
+                allowed_expression_bucket_ids=[
+                    "long_stock",
+                    "defined_risk_directional_option",
+                ],
+            ),
+            _expression(
+                "long_stock",
+                suitability={"prefers_stock_when_entry_clean": True},
+            ),
+            _expression(
+                "defined_risk_directional_option",
+                default_trade_identity="tactical_option_trade",
+                suitability={
+                    "prefers_defined_risk": True,
+                    "requires_directional_clarity": True,
+                },
+            ),
+        ],
+    )
+
+    assert len(selected.selected_trades) == 1
+    assert selected.watch_candidates == ()
+    trade = selected.selected_trades[0]
+    assert trade.selected_expression_bucket_id == "defined_risk_directional_option"
+    assert trade.fallback_expression_bucket_ids == ("long_stock",)
+
+
+def test_selector_prefers_event_volatility_expression_when_event_is_inside_horizon():
+    selected = PrimaryStrategySelector().select(
+        [
+            _candidate(
+                "event_setup_v1",
+                0.79,
+                evidence={
+                    "entry_signal.stock_entry_clean": False,
+                    "signal_direction.directional_clarity": False,
+                    "event_context.binary_event_in_horizon": True,
+                    "event_context.event_volatility_matters": True,
+                },
+                action="enter_long",
+                direction="neutral",
+            ),
+        ],
+        [
+            _strategy(
+                "event_setup_v1",
+                allowed_expression_bucket_ids=[
+                    "defined_risk_income_spread",
+                    "long_stock",
+                    "volatility_event_option",
+                ],
+            ),
+            _expression(
+                "defined_risk_income_spread",
+                default_trade_identity="tactical_option_trade",
+                suitability={
+                    "prefers_defined_risk": True,
+                    "penalize_binary_event_through_horizon": True,
+                },
+            ),
+            _expression(
+                "long_stock",
+                suitability={"prefers_stock_when_entry_clean": True},
+            ),
+            _expression(
+                "volatility_event_option",
+                default_trade_identity="tactical_option_trade",
+                suitability={"prefers_event_volatility": True},
+            ),
+        ],
+    )
+
+    assert len(selected.selected_trades) == 1
+    trade = selected.selected_trades[0]
+    assert trade.selected_expression_bucket_id == "volatility_event_option"
+    assert trade.fallback_expression_bucket_ids == ("long_stock", "defined_risk_income_spread")

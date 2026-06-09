@@ -135,7 +135,11 @@ def test_trading_signal_paths_export_builders_and_source_contracts():
 
 def test_trading_strategy_paths_export_catalog_and_selection_components():
     from src.trading.strategies.calibration import ConfidenceCalibrator
-    from src.trading.strategies.catalog import get_initial_strategy_definitions
+    from src.trading.strategies import (
+        get_initial_expression_definitions,
+        get_initial_strategy_definitions,
+        load_all_trading_definitions,
+    )
     from src.trading.strategies.classifier import TradeClassifier
     from src.trading.strategies.matching import StrategyMatcher
     from src.trading.strategies.selector import PrimaryStrategySelector
@@ -143,6 +147,8 @@ def test_trading_strategy_paths_export_catalog_and_selection_components():
 
     assert ConfidenceCalibrator.__name__ == "ConfidenceCalibrator"
     assert callable(get_initial_strategy_definitions)
+    assert callable(get_initial_expression_definitions)
+    assert callable(load_all_trading_definitions)
     assert TradeClassifier.__name__ == "TradeClassifier"
     assert StrategyMatcher.__name__ == "StrategyMatcher"
     assert PrimaryStrategySelector.__name__ == "PrimaryStrategySelector"

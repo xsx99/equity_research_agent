@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Iterable
+from typing import Any, Iterable
 
 from src.trading.portfolio.intents import PortfolioIntentConfig, is_core_holding_approved
 from src.trading.strategies.selector import SelectedTradeRecord
@@ -77,6 +77,7 @@ class TradeClassifier:
             classification_reason=reason,
             selected_strategy_context_json={
                 **selected.selection_context,
+                **selected.expression_selection_context,
                 "core_signal_evidence": dict(candidate.core_signal_evidence),
                 "invalidators": list(candidate.invalidators),
                 "risk_tags": list(candidate.risk_tags),

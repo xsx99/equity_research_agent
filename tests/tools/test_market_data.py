@@ -147,6 +147,48 @@ def test_fetch_daily_bars_parses_open_close_and_bar_date():
     ]
 
 
+def test_fetch_option_chain_requests_alpaca_chain_endpoint_and_normalizes_contracts():
+    client = _CapturingClient(
+        {
+            "snapshots": {
+                "AAPL260619C00200000": {
+                    "latestQuote": {"bp": 3.1, "ap": 3.3},
+                    "greeks": {"delta": 0.41, "gamma": 0.05, "theta": -0.04, "vega": 0.15},
+                    "impliedVolatility": 0.28,
+                }
+            }
+        }
+    )
+    provider = AlpacaMarketDataProvider(
+        api_key="test-key",
+        secret_key="test-secret",
+        client=client,
+    )
+
+    contracts = provider.fetch_option_chain("AAPL")
+
+    assert contracts == [
+        {
+            "contract_symbol": "AAPL260619C00200000",
+            "option_type": "call",
+            "strike": 200.0,
+            "expiry": "2026-06-19",
+            "delta": 0.41,
+            "gamma": 0.05,
+            "theta": -0.04,
+            "vega": 0.15,
+            "iv_rank": 0.28,
+            "bid": 3.1,
+            "ask": 3.3,
+            "mid": 3.2,
+        }
+    ]
+    call = client.calls[0]
+    assert call["url"] == "https://data.alpaca.markets/v1beta1/options/snapshots/AAPL"
+    assert call["params"]["feed"] == "indicative"
+    assert call["params"]["limit"] == 1000
+
+
 def test_fetch_context_enriches_fundamental_scores_from_finnhub_payloads():
     client = _RoutingClient(
         {

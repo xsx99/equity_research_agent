@@ -32,6 +32,7 @@ def test_technical_signals_build_price_volume_and_relative_strength_fields():
 
     signals = build_technical_signals([record])
 
+    assert signals.values["last_price"] == pytest.approx(105.0)
     assert signals.values["return_1d"] == pytest.approx(3 / 102)
     assert signals.values["return_5d"] is None
     assert signals.values["rs_vs_spy_1d"] == pytest.approx((3 / 102) - 0.01)

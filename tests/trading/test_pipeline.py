@@ -204,9 +204,14 @@ def test_strategy_pipeline_records_manual_request_results_without_in_memory_repo
     )
     selected = SelectedTradeRecord(
         candidate=candidate,
-        expression_bucket_id="long_stock",
-        expression_bucket_version="v1",
-        expression_bucket_config={"default_trade_identity": "tactical_stock_trade"},
+        selected_expression_bucket_id="long_stock",
+        selected_expression_bucket_version="v1",
+        selected_expression_bucket_config={"default_trade_identity": "tactical_stock_trade"},
+        fallback_expression_bucket_ids=("defined_risk_directional_option",),
+        expression_selection_context={
+            "selected_expression_bucket_id": "long_stock",
+            "fallback_expression_bucket_ids": ["defined_risk_directional_option"],
+        },
         selection_context={},
     )
     classification = TradeClassificationRecord(
@@ -247,6 +252,7 @@ def test_strategy_pipeline_records_manual_request_results_without_in_memory_repo
 
     assert len(result.candidates) == 1
     assert len(result.selected_trades) == 1
+    assert result.selected_trades[0].fallback_expression_bucket_ids == ("defined_risk_directional_option",)
     assert result.watch_candidates == ()
     assert manual_service.load_active()[0].latest_result_status == "actionable_trade"
 

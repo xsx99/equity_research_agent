@@ -291,6 +291,31 @@ class AlpacaMarketDataProvider:
             ),
         }
 
+    def fetch_option_chain(self, ticker: str) -> list[dict[str, Any]]:
+        symbol = ticker.upper()
+        response = self._client.get(
+            f"{self.data_base_url}/v1beta1/options/snapshots/{symbol}",
+            params={
+                "feed": "indicative",
+                "limit": 1000,
+            },
+            headers=self._auth_headers(),
+        )
+        response.raise_for_status()
+        payload = response.json()
+        snapshots = payload.get("snapshots") if isinstance(payload, dict) else None
+        if not isinstance(snapshots, dict):
+            return []
+
+        contracts: list[dict[str, Any]] = []
+        for contract_symbol, snapshot in snapshots.items():
+            if not isinstance(contract_symbol, str) or not isinstance(snapshot, dict):
+                continue
+            normalized = _normalize_option_snapshot(contract_symbol, snapshot)
+            if normalized is not None:
+                contracts.append(normalized)
+        return contracts
+
     def fetch_universe_assets(self) -> list[dict[str, Any]]:
         """Return active Alpaca US equity assets as provider-neutral rows.
 
@@ -441,3 +466,54 @@ def _valuation_percentile(*, pe_ratio: Optional[float], ps_ratio: Optional[float
         _normalize_ratio_score(ps_ratio, floor=1.0, ceiling=15.0),
     ]
     return _average_scores(tuple(scores))
+
+
+def _normalize_option_snapshot(contract_symbol: str, snapshot: dict[str, Any]) -> dict[str, Any] | None:
+    parsed = _parse_occ_option_symbol(contract_symbol)
+    if parsed is None:
+        return None
+    latest_quote = snapshot.get("latestQuote") if isinstance(snapshot.get("latestQuote"), dict) else {}
+    greeks = snapshot.get("greeks") if isinstance(snapshot.get("greeks"), dict) else {}
+    bid = _to_float_or_none(latest_quote.get("bp"))
+    ask = _to_float_or_none(latest_quote.get("ap"))
+    mid = (
+        round((bid + ask) / 2.0, 2)
+        if bid is not None and ask is not None
+        else None
+    )
+    return {
+        "contract_symbol": contract_symbol,
+        "option_type": parsed["option_type"],
+        "strike": parsed["strike"],
+        "expiry": parsed["expiry"].isoformat(),
+        "delta": _to_float_or_none(greeks.get("delta")),
+        "gamma": _to_float_or_none(greeks.get("gamma")),
+        "theta": _to_float_or_none(greeks.get("theta")),
+        "vega": _to_float_or_none(greeks.get("vega")),
+        "iv_rank": _to_float_or_none(snapshot.get("impliedVolatility")),
+        "bid": bid,
+        "ask": ask,
+        "mid": mid,
+    }
+
+
+def _parse_occ_option_symbol(contract_symbol: str) -> dict[str, Any] | None:
+    if len(contract_symbol) < 16:
+        return None
+    root = contract_symbol[:-15]
+    expiry_raw = contract_symbol[-15:-9]
+    option_type = contract_symbol[-9:-8]
+    strike_raw = contract_symbol[-8:]
+    if option_type not in {"C", "P"}:
+        return None
+    try:
+        expiry = datetime.strptime(expiry_raw, "%y%m%d").date()
+        strike = int(strike_raw) / 1000.0
+    except ValueError:
+        return None
+    return {
+        "root_symbol": root,
+        "option_type": "call" if option_type == "C" else "put",
+        "expiry": expiry,
+        "strike": strike,
+    }

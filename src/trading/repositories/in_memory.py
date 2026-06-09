@@ -194,7 +194,21 @@ class InMemoryTradingRepository:
         self,
         classifications: list[TradeClassificationRecord] | tuple[TradeClassificationRecord, ...],
     ) -> None:
-        self.trade_classifications.extend(classifications)
+        for classification in classifications:
+            self.trade_classifications = [
+                item
+                for item in self.trade_classifications
+                if item.trade_classification_id != classification.trade_classification_id
+            ]
+            self.trade_classifications.append(classification)
+
+    def load_trade_classification(self, trade_classification_id: str | None) -> TradeClassificationRecord | None:
+        if trade_classification_id is None:
+            return None
+        for classification in self.trade_classifications:
+            if classification.trade_classification_id == trade_classification_id:
+                return classification
+        return None
 
     def save_historical_replay_run(self, run: HistoricalReplayRunRecord) -> None:
         self.historical_replay_runs.append(run)
@@ -236,6 +250,11 @@ class InMemoryTradingRepository:
         self.llm_usage_events.extend(usage_events)
 
     def save_trading_decision(self, decision: "TradingDecisionRecord") -> None:
+        self.trading_decisions = [
+            item
+            for item in self.trading_decisions
+            if item.trading_decision_id != decision.trading_decision_id
+        ]
         self.trading_decisions.append(decision)
 
     def save_option_strategy_decision(self, decision: OptionStrategyDecisionRecord) -> None:

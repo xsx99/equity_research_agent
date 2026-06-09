@@ -107,6 +107,7 @@ def build_live_preopen_dependencies(session: Any | None = None) -> LivePreopenDe
     from src.trading.repositories.sqlalchemy import SqlAlchemyTradingRepository
     from src.trading.risk.config import RiskConfigResolver
     from src.trading.risk.manager import RiskManager
+    from src.trading.risk.options import OptionRiskManager
     from src.trading.risk.sizing import PositionSizer
     from src.trading.signals.source_ingestion import SourceIngestionService
     from src.trading.workflows.paper_execution import PaperExecutionWorkflow
@@ -129,6 +130,10 @@ def build_live_preopen_dependencies(session: Any | None = None) -> LivePreopenDe
         artifact_repository=source_repository,
         provider_name="alpaca_live",
     )
+    config_resolver = RiskConfigResolver()
+    position_sizer = PositionSizer()
+    risk_manager = RiskManager()
+    option_risk_manager = OptionRiskManager()
     return LivePreopenDependencies(
         universe_filter_loader=_RepositoryUniverseFilterLoader(trading_repository),
         manual_request_loader=manual_request_service,
@@ -152,12 +157,13 @@ def build_live_preopen_dependencies(session: Any | None = None) -> LivePreopenDe
         risk_workflow=_LiveRiskWorkflow(
             repository=trading_repository,
             source_repository=source_repository,
-            config_resolver=RiskConfigResolver(),
-            position_sizer=PositionSizer(),
-            risk_manager=RiskManager(),
+            config_resolver=config_resolver,
+            position_sizer=position_sizer,
+            risk_manager=risk_manager,
         ),
         trading_decision_pipeline=TradingDecisionPipeline(
             repository=trading_repository,
+            source_repository=source_repository,
             prompt_registry=PromptRegistry.get_default(),
             manual_request_service=manual_request_service,
             model_name=app_config.TRADING_MODEL_NAME,
@@ -167,6 +173,10 @@ def build_live_preopen_dependencies(session: Any | None = None) -> LivePreopenDe
             repository=trading_repository,
             broker=broker,
             manual_request_service=manual_request_service,
+            config_resolver=config_resolver,
+            position_sizer=position_sizer,
+            risk_manager=risk_manager,
+            option_risk_manager=option_risk_manager,
         ),
         trading_repository=trading_repository,
     )
