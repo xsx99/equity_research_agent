@@ -1121,6 +1121,7 @@ class SQLAlchemyTradingRepository:
             row.gamma = Decimal(str(leg.gamma))
             row.theta = Decimal(str(leg.theta))
             row.vega = Decimal(str(leg.vega))
+            row.implied_volatility = _decimal_or_none(leg.implied_volatility)
             row.iv_rank = _decimal_or_none(leg.iv_rank)
             row.bid = Decimal(str(leg.bid))
             row.ask = Decimal(str(leg.ask))

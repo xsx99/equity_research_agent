@@ -74,6 +74,19 @@ def test_option_expression_seeds_publish_payload_policy_metadata():
     assert volatility_policy["close_conditions"] == ["event_exit_after_reaction", "premium_stop"]
 
 
+def test_option_expression_seeds_publish_explicit_iv_and_rank_leg_fields():
+    rows = {row["strategy_id"]: row for row in get_initial_expression_definitions()}
+
+    directional_fields = rows["defined_risk_directional_option"]["config_json"]["required_option_leg_fields"]
+    volatility_fields = rows["volatility_event_option"]["config_json"]["required_option_leg_fields"]
+
+    assert "implied_volatility" in directional_fields
+    assert "iv_rank" in directional_fields
+    assert "iv_rank_or_percentile" not in directional_fields
+    assert "implied_volatility" in volatility_fields
+    assert "iv_rank" in volatility_fields
+
+
 def test_combined_definition_loader_preserves_strategy_then_expression_order():
     rows = load_all_trading_definitions()
 

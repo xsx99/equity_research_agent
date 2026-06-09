@@ -799,6 +799,8 @@ def _build_option_strategy_payload(
         desired_legs=desired_legs,
         option_chain_rows=option_chain_rows,
         expected_expiry=expiry,
+        expression_bucket_id=expression_bucket_id,
+        expression_definition=expression_definition,
     )
     if option_chain_rows and chain_legs is None:
         return _reject_option_payload(
@@ -807,6 +809,26 @@ def _build_option_strategy_payload(
             underlying_price=underlying_price,
             event_through_expiry=event_through_expiry,
             metadata={"payload_generation_mode": "option_chain_snapshot"},
+        )
+    selected_legs = chain_legs or desired_legs
+    iv_context = _option_iv_context(
+        legs=selected_legs,
+        iv_required=_expression_requires_implied_volatility(
+            expression_bucket_id=expression_bucket_id,
+            expression_definition=expression_definition,
+        ),
+        used_option_chain=chain_legs is not None,
+    )
+    if iv_context["mode"] == "rejected_missing_implied_volatility":
+        return _reject_option_payload(
+            reason="iv_data_required",
+            option_strategy_type=option_strategy_type,
+            underlying_price=underlying_price,
+            event_through_expiry=event_through_expiry,
+            metadata={
+                "payload_generation_mode": "option_chain_snapshot",
+                "iv_context": iv_context,
+            },
         )
     decision = options_strategy_layer.build_strategy(
         OptionStrategyDecisionInput(
@@ -851,7 +873,7 @@ def _build_option_strategy_payload(
                 option_strategy_type=option_strategy_type,
                 option_policy=option_policy,
             ),
-            legs=chain_legs or desired_legs,
+            legs=selected_legs,
         )
     )
     payload = _apply_expression_policy_to_option_payload(
@@ -864,6 +886,7 @@ def _build_option_strategy_payload(
     metadata["payload_generation_mode"] = (
         "option_chain_snapshot" if chain_legs is not None else "deterministic_signal_snapshot"
     )
+    metadata["iv_context"] = iv_context
     payload["metadata_json"] = metadata
     return payload
 
@@ -1005,6 +1028,7 @@ def _expression_option_policy(
     return {
         "defined_risk_directional_option": {
             "max_loss_source": "premium_paid",
+            "requires_implied_volatility": False,
             "profit_target_pct": 0.65,
             "non_event_dte_days": 28,
             "long_call_strike_pct_above_spot": 0.02,
@@ -1029,6 +1053,9 @@ def _expression_option_policy(
         },
         "volatility_event_option": {
             "max_loss_source": "net_debit",
+            "requires_implied_volatility": True,
+            "prefer_higher_vega": True,
+            "prefer_higher_implied_volatility": True,
             "profit_target_pct": 0.35,
             "event_dte_days": 7,
             "straddle_target_delta_abs": 0.24,
@@ -1043,6 +1070,21 @@ def _expression_option_policy(
             "strategy_pairing_method": "same_expiry_long_vol",
         },
     }.get(expression_bucket_id, {})
+
+
+def _expression_requires_implied_volatility(
+    *,
+    expression_bucket_id: str,
+    expression_definition: StrategyDefinitionRecord,
+) -> bool:
+    option_policy = _expression_option_policy(
+        expression_bucket_id=expression_bucket_id,
+        expression_definition=expression_definition,
+    )
+    configured = option_policy.get("requires_implied_volatility")
+    if isinstance(configured, bool):
+        return configured
+    return expression_bucket_id == "volatility_event_option"
 
 
 def _option_days_to_expiry(
@@ -1171,6 +1213,7 @@ def _build_option_leg_definitions(
             ask=ask,
             mid=chosen,
             chosen_price=chosen,
+            implied_volatility=0.35,
         )
 
     direction = str(direction or "").lower()
@@ -1299,10 +1342,16 @@ def _select_option_chain_legs(
     desired_legs: tuple[OptionLegDefinition, ...],
     option_chain_rows: tuple[SourceRecord, ...],
     expected_expiry: datetime.date,
+    expression_bucket_id: str,
+    expression_definition: StrategyDefinitionRecord,
 ) -> tuple[OptionLegDefinition, ...] | None:
     contracts = _flatten_option_chain_contracts(option_chain_rows)
     if not contracts:
         return None
+    option_policy = _expression_option_policy(
+        expression_bucket_id=expression_bucket_id,
+        expression_definition=expression_definition,
+    )
     remaining = list(contracts)
     selected: list[OptionLegDefinition] = []
     for desired_leg in desired_legs:
@@ -1319,11 +1368,38 @@ def _select_option_chain_legs(
                 contract=contract,
                 desired_leg=desired_leg,
                 expected_expiry=expected_expiry,
+                option_policy=option_policy,
             ),
         )
         selected.append(_option_leg_from_chain_contract(best, desired_leg))
         remaining.remove(best)
     return tuple(selected)
+
+
+def _option_iv_context(
+    *,
+    legs: tuple[OptionLegDefinition, ...],
+    iv_required: bool,
+    used_option_chain: bool,
+) -> dict[str, Any]:
+    missing_leg_count = sum(1 for leg in legs if leg.implied_volatility is None)
+    if missing_leg_count == 0:
+        return {
+            "iv_required": iv_required,
+            "mode": "present",
+            "used_option_chain": used_option_chain,
+            "missing_leg_count": 0,
+        }
+    return {
+        "iv_required": iv_required,
+        "mode": (
+            "rejected_missing_implied_volatility"
+            if iv_required and used_option_chain
+            else "degraded_missing_implied_volatility"
+        ),
+        "used_option_chain": used_option_chain,
+        "missing_leg_count": missing_leg_count,
+    }
 
 
 def _flatten_option_chain_contracts(
@@ -1362,6 +1438,7 @@ def _option_chain_contract_score(
     contract: dict[str, Any],
     desired_leg: OptionLegDefinition,
     expected_expiry: datetime.date,
+    option_policy: dict[str, Any],
 ) -> float:
     expiry = _contract_expiry(contract)
     expiry_penalty = abs((expiry - expected_expiry).days) * 100.0
@@ -1369,7 +1446,16 @@ def _option_chain_contract_score(
     delta = float(contract.get("delta") or 0.0)
     strike_penalty = abs(strike - desired_leg.strike)
     delta_penalty = abs(delta - desired_leg.delta) * 100.0
-    return expiry_penalty + strike_penalty + delta_penalty
+    score = expiry_penalty + strike_penalty + delta_penalty
+    if option_policy.get("prefer_higher_vega"):
+        vega = contract.get("vega")
+        if isinstance(vega, (int, float)):
+            score -= float(vega) * 100.0
+    if option_policy.get("prefer_higher_implied_volatility"):
+        implied_volatility = contract.get("implied_volatility")
+        if isinstance(implied_volatility, (int, float)):
+            score -= float(implied_volatility) * 10.0
+    return score
 
 
 def _option_leg_from_chain_contract(
@@ -1392,11 +1478,16 @@ def _option_leg_from_chain_contract(
         gamma=float(contract.get("gamma") or desired_leg.gamma),
         theta=float(contract.get("theta") or desired_leg.theta),
         vega=float(contract.get("vega") or desired_leg.vega),
-        iv_rank=float(contract["iv_rank"]) if contract.get("iv_rank") is not None else desired_leg.iv_rank,
+        iv_rank=float(contract["iv_rank"]) if contract.get("iv_rank") is not None else None,
         bid=bid,
         ask=ask,
         mid=mid,
         chosen_price=chosen_price,
+        implied_volatility=(
+            float(contract["implied_volatility"])
+            if contract.get("implied_volatility") is not None
+            else None
+        ),
     )
 
 

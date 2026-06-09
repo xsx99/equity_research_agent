@@ -2,6 +2,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 from src.db.models.trading import (
+    OptionStrategyLeg,
     CandidateOutcomeEvaluation,
     DailyReflection,
     DailyReflectionStatus,
@@ -265,6 +266,30 @@ def test_reflection_models_can_be_instantiated():
     assert reflection.status == "succeeded"
     assert factor.status == "active"
     assert application.learning_factor is factor
+
+
+def test_option_strategy_leg_model_exposes_implied_volatility_column():
+    row = OptionStrategyLeg(
+        ticker="NVDA",
+        option_type="call",
+        side="buy",
+        quantity=1,
+        strike=120,
+        expiry=date(2026, 7, 17),
+        dte=28,
+        delta=0.4,
+        gamma=0.05,
+        theta=-0.04,
+        vega=0.15,
+        implied_volatility=0.34,
+        iv_rank=0.61,
+        bid=3.1,
+        ask=3.3,
+        mid=3.2,
+        chosen_price=3.2,
+    )
+
+    assert row.implied_volatility == 0.34
 
 
 def test_strategy_evolution_models_can_be_instantiated():

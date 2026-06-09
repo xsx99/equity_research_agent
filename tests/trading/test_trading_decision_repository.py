@@ -1236,6 +1236,616 @@ def test_trading_decision_pipeline_skips_illiquid_option_chain_contracts(tmp_pat
     assert leg["bid"] == 2.4
 
 
+def test_trading_decision_pipeline_marks_directional_option_payload_as_iv_degraded_when_chain_iv_is_missing(tmp_path):
+    now = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+    available_at = datetime(2026, 6, 1, 10, 0, tzinfo=timezone.utc)
+    registry = _write_prompt(tmp_path)
+    repository = InMemoryTradingRepository()
+    source_repository = InMemorySignalSourceRepository(
+        (
+            SourceRecord(
+                ticker="NVDA",
+                source_family="option_chain",
+                source="fixture",
+                source_table="option_chain_snapshots",
+                source_record_id="chain-directional-no-iv",
+                event_time=available_at,
+                published_at=available_at,
+                ingested_at=available_at,
+                available_for_decision_at=available_at,
+                payload={
+                    "contracts": [
+                        {
+                            "contract_symbol": "NVDA260629C00120000",
+                            "option_type": "call",
+                            "strike": 120.0,
+                            "expiry": "2026-06-29",
+                            "dte": 28,
+                            "delta": 0.41,
+                            "gamma": 0.05,
+                            "theta": -0.04,
+                            "vega": 0.15,
+                            "implied_volatility": None,
+                            "iv_rank": None,
+                            "bid": 3.1,
+                            "ask": 3.3,
+                            "mid": 3.2,
+                            "chosen_price": 3.2,
+                            "open_interest": 2400,
+                            "volume": 180,
+                        },
+                    ]
+                },
+            ),
+        )
+    )
+    repository.save_signal_snapshot(
+        _snapshot(
+            now,
+            signal_json={
+                "technical": {"rs_vs_spy_1d": 0.02, "relative_volume": 1.8, "last_price": 118.0},
+                "fundamental": {"quality_score": 0.91},
+                "events_news": {"catalyst_quality_score": 0.88},
+            },
+        )
+    )
+    repository.save_strategy_definition(
+        _expression_definition(
+            "defined_risk_directional_option",
+            trade_identity="tactical_option_trade",
+            allowed_instruments=("paper_option_strategy",),
+            allowed_option_strategy_types=("long_call", "long_put"),
+            option_policy={
+                "profit_target_pct": 0.65,
+                "non_event_dte_days": 28,
+                "long_call_strike_pct_above_spot": 0.02,
+                "long_call_target_delta": 0.42,
+                "close_conditions": ["take_profit_65pct", "time_stop_10d"],
+            },
+        )
+    )
+
+    candidate = CandidateScoreRecord(
+        candidate_score_id="candidate-directional-no-iv",
+        strategy_run_id="run-1",
+        signal_snapshot_id="snapshot-1",
+        ticker="NVDA",
+        strategy_id="strong_theme_catalyst_continuation_v1",
+        strategy_version="v1",
+        strategy_definition_id="definition-1",
+        candidate_score=0.84,
+        direction="bullish",
+        action="enter_long",
+        typical_horizon="2w-3m",
+        core_signal_evidence={"risk_shape.defined_risk_preferred": True},
+        missing_required_signals=[],
+        unsupported_missing_signal_families=[],
+        invalidators=["price confirmation fails"],
+        risk_tags=[],
+        macro_compatibility="allowed",
+        selection_source="scanner",
+        manual_request_id=None,
+        selection_reason="defined risk preferred",
+        rejection_reason=None,
+        benchmark_context={"primary_benchmark": "QQQ"},
+        decision_time=now,
+        available_for_decision_at=available_at,
+        source_record_refs_json=[],
+    )
+    classification = TradeClassificationRecord(
+        trade_classification_id="classification-directional-no-iv",
+        candidate_score_id="candidate-directional-no-iv",
+        strategy_run_id="run-1",
+        ticker="NVDA",
+        selected_strategy_id="strong_theme_catalyst_continuation_v1",
+        selected_strategy_version="v1",
+        expression_bucket_id="defined_risk_directional_option",
+        expression_bucket_version="v1",
+        trade_identity="tactical_option_trade",
+        watch_type=None,
+        direction="bullish",
+        intended_horizon="2w-3m",
+        exit_policy="strategy_invalidators_or_target_horizon",
+        result_status="actionable_trade",
+        classification_reason="eligible option expression selected",
+        selected_strategy_context_json={
+            "selected_expression_bucket_id": "defined_risk_directional_option",
+            "fallback_expression_bucket_ids": [],
+        },
+        decision_time=now,
+    )
+
+    def runner(prompt: str, model_name: str):
+        return {
+            "content": {
+                "ticker": "NVDA",
+                "decision": "open_option_strategy",
+                "strategy_id": "strong_theme_catalyst_continuation_v1",
+                "expression_bucket_id": "defined_risk_directional_option",
+                "trade_identity": "tactical_option_trade",
+                "instrument_type": "option",
+                "selection_source": "scanner",
+                "manual_request_id": None,
+                "confidence": 0.78,
+                "confidence_basis": {},
+                "benchmark_context": {"primary_benchmark": "QQQ"},
+                "target_weight": 0.03,
+                "max_loss_pct": 0.02,
+                "time_horizon": "2w-3m",
+                "entry_plan": "buy defined risk call exposure",
+                "exit_plan": "close_or_invalidator",
+                "thesis": "Defined risk is preferable while keeping bullish exposure.",
+                "key_drivers": ["defined_risk_preferred"],
+                "counterarguments": [],
+                "risk_checks": ["defined_max_loss"],
+                "invalidators": ["price confirmation fails"],
+                "learning_factors_used": [],
+                "schema_version": "v1",
+                "generated_at": "2026-06-01T12:00:00+00:00",
+            },
+            "usage": {
+                "provider": "openai",
+                "model": model_name,
+                "prompt_tokens": 12,
+                "completion_tokens": 20,
+                "total_tokens": 32,
+                "estimated_cost": 0.002,
+                "latency_ms": 75,
+            },
+        }
+
+    decision = TradingDecisionPipeline(
+        repository=repository,
+        source_repository=source_repository,
+        prompt_registry=registry,
+        manual_request_service=None,
+        model_name="gpt-5-mini",
+        agent_runner=runner,
+    ).run(
+        candidates=(candidate,),
+        classifications=(classification,),
+        risk_decisions=(),
+        decision_time=now,
+    ).decisions[0]
+
+    payload = decision.metadata_json["option_strategy"]
+    assert payload["status"] == "ready"
+    assert payload["metadata_json"]["iv_context"]["mode"] == "degraded_missing_implied_volatility"
+    assert payload["metadata_json"]["iv_context"]["iv_required"] is False
+    assert payload["metadata_json"]["legs"][0]["implied_volatility"] is None
+
+
+def test_trading_decision_pipeline_rejects_volatility_event_option_when_chain_iv_is_missing(tmp_path):
+    now = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+    available_at = datetime(2026, 6, 1, 10, 0, tzinfo=timezone.utc)
+    registry = _write_prompt(tmp_path)
+    repository = InMemoryTradingRepository()
+    source_repository = InMemorySignalSourceRepository(
+        (
+            SourceRecord(
+                ticker="NVDA",
+                source_family="option_chain",
+                source="fixture",
+                source_table="option_chain_snapshots",
+                source_record_id="chain-vol-no-iv",
+                event_time=available_at,
+                published_at=available_at,
+                ingested_at=available_at,
+                available_for_decision_at=available_at,
+                payload={
+                    "contracts": [
+                        {
+                            "contract_symbol": "NVDA260608C00122000",
+                            "option_type": "call",
+                            "strike": 122.0,
+                            "expiry": "2026-06-08",
+                            "dte": 7,
+                            "delta": 0.26,
+                            "gamma": 0.03,
+                            "theta": -0.01,
+                            "vega": 0.08,
+                            "implied_volatility": None,
+                            "iv_rank": None,
+                            "bid": 1.4,
+                            "ask": 1.6,
+                            "mid": 1.5,
+                            "chosen_price": 1.5,
+                            "open_interest": 1200,
+                            "volume": 95,
+                        },
+                        {
+                            "contract_symbol": "NVDA260608P00114000",
+                            "option_type": "put",
+                            "strike": 114.0,
+                            "expiry": "2026-06-08",
+                            "dte": 7,
+                            "delta": -0.14,
+                            "gamma": 0.02,
+                            "theta": -0.01,
+                            "vega": 0.07,
+                            "implied_volatility": None,
+                            "iv_rank": None,
+                            "bid": 1.4,
+                            "ask": 1.6,
+                            "mid": 1.5,
+                            "chosen_price": 1.5,
+                            "open_interest": 1300,
+                            "volume": 102,
+                        },
+                    ]
+                },
+            ),
+        )
+    )
+    repository.save_signal_snapshot(
+        _snapshot(
+            now,
+            signal_json={
+                "technical": {"rs_vs_spy_1d": 0.02, "relative_volume": 1.8, "last_price": 118.0},
+                "fundamental": {"quality_score": 0.91},
+                "events_news": {
+                    "catalyst_quality_score": 0.88,
+                    "own_earnings_event_type": "earnings",
+                },
+            },
+        )
+    )
+    repository.save_strategy_definition(
+        _expression_definition(
+            "volatility_event_option",
+            trade_identity="tactical_option_trade",
+            allowed_instruments=("paper_option_strategy",),
+            allowed_option_strategy_types=("long_strangle",),
+        )
+    )
+    repository.save_strategy_definition(
+        _expression_definition(
+            "long_stock",
+            trade_identity="tactical_stock_trade",
+            allowed_instruments=("common_stock",),
+        )
+    )
+
+    candidate = CandidateScoreRecord(
+        candidate_score_id="candidate-vol-no-iv",
+        strategy_run_id="run-1",
+        signal_snapshot_id="snapshot-1",
+        ticker="NVDA",
+        strategy_id="strong_theme_no_clear_near_term_entry_v1",
+        strategy_version="v1",
+        strategy_definition_id="definition-1",
+        candidate_score=0.79,
+        direction="neutral",
+        action="enter_long",
+        typical_horizon="2w-3m",
+        core_signal_evidence={"event_context.event_volatility_matters": True},
+        missing_required_signals=[],
+        unsupported_missing_signal_families=[],
+        invalidators=["event reaction fails"],
+        risk_tags=[],
+        macro_compatibility="allowed",
+        selection_source="scanner",
+        manual_request_id=None,
+        selection_reason="event volatility setup",
+        rejection_reason=None,
+        benchmark_context={"primary_benchmark": "QQQ"},
+        decision_time=now,
+        available_for_decision_at=available_at,
+        source_record_refs_json=[],
+    )
+    classification = TradeClassificationRecord(
+        trade_classification_id="classification-vol-no-iv",
+        candidate_score_id="candidate-vol-no-iv",
+        strategy_run_id="run-1",
+        ticker="NVDA",
+        selected_strategy_id="strong_theme_no_clear_near_term_entry_v1",
+        selected_strategy_version="v1",
+        expression_bucket_id="volatility_event_option",
+        expression_bucket_version="v1",
+        trade_identity="tactical_option_trade",
+        watch_type=None,
+        direction="neutral",
+        intended_horizon="2w-3m",
+        exit_policy="strategy_invalidators_or_target_horizon",
+        result_status="actionable_trade",
+        classification_reason="event volatility expression selected",
+        selected_strategy_context_json={
+            "selected_expression_bucket_id": "volatility_event_option",
+            "fallback_expression_bucket_ids": ["long_stock"],
+        },
+        decision_time=now,
+    )
+
+    def runner(prompt: str, model_name: str):
+        return {
+            "content": {
+                "ticker": "NVDA",
+                "decision": "open_option_strategy",
+                "strategy_id": "strong_theme_no_clear_near_term_entry_v1",
+                "expression_bucket_id": "volatility_event_option",
+                "trade_identity": "tactical_option_trade",
+                "instrument_type": "option",
+                "selection_source": "scanner",
+                "manual_request_id": None,
+                "confidence": 0.7,
+                "confidence_basis": {},
+                "benchmark_context": {"primary_benchmark": "QQQ"},
+                "target_weight": 0.02,
+                "max_loss_pct": 0.02,
+                "time_horizon": "1w-2w",
+                "entry_plan": "buy event volatility expression",
+                "exit_plan": "event_exit_after_reaction",
+                "thesis": "Event volatility is the preferred expression.",
+                "key_drivers": ["event_volatility_setup"],
+                "counterarguments": [],
+                "risk_checks": ["defined_max_loss"],
+                "invalidators": ["event reaction fails"],
+                "learning_factors_used": [],
+                "schema_version": "v1",
+                "generated_at": "2026-06-01T12:00:00+00:00",
+            },
+            "usage": {
+                "provider": "openai",
+                "model": model_name,
+                "prompt_tokens": 12,
+                "completion_tokens": 20,
+                "total_tokens": 32,
+                "estimated_cost": 0.002,
+                "latency_ms": 75,
+            },
+        }
+
+    decision = TradingDecisionPipeline(
+        repository=repository,
+        source_repository=source_repository,
+        prompt_registry=registry,
+        manual_request_service=None,
+        model_name="gpt-5-mini",
+        agent_runner=runner,
+    ).run(
+        candidates=(candidate,),
+        classifications=(classification,),
+        risk_decisions=(),
+        decision_time=now,
+    ).decisions[0]
+
+    payload = decision.metadata_json["option_strategy"]
+    assert payload["status"] == "rejected"
+    assert payload["rejection_reason"] == "iv_data_required"
+    assert payload["metadata_json"]["iv_context"]["mode"] == "rejected_missing_implied_volatility"
+    assert payload["metadata_json"]["iv_context"]["iv_required"] is True
+
+
+def test_trading_decision_pipeline_prefers_higher_vega_event_contracts_for_volatility_expression(tmp_path):
+    now = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+    available_at = datetime(2026, 6, 1, 10, 0, tzinfo=timezone.utc)
+    registry = _write_prompt(tmp_path)
+    repository = InMemoryTradingRepository()
+    source_repository = InMemorySignalSourceRepository(
+        (
+            SourceRecord(
+                ticker="NVDA",
+                source_family="option_chain",
+                source="fixture",
+                source_table="option_chain_snapshots",
+                source_record_id="chain-vol-high-vega",
+                event_time=available_at,
+                published_at=available_at,
+                ingested_at=available_at,
+                available_for_decision_at=available_at,
+                payload={
+                    "contracts": [
+                        {
+                            "contract_symbol": "NVDA260608C00123000",
+                            "option_type": "call",
+                            "strike": 123.0,
+                            "expiry": "2026-06-08",
+                            "dte": 7,
+                            "delta": 0.26,
+                            "gamma": 0.03,
+                            "theta": -0.01,
+                            "vega": 0.08,
+                            "implied_volatility": 0.35,
+                            "iv_rank": 0.32,
+                            "bid": 1.4,
+                            "ask": 1.6,
+                            "mid": 1.5,
+                            "chosen_price": 1.5,
+                            "open_interest": 1200,
+                            "volume": 95,
+                        },
+                        {
+                            "contract_symbol": "NVDA260608P00114000",
+                            "option_type": "put",
+                            "strike": 114.0,
+                            "expiry": "2026-06-08",
+                            "dte": 7,
+                            "delta": -0.14,
+                            "gamma": 0.02,
+                            "theta": -0.01,
+                            "vega": 0.07,
+                            "implied_volatility": 0.34,
+                            "iv_rank": 0.3,
+                            "bid": 1.4,
+                            "ask": 1.6,
+                            "mid": 1.5,
+                            "chosen_price": 1.5,
+                            "open_interest": 1300,
+                            "volume": 102,
+                        },
+                        {
+                            "contract_symbol": "NVDA260608C00124000",
+                            "option_type": "call",
+                            "strike": 124.0,
+                            "expiry": "2026-06-08",
+                            "dte": 7,
+                            "delta": 0.24,
+                            "gamma": 0.05,
+                            "theta": -0.02,
+                            "vega": 0.22,
+                            "implied_volatility": 0.72,
+                            "iv_rank": 0.71,
+                            "bid": 1.7,
+                            "ask": 1.9,
+                            "mid": 1.8,
+                            "chosen_price": 1.8,
+                            "open_interest": 2100,
+                            "volume": 180,
+                        },
+                        {
+                            "contract_symbol": "NVDA260608P00113000",
+                            "option_type": "put",
+                            "strike": 113.0,
+                            "expiry": "2026-06-08",
+                            "dte": 7,
+                            "delta": -0.12,
+                            "gamma": 0.04,
+                            "theta": -0.02,
+                            "vega": 0.2,
+                            "implied_volatility": 0.7,
+                            "iv_rank": 0.68,
+                            "bid": 1.7,
+                            "ask": 1.9,
+                            "mid": 1.8,
+                            "chosen_price": 1.8,
+                            "open_interest": 2400,
+                            "volume": 205,
+                        },
+                    ]
+                },
+            ),
+        )
+    )
+    repository.save_signal_snapshot(
+        _snapshot(
+            now,
+            signal_json={
+                "technical": {"rs_vs_spy_1d": 0.02, "relative_volume": 1.8, "last_price": 118.0},
+                "fundamental": {"quality_score": 0.91},
+                "events_news": {
+                    "catalyst_quality_score": 0.88,
+                    "own_earnings_event_type": "earnings",
+                },
+            },
+        )
+    )
+    repository.save_strategy_definition(
+        _expression_definition(
+            "volatility_event_option",
+            trade_identity="tactical_option_trade",
+            allowed_instruments=("paper_option_strategy",),
+            allowed_option_strategy_types=("long_strangle",),
+        )
+    )
+
+    candidate = CandidateScoreRecord(
+        candidate_score_id="candidate-vol-high-vega",
+        strategy_run_id="run-1",
+        signal_snapshot_id="snapshot-1",
+        ticker="NVDA",
+        strategy_id="strong_theme_no_clear_near_term_entry_v1",
+        strategy_version="v1",
+        strategy_definition_id="definition-1",
+        candidate_score=0.79,
+        direction="neutral",
+        action="enter_long",
+        typical_horizon="2w-3m",
+        core_signal_evidence={"event_context.event_volatility_matters": True},
+        missing_required_signals=[],
+        unsupported_missing_signal_families=[],
+        invalidators=["event reaction fails"],
+        risk_tags=[],
+        macro_compatibility="allowed",
+        selection_source="scanner",
+        manual_request_id=None,
+        selection_reason="event volatility setup",
+        rejection_reason=None,
+        benchmark_context={"primary_benchmark": "QQQ"},
+        decision_time=now,
+        available_for_decision_at=available_at,
+        source_record_refs_json=[],
+    )
+    classification = TradeClassificationRecord(
+        trade_classification_id="classification-vol-high-vega",
+        candidate_score_id="candidate-vol-high-vega",
+        strategy_run_id="run-1",
+        ticker="NVDA",
+        selected_strategy_id="strong_theme_no_clear_near_term_entry_v1",
+        selected_strategy_version="v1",
+        expression_bucket_id="volatility_event_option",
+        expression_bucket_version="v1",
+        trade_identity="tactical_option_trade",
+        watch_type=None,
+        direction="neutral",
+        intended_horizon="2w-3m",
+        exit_policy="strategy_invalidators_or_target_horizon",
+        result_status="actionable_trade",
+        classification_reason="event volatility expression selected",
+        selected_strategy_context_json={
+            "selected_expression_bucket_id": "volatility_event_option",
+            "fallback_expression_bucket_ids": [],
+        },
+        decision_time=now,
+    )
+
+    def runner(prompt: str, model_name: str):
+        return {
+            "content": {
+                "ticker": "NVDA",
+                "decision": "open_option_strategy",
+                "strategy_id": "strong_theme_no_clear_near_term_entry_v1",
+                "expression_bucket_id": "volatility_event_option",
+                "trade_identity": "tactical_option_trade",
+                "instrument_type": "option",
+                "selection_source": "scanner",
+                "manual_request_id": None,
+                "confidence": 0.7,
+                "confidence_basis": {},
+                "benchmark_context": {"primary_benchmark": "QQQ"},
+                "target_weight": 0.02,
+                "max_loss_pct": 0.02,
+                "time_horizon": "1w-2w",
+                "entry_plan": "buy event volatility expression",
+                "exit_plan": "event_exit_after_reaction",
+                "thesis": "Event volatility is the preferred expression.",
+                "key_drivers": ["event_volatility_setup"],
+                "counterarguments": [],
+                "risk_checks": ["defined_max_loss"],
+                "invalidators": ["event reaction fails"],
+                "learning_factors_used": [],
+                "schema_version": "v1",
+                "generated_at": "2026-06-01T12:00:00+00:00",
+            },
+            "usage": {
+                "provider": "openai",
+                "model": model_name,
+                "prompt_tokens": 12,
+                "completion_tokens": 20,
+                "total_tokens": 32,
+                "estimated_cost": 0.002,
+                "latency_ms": 75,
+            },
+        }
+
+    decision = TradingDecisionPipeline(
+        repository=repository,
+        source_repository=source_repository,
+        prompt_registry=registry,
+        manual_request_service=None,
+        model_name="gpt-5-mini",
+        agent_runner=runner,
+    ).run(
+        candidates=(candidate,),
+        classifications=(classification,),
+        risk_decisions=(),
+        decision_time=now,
+    ).decisions[0]
+
+    legs = decision.metadata_json["option_strategy"]["metadata_json"]["legs"]
+    assert [leg["strike"] for leg in legs] == [124.0, 113.0]
+    assert [leg["implied_volatility"] for leg in legs] == [0.72, 0.7]
+
+
 def test_trading_decision_pipeline_builds_readable_news_evidence_items_for_llm_input(tmp_path):
     previous_scan = datetime(2026, 6, 3, 12, 0, tzinfo=timezone.utc)
     now = datetime(2026, 6, 5, 12, 0, tzinfo=timezone.utc)

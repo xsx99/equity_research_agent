@@ -6,7 +6,7 @@ from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any
 
-from src.db.models.trading import UniverseFilterConfig, UniverseSnapshot, UniverseSymbol
+from src.db.models.trading import OptionStrategyLeg, UniverseFilterConfig, UniverseSnapshot, UniverseSymbol
 from src.trading.data_sources.universe import UniverseAsset, UniverseFilterConfig as UniverseFilterConfigRecord
 from src.trading.data_sources.universe import UniverseSnapshotResult, UniverseSymbolDecision
 from src.trading.brokers.paper_option import PaperOptionExecutionRecord, PaperOptionOrderRecord, PaperOptionPosition
@@ -426,6 +426,7 @@ def test_sqlalchemy_repository_persists_pr7_option_artifacts():
                 mid=1.5,
                 chosen_price=1.5,
                 created_at=now,
+                implied_volatility=0.34,
             ),
         )
     )
@@ -523,6 +524,9 @@ def test_sqlalchemy_repository_persists_pr7_option_artifacts():
 
     assert repository.has_paper_option_execution("option-execution-1") is True
     assert repository.load_paper_option_positions()[0].ticker == "NVDA"
+    persisted_leg = session.query(OptionStrategyLeg).one_or_none()
+    assert persisted_leg is not None
+    assert persisted_leg.implied_volatility == Decimal("0.34")
 
 
 class _BrokerStub:

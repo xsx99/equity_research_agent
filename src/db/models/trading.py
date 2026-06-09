@@ -1802,6 +1802,7 @@ class OptionStrategyLeg(Base):
     gamma = Column(Numeric, nullable=False)
     theta = Column(Numeric, nullable=False)
     vega = Column(Numeric, nullable=False)
+    implied_volatility = Column(Numeric, nullable=True)
     iv_rank = Column(Numeric, nullable=True)
     bid = Column(Numeric, nullable=False)
     ask = Column(Numeric, nullable=False)

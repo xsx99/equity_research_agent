@@ -34,6 +34,7 @@ class OptionLegDefinition:
     ask: float
     mid: float
     chosen_price: float
+    implied_volatility: float | None = None
 
 
 @dataclass(frozen=True)
@@ -127,6 +128,7 @@ class OptionStrategyLegRecord:
     mid: float
     chosen_price: float
     created_at: datetime
+    implied_volatility: float | None = None
 
 
 class OptionsStrategyLayer:
@@ -226,6 +228,11 @@ class OptionsStrategyLayer:
                     mid=float(payload["mid"]),
                     chosen_price=float(payload["chosen_price"]),
                     created_at=decision.created_at,
+                    implied_volatility=(
+                        float(payload["implied_volatility"])
+                        if payload.get("implied_volatility") is not None
+                        else None
+                    ),
                 )
             )
         return tuple(records)
@@ -285,6 +292,7 @@ def _serialize_leg(leg: OptionLegDefinition) -> dict[str, Any]:
         "gamma": leg.gamma,
         "theta": leg.theta,
         "vega": leg.vega,
+        "implied_volatility": leg.implied_volatility,
         "iv_rank": leg.iv_rank,
         "bid": leg.bid,
         "ask": leg.ask,
