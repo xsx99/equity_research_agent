@@ -670,6 +670,34 @@ class SQLAlchemyTradingRepository:
             row.decision_time = classification.decision_time
         self.session.flush()
 
+    def load_trade_classification(self, trade_classification_id: str | None) -> TradeClassificationRecord | None:
+        if trade_classification_id is None:
+            return None
+        row = self.session.query(TradeClassification).filter_by(
+            trade_classification_id=_to_uuid(trade_classification_id)
+        ).one_or_none()
+        if row is None:
+            return None
+        return TradeClassificationRecord(
+            trade_classification_id=str(row.trade_classification_id),
+            candidate_score_id=str(row.candidate_score_id),
+            strategy_run_id=str(row.strategy_run_id),
+            ticker=row.ticker,
+            selected_strategy_id=row.selected_strategy_id,
+            selected_strategy_version=row.selected_strategy_version,
+            expression_bucket_id=row.expression_bucket_id,
+            expression_bucket_version=row.expression_bucket_version,
+            trade_identity=row.trade_identity,
+            watch_type=row.watch_type,
+            direction=row.direction,
+            intended_horizon=row.intended_horizon,
+            exit_policy=row.exit_policy,
+            result_status=row.result_status,
+            classification_reason=row.classification_reason,
+            selected_strategy_context_json=dict(row.selected_strategy_context_json or {}),
+            decision_time=row.decision_time,
+        )
+
     def save_position_sizing_decision(self, decision: Any) -> None:
         row = self.session.query(PositionSizingDecision).filter_by(
             position_sizing_decision_id=_to_uuid(decision.position_sizing_decision_id)

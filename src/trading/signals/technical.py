@@ -62,6 +62,7 @@ def build_technical_signals(records: list[SourceRecord] | tuple[SourceRecord, ..
     latest_volume = volumes[-1] if volumes else None
     return_1d = _return_over(closes, 1)
     values: dict[str, Any] = {
+        "last_price": latest_close,
         "return_1d": return_1d,
         "return_5d": _return_over(closes, 5),
         "return_10d": _return_over(closes, 10),

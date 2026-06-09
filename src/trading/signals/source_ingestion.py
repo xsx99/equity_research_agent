@@ -140,6 +140,7 @@ class SourceIngestionService:
         bars_policy = self._policy("market_bars", "technical", recorder)
         context_policy = self._policy("market_context", "fundamental", recorder)
         news_policy = self._policy("news", "events_news", recorder)
+        option_chain_policy = self._policy("option_chain", "option_chain", recorder)
         source_records: list[SourceRecord] = []
         fundamental_snapshots: list[FundamentalSnapshotRecord] = []
         event_news_items: list[EventNewsItemRecord] = []
@@ -166,6 +167,13 @@ class SourceIngestionService:
                     if snapshot is not None:
                         fundamental_snapshots.append(snapshot)
                         source_records.append(source_record_from_fundamental_snapshot(snapshot))
+                except Exception as exc:
+                    errors.append(exc)
+            if "option_chain" in families:
+                try:
+                    option_chain_record = self._refresh_option_chain(ticker, as_of, option_chain_policy)
+                    if option_chain_record is not None:
+                        source_records.append(option_chain_record)
                 except Exception as exc:
                     errors.append(exc)
             if "events_news" in families and self.news_provider is not None:
@@ -311,6 +319,34 @@ class SourceIngestionService:
             available_for_decision_at=as_of,
             raw_payload_ref=None,
             normalized_metrics_json=metrics,
+        )
+
+    def _refresh_option_chain(
+        self,
+        ticker: str,
+        as_of: datetime,
+        policy: ProviderResiliencePolicy,
+    ) -> SourceRecord | None:
+        fetch_option_chain = getattr(self.market_provider, "fetch_option_chain", None)
+        if fetch_option_chain is None:
+            return None
+        contracts = policy.execute(ticker, lambda: fetch_option_chain(ticker))
+        if not isinstance(contracts, list):
+            return None
+        normalized_contracts = [dict(contract) for contract in contracts if isinstance(contract, dict)]
+        if not normalized_contracts:
+            return None
+        return SourceRecord(
+            ticker=ticker,
+            source_family="option_chain",
+            source=self.provider_name,
+            source_table="option_chain_snapshots",
+            source_record_id=f"option_chain:{ticker}:{as_of.isoformat()}",
+            event_time=as_of,
+            published_at=as_of,
+            ingested_at=as_of,
+            available_for_decision_at=as_of,
+            payload={"contracts": normalized_contracts},
         )
 
     def _refresh_events_news(

@@ -1,8 +1,8 @@
 from datetime import datetime, timezone
 
 from src.trading.portfolio.intents import PortfolioIntentConfig
-from src.trading.strategies.selector import SelectedTradeRecord
-from src.trading.strategies.matching import CandidateScoreRecord
+from src.trading.strategies.selector import SelectedTradeRecord, advance_selected_trade_expression
+from src.trading.strategies.matching import CandidateScoreRecord, StrategyDefinitionRecord
 from src.trading.strategies.classifier import TradeClassifier
 
 
@@ -48,17 +48,51 @@ def _candidate(
 
 
 def _selected(candidate: CandidateScoreRecord, expression_bucket_id: str = "long_stock") -> SelectedTradeRecord:
+    if expression_bucket_id == "core_stock_accumulation":
+        default_trade_identity = "core_holding"
+    elif expression_bucket_id in {
+        "defined_risk_directional_option",
+        "defined_risk_income_spread",
+        "volatility_event_option",
+    }:
+        default_trade_identity = "tactical_option_trade"
+    else:
+        default_trade_identity = "tactical_stock_trade"
     return SelectedTradeRecord(
         candidate=candidate,
-        expression_bucket_id=expression_bucket_id,
-        expression_bucket_version="v1",
-        expression_bucket_config={
-            "default_trade_identity": "core_holding"
-            if expression_bucket_id == "core_stock_accumulation"
-            else "tactical_stock_trade",
+        selected_expression_bucket_id=expression_bucket_id,
+        selected_expression_bucket_version="v1",
+        selected_expression_bucket_config={
+            "default_trade_identity": default_trade_identity,
             "default_exit_policy": "strategy_invalidators_or_target_horizon",
         },
+        fallback_expression_bucket_ids=("defined_risk_directional_option",)
+        if expression_bucket_id == "long_stock"
+        else ("long_stock",),
+        expression_selection_context={
+            "selected_expression_bucket_id": expression_bucket_id,
+            "fallback_expression_bucket_ids": ["defined_risk_directional_option"]
+            if expression_bucket_id == "long_stock"
+            else ["long_stock"],
+        },
         selection_context={"candidate_score_id": candidate.candidate_score_id},
+    )
+
+
+def _expression_definition(expression_bucket_id: str, trade_identity: str) -> StrategyDefinitionRecord:
+    return StrategyDefinitionRecord(
+        strategy_definition_id=f"{expression_bucket_id}-definition",
+        strategy_id=expression_bucket_id,
+        version="v1",
+        display_name=expression_bucket_id,
+        strategy_layer="expression_bucket",
+        typical_horizon="2w-3m",
+        config_json={
+            "default_trade_identity": trade_identity,
+            "default_exit_policy": "strategy_invalidators_or_target_horizon",
+        },
+        lifecycle_status="active",
+        is_active=True,
     )
 
 
@@ -70,6 +104,10 @@ def test_trade_classifier_assigns_tactical_stock_identity_for_actionable_long_st
     assert classification.result_status == "actionable_trade"
     assert classification.selected_strategy_id == "strong_theme_catalyst_continuation_v1"
     assert classification.expression_bucket_id == "long_stock"
+    assert classification.selected_strategy_context_json["selected_expression_bucket_id"] == "long_stock"
+    assert classification.selected_strategy_context_json["fallback_expression_bucket_ids"] == [
+        "defined_risk_directional_option"
+    ]
 
 
 def test_trade_classifier_requires_active_intent_for_core_holding_identity():
@@ -109,3 +147,20 @@ def test_trade_classifier_rejects_watch_candidate_inputs():
         assert str(exc) == "trade_classifier_requires_actionable_selected_trade"
     else:
         raise AssertionError("expected watch-path candidate to be rejected")
+
+
+def test_trade_classifier_can_reclassify_after_same_strategy_expression_fallback():
+    fallback_selected = advance_selected_trade_expression(
+        _selected(_candidate(), expression_bucket_id="defined_risk_directional_option"),
+        [
+            _expression_definition("defined_risk_directional_option", "tactical_option_trade"),
+            _expression_definition("long_stock", "tactical_stock_trade"),
+        ],
+    )
+
+    assert fallback_selected is not None
+    classification = TradeClassifier().classify(fallback_selected)
+
+    assert classification.trade_identity == "tactical_stock_trade"
+    assert classification.expression_bucket_id == "long_stock"
+    assert classification.selected_strategy_context_json["selected_expression_bucket_id"] == "long_stock"

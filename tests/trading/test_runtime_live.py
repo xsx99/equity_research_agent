@@ -13,6 +13,7 @@ from src.trading.runtime.preopen import (
     LivePreopenRuntime,
     run_live_preopen_once,
 )
+from src.trading.runtime.preopen_dependencies import build_live_preopen_dependencies
 from src.trading.runtime.support import (
     build_execution_report,
     build_runtime_report,
@@ -235,6 +236,91 @@ def test_run_live_preopen_once_builds_default_dependencies_when_not_injected(mon
 
     assert result["status"] == "passed"
     assert result["execution"]["mode"] == "dry_run"
+
+
+def test_build_live_preopen_dependencies_wires_fallback_reapproval_into_paper_execution(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class _Repo:
+        pass
+
+    class _SourceRepo:
+        pass
+
+    class _ManualService:
+        pass
+
+    class _Broker:
+        pass
+
+    class _ConfigResolver:
+        pass
+
+    class _PositionSizer:
+        pass
+
+    class _RiskManager:
+        pass
+
+    class _OptionRiskManager:
+        pass
+
+    class _PromptRegistry:
+        @staticmethod
+        def get_default():
+            return "prompt-registry"
+
+    class _SignalPipeline:
+        def __init__(self, **kwargs):
+            captured["signal_pipeline_kwargs"] = kwargs
+
+    class _StrategyPipeline:
+        def __init__(self, **kwargs):
+            captured["strategy_pipeline_kwargs"] = kwargs
+
+    class _PortfolioSyncWorkflow:
+        def __init__(self, **kwargs):
+            captured["portfolio_sync_kwargs"] = kwargs
+
+    class _TradingDecisionPipeline:
+        def __init__(self, **kwargs):
+            captured["trading_decision_kwargs"] = kwargs
+
+    class _PaperExecutionWorkflow:
+        def __init__(self, **kwargs):
+            captured["paper_execution_kwargs"] = kwargs
+
+    monkeypatch.setattr("src.trading.runtime.preopen_dependencies.seed_initial_strategy_definitions", lambda repo: captured.setdefault("seed_repo", repo))
+    monkeypatch.setattr("src.trading.runtime.preopen_dependencies.build_default_news_provider", lambda: "news-provider")
+    monkeypatch.setattr("src.trading.runtime.preopen_dependencies.app_config.TRADING_MODEL_NAME", "gpt-5-mini")
+    monkeypatch.setattr("src.agents.prompt_registry.PromptRegistry", _PromptRegistry)
+    monkeypatch.setattr("src.agents.trading._default_agent_runner", "runner")
+    monkeypatch.setattr("src.providers.market_data.AlpacaMarketDataProvider", lambda: "market-provider")
+    monkeypatch.setattr("src.trading.brokers.paper_stock.PaperStockBroker", lambda: _Broker())
+    monkeypatch.setattr("src.trading.data_sources.live_universe.LiveUniverseProvider", lambda **kwargs: ("live-universe-provider", kwargs))
+    monkeypatch.setattr("src.trading.manual_review.sqlalchemy.SQLAlchemyManualTickerRequestService", lambda session: _ManualService())
+    monkeypatch.setattr("src.trading.repositories.source_sqlalchemy.SQLAlchemySignalSourceRepository", lambda session: _SourceRepo())
+    monkeypatch.setattr("src.trading.repositories.sqlalchemy.SqlAlchemyTradingRepository", lambda session: _Repo())
+    monkeypatch.setattr("src.trading.risk.config.RiskConfigResolver", lambda: _ConfigResolver())
+    monkeypatch.setattr("src.trading.risk.sizing.PositionSizer", lambda: _PositionSizer())
+    monkeypatch.setattr("src.trading.risk.manager.RiskManager", lambda: _RiskManager())
+    monkeypatch.setattr("src.trading.risk.options.OptionRiskManager", lambda: _OptionRiskManager())
+    monkeypatch.setattr("src.trading.signals.source_ingestion.SourceIngestionService", lambda **kwargs: ("signal-ingestion", kwargs))
+    monkeypatch.setattr("src.trading.workflows.signal_snapshot.SignalPipeline", _SignalPipeline)
+    monkeypatch.setattr("src.trading.workflows.strategy_scoring.StrategyPipeline", _StrategyPipeline)
+    monkeypatch.setattr("src.trading.workflows.portfolio_sync.BrokerPortfolioSyncWorkflow", _PortfolioSyncWorkflow)
+    monkeypatch.setattr("src.trading.workflows.trading_decision.TradingDecisionPipeline", _TradingDecisionPipeline)
+    monkeypatch.setattr("src.trading.workflows.paper_execution.PaperExecutionWorkflow", _PaperExecutionWorkflow)
+
+    dependencies = build_live_preopen_dependencies(session=object())
+
+    assert isinstance(dependencies, LivePreopenDependencies)
+    assert captured["seed_repo"].__class__ is _Repo
+    assert captured["trading_decision_kwargs"]["source_repository"].__class__ is _SourceRepo
+    assert captured["paper_execution_kwargs"]["config_resolver"].__class__ is _ConfigResolver
+    assert captured["paper_execution_kwargs"]["position_sizer"].__class__ is _PositionSizer
+    assert captured["paper_execution_kwargs"]["risk_manager"].__class__ is _RiskManager
+    assert captured["paper_execution_kwargs"]["option_risk_manager"].__class__ is _OptionRiskManager
 
 
 def test_configured_live_universe_scan_pipeline_prefers_targeted_symbols_for_manual_scope():

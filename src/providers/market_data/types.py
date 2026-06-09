@@ -91,6 +91,9 @@ class MarketDataProvider(Protocol):
     def fetch_context(self, ticker: str) -> dict[str, Any]:
         """Return optional context fields such as sector and earnings distance."""
 
+    def fetch_option_chain(self, ticker: str) -> list[dict[str, Any]]:
+        """Return normalized option-chain contracts for the underlying symbol."""
+
 
 class UniverseDataProvider(Protocol):
     """Contract for market providers that can list tradable assets."""

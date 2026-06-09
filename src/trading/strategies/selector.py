@@ -13,14 +13,37 @@ class SelectedTradeRecord:
     """Selected trade-path strategy plus frozen expression context."""
 
     candidate: CandidateScoreRecord
-    expression_bucket_id: str
-    expression_bucket_version: str
-    expression_bucket_config: dict[str, Any]
+    selected_expression_bucket_id: str
+    selected_expression_bucket_version: str
+    selected_expression_bucket_config: dict[str, Any]
+    fallback_expression_bucket_ids: tuple[str, ...]
+    expression_selection_context: dict[str, Any]
     selection_context: dict[str, Any]
 
     @property
     def strategy_id(self) -> str:
         return self.candidate.strategy_id
+
+    @property
+    def expression_bucket_id(self) -> str:
+        return self.selected_expression_bucket_id
+
+    @property
+    def expression_bucket_version(self) -> str:
+        return self.selected_expression_bucket_version
+
+    @property
+    def expression_bucket_config(self) -> dict[str, Any]:
+        return self.selected_expression_bucket_config
+
+
+@dataclass(frozen=True)
+class ExpressionSelectionPlan:
+    """Concrete expression choice and ordered same-strategy fallbacks."""
+
+    selected_expression: StrategyDefinitionRecord
+    fallback_expressions: tuple[StrategyDefinitionRecord, ...]
+    context: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -49,8 +72,89 @@ class PrimarySelectionResult:
 SelectedStrategyRecord = SelectedTradeRecord
 
 
+def advance_selected_trade_expression(
+    selected_trade: SelectedTradeRecord,
+    expression_definitions: Iterable[StrategyDefinitionRecord],
+) -> SelectedTradeRecord | None:
+    """Advance to the next persisted same-strategy fallback expression, if any."""
+    remaining_ids = list(selected_trade.fallback_expression_bucket_ids)
+    if not remaining_ids:
+        return None
+    expressions = {
+        definition.strategy_id: definition
+        for definition in expression_definitions
+        if definition.strategy_layer == "expression_bucket" and definition.is_active
+    }
+    while remaining_ids:
+        next_id = remaining_ids.pop(0)
+        next_expression = expressions.get(next_id)
+        if next_expression is None:
+            continue
+        return SelectedTradeRecord(
+            candidate=selected_trade.candidate,
+            selected_expression_bucket_id=next_expression.strategy_id,
+            selected_expression_bucket_version=next_expression.version,
+            selected_expression_bucket_config=dict(next_expression.config_json),
+            fallback_expression_bucket_ids=tuple(remaining_ids),
+            expression_selection_context={
+                **selected_trade.expression_selection_context,
+                "selected_expression_bucket_id": next_expression.strategy_id,
+                "fallback_expression_bucket_ids": list(remaining_ids),
+                "advanced_from_expression_bucket_id": selected_trade.selected_expression_bucket_id,
+            },
+            selection_context=dict(selected_trade.selection_context),
+        )
+    return None
+
+
+class ExpressionSelector:
+    """Rank allowed expression buckets for a chosen tactical strategy."""
+
+    def select(
+        self,
+        candidate: CandidateScoreRecord,
+        strategy_definition: StrategyDefinitionRecord | None,
+        expressions: dict[str, StrategyDefinitionRecord],
+    ) -> ExpressionSelectionPlan | None:
+        if strategy_definition is None:
+            return None
+        allowed_bucket_ids = _allowed_expression_bucket_ids(strategy_definition)
+        if not allowed_bucket_ids:
+            return None
+        ranked = _rank_allowed_expressions(candidate, allowed_bucket_ids, expressions)
+        if not ranked:
+            return None
+        selected_expression, selected_score, selected_reason = ranked[0]
+        fallback_expressions = tuple(expression for expression, _, _ in ranked[1:])
+        ranking_reasons = {
+            expression.strategy_id: reason
+            for expression, _, reason in ranked
+        }
+        return ExpressionSelectionPlan(
+            selected_expression=selected_expression,
+            fallback_expressions=fallback_expressions,
+            context={
+                "selected_expression_bucket_id": selected_expression.strategy_id,
+                "fallback_expression_bucket_ids": tuple(
+                    expression.strategy_id for expression in fallback_expressions
+                ),
+                "allowed_expression_bucket_ids": allowed_bucket_ids,
+                "ranking_reasons": ranking_reasons,
+                "ranking_scores": {
+                    expression.strategy_id: score
+                    for expression, score, _ in ranked
+                },
+                "selected_score": selected_score,
+                "selected_reason": selected_reason,
+            },
+        )
+
+
 class PrimaryStrategySelector:
     """Choose trade-path selections and separate watch-path outcomes."""
+
+    def __init__(self, expression_selector: ExpressionSelector | None = None) -> None:
+        self.expression_selector = expression_selector or ExpressionSelector()
 
     def select(
         self,
@@ -73,28 +177,23 @@ class PrimaryStrategySelector:
         for group in _group_candidates(candidates).values():
             actionable = _choose_actionable(group)
             if actionable is not None:
-                expression = _choose_expression(
+                expression_plan = self.expression_selector.select(
                     actionable,
                     tactical_definitions.get(actionable.strategy_id),
                     expressions,
                 )
-                if expression is not None:
-                    if _expression_is_deferred_option_path(expression):
-                        watch_candidates.append(
-                            _watch_candidate_for_candidate(
-                                actionable,
-                                watch_reason="eligible option expression is deferred until option-chain data is available",
-                                result_status="ordinary_watch",
-                                watch_type="ordinary_watch",
-                            )
-                        )
-                        continue
+                if expression_plan is not None:
                     selected_trades.append(
                         SelectedTradeRecord(
                             candidate=actionable,
-                            expression_bucket_id=expression.strategy_id,
-                            expression_bucket_version=expression.version,
-                            expression_bucket_config=dict(expression.config_json),
+                            selected_expression_bucket_id=expression_plan.selected_expression.strategy_id,
+                            selected_expression_bucket_version=expression_plan.selected_expression.version,
+                            selected_expression_bucket_config=dict(expression_plan.selected_expression.config_json),
+                            fallback_expression_bucket_ids=tuple(
+                                expression.strategy_id
+                                for expression in expression_plan.fallback_expressions
+                            ),
+                            expression_selection_context=dict(expression_plan.context),
                             selection_context=_selection_context(actionable),
                         )
                     )
@@ -163,11 +262,10 @@ def _choose_expression(
     strategy_definition: StrategyDefinitionRecord | None,
     expressions: dict[str, StrategyDefinitionRecord],
 ) -> StrategyDefinitionRecord | None:
+    del candidate
     if strategy_definition is None:
         return None
-    selection_policy = dict(strategy_definition.config_json.get("selection_policy") or {})
-    bucket_ids = tuple(selection_policy.get("eligible_expression_bucket_ids") or ())
-    for bucket_id in bucket_ids:
+    for bucket_id in _allowed_expression_bucket_ids(strategy_definition):
         expression = expressions.get(str(bucket_id))
         if expression is not None:
             return expression
@@ -192,10 +290,6 @@ def _watch_candidate_for_candidate(
         watch_reason=watch_reason if watch_reason is not None else resolved_reason,
         selection_context=_selection_context(candidate),
     )
-
-
-def _expression_is_deferred_option_path(expression: StrategyDefinitionRecord) -> bool:
-    return str(expression.config_json.get("default_trade_identity") or "") == "tactical_option_trade"
 
 
 def _watch_state_for_candidate(candidate: CandidateScoreRecord) -> tuple[str | None, str, str]:
@@ -238,3 +332,81 @@ def _has_high_move_potential(candidate: CandidateScoreRecord) -> bool:
         and float(high_signal_count) >= 1
         and candidate.candidate_score >= 0.55
     )
+
+
+def _allowed_expression_bucket_ids(strategy_definition: StrategyDefinitionRecord) -> tuple[str, ...]:
+    selection_policy = dict(strategy_definition.config_json.get("selection_policy") or {})
+    bucket_ids = tuple(selection_policy.get("allowed_expression_bucket_ids") or ())
+    if bucket_ids:
+        return bucket_ids
+    return tuple(selection_policy.get("eligible_expression_bucket_ids") or ())
+
+
+def _rank_allowed_expressions(
+    candidate: CandidateScoreRecord,
+    allowed_bucket_ids: tuple[str, ...],
+    expressions: dict[str, StrategyDefinitionRecord],
+) -> list[tuple[StrategyDefinitionRecord, int, str]]:
+    ranked: list[tuple[StrategyDefinitionRecord, int, str]] = []
+    for index, bucket_id in enumerate(allowed_bucket_ids):
+        expression = expressions.get(str(bucket_id))
+        if expression is None:
+            continue
+        score, reason = _expression_rank(candidate, expression)
+        ranked.append((expression, score * 100 - index, reason))
+    ranked.sort(key=lambda item: item[1], reverse=True)
+    return ranked
+
+
+def _expression_rank(
+    candidate: CandidateScoreRecord,
+    expression: StrategyDefinitionRecord,
+) -> tuple[int, str]:
+    evidence = candidate.core_signal_evidence
+    suitability = dict(expression.config_json.get("suitability") or {})
+    stock_entry_clean = _evidence_bool(evidence.get("entry_signal.stock_entry_clean"))
+    directional_clarity = _evidence_bool(evidence.get("signal_direction.directional_clarity"))
+    defined_risk_preferred = _evidence_bool(evidence.get("risk_shape.defined_risk_preferred"))
+    binary_event_in_horizon = _evidence_bool(evidence.get("event_context.binary_event_in_horizon"))
+    event_volatility_matters = _evidence_bool(evidence.get("event_context.event_volatility_matters"))
+
+    score = 0
+    reasons: list[str] = []
+    if suitability.get("prefers_stock_when_entry_clean"):
+        if stock_entry_clean:
+            score += 4
+            reasons.append("clean stock entry")
+        else:
+            score -= 2
+    if suitability.get("prefers_defined_risk") and defined_risk_preferred:
+        score += 3
+        reasons.append("defined risk preferred")
+    if suitability.get("requires_directional_clarity"):
+        if directional_clarity:
+            score += 2
+            reasons.append("directional clarity present")
+        else:
+            score -= 3
+    if suitability.get("prefers_event_volatility"):
+        if binary_event_in_horizon and event_volatility_matters:
+            score += 5
+            reasons.append("event volatility setup")
+        else:
+            score -= 1
+    if suitability.get("penalize_binary_event_through_horizon") and binary_event_in_horizon:
+        score -= 4
+    if expression.strategy_id == "long_stock" and not stock_entry_clean:
+        score -= 1
+    if expression.strategy_id == "volatility_event_option" and binary_event_in_horizon and event_volatility_matters:
+        score += 1
+    if not reasons:
+        reasons.append("declared order fallback")
+    return score, ", ".join(reasons)
+
+
+def _evidence_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return float(value) > 0
+    return bool(value)

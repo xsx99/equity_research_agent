@@ -7,7 +7,7 @@ from src.trading.manual_review.requests import ManualTickerRequestService
 from src.trading.brokers.paper_option import PaperOptionBroker
 from src.trading.brokers.paper_stock import PaperOrderRequest, PaperStockBroker
 from src.trading.repositories.in_memory import InMemoryTradingRepository
-from src.trading.risk import RiskDecisionRecord
+from src.trading.risk import OptionRiskAssessment, RiskDecisionRecord
 from src.trading.workflows.paper_execution import PaperExecutionWorkflow
 from src.trading.workflows.trading_decision import TradingDecisionRecord
 
@@ -317,3 +317,567 @@ def test_paper_execution_workflow_persists_option_artifacts_and_overlay():
     assert len(repository.paper_option_orders) == 1
     assert len(repository.paper_option_positions) == 1
     assert len(repository.option_risk_snapshots) == 1
+
+
+def test_paper_execution_workflow_falls_back_to_stock_when_option_expression_is_rejected():
+    now = datetime(2026, 6, 2, 16, 31, tzinfo=timezone.utc)
+    repository = InMemoryTradingRepository()
+    workflow = PaperExecutionWorkflow(
+        repository=repository,
+        broker=PaperStockBroker(api_key="key", secret_key="secret", client=_CapturingClient()),
+        option_broker=PaperOptionBroker(now=lambda: now),
+        manual_request_service=ManualTickerRequestService(now=lambda: now),
+    )
+    option_decision = TradingDecisionRecord(
+        trading_decision_id="option-decision-2",
+        candidate_score_id="candidate-2",
+        trade_classification_id="classification-2",
+        risk_decision_id="risk-1",
+        ticker="NVDA",
+        decision="open_option_strategy",
+        strategy_id="strong_theme_catalyst_continuation_v1",
+        strategy_version="v1",
+        expression_bucket_id="defined_risk_directional_option",
+        expression_bucket_version="v1",
+        trade_identity="tactical_option_trade",
+        instrument_type="option",
+        selection_source="scanner",
+        manual_request_id=None,
+        confidence=0.78,
+        target_weight=0.02,
+        approved_weight=0.02,
+        max_loss_pct=0.02,
+        time_horizon="1w-4w",
+        thesis="Option expression first, stock fallback if option plan fails.",
+        invalidators=["price confirmation fails"],
+        prompt_template=object(),
+        prompt_run=object(),
+        usage_events=[],
+        decision_time=now,
+        available_for_decision_at=now,
+        context_snapshot_json={
+            "candidate_context": {
+                "strategy_run_id": "run-2",
+                "direction": "bullish",
+            },
+            "classification_context": {
+                "expression_fallback_plan": [
+                    {
+                        "expression_bucket_id": "defined_risk_directional_option",
+                        "expression_bucket_version": "v1",
+                        "trade_identity": "tactical_option_trade",
+                        "instrument_type": "option",
+                        "decision_action": "open_option_strategy",
+                        "rank": 0,
+                        "is_selected": True,
+                    },
+                    {
+                        "expression_bucket_id": "long_stock",
+                        "expression_bucket_version": "v1",
+                        "trade_identity": "tactical_stock_trade",
+                        "instrument_type": "stock",
+                        "decision_action": "enter_long",
+                        "rank": 1,
+                        "is_selected": False,
+                    },
+                ]
+            }
+        },
+        metadata_json={
+            "paper_trade_authorized": True,
+            "option_strategy": {
+                "option_strategy_decision_id": "option-strategy-2",
+                "option_strategy_type": "long_call",
+                "status": "rejected",
+                "rejection_reason": "missing_option_chain",
+                "underlying_price": 118.0,
+                "net_debit_or_credit": 2.2,
+                "max_loss": 220.0,
+                "max_profit": None,
+                "breakevens": [120.2],
+                "margin_requirement": 220.0,
+                "buying_power_effect": 220.0,
+                "assignment_notional": 0.0,
+                "portfolio_delta": 0.32,
+                "portfolio_gamma": 0.04,
+                "portfolio_theta": -0.03,
+                "portfolio_vega": 0.12,
+                "event_through_expiry": True,
+                "strategy_pairing_method": "single_leg",
+                "assignment_plan": None,
+            },
+        },
+    )
+    risk = _risk_decision(approved_quantity=1)
+
+    result = workflow.run(
+        trading_decisions=(option_decision,),
+        risk_decisions=(risk,),
+        trade_date=now,
+    )
+
+    assert len(result.paper_orders) == 1
+    assert len(repository.paper_orders) == 1
+    assert repository.paper_orders[0].ticker == "NVDA"
+    assert len(repository.paper_option_orders) == 0
+    assert len(repository.option_strategy_decisions) == 1
+    assert repository.option_strategy_decisions[0].status == "rejected"
+    assert len(repository.trade_classifications) == 1
+    assert repository.trade_classifications[0].trade_identity == "tactical_stock_trade"
+    assert repository.trade_classifications[0].expression_bucket_id == "long_stock"
+    assert len(repository.trading_decisions) == 1
+    assert repository.trading_decisions[0].trade_identity == "tactical_stock_trade"
+    assert repository.trading_decisions[0].instrument_type == "stock"
+    assert repository.paper_orders[0].trading_decision_id == repository.trading_decisions[0].trading_decision_id
+
+
+def test_paper_execution_workflow_reapproves_stock_fallback_before_submitting_order():
+    now = datetime(2026, 6, 2, 16, 31, tzinfo=timezone.utc)
+    repository = InMemoryTradingRepository()
+    captured_requests: list[dict[str, Any]] = []
+
+    class _ConfigResolver:
+        def resolve(self, **kwargs):
+            return object()
+
+    class _PositionSizer:
+        def size_position(self, request, portfolio_context, config):
+            del portfolio_context, config
+            captured_requests.append(
+                {
+                    "instrument_type": request.instrument_type,
+                    "trade_identity": request.classification.trade_identity,
+                    "price": request.price,
+                }
+            )
+            return type(
+                "Sizing",
+                (),
+                {
+                    "position_sizing_decision_id": "fallback-sizing-1",
+                    "candidate_score_id": request.candidate.candidate_score_id,
+                    "trade_classification_id": request.classification.trade_classification_id,
+                    "ticker": request.candidate.ticker,
+                    "risk_appetite": "balanced",
+                    "base_weight": 0.03,
+                    "volatility_adjusted_weight": 0.03,
+                    "liquidity_capped_weight": 0.03,
+                    "final_weight": 0.03,
+                    "final_notional": 3000.0,
+                    "applied_caps": [],
+                    "binding_constraint": None,
+                    "decision_time": now,
+                    "metadata_json": {},
+                },
+            )()
+
+    class _RiskManager:
+        def evaluate(self, request, sizing, portfolio_context, config):
+            del sizing, portfolio_context, config
+            return RiskDecisionRecord(
+                risk_decision_id="fallback-risk-1",
+                candidate_score_id=request.candidate.candidate_score_id,
+                trade_classification_id=request.classification.trade_classification_id,
+                position_sizing_decision_id="fallback-sizing-1",
+                ticker="NVDA",
+                status="approved",
+                reason_code="fallback_within_limits",
+                approved_weight=0.03,
+                approved_notional=3000.0,
+                approved_quantity=3.0,
+                portfolio_risk_snapshot_id="portfolio-risk-fallback-1",
+                applied_rules=["fallback_stock_reapproval"],
+                generated_hedge_action=None,
+                decision_time=now,
+                metadata_json={},
+            )
+
+    workflow = PaperExecutionWorkflow(
+        repository=repository,
+        broker=PaperStockBroker(api_key="key", secret_key="secret", client=_CapturingClient()),
+        option_broker=PaperOptionBroker(now=lambda: now),
+        manual_request_service=ManualTickerRequestService(now=lambda: now),
+        config_resolver=_ConfigResolver(),
+        position_sizer=_PositionSizer(),
+        risk_manager=_RiskManager(),
+    )
+    option_decision = TradingDecisionRecord(
+        trading_decision_id="option-decision-3",
+        candidate_score_id="candidate-2",
+        trade_classification_id="classification-2",
+        risk_decision_id="risk-1",
+        ticker="NVDA",
+        decision="open_option_strategy",
+        strategy_id="strong_theme_catalyst_continuation_v1",
+        strategy_version="v1",
+        expression_bucket_id="defined_risk_directional_option",
+        expression_bucket_version="v1",
+        trade_identity="tactical_option_trade",
+        instrument_type="option",
+        selection_source="scanner",
+        manual_request_id=None,
+        confidence=0.78,
+        target_weight=0.02,
+        approved_weight=0.02,
+        max_loss_pct=0.02,
+        time_horizon="1w-4w",
+        thesis="Option expression first, stock fallback if option plan fails.",
+        invalidators=["price confirmation fails"],
+        prompt_template=object(),
+        prompt_run=object(),
+        usage_events=[],
+        decision_time=now,
+        available_for_decision_at=now,
+        context_snapshot_json={
+            "candidate_context": {"candidate_score": 0.78},
+            "classification_context": {
+                "expression_fallback_plan": [
+                    {
+                        "expression_bucket_id": "defined_risk_directional_option",
+                        "expression_bucket_version": "v1",
+                        "trade_identity": "tactical_option_trade",
+                        "instrument_type": "option",
+                        "decision_action": "open_option_strategy",
+                        "rank": 0,
+                        "is_selected": True,
+                    },
+                    {
+                        "expression_bucket_id": "long_stock",
+                        "expression_bucket_version": "v1",
+                        "trade_identity": "tactical_stock_trade",
+                        "instrument_type": "stock",
+                        "decision_action": "enter_long",
+                        "rank": 1,
+                        "is_selected": False,
+                    },
+                ]
+            },
+            "risk_context": {"approved_weight": 0.02},
+        },
+        metadata_json={
+            "paper_trade_authorized": True,
+            "option_strategy": {
+                "option_strategy_decision_id": "option-strategy-3",
+                "option_strategy_type": "long_call",
+                "status": "rejected",
+                "rejection_reason": "missing_option_chain",
+                "underlying_price": 118.0,
+                "net_debit_or_credit": 2.2,
+                "max_loss": 220.0,
+                "max_profit": None,
+                "breakevens": [120.2],
+                "margin_requirement": 220.0,
+                "buying_power_effect": 220.0,
+                "assignment_notional": 0.0,
+                "portfolio_delta": 0.32,
+                "portfolio_gamma": 0.04,
+                "portfolio_theta": -0.03,
+                "portfolio_vega": 0.12,
+                "event_through_expiry": True,
+                "strategy_pairing_method": "single_leg",
+                "assignment_plan": None,
+            },
+        },
+    )
+    risk = _risk_decision(approved_quantity=1)
+
+    workflow.run(
+        trading_decisions=(option_decision,),
+        risk_decisions=(risk,),
+        trade_date=now,
+    )
+
+    assert captured_requests == [
+        {
+            "instrument_type": "stock",
+            "trade_identity": "tactical_stock_trade",
+            "price": 118.0,
+        }
+    ]
+    assert len(repository.paper_orders) == 1
+    assert repository.paper_orders[0].quantity == 3.0
+    assert len(repository.risk_decisions) == 1
+    assert repository.risk_decisions[0].risk_decision_id == "fallback-risk-1"
+
+
+def test_paper_execution_workflow_reapproves_option_fallback_before_submitting_option_order():
+    now = datetime(2026, 6, 2, 16, 31, tzinfo=timezone.utc)
+    repository = InMemoryTradingRepository()
+    captured_requests: list[dict[str, Any]] = []
+    captured_option_risk_inputs: list[dict[str, Any]] = []
+
+    class _ConfigResolver:
+        def resolve(self, **kwargs):
+            return object()
+
+    class _PositionSizer:
+        def size_position(self, request, portfolio_context, config):
+            del portfolio_context, config
+            captured_requests.append(
+                {
+                    "instrument_type": request.instrument_type,
+                    "trade_identity": request.classification.trade_identity,
+                    "price": request.price,
+                    "estimated_margin_requirement": request.estimated_margin_requirement,
+                }
+            )
+            return type(
+                "Sizing",
+                (),
+                {
+                    "position_sizing_decision_id": "fallback-option-sizing-1",
+                    "candidate_score_id": request.candidate.candidate_score_id,
+                    "trade_classification_id": request.classification.trade_classification_id,
+                    "ticker": request.candidate.ticker,
+                    "risk_appetite": "balanced",
+                    "base_weight": 0.02,
+                    "volatility_adjusted_weight": 0.02,
+                    "liquidity_capped_weight": 0.02,
+                    "final_weight": 0.02,
+                    "final_notional": 2000.0,
+                    "applied_caps": [],
+                    "binding_constraint": None,
+                    "decision_time": now,
+                    "metadata_json": {},
+                },
+            )()
+
+    class _RiskManager:
+        def evaluate(self, request, sizing, portfolio_context, config):
+            del sizing, portfolio_context, config
+            return RiskDecisionRecord(
+                risk_decision_id="fallback-option-risk-1",
+                candidate_score_id=request.candidate.candidate_score_id,
+                trade_classification_id=request.classification.trade_classification_id,
+                position_sizing_decision_id="fallback-option-sizing-1",
+                ticker="NVDA",
+                status="approved",
+                reason_code="fallback_option_within_limits",
+                approved_weight=0.02,
+                approved_notional=2000.0,
+                approved_quantity=2.0,
+                portfolio_risk_snapshot_id="portfolio-risk-fallback-option-1",
+                applied_rules=["fallback_option_reapproval"],
+                generated_hedge_action=None,
+                decision_time=now,
+                metadata_json={},
+            )
+
+    class _OptionRiskManager:
+        def evaluate_assignment_risk(self, option_risk, *, portfolio_context, config):
+            del portfolio_context, config
+            captured_option_risk_inputs.append(
+                {
+                    "option_strategy_type": option_risk.option_strategy_type,
+                    "leg_quantities": [leg.quantity for leg in option_risk.legs],
+                    "margin_requirement": option_risk.margin_requirement,
+                }
+            )
+            return OptionRiskAssessment(
+                status="approved",
+                reason_code="within_limits",
+                worst_case_assignment_notional=0.0,
+                portfolio_delta=0.12,
+                portfolio_gamma=0.05,
+                portfolio_theta=-0.02,
+                portfolio_vega=0.21,
+            )
+
+    workflow = PaperExecutionWorkflow(
+        repository=repository,
+        broker=PaperStockBroker(api_key="key", secret_key="secret", client=_CapturingClient()),
+        option_broker=PaperOptionBroker(now=lambda: now),
+        manual_request_service=ManualTickerRequestService(now=lambda: now),
+        config_resolver=_ConfigResolver(),
+        position_sizer=_PositionSizer(),
+        risk_manager=_RiskManager(),
+        option_risk_manager=_OptionRiskManager(),
+    )
+    option_decision = TradingDecisionRecord(
+        trading_decision_id="option-decision-4",
+        candidate_score_id="candidate-4",
+        trade_classification_id="classification-4",
+        risk_decision_id="risk-1",
+        ticker="NVDA",
+        decision="open_option_strategy",
+        strategy_id="strong_theme_catalyst_continuation_v1",
+        strategy_version="v1",
+        expression_bucket_id="defined_risk_directional_option",
+        expression_bucket_version="v1",
+        trade_identity="tactical_option_trade",
+        instrument_type="option",
+        selection_source="scanner",
+        manual_request_id=None,
+        confidence=0.78,
+        target_weight=0.02,
+        approved_weight=0.02,
+        max_loss_pct=0.02,
+        time_horizon="1w-4w",
+        thesis="Primary option fails, fallback option should reapprove and execute.",
+        invalidators=["price confirmation fails"],
+        prompt_template=object(),
+        prompt_run=object(),
+        usage_events=[],
+        decision_time=now,
+        available_for_decision_at=now,
+        context_snapshot_json={
+            "candidate_context": {
+                "candidate_score": 0.78,
+                "strategy_run_id": "run-4",
+                "direction": "bullish",
+            },
+            "classification_context": {
+                "expression_fallback_plan": [
+                    {
+                        "expression_bucket_id": "defined_risk_directional_option",
+                        "expression_bucket_version": "v1",
+                        "trade_identity": "tactical_option_trade",
+                        "instrument_type": "option",
+                        "decision_action": "open_option_strategy",
+                        "rank": 0,
+                        "is_selected": True,
+                    },
+                    {
+                        "expression_bucket_id": "volatility_event_option",
+                        "expression_bucket_version": "v1",
+                        "trade_identity": "tactical_option_trade",
+                        "instrument_type": "option",
+                        "decision_action": "open_option_strategy",
+                        "rank": 1,
+                        "is_selected": False,
+                    },
+                    {
+                        "expression_bucket_id": "long_stock",
+                        "expression_bucket_version": "v1",
+                        "trade_identity": "tactical_stock_trade",
+                        "instrument_type": "stock",
+                        "decision_action": "enter_long",
+                        "rank": 2,
+                        "is_selected": False,
+                    },
+                ]
+            },
+            "risk_context": {"approved_weight": 0.02},
+        },
+        metadata_json={
+            "paper_trade_authorized": True,
+            "option_strategy": {
+                "option_strategy_decision_id": "option-strategy-4a",
+                "option_strategy_type": "long_call",
+                "status": "rejected",
+                "rejection_reason": "missing_option_chain",
+                "underlying_price": 118.0,
+                "net_debit_or_credit": 2.2,
+                "max_loss": 220.0,
+                "max_profit": None,
+                "breakevens": [120.2],
+                "margin_requirement": 220.0,
+                "buying_power_effect": 220.0,
+                "assignment_notional": 0.0,
+                "portfolio_delta": 0.32,
+                "portfolio_gamma": 0.04,
+                "portfolio_theta": -0.03,
+                "portfolio_vega": 0.12,
+                "event_through_expiry": True,
+                "strategy_pairing_method": "single_leg",
+                "assignment_plan": None,
+            },
+            "option_strategy_fallbacks": {
+                "volatility_event_option": {
+                    "option_strategy_decision_id": "option-strategy-4b",
+                    "option_strategy_type": "long_strangle",
+                    "status": "ready",
+                    "underlying_price": 118.0,
+                    "net_debit_or_credit": 3.0,
+                    "max_loss": 300.0,
+                    "max_profit": None,
+                    "breakevens": [114.0, 122.0],
+                    "margin_requirement": 300.0,
+                    "buying_power_effect": 300.0,
+                    "assignment_notional": 0.0,
+                    "portfolio_delta": 0.12,
+                    "portfolio_gamma": 0.05,
+                    "portfolio_theta": -0.02,
+                    "portfolio_vega": 0.21,
+                    "event_through_expiry": True,
+                    "strategy_pairing_method": "single_leg",
+                    "assignment_plan": None,
+                    "metadata_json": {
+                        "legs": [
+                            {
+                                "option_type": "call",
+                                "side": "buy",
+                                "quantity": 1,
+                                "strike": 122.0,
+                                "expiry": "2026-06-12",
+                                "dte": 10,
+                                "delta": 0.26,
+                                "gamma": 0.03,
+                                "theta": -0.01,
+                                "vega": 0.11,
+                                "iv_rank": 0.62,
+                                "bid": 1.4,
+                                "ask": 1.6,
+                                "mid": 1.5,
+                                "chosen_price": 1.5,
+                            },
+                            {
+                                "option_type": "put",
+                                "side": "buy",
+                                "quantity": 1,
+                                "strike": 114.0,
+                                "expiry": "2026-06-12",
+                                "dte": 10,
+                                "delta": -0.14,
+                                "gamma": 0.02,
+                                "theta": -0.01,
+                                "vega": 0.1,
+                                "iv_rank": 0.62,
+                                "bid": 1.4,
+                                "ask": 1.6,
+                                "mid": 1.5,
+                                "chosen_price": 1.5,
+                            },
+                        ]
+                    },
+                }
+            },
+        },
+    )
+    risk = _risk_decision(approved_quantity=1)
+
+    workflow.run(
+        trading_decisions=(option_decision,),
+        risk_decisions=(risk,),
+        trade_date=now,
+    )
+
+    assert captured_requests == [
+        {
+            "instrument_type": "option",
+            "trade_identity": "tactical_option_trade",
+            "price": 300.0,
+            "estimated_margin_requirement": 300.0,
+        }
+    ]
+    assert captured_option_risk_inputs == [
+        {
+            "option_strategy_type": "long_strangle",
+            "leg_quantities": [2, 2],
+            "margin_requirement": 600.0,
+        }
+    ]
+    assert len(repository.option_strategy_decisions) == 2
+    assert repository.option_strategy_decisions[0].status == "rejected"
+    assert repository.option_strategy_decisions[1].option_strategy_type == "long_strangle"
+    assert len(repository.paper_option_orders) == 1
+    assert repository.paper_option_orders[0].option_strategy_type == "long_strangle"
+    assert repository.paper_option_orders[0].quantity == 2
+    assert len(repository.paper_orders) == 0
+    assert len(repository.risk_decisions) == 1
+    assert repository.risk_decisions[0].risk_decision_id == "fallback-option-risk-1"
+    assert len(repository.trade_classifications) == 1
+    assert repository.trade_classifications[0].expression_bucket_id == "volatility_event_option"
+    assert len(repository.trading_decisions) == 1
+    assert repository.trading_decisions[0].expression_bucket_id == "volatility_event_option"
+    assert repository.paper_option_orders[0].trading_decision_id == repository.trading_decisions[0].trading_decision_id

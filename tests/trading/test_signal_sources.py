@@ -26,6 +26,7 @@ class _FakeMarketProvider:
     def __init__(self) -> None:
         self.bar_calls: list[tuple[str, int]] = []
         self.context_calls: list[str] = []
+        self.option_chain_calls: list[str] = []
 
     def fetch_daily_bars(self, ticker: str, lookback_days: int):
         self.bar_calls.append((ticker, lookback_days))
@@ -44,6 +45,28 @@ class _FakeMarketProvider:
             "pe_ratio": 28.0,
             "earnings_in_days": 6,
         }
+
+    def fetch_option_chain(self, ticker: str):
+        self.option_chain_calls.append(ticker)
+        return [
+            {
+                "contract_symbol": f"{ticker}260629C00120000",
+                "option_type": "call",
+                "strike": 120.0,
+                "expiry": "2026-06-29",
+                "dte": 28,
+                "delta": 0.41,
+                "gamma": 0.05,
+                "theta": -0.04,
+                "vega": 0.15,
+                "iv_rank": 0.58,
+                "bid": 3.1,
+                "ask": 3.3,
+                "mid": 3.2,
+                "open_interest": 2400,
+                "volume": 180,
+            }
+        ]
 
 
 class _FakeNewsProvider:
@@ -205,3 +228,33 @@ def test_source_ingestion_service_preserves_legacy_event_typing_when_condenser_d
     assert result.event_news_items[0].sentiment == "positive"
     assert result.event_news_items[0].importance == "high"
     assert result.ingestion_run.metadata_json["news_condensation"]["kept_news_item_count"] == 1
+
+
+def test_source_ingestion_service_adapts_option_chain_rows_when_provider_supports_it():
+    now = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+    market_provider = _FakeMarketProvider()
+    source_repository = InMemorySignalSourceRepository()
+    artifact_repository = InMemoryTradingRepository()
+
+    result = SourceIngestionService(
+        market_provider=market_provider,
+        news_provider=None,
+        source_repository=source_repository,
+        artifact_repository=artifact_repository,
+        provider_name="fixture",
+        now=lambda: now,
+        sleeper=lambda seconds: None,
+    ).refresh_tickers(("AAPL",), as_of=now, run_type="targeted", source_families=("option_chain",))
+
+    rows = source_repository.latest_available_by_family("AAPL", "option_chain", now)
+
+    assert result.ingestion_run.coverage_json == {
+        "tickers_requested": 1,
+        "source_records": 1,
+        "fundamental_snapshots": 0,
+        "event_news_items": 0,
+    }
+    assert len(rows) == 1
+    assert rows[0].source_family == "option_chain"
+    assert rows[0].payload["contracts"][0]["contract_symbol"] == "AAPL260629C00120000"
+    assert market_provider.option_chain_calls == ["AAPL"]

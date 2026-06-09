@@ -70,6 +70,7 @@ def test_build_signal_snapshot_combines_three_signal_families_and_pit_audit():
         snapshot_type="pre_open",
     )
 
+    assert snapshot.signal_json["technical"]["last_price"] == 103.0
     assert snapshot.signal_json["technical"]["return_1d"] == 0.03
     assert snapshot.signal_json["technical"]["rs_vs_spy_1d"] == 0.019999999999999997
     assert snapshot.signal_json["fundamental"]["market_cap_bucket"] == "mega"
