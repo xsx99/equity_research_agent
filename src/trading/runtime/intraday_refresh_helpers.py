@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from src.trading.intraday.rebalance import IntradayRebalanceRequest
+from src.trading.runtime.lookahead_risk import _sector_from_baseline
 from src.trading.signals.sources import EventNewsItemRecord, SourceRecord
 
 
@@ -77,6 +78,9 @@ def _build_alert_map(alerts: tuple[object, ...]) -> dict[str, list[dict[str, Any
                 "sentiment": getattr(alert, "sentiment", None),
                 "headline": getattr(alert, "headline", None),
                 "summary": getattr(alert, "summary", None),
+                "source_ticker": getattr(alert, "source_ticker", None),
+                "readthrough_source_ticker": getattr(alert, "readthrough_source_ticker", None),
+                "affected_themes": list(getattr(alert, "affected_themes", ())),
             }
         )
     return alert_map
@@ -138,7 +142,9 @@ def _build_rebalance_request(
             for alert in alerts
             if alert.get("sentiment") == "negative"
         ),
-        metadata_json={},
+        metadata_json={
+            "sector": _sector_from_baseline(baseline),
+        },
     )
 
 

@@ -193,6 +193,10 @@ def _sector_from_snapshot(snapshot: object | None) -> str | None:
     return None
 
 
+def _sector_from_baseline(baseline: object | None) -> str | None:
+    return _sector_from_snapshot(baseline)
+
+
 def _intraday_event_assessment(
     *,
     request: object,
