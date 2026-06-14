@@ -236,7 +236,7 @@ def _intraday_cluster_assessment(
     if severity not in {"high", "critical"}:
         return None
     themes = tuple(alert.get("affected_themes") or ())
-    readthrough_source = alert.get("readthrough_source_ticker") or alert.get("source_ticker")
+    readthrough_source = alert.get("readthrough_source_ticker")
     sector = dict(getattr(request, "metadata_json", {}) or {}).get("sector")
     if not themes and not readthrough_source:
         return None
