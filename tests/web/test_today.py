@@ -1147,6 +1147,45 @@ class TestTodayDashboard:
         assert "direct negative catalyst" in history["UBER"]["summary"][0].lower()
         assert "below sma20" in history["UBER"]["technical"][0]["summary"].lower()
 
+    def test_load_trade_detail_includes_lookahead_risk_source_and_generated_hedge_action(self):
+        from src.web.routers.today import _load_trade_detail
+
+        decision_id = uuid.uuid4()
+        row = SimpleNamespace(
+            trading_decision_id=decision_id,
+            ticker="NVDA",
+            decision="trim",
+            decision_time=datetime(2026, 6, 3, 23, 25, 34, tzinfo=timezone.utc),
+            strategy_id="breakout_v1",
+            expression_bucket_id="long_stock",
+            trade_identity="tactical_stock_trade",
+            confidence=Decimal("0.52"),
+            thesis="Reduce before the event window.",
+            metadata_json={},
+            prompt_run=None,
+            candidate_score=None,
+            risk_decision=SimpleNamespace(
+                status="approved",
+                reason_code="own_event_force_reduce",
+                generated_hedge_action_json={"reason_code": "macro_high_overlay"},
+                metadata_json={"lookahead_risk_source": "own_event"},
+            ),
+        )
+        session = MagicMock()
+        session.query.side_effect = [
+            _ListQuery([row]),
+            _ListQuery([]),
+        ]
+
+        detail = _load_trade_detail(session, str(decision_id))
+
+        assert detail["risk_decision"] == {
+            "status": "approved",
+            "reason_code": "own_event_force_reduce",
+            "generated_hedge_action": {"reason_code": "macro_high_overlay"},
+            "lookahead_risk_source": "own_event",
+        }
+
     def test_load_candidate_rows_translates_operator_facing_labels(self):
         from src.web.routers.today import _load_candidate_rows
 

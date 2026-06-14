@@ -827,7 +827,12 @@ class SQLAlchemyTradingRepository:
             dict(decision.generated_hedge_action) if decision.generated_hedge_action is not None else None
         )
         row.decision_time = decision.decision_time
-        row.metadata_json = dict(decision.metadata_json)
+        metadata_json = dict(decision.metadata_json)
+        if getattr(decision, "binding_constraint", None) is not None:
+            metadata_json.setdefault("binding_constraint", decision.binding_constraint)
+        if getattr(decision, "lookahead_risk_source", None) is not None:
+            metadata_json.setdefault("lookahead_risk_source", decision.lookahead_risk_source)
+        row.metadata_json = metadata_json
         self.session.flush()
 
     def save_prompt_template(self, template: object) -> None:

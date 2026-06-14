@@ -686,7 +686,7 @@ def _serialize_trade_row(
         "thesis": row.thesis,
         "key_drivers": key_drivers,
         "counterarguments": counterarguments,
-        "invalidators": list(row.invalidators_json or []),
+        "invalidators": list(getattr(row, "invalidators_json", None) or []),
         "metadata_json": metadata_json,
     }
 
@@ -764,11 +764,19 @@ def _load_trade_detail(session: Any, decision_id: str) -> dict[str, Any] | None:
         ]
     outcomes = (
         session.query(CandidateOutcomeEvaluation)
-        .filter(CandidateOutcomeEvaluation.candidate_score_id == row.candidate_score_id)
+        .filter(CandidateOutcomeEvaluation.candidate_score_id == getattr(row, "candidate_score_id", None))
         .order_by(CandidateOutcomeEvaluation.created_at.desc())
         .limit(10)
         .all()
     )
+    risk_decision = None
+    if row.risk_decision:
+        risk_decision = {
+            "status": row.risk_decision.status,
+            "reason_code": row.risk_decision.reason_code,
+            "generated_hedge_action": getattr(row.risk_decision, "generated_hedge_action_json", None),
+            "lookahead_risk_source": _risk_decision_lookahead_source(row.risk_decision),
+        }
     return {
         "trading_decision_id": str(row.trading_decision_id),
         "ticker": row.ticker,
@@ -783,18 +791,13 @@ def _load_trade_detail(session: Any, decision_id: str) -> dict[str, Any] | None:
         "counterarguments": list(
             getattr(row, "counterarguments_json", None) or metadata_json.get("counterarguments") or []
         ),
-        "invalidators": list(row.invalidators_json or []),
+        "invalidators": list(getattr(row, "invalidators_json", None) or []),
         "metadata_json": metadata_json,
         "llm_decision_json": row.prompt_run.parsed_output_json if row.prompt_run else {},
         "validation_status": row.prompt_run.parse_status if row.prompt_run else "unavailable",
         "signal_snapshot": signal_snapshot.signal_json if signal_snapshot else {},
         "strategy_scores": tuple(score_rows),
-        "risk_decision": {
-            "status": row.risk_decision.status,
-            "reason_code": row.risk_decision.reason_code,
-        }
-        if row.risk_decision
-        else None,
+        "risk_decision": risk_decision,
         "outcomes": tuple(
             {
                 "evaluation_status": outcome.evaluation_status,
@@ -1138,6 +1141,12 @@ def _merge_audit_detail_into_workspace_detail(
         or risk_summary.get("reason") == "No material update"
     ) and isinstance(audit_detail.get("risk_decision"), dict):
         risk_summary["reason"] = audit_detail["risk_decision"].get("reason_code") or risk_summary.get("reason")
+    if not risk_summary.get("lookahead_risk_source") and isinstance(audit_detail.get("risk_decision"), dict):
+        risk_summary["lookahead_risk_source"] = audit_detail["risk_decision"].get("lookahead_risk_source")
+    if not risk_summary.get("hedge_overlay_reason") and isinstance(audit_detail.get("risk_decision"), dict):
+        generated_hedge_action = audit_detail["risk_decision"].get("generated_hedge_action")
+        if isinstance(generated_hedge_action, dict):
+            risk_summary["hedge_overlay_reason"] = generated_hedge_action.get("reason_code")
 
     latest_conclusion["trade_decision"] = trade_decision
     latest_conclusion["risk_summary"] = risk_summary
@@ -1238,9 +1247,19 @@ def _load_risk_by_ticker(session: Any) -> dict[str, dict[str, Any]]:
         ticker = str(row.ticker or "").strip().upper()
         if not ticker or ticker in grouped:
             continue
+        raw_json = {
+            "status": row.status,
+            "reason_code": row.reason_code,
+            "lookahead_risk_source": _risk_decision_lookahead_source(row),
+            "binding_constraint": _risk_decision_binding_constraint(row),
+            "generated_hedge_action": getattr(row, "generated_hedge_action_json", None),
+        }
         grouped[ticker] = {
             "status": row.status,
             "reason": row.reason_code,
+            "lookahead_risk_source": raw_json["lookahead_risk_source"],
+            "generated_hedge_action": raw_json["generated_hedge_action"],
+            "raw_json": raw_json,
             "history": [
                 {
                     "time": row.decision_time or row.created_at,
@@ -1250,6 +1269,34 @@ def _load_risk_by_ticker(session: Any) -> dict[str, dict[str, Any]]:
             ],
         }
     return grouped
+
+
+def _risk_decision_lookahead_source(row: Any) -> str | None:
+    metadata_json = dict(getattr(row, "metadata_json", {}) or {})
+    direct_value = getattr(row, "lookahead_risk_source", None)
+    if direct_value is not None:
+        value = str(direct_value).strip()
+        if value:
+            return value
+    metadata_value = metadata_json.get("lookahead_risk_source")
+    if metadata_value is None:
+        return None
+    value = str(metadata_value).strip()
+    return value or None
+
+
+def _risk_decision_binding_constraint(row: Any) -> str | None:
+    metadata_json = dict(getattr(row, "metadata_json", {}) or {})
+    direct_value = getattr(row, "binding_constraint", None)
+    if direct_value is not None:
+        value = str(direct_value).strip()
+        if value:
+            return value
+    metadata_value = metadata_json.get("binding_constraint")
+    if metadata_value is None:
+        return None
+    value = str(metadata_value).strip()
+    return value or None
 
 
 def _load_signal_history_by_ticker(session: Any) -> dict[str, dict[str, Any]]:

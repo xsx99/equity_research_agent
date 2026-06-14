@@ -143,6 +143,11 @@ PR 8 adds the first intraday refresh and rebalance path on top of the morning ba
 
 The current PR 8 implementation intentionally keeps intraday rebalance separate from the morning trading-decision pipeline. It reuses prompt telemetry and paper-execution building blocks, but it does not collapse morning and intraday flows into one shared top-level workflow.
 
+## Lookahead Risk Planner
+
+- Added `PortfolioHedgePlanner` as a pure lookahead risk-planning layer ahead of final `RiskManager` approval.
+- Pre-open and intraday risk flows now distinguish single-name event reduction from macro/sector hedge overlays.
+
 ## PR 11 Scope
 
 PR 11 adds the first operator-facing V2 trading workstation in the existing FastAPI app:

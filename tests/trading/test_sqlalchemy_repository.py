@@ -6,7 +6,7 @@ from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any
 
-from src.db.models.trading import OptionStrategyLeg, UniverseFilterConfig, UniverseSnapshot, UniverseSymbol
+from src.db.models.trading import OptionStrategyLeg, RiskDecision, UniverseFilterConfig, UniverseSnapshot, UniverseSymbol
 from src.trading.data_sources.universe import UniverseAsset, UniverseFilterConfig as UniverseFilterConfigRecord
 from src.trading.data_sources.universe import UniverseSnapshotResult, UniverseSymbolDecision
 from src.trading.brokers.paper_option import PaperOptionExecutionRecord, PaperOptionOrderRecord, PaperOptionPosition
@@ -241,6 +241,40 @@ def test_sqlalchemy_repository_persists_pr4_risk_artifacts():
     repository.save_risk_decision(risk_decision)
 
     assert session.flush_calls >= 4
+
+
+def test_sqlalchemy_repository_persists_lookahead_risk_audit_fields_in_metadata():
+    now = datetime(2026, 6, 13, 12, 45, tzinfo=timezone.utc)
+    session = _FakeSession()
+    repository = SqlAlchemyTradingRepository(session)
+
+    risk_decision = RiskDecisionRecord(
+        risk_decision_id="risk-lookahead-1",
+        candidate_score_id=None,
+        trade_classification_id=None,
+        position_sizing_decision_id=None,
+        ticker="NVDA",
+        status="approved",
+        reason_code="own_event_force_reduce",
+        approved_weight=0.02,
+        approved_notional=2000.0,
+        approved_quantity=10.0,
+        portfolio_risk_snapshot_id=None,
+        applied_rules=["portfolio_risk_intent"],
+        generated_hedge_action={"reason_code": "macro_high_overlay"},
+        decision_time=now,
+        binding_constraint="own_event_force_reduce",
+        lookahead_risk_source="own_event",
+        metadata_json={},
+    )
+
+    repository.save_risk_decision(risk_decision)
+
+    stored = session.rows_by_type[RiskDecision][0]
+
+    assert stored.metadata_json["binding_constraint"] == "own_event_force_reduce"
+    assert stored.metadata_json["lookahead_risk_source"] == "own_event"
+    assert stored.generated_hedge_action_json["reason_code"] == "macro_high_overlay"
 
 
 def test_sqlalchemy_repository_round_trips_portfolio_risk_intent():
