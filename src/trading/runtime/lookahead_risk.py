@@ -230,20 +230,26 @@ def _intraday_event_assessment(
 def _intraday_cluster_assessment(
     *,
     request: object,
-    alert: dict[str, Any],
+    alert: object,
 ) -> PortfolioEventRiskAssessmentRecord | None:
+    if not isinstance(alert, dict):
+        return None
     severity = str(alert.get("severity") or "low").lower()
     if severity not in {"high", "critical"}:
         return None
     themes = tuple(alert.get("affected_themes") or ())
     readthrough_source = alert.get("readthrough_source_ticker")
+    ticker = str(getattr(request, "ticker", ""))
     sector = dict(getattr(request, "metadata_json", {}) or {}).get("sector")
-    if not themes and not readthrough_source:
+    if not isinstance(readthrough_source, str) or not readthrough_source.strip():
+        return None
+    readthrough_source = readthrough_source.strip()
+    if readthrough_source == ticker:
         return None
     if not sector:
         return None
     return PortfolioEventRiskAssessmentRecord(
-        ticker=str(getattr(request, "ticker", "")),
+        ticker=ticker,
         risk_source="sector_event_cluster",
         severity=severity,
         event_type=str(alert.get("alert_type") or "readthrough"),

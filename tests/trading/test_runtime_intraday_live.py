@@ -507,7 +507,7 @@ def test_intraday_helper_derives_sector_cluster_assessment_from_readthrough_aler
     assert intent.hedge_actions[0].target_underlier == "SMH"
 
 
-def test_intraday_helper_keeps_same_ticker_earnings_alert_on_own_event_path():
+def test_intraday_helper_keeps_same_ticker_themed_earnings_alert_on_own_event_path():
     helper = LookaheadRiskWorkflowHelper()
     now = datetime(2026, 6, 4, 16, 0, tzinfo=timezone.utc)
     portfolio_context = SimpleNamespace(
@@ -541,6 +541,7 @@ def test_intraday_helper_keeps_same_ticker_earnings_alert_on_own_event_path():
                         "alert_type": "earnings_update",
                         "severity": "high",
                         "source_ticker": "NVDA",
+                        "affected_themes": ["ai_semis"],
                     },
                 ),
                 metadata_json={"sector": "Semiconductors"},
@@ -554,6 +555,44 @@ def test_intraday_helper_keeps_same_ticker_earnings_alert_on_own_event_path():
 
     assert intent.aggregate_risk_state == "mixed_risk"
     assert intent.position_actions[0].risk_source == "own_event"
+    assert intent.hedge_actions == ()
+
+
+def test_intraday_helper_ignores_non_dict_alert_before_cluster_path():
+    helper = LookaheadRiskWorkflowHelper()
+    now = datetime(2026, 6, 4, 16, 0, tzinfo=timezone.utc)
+    portfolio_context = SimpleNamespace(
+        account_equity=100000.0,
+        total_margin_requirement=0.0,
+        margin_model_profile="estimated_fidelity_like_conservative_v1",
+        margin_model_version="v1",
+        positions=(),
+    )
+    config = RiskConfigResolver().resolve(
+        risk_appetite="balanced",
+        portfolio_context=portfolio_context,
+        macro_risk_budget_multiplier=1.0,
+    )
+
+    intent = helper.build_intraday_portfolio_risk_intent(
+        rebalance_requests=(
+            SimpleNamespace(
+                ticker="NVDA",
+                trade_identity="tactical_stock_trade",
+                existing_position=True,
+                allow_open_new=False,
+                alerts=("bad-alert-shape",),
+                metadata_json={"sector": "Semiconductors"},
+            ),
+        ),
+        portfolio_context=portfolio_context,
+        config=config,
+        decision_time=now,
+        macro_risk_state=None,
+    )
+
+    assert intent.aggregate_risk_state == "risk_normalized"
+    assert intent.position_actions == ()
     assert intent.hedge_actions == ()
 
 
