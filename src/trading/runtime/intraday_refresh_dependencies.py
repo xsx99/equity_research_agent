@@ -25,6 +25,7 @@ class LiveIntradayRefreshDependencies:
     candidate_context_loader: Callable[[tuple[str, ...], datetime], dict[str, tuple[str, ...]]]
     position_context_loader: Callable[[tuple[str, ...], tuple[object, ...]], dict[str, tuple[str, ...]]]
     theme_context_loader: Callable[[tuple[str, ...], datetime], dict[str, tuple[str, ...]]]
+    macro_state_loader: Callable[[datetime], str | None]
     lookahead_helper: Any | None = None
 
 
@@ -75,6 +76,7 @@ def build_live_intraday_refresh_dependencies(session: Any | None = None) -> Live
             if ticker in {getattr(position, "ticker", None) for position in positions}
         },
         theme_context_loader=lambda tickers, decision_time: {},
+        macro_state_loader=lambda decision_time: None,
         lookahead_helper=LookaheadRiskWorkflowHelper(hedge_planner=PortfolioHedgePlanner()),
     )
 

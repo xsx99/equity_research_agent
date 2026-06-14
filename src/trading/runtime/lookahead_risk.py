@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import datetime
+from typing import Any
 
 from src.trading.risk import (
     PendingTradeRiskRecord,
@@ -89,6 +90,7 @@ class LookaheadRiskWorkflowHelper:
         portfolio_context: object,
         config: object,
         decision_time: datetime,
+        macro_risk_state: str | None,
     ) -> PortfolioRiskIntentRecord:
         if not hasattr(portfolio_context, "positions"):
             return PortfolioRiskIntentRecord.create(
@@ -112,7 +114,9 @@ class LookaheadRiskWorkflowHelper:
                     )
                 )
             for alert in tuple(getattr(request, "alerts", ())):
-                assessment = _intraday_event_assessment(request=request, alert=alert)
+                assessment = _intraday_cluster_assessment(request=request, alert=alert)
+                if assessment is None:
+                    assessment = _intraday_event_assessment(request=request, alert=alert)
                 if assessment is not None:
                     event_assessments.append(assessment)
         return self.hedge_planner.plan(
@@ -123,6 +127,7 @@ class LookaheadRiskWorkflowHelper:
                 risk_limit_config=config,
                 event_assessments=tuple(event_assessments),
                 pending_trades=tuple(pending_trades),
+                macro_risk_state=macro_risk_state,
             )
         )
 
@@ -193,6 +198,10 @@ def _sector_from_snapshot(snapshot: object | None) -> str | None:
     return None
 
 
+def _sector_from_baseline(baseline: object | None) -> str | None:
+    return _sector_from_snapshot(baseline)
+
+
 def _intraday_event_assessment(
     *,
     request: object,
@@ -215,4 +224,41 @@ def _intraday_event_assessment(
         affects_existing_position=bool(getattr(request, "existing_position", False)),
         affects_pending_trade=not bool(getattr(request, "existing_position", False)),
         metadata_json={"source": "intraday_alert"},
+    )
+
+
+def _intraday_cluster_assessment(
+    *,
+    request: object,
+    alert: object,
+) -> PortfolioEventRiskAssessmentRecord | None:
+    if not isinstance(alert, dict):
+        return None
+    severity = str(alert.get("severity") or "low").lower()
+    if severity not in {"high", "critical"}:
+        return None
+    themes = tuple(alert.get("affected_themes") or ())
+    readthrough_source = alert.get("readthrough_source_ticker")
+    ticker = str(getattr(request, "ticker", ""))
+    sector = dict(getattr(request, "metadata_json", {}) or {}).get("sector")
+    if not isinstance(readthrough_source, str) or not readthrough_source.strip():
+        return None
+    readthrough_source = readthrough_source.strip()
+    if readthrough_source == ticker:
+        return None
+    if not sector:
+        return None
+    return PortfolioEventRiskAssessmentRecord(
+        ticker=ticker,
+        risk_source="sector_event_cluster",
+        severity=severity,
+        event_type=str(alert.get("alert_type") or "readthrough"),
+        days_until_event=0,
+        affects_existing_position=bool(getattr(request, "existing_position", False)),
+        affects_pending_trade=not bool(getattr(request, "existing_position", False)),
+        metadata_json={
+            "sector": sector,
+            "affected_themes": list(themes),
+            "readthrough_source_ticker": readthrough_source,
+        },
     )
