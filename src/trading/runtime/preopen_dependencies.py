@@ -162,6 +162,7 @@ def build_live_preopen_dependencies(session: Any | None = None) -> LivePreopenDe
             config_resolver=config_resolver,
             position_sizer=position_sizer,
             risk_manager=risk_manager,
+            option_risk_manager=option_risk_manager,
             lookahead_helper=LookaheadRiskWorkflowHelper(
                 hedge_planner=PortfolioHedgePlanner()
             ),

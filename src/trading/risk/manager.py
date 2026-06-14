@@ -283,7 +283,8 @@ class RiskManager:
         generated_hedge_action: dict[str, object] | None = None,
     ) -> RiskDecisionRecord:
         approved_notional = approved_weight * (sizing.final_notional / sizing.final_weight) if sizing.final_weight > 0 else 0.0
-        approved_quantity = approved_notional / request.price if request.price > 0 else 0.0
+        quantity_basis, quantity_denominator = _approved_quantity_basis(request)
+        approved_quantity = approved_notional / quantity_denominator if quantity_denominator > 0 else 0.0
         return RiskDecisionRecord.create(
             candidate_score_id=request.candidate.candidate_score_id,
             trade_classification_id=request.classification.trade_classification_id,
@@ -300,6 +301,13 @@ class RiskManager:
             lookahead_risk_source=lookahead_risk_source,
             generated_hedge_action=generated_hedge_action,
             decision_time=request.candidate.decision_time,
+            metadata_json=_risk_decision_metadata(
+                request=request,
+                approved_notional=approved_notional,
+                approved_quantity=approved_quantity,
+                quantity_basis=quantity_basis,
+                quantity_unit_cost=quantity_denominator,
+            ),
         )
 
 
@@ -309,6 +317,38 @@ def _beta_multiplier(beta_bucket: str | None) -> float:
         "medium": 1.0,
         "high": 1.2,
     }.get(str(beta_bucket or "").lower(), 1.0)
+
+
+def _approved_quantity_basis(request: TradeRiskRequest) -> tuple[str, float]:
+    if request.instrument_type == "option":
+        if request.estimated_margin_requirement and request.estimated_margin_requirement > 0:
+            return ("estimated_margin_requirement", request.estimated_margin_requirement)
+        if request.estimated_buying_power_effect and request.estimated_buying_power_effect > 0:
+            return ("estimated_buying_power_effect", request.estimated_buying_power_effect)
+    return ("price", request.price if request.price > 0 else 0.0)
+
+
+def _risk_decision_metadata(
+    *,
+    request: TradeRiskRequest,
+    approved_notional: float,
+    approved_quantity: float,
+    quantity_basis: str,
+    quantity_unit_cost: float,
+) -> dict[str, object]:
+    metadata: dict[str, object] = {
+        "approved_capital_notional": approved_notional,
+        "approved_quantity_basis": quantity_basis,
+        "approved_quantity_unit_cost": quantity_unit_cost,
+    }
+    if request.instrument_type != "option":
+        return metadata
+    metadata["approved_strategy_units"] = approved_quantity
+    metadata["approved_margin_exposure"] = approved_quantity * float(request.estimated_margin_requirement or 0.0)
+    metadata["approved_buying_power_effect"] = approved_quantity * float(request.estimated_buying_power_effect or 0.0)
+    metadata["approved_assignment_notional"] = approved_quantity * float(request.assignment_notional or 0.0)
+    metadata["approved_premium_notional"] = approved_quantity * float(request.price or 0.0)
+    return metadata
 
 
 def _is_macro_only_bearish(request: TradeRiskRequest) -> bool:

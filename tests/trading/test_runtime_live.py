@@ -6,9 +6,14 @@ from types import SimpleNamespace
 
 from src.trading.data_sources.universe import UniverseAsset, UniverseFilterConfig
 from src.trading.data_sources.live_universe import LiveUniverseProvider
-from src.trading.risk import HedgeActionRecord, PortfolioRiskIntentRecord, RiskDecisionRecord
+from src.trading.risk import (
+    HedgeActionRecord,
+    OptionRiskAssessment,
+    PortfolioRiskIntentRecord,
+    RiskDecisionRecord,
+)
 from src.trading.runtime.preopen_dependencies import _ConfiguredLiveUniverseScanPipeline
-from src.trading.runtime.preopen_risk import _LiveRiskWorkflow
+from src.trading.runtime.preopen_risk import _LiveRiskWorkflow, _build_trade_risk_request
 from src.trading.runtime.preopen import (
     LivePreopenDependencies,
     LivePreopenRuntime,
@@ -615,6 +620,509 @@ def test_live_risk_workflow_reuses_persisted_portfolio_snapshot_id_for_risk_deci
     assert len(result.risk_decisions) == 1
     assert len(captured_decisions) == 1
     assert captured_decisions[0].portfolio_risk_snapshot_id == portfolio_snapshot_id
+
+
+def test_build_trade_risk_request_maps_tactical_option_trade_to_option_instrument():
+    decision_time = datetime(2026, 6, 3, 12, 45, tzinfo=timezone.utc)
+
+    class _SourceRepository:
+        def latest_available_by_family(self, ticker, family, decision_time):
+            del ticker, family, decision_time
+            return [SimpleNamespace(payload={"bars": [{"close": 200.0}]})]
+
+    request = _build_trade_risk_request(
+        candidate=SimpleNamespace(
+            candidate_score_id="candidate-1",
+            signal_snapshot_id="snapshot-1",
+            ticker="NVDA",
+            candidate_score=0.8,
+        ),
+        classification=SimpleNamespace(
+            candidate_score_id="candidate-1",
+            trade_classification_id="classification-1",
+            trade_identity="tactical_option_trade",
+        ),
+        snapshot=SimpleNamespace(
+            signal_json={"technical": {"atr_pct": 0.06, "dollar_volume": 50_000_000}},
+            source_freshness_json={"technical": "fresh"},
+        ),
+        source_repository=_SourceRepository(),
+        decision_time=decision_time,
+    )
+
+    assert request.instrument_type == "option"
+
+
+def test_build_trade_risk_request_marks_option_metadata_incomplete_without_chain():
+    decision_time = datetime(2026, 6, 3, 12, 45, tzinfo=timezone.utc)
+
+    class _SourceRepository:
+        def latest_available_by_family(self, ticker, family, decision_time):
+            del ticker, family, decision_time
+            return [SimpleNamespace(payload={"bars": [{"close": 200.0}]})]
+
+    request = _build_trade_risk_request(
+        candidate=SimpleNamespace(
+            candidate_score_id="candidate-1",
+            signal_snapshot_id="snapshot-1",
+            ticker="NVDA",
+            candidate_score=0.8,
+        ),
+        classification=SimpleNamespace(
+            candidate_score_id="candidate-1",
+            trade_classification_id="classification-1",
+            trade_identity="tactical_option_trade",
+        ),
+        snapshot=SimpleNamespace(
+            signal_json={"technical": {"atr_pct": 0.06, "dollar_volume": 50_000_000}},
+            source_freshness_json={"technical": "fresh"},
+        ),
+        source_repository=_SourceRepository(),
+        decision_time=decision_time,
+    )
+
+    assert request.option_risk_metadata_complete is False
+
+
+def test_build_trade_risk_request_uses_option_chain_premium_for_option_price_proxy():
+    decision_time = datetime(2026, 6, 3, 12, 45, tzinfo=timezone.utc)
+
+    class _SourceRepository:
+        def latest_available_by_family(self, ticker, family, decision_time):
+            del ticker, decision_time
+            if family == "technical":
+                return [SimpleNamespace(payload={"bars": [{"close": 200.0}]})]
+            if family == "option_chain":
+                return [
+                    SimpleNamespace(
+                        payload={
+                            "contracts": [
+                                {
+                                    "contract_symbol": "NVDA260703C00195000",
+                                    "option_type": "call",
+                                    "strike": 195.0,
+                                    "expiry": "2026-07-03",
+                                    "dte": 30,
+                                    "delta": 0.42,
+                                    "gamma": 0.03,
+                                    "theta": -0.02,
+                                    "vega": 0.08,
+                                    "bid": 3.1,
+                                    "ask": 3.3,
+                                    "mid": 3.2,
+                                    "chosen_price": 3.2,
+                                    "open_interest": 1200,
+                                    "volume": 180,
+                                }
+                            ]
+                        }
+                    )
+                ]
+            return []
+
+    request = _build_trade_risk_request(
+        candidate=SimpleNamespace(
+            candidate_score_id="candidate-1",
+            signal_snapshot_id="snapshot-1",
+            ticker="NVDA",
+            candidate_score=0.8,
+        ),
+        classification=SimpleNamespace(
+            candidate_score_id="candidate-1",
+            trade_classification_id="classification-1",
+            trade_identity="tactical_option_trade",
+        ),
+        snapshot=SimpleNamespace(
+            signal_json={"technical": {"atr_pct": 0.06, "dollar_volume": 50_000_000}},
+            source_freshness_json={"technical": "fresh"},
+        ),
+        source_repository=_SourceRepository(),
+        decision_time=decision_time,
+    )
+
+    assert request.option_risk_metadata_complete is True
+    assert request.price == 320.0
+    assert request.estimated_margin_requirement == 320.0
+    assert request.estimated_buying_power_effect == 320.0
+
+
+def test_build_trade_risk_request_uses_expression_payload_for_option_spread_risk():
+    decision_time = datetime(2026, 6, 3, 12, 45, tzinfo=timezone.utc)
+
+    class _SourceRepository:
+        def latest_available_by_family(self, ticker, family, decision_time):
+            del ticker, decision_time
+            if family == "technical":
+                return [SimpleNamespace(payload={"bars": [{"close": 118.0}]})]
+            if family == "option_chain":
+                return [
+                    SimpleNamespace(
+                        payload={
+                            "contracts": [
+                                {
+                                    "contract_symbol": "NVDA260624P00114500",
+                                    "option_type": "put",
+                                    "strike": 114.5,
+                                    "expiry": "2026-06-24",
+                                    "dte": 21,
+                                    "delta": -0.28,
+                                    "gamma": 0.02,
+                                    "theta": 0.01,
+                                    "vega": -0.07,
+                                    "iv_rank": 0.6,
+                                    "bid": 1.5,
+                                    "ask": 1.7,
+                                    "mid": 1.6,
+                                    "chosen_price": 1.6,
+                                    "open_interest": 1500,
+                                    "volume": 240,
+                                },
+                                {
+                                    "contract_symbol": "NVDA260624P00108500",
+                                    "option_type": "put",
+                                    "strike": 108.5,
+                                    "expiry": "2026-06-24",
+                                    "dte": 21,
+                                    "delta": -0.12,
+                                    "gamma": 0.01,
+                                    "theta": -0.01,
+                                    "vega": 0.04,
+                                    "iv_rank": 0.58,
+                                    "bid": 0.9,
+                                    "ask": 1.1,
+                                    "mid": 1.0,
+                                    "chosen_price": 1.0,
+                                    "open_interest": 900,
+                                    "volume": 120,
+                                },
+                            ]
+                        }
+                    )
+                ]
+            return []
+
+    expression_definitions = {
+        "defined_risk_income_spread": StrategyDefinitionRecord(
+            strategy_definition_id="defined-risk-income-spread-definition",
+            strategy_id="defined_risk_income_spread",
+            version="v1",
+            display_name="defined_risk_income_spread",
+            strategy_layer="expression_bucket",
+            typical_horizon="2w-8w",
+            config_json={
+                "default_trade_identity": "tactical_option_trade",
+                "allowed_instruments": ["paper_option_strategy"],
+                "allowed_option_strategy_types": ["put_credit_spread", "call_credit_spread"],
+                "option_policy": {"non_event_dte_days": 21},
+                "default_exit_policy": "strategy_invalidators_or_target_horizon",
+            },
+            lifecycle_status="active",
+            is_active=True,
+            source="test",
+        )
+    }
+
+    request = _build_trade_risk_request(
+        candidate=SimpleNamespace(
+            candidate_score_id="candidate-1",
+            signal_snapshot_id="snapshot-1",
+            ticker="NVDA",
+            candidate_score=0.8,
+            decision_time=decision_time,
+            direction="bullish",
+            action="enter_long",
+            strategy_id="strong_theme_catalyst_continuation_v1",
+            strategy_version="v1",
+        ),
+        classification=SimpleNamespace(
+            candidate_score_id="candidate-1",
+            trade_classification_id="classification-1",
+            trade_identity="tactical_option_trade",
+            expression_bucket_id="defined_risk_income_spread",
+            expression_bucket_version="v1",
+        ),
+        snapshot=SimpleNamespace(
+            signal_json={
+                "technical": {"last_price": 118.0, "atr_pct": 0.06, "dollar_volume": 50_000_000},
+                "events_news": {},
+            },
+            source_freshness_json={"technical": "fresh"},
+        ),
+        source_repository=_SourceRepository(),
+        decision_time=decision_time,
+        expression_definitions=expression_definitions,
+    )
+
+    assert request.option_risk_metadata_complete is True
+    assert request.price == 60.0
+    assert request.estimated_margin_requirement == 540.0
+    assert request.estimated_buying_power_effect == 540.0
+    assert request.assignment_notional == 11450.0
+    assert request.event_through_horizon is False
+
+
+def test_live_risk_workflow_rejects_option_trade_when_assignment_risk_fails():
+    decision_time = datetime(2026, 6, 3, 12, 45, tzinfo=timezone.utc)
+    saved_option_snapshots: list[object] = []
+
+    class _Repository:
+        def load_signal_snapshots_for_decision(self, *, decision_time, snapshot_type):
+            del decision_time, snapshot_type
+            return (
+                SimpleNamespace(
+                    signal_snapshot_id="snapshot-1",
+                    signal_json={
+                        "technical": {
+                            "last_price": 118.0,
+                            "atr_pct": 0.06,
+                            "dollar_volume": 50_000_000,
+                        },
+                        "events_news": {},
+                    },
+                    source_freshness_json={"technical": "fresh"},
+                ),
+            )
+
+        def load_active_strategy_definitions(self):
+            return [
+                StrategyDefinitionRecord(
+                    strategy_definition_id="defined-risk-income-spread-definition",
+                    strategy_id="defined_risk_income_spread",
+                    version="v1",
+                    display_name="defined_risk_income_spread",
+                    strategy_layer="expression_bucket",
+                    typical_horizon="2w-8w",
+                    config_json={
+                        "default_trade_identity": "tactical_option_trade",
+                        "allowed_instruments": ["paper_option_strategy"],
+                        "allowed_option_strategy_types": ["put_credit_spread", "call_credit_spread"],
+                        "option_policy": {"non_event_dte_days": 21},
+                        "default_exit_policy": "strategy_invalidators_or_target_horizon",
+                    },
+                    lifecycle_status="active",
+                    is_active=True,
+                    source="test",
+                )
+            ]
+
+        def save_portfolio_risk_snapshot(self, snapshot):
+            del snapshot
+
+        def save_risk_factor_exposures(self, exposures):
+            del exposures
+
+        def save_position_sizing_decision(self, sizing):
+            del sizing
+
+        def save_risk_decision(self, decision):
+            self.saved_decision = decision
+
+        def save_option_risk_snapshot(self, snapshot):
+            saved_option_snapshots.append(snapshot)
+
+    class _SourceRepository:
+        def latest_available_by_family(self, ticker, family, decision_time):
+            del ticker, decision_time
+            if family == "technical":
+                return [SimpleNamespace(payload={"bars": [{"close": 118.0}]})]
+            if family == "option_chain":
+                return [
+                    SimpleNamespace(
+                        payload={
+                            "contracts": [
+                                {
+                                    "option_type": "put",
+                                    "strike": 114.5,
+                                    "expiry": "2026-06-24",
+                                    "dte": 21,
+                                    "delta": -0.28,
+                                    "gamma": 0.02,
+                                    "theta": 0.01,
+                                    "vega": -0.07,
+                                    "iv_rank": 0.6,
+                                    "bid": 1.5,
+                                    "ask": 1.7,
+                                    "mid": 1.6,
+                                    "chosen_price": 1.6,
+                                    "open_interest": 1500,
+                                    "volume": 240,
+                                },
+                                {
+                                    "option_type": "put",
+                                    "strike": 108.5,
+                                    "expiry": "2026-06-24",
+                                    "dte": 21,
+                                    "delta": -0.12,
+                                    "gamma": 0.01,
+                                    "theta": -0.01,
+                                    "vega": 0.04,
+                                    "iv_rank": 0.58,
+                                    "bid": 0.9,
+                                    "ask": 1.1,
+                                    "mid": 1.0,
+                                    "chosen_price": 1.0,
+                                    "open_interest": 900,
+                                    "volume": 120,
+                                },
+                            ]
+                        }
+                    )
+                ]
+            return []
+
+    class _ConfigResolver:
+        def resolve(self, **kwargs):
+            del kwargs
+            return SimpleNamespace(
+                risk_appetite="balanced",
+                resolver_version="v1",
+                margin_model_profile="alpaca",
+                margin_model_version="broker",
+                max_sector_weight=0.30,
+                assignment_concentration_limit=0.10,
+            )
+
+    class _PositionSizer:
+        def size_position(self, request, portfolio_context, config):
+            del request, portfolio_context, config
+            return SimpleNamespace(
+                position_sizing_decision_id="sizing-1",
+                candidate_score_id="candidate-1",
+                trade_classification_id="classification-1",
+                ticker="NVDA",
+                risk_appetite="balanced",
+                base_weight=0.05,
+                volatility_adjusted_weight=0.05,
+                liquidity_capped_weight=0.05,
+                final_weight=0.05,
+                final_notional=5000.0,
+                applied_caps=[],
+                binding_constraint=None,
+                decision_time=decision_time,
+                metadata_json={},
+            )
+
+    class _RiskManager:
+        def build_portfolio_risk_snapshot(self, portfolio_context, config):
+            del portfolio_context, config
+            return SimpleNamespace(
+                portfolio_risk_snapshot_id="snapshot-portfolio-1",
+                decision_time=decision_time,
+                risk_appetite="balanced",
+                resolver_version="v1",
+                margin_model_profile="alpaca",
+                margin_model_version="broker",
+                account_equity=100000.0,
+                cash_balance=100000.0,
+                buying_power=200000.0,
+                excess_liquidity=100000.0,
+                stock_margin_requirement=0.0,
+                option_margin_requirement=0.0,
+                total_margin_requirement=0.0,
+                initial_margin_requirement=0.0,
+                maintenance_margin_requirement=0.0,
+                margin_requirement_source="broker_reported",
+                net_exposure=0.0,
+                gross_exposure=0.0,
+                beta_adjusted_net_exposure=0.0,
+                concentration_flags=[],
+                metadata_json={},
+            )
+
+        def compute_factor_exposures(self, portfolio_context):
+            del portfolio_context
+            return ()
+
+        def evaluate(self, request, sizing, portfolio_context, config, portfolio_risk_intent=None):
+            del request, sizing, portfolio_context, config, portfolio_risk_intent
+            return RiskDecisionRecord(
+                risk_decision_id="risk-1",
+                candidate_score_id="candidate-1",
+                trade_classification_id="classification-1",
+                position_sizing_decision_id="sizing-1",
+                ticker="NVDA",
+                status="approved",
+                reason_code="within_limits",
+                approved_weight=0.05,
+                approved_notional=5000.0,
+                approved_quantity=83.33,
+                portfolio_risk_snapshot_id="snapshot-portfolio-1",
+                applied_rules=["single_name_limit_ok"],
+                generated_hedge_action=None,
+                decision_time=decision_time,
+                metadata_json={},
+            )
+
+    class _OptionRiskManager:
+        def evaluate_assignment_risk(self, option_risk, *, portfolio_context, config):
+            del portfolio_context, config
+            assert option_risk.option_strategy_type == "put_credit_spread"
+            assert option_risk.margin_requirement == 540.0
+            assert option_risk.buying_power_effect == 540.0
+            return OptionRiskAssessment(
+                status="rejected",
+                reason_code="assignment_concentration_cap",
+                worst_case_assignment_notional=11450.0,
+                portfolio_delta=-0.16,
+                portfolio_gamma=0.03,
+                portfolio_theta=0.0,
+                portfolio_vega=-0.03,
+            )
+
+    workflow = _LiveRiskWorkflow(
+        repository=_Repository(),
+        source_repository=_SourceRepository(),
+        config_resolver=_ConfigResolver(),
+        position_sizer=_PositionSizer(),
+        risk_manager=_RiskManager(),
+        option_risk_manager=_OptionRiskManager(),
+    )
+
+    result = workflow.run(
+        candidates=(
+            SimpleNamespace(
+                candidate_score_id="candidate-1",
+                signal_snapshot_id="snapshot-1",
+                ticker="NVDA",
+                candidate_score=0.8,
+                decision_time=decision_time,
+                direction="bullish",
+                action="enter_long",
+                strategy_id="strong_theme_catalyst_continuation_v1",
+                strategy_version="v1",
+            ),
+        ),
+        classifications=(
+            SimpleNamespace(
+                candidate_score_id="candidate-1",
+                trade_classification_id="classification-1",
+                trade_identity="tactical_option_trade",
+                expression_bucket_id="defined_risk_income_spread",
+                expression_bucket_version="v1",
+            ),
+        ),
+        portfolio_context=SimpleNamespace(
+            account_equity=100000.0,
+            positions=(),
+            cash_balance=100000.0,
+            buying_power=200000.0,
+            excess_liquidity=100000.0,
+            stock_margin_requirement=0.0,
+            option_margin_requirement=0.0,
+            total_margin_requirement=0.0,
+            initial_margin_requirement=0.0,
+            maintenance_margin_requirement=0.0,
+            margin_requirement_source="broker_reported",
+            approved_core_tickers=(),
+        ),
+        decision_time=decision_time,
+    )
+
+    assert result.risk_decisions[0].status == "rejected"
+    assert result.risk_decisions[0].reason_code == "assignment_concentration_cap"
+    assert "option_assignment_risk_check" in result.risk_decisions[0].applied_rules
+    assert len(saved_option_snapshots) == 1
+    assert saved_option_snapshots[0].worst_case_assignment_notional == 11450.0
 
 
 def test_live_risk_workflow_persists_portfolio_risk_intent_and_materializes_generated_hedge():

@@ -139,16 +139,27 @@ class LookaheadRiskWorkflowHelper:
     ) -> tuple[RiskDecisionRecord, ...]:
         if not portfolio_risk_intent.hedge_actions:
             return risk_decisions
+        hedge_action = portfolio_risk_intent.hedge_actions[0]
         approved = [
             decision
             for decision in risk_decisions
-            if decision.status in {"approved", "reduced"} and decision.approved_notional > 0
+            if decision.status in {"approved", "reduced"}
+            and _hedge_protected_exposure(
+                decision,
+                target_exposure_type=hedge_action.target_exposure_type,
+            )[1] > 0
         ]
         if not approved:
             return risk_decisions
         carrier = approved[0]
-        hedge_action = portfolio_risk_intent.hedge_actions[0]
-        protected_notional = sum(decision.approved_notional for decision in approved) * hedge_action.coverage_ratio
+        protected_exposures = [
+            _hedge_protected_exposure(
+                decision,
+                target_exposure_type=hedge_action.target_exposure_type,
+            )
+            for decision in approved
+        ]
+        protected_notional = sum(value for _, value in protected_exposures) * hedge_action.coverage_ratio
         payload = {
             "action": hedge_action.action,
             "risk_source": hedge_action.risk_source,
@@ -160,6 +171,7 @@ class LookaheadRiskWorkflowHelper:
             "option_strategy_type": "long_put",
             "underlying_price": 100.0,
             "protected_notional": protected_notional,
+            "protected_exposure_basis": _dominant_protected_exposure_basis(protected_exposures),
             "metadata_json": dict(hedge_action.metadata_json),
         }
         materialized: list[RiskDecisionRecord] = []
@@ -200,6 +212,36 @@ def _sector_from_snapshot(snapshot: object | None) -> str | None:
 
 def _sector_from_baseline(baseline: object | None) -> str | None:
     return _sector_from_snapshot(baseline)
+
+
+def _hedge_protected_exposure(
+    decision: RiskDecisionRecord,
+    *,
+    target_exposure_type: str,
+) -> tuple[str, float]:
+    metadata_json = dict(decision.metadata_json or {})
+    if target_exposure_type == "assignment":
+        assignment_notional = float(metadata_json.get("approved_assignment_notional") or 0.0)
+        if assignment_notional > 0:
+            return ("approved_assignment_notional", assignment_notional)
+    for key in (
+        "approved_margin_exposure",
+        "approved_buying_power_effect",
+        "approved_capital_notional",
+    ):
+        value = float(metadata_json.get(key) or 0.0)
+        if value > 0:
+            return (key, value)
+    return ("approved_notional", max(float(decision.approved_notional), 0.0))
+
+
+def _dominant_protected_exposure_basis(protected_exposures: list[tuple[str, float]]) -> str:
+    if not protected_exposures:
+        return "approved_notional"
+    basis_totals: dict[str, float] = {}
+    for basis, value in protected_exposures:
+        basis_totals[basis] = basis_totals.get(basis, 0.0) + value
+    return max(basis_totals.items(), key=lambda item: item[1])[0]
 
 
 def _intraday_event_assessment(

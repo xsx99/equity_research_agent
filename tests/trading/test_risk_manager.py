@@ -103,6 +103,33 @@ def _request(
     )
 
 
+def _option_request() -> TradeRiskRequest:
+    return TradeRiskRequest(
+        candidate=_candidate(direction="bullish"),
+        classification=_classification(trade_identity="tactical_option_trade"),
+        instrument_type="option",
+        target_weight=0.05,
+        confidence=0.8,
+        sector="Technology",
+        beta_bucket="high",
+        volatility_bucket="high",
+        liquidity_bucket="liquid",
+        event_type=None,
+        macro_sensitivity="ai_capex",
+        price=60.0,
+        atr_pct=0.03,
+        average_daily_dollar_volume=50_000_000,
+        signal_freshness={"technical": "fresh", "fundamental": "fresh", "events_news": "fresh"},
+        estimated_margin_requirement=540.0,
+        estimated_buying_power_effect=540.0,
+        estimated_initial_margin_requirement=540.0,
+        estimated_maintenance_margin_requirement=540.0,
+        assignment_notional=11_450.0,
+        option_risk_metadata_complete=True,
+        event_through_horizon=False,
+    )
+
+
 def _portfolio(*positions: PortfolioPosition) -> PortfolioContext:
     return PortfolioContext(
         as_of=datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc),
@@ -308,3 +335,38 @@ def test_risk_manager_emits_generated_hedge_payload_when_trade_stays_open():
     assert decision.generated_hedge_action is not None
     assert decision.generated_hedge_action["target_underlier"] == "QQQ"
     assert decision.generated_hedge_action["coverage_ratio"] == 0.5
+
+
+def test_risk_manager_sizes_option_quantity_using_strategy_margin_requirement():
+    portfolio = _portfolio()
+    config = RiskConfigResolver().resolve(
+        risk_appetite=RiskAppetiteProfile.BALANCED,
+        portfolio_context=portfolio,
+        macro_risk_budget_multiplier=1.0,
+    )
+    request = _option_request()
+    sizing = PositionSizer().size_position(request, portfolio, config)
+
+    decision = RiskManager().evaluate(request, sizing, portfolio, config)
+
+    assert decision.status == "approved"
+    assert decision.approved_notional == sizing.final_notional
+    assert decision.approved_quantity == sizing.final_notional / 540.0
+
+
+def test_risk_manager_records_option_exposure_breakdown_in_metadata():
+    portfolio = _portfolio()
+    config = RiskConfigResolver().resolve(
+        risk_appetite=RiskAppetiteProfile.BALANCED,
+        portfolio_context=portfolio,
+        macro_risk_budget_multiplier=1.0,
+    )
+    request = _option_request()
+    sizing = PositionSizer().size_position(request, portfolio, config)
+
+    decision = RiskManager().evaluate(request, sizing, portfolio, config)
+
+    assert decision.metadata_json["approved_quantity_basis"] == "estimated_margin_requirement"
+    assert decision.metadata_json["approved_quantity_unit_cost"] == 540.0
+    assert decision.metadata_json["approved_strategy_units"] == decision.approved_quantity
+    assert decision.metadata_json["approved_assignment_notional"] == request.assignment_notional * decision.approved_quantity
