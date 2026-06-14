@@ -5,14 +5,13 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from src.trading.intraday.signals import IntradaySignalScanRecord, IntradaySignalSnapshotRecord
-from src.trading.risk import PortfolioRiskIntentRecord
+from src.trading.risk import HedgeActionRecord, PortfolioRiskIntentRecord
 from src.trading.runtime.dispatch import get_job_phase_handler
 from src.trading.runtime.intraday_refresh import (
     LiveIntradayRefreshDependencies,
     LiveIntradayRefreshRuntime,
     run_live_intraday_refresh_once,
 )
-from src.trading.runtime.lookahead_risk import LookaheadRiskWorkflowHelper
 from src.trading.signals import SignalSnapshotResult
 from src.trading.signals.sources import EventNewsItemRecord, SourceRecord
 
@@ -99,6 +98,40 @@ class _PortfolioSyncWorkflow:
         assert as_of.tzinfo is not None
         self.recorder.record("portfolio_sync")
         return self.result
+
+
+class _MacroLookaheadHelper:
+    def __init__(self) -> None:
+        self.received_macro_risk_state: str | None = None
+
+    def build_intraday_portfolio_risk_intent(
+        self,
+        *,
+        rebalance_requests,
+        portfolio_context,
+        config,
+        decision_time: datetime,
+        macro_risk_state: str | None,
+    ) -> PortfolioRiskIntentRecord:
+        self.received_macro_risk_state = macro_risk_state
+        assert macro_risk_state == "high"
+        return PortfolioRiskIntentRecord.create(
+            decision_time=decision_time,
+            risk_window="1-5d",
+            aggregate_risk_state="macro_high_risk",
+            hedge_actions=(
+                HedgeActionRecord(
+                    action="open_hedge",
+                    risk_source="macro",
+                    severity="high",
+                    target_underlier="SPY",
+                    target_exposure_type="broad_market",
+                    coverage_ratio=0.5,
+                    reason_code="macro_high_overlay",
+                    metadata_json={},
+                ),
+            ),
+        )
 
 
 class _NewsAlertService:
@@ -409,26 +442,14 @@ def test_live_intraday_refresh_runtime_passes_macro_risk_state_into_intraday_loo
     runtime.dependencies = LiveIntradayRefreshDependencies(
         **{
             **runtime.dependencies.__dict__,
-            "portfolio_sync_workflow": _PortfolioSyncWorkflow(
-                _CallRecorder(),
-                SimpleNamespace(
-                    portfolio_context=SimpleNamespace(
-                        account_equity=100000.0,
-                        total_margin_requirement=0.0,
-                        margin_model_profile="estimated_fidelity_like_conservative_v1",
-                        margin_model_version="v1",
-                        positions=(SimpleNamespace(ticker="AAPL", trade_identity="tactical_stock_trade", sector=None),),
-                    ),
-                    positions=(SimpleNamespace(ticker="AAPL", trade_identity="tactical_stock_trade", sector=None),),
-                ),
-            ),
             "macro_state_loader": lambda decision_time: "high",
-            "lookahead_helper": LookaheadRiskWorkflowHelper(),
+            "lookahead_helper": _MacroLookaheadHelper(),
         }
     )
 
     runtime.run()
 
+    assert runtime.dependencies.lookahead_helper.received_macro_risk_state == "high"
     assert rebalance_pipeline.last_portfolio_risk_intent.aggregate_risk_state == "macro_high_risk"
     assert rebalance_pipeline.last_portfolio_risk_intent.hedge_actions[0].risk_source == "macro"
 
