@@ -147,6 +147,11 @@ The current PR 8 implementation intentionally keeps intraday rebalance separate 
 
 - Added `PortfolioHedgePlanner` as a pure lookahead risk-planning layer ahead of final `RiskManager` approval.
 - Pre-open and intraday risk flows now distinguish single-name event reduction from macro/sector hedge overlays.
+- Intraday lookahead now consumes:
+  - actionable own-event alerts
+  - live macro severity from an injected runtime loader
+  - readthrough/theme context preserved from `NewsAlertRecord`
+- Dedicated macro ingestion and broader cluster scoring remain follow-up work.
 
 ## PR 11 Scope
 
