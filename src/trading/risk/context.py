@@ -99,6 +99,12 @@ class TradeRiskRequest:
     direct_company_negative_evidence: bool = False
     bearish_signal_sources: tuple[str, ...] = ()
     option_risk_metadata_complete: bool = True
+    event_date_distance: int | None = None
+    event_through_horizon: bool | None = None
+    core_vs_tactical: str | None = None
+    lookahead_macro_state: str | None = None
+    lookahead_event_state: str | None = None
+    lookahead_cluster_state: str | None = None
 
 
 @dataclass(frozen=True)
@@ -250,6 +256,8 @@ class RiskDecisionRecord:
     applied_rules: list[str]
     generated_hedge_action: dict[str, Any] | None
     decision_time: datetime
+    binding_constraint: str | None = None
+    lookahead_risk_source: str | None = None
     metadata_json: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -268,6 +276,8 @@ class RiskDecisionRecord:
         portfolio_risk_snapshot_id: str | None,
         applied_rules: list[str],
         decision_time: datetime,
+        binding_constraint: str | None = None,
+        lookahead_risk_source: str | None = None,
         generated_hedge_action: dict[str, Any] | None = None,
         metadata_json: dict[str, Any] | None = None,
     ) -> "RiskDecisionRecord":
@@ -284,6 +294,8 @@ class RiskDecisionRecord:
             approved_quantity=approved_quantity,
             portfolio_risk_snapshot_id=portfolio_risk_snapshot_id,
             applied_rules=applied_rules,
+            binding_constraint=binding_constraint,
+            lookahead_risk_source=lookahead_risk_source,
             generated_hedge_action=generated_hedge_action,
             decision_time=decision_time,
             metadata_json=metadata_json or {},

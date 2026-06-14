@@ -13,6 +13,7 @@ from src.trading.risk.context import (
     RiskFactorExposureRecord,
     TradeRiskRequest,
 )
+from src.trading.risk.lookahead import HedgeActionRecord, PortfolioRiskIntentRecord, PositionRiskActionRecord
 
 
 class RiskManager:
@@ -106,8 +107,38 @@ class RiskManager:
         sizing: PositionSizingDecisionRecord,
         portfolio_context: PortfolioContext,
         config: RiskLimitConfig,
+        portfolio_risk_intent: PortfolioRiskIntentRecord | None = None,
     ) -> RiskDecisionRecord:
         snapshot = self.build_portfolio_risk_snapshot(portfolio_context, config)
+        planner_position_action = _matching_planner_position_action(
+            portfolio_risk_intent,
+            ticker=request.candidate.ticker,
+            trade_identity=request.classification.trade_identity,
+        )
+        planner_weight = sizing.final_weight
+        planner_reason_code: str | None = None
+        planner_risk_source: str | None = None
+        if planner_position_action is not None:
+            planner_reason_code = planner_position_action.reason_code
+            planner_risk_source = planner_position_action.risk_source
+            if planner_position_action.action == "block_open":
+                return self._decision(
+                    request,
+                    sizing,
+                    snapshot_id=snapshot.portfolio_risk_snapshot_id,
+                    status="rejected",
+                    reason_code=planner_position_action.reason_code,
+                    approved_weight=0.0,
+                    applied_rules=["portfolio_risk_intent"],
+                    binding_constraint=planner_position_action.reason_code,
+                    lookahead_risk_source=planner_position_action.risk_source,
+                )
+            if (
+                planner_position_action.action in {"reduce", "force_reduce"}
+                and planner_position_action.max_allowed_weight_override is not None
+            ):
+                planner_weight = min(sizing.final_weight, planner_position_action.max_allowed_weight_override)
+
         if request.classification.trade_identity == "core_holding" and request.candidate.ticker not in portfolio_context.approved_core_tickers:
             return self._decision(
                 request,
@@ -117,6 +148,7 @@ class RiskManager:
                 reason_code="core_holding_requires_portfolio_intent",
                 approved_weight=0.0,
                 applied_rules=["core_holding_intent_check"],
+                lookahead_risk_source=planner_risk_source,
             )
 
         if _has_missing_or_stale_signals(request):
@@ -128,6 +160,7 @@ class RiskManager:
                 reason_code="missing_or_stale_signals",
                 approved_weight=0.0,
                 applied_rules=["signal_freshness_check"],
+                lookahead_risk_source=planner_risk_source,
             )
 
         if request.instrument_type == "stock" and _is_macro_only_bearish(request):
@@ -139,6 +172,7 @@ class RiskManager:
                 reason_code="macro_only_bearish_single_name_blocked",
                 approved_weight=0.0,
                 applied_rules=["bearish_evidence_gate"],
+                lookahead_risk_source=planner_risk_source,
             )
 
         if request.estimated_margin_requirement is None or request.estimated_buying_power_effect is None:
@@ -150,6 +184,7 @@ class RiskManager:
                 reason_code="unestimable_margin_requirement",
                 approved_weight=0.0,
                 applied_rules=["margin_estimation_check"],
+                lookahead_risk_source=planner_risk_source,
             )
 
         if request.instrument_type == "option" and not request.option_risk_metadata_complete:
@@ -161,11 +196,12 @@ class RiskManager:
                 reason_code="missing_option_risk_metadata",
                 approved_weight=0.0,
                 applied_rules=["option_metadata_check"],
+                lookahead_risk_source=planner_risk_source,
             )
 
         sector_weight = self._current_sector_weight(request.sector, portfolio_context)
         effective_sector_cap = _effective_sector_cap(request, config)
-        proposed_weight = sector_weight + sizing.final_weight
+        proposed_weight = sector_weight + planner_weight
         if request.sector and proposed_weight > effective_sector_cap:
             approved_weight = max(0.0, effective_sector_cap - sector_weight)
             return self._decision(
@@ -176,16 +212,31 @@ class RiskManager:
                 reason_code="sector_concentration_cap",
                 approved_weight=approved_weight,
                 applied_rules=["sector_concentration_check"],
+                binding_constraint="sector_concentration_cap",
+                lookahead_risk_source=planner_risk_source,
+                generated_hedge_action=_generated_hedge_action(portfolio_risk_intent),
             )
 
+        status = "approved"
+        reason_code = "within_limits"
+        applied_rules = ["single_name_limit_ok", "sector_concentration_ok"]
+        binding_constraint = None
+        if planner_weight < sizing.final_weight:
+            status = "reduced"
+            reason_code = planner_reason_code or "portfolio_risk_intent_reduce"
+            applied_rules = ["portfolio_risk_intent", "single_name_limit_ok", "sector_concentration_ok"]
+            binding_constraint = reason_code
         return self._decision(
             request,
             sizing,
             snapshot_id=snapshot.portfolio_risk_snapshot_id,
-            status="approved",
-            reason_code="within_limits",
-            approved_weight=sizing.final_weight,
-            applied_rules=["single_name_limit_ok", "sector_concentration_ok"],
+            status=status,
+            reason_code=reason_code,
+            approved_weight=planner_weight,
+            applied_rules=applied_rules,
+            binding_constraint=binding_constraint,
+            lookahead_risk_source=planner_risk_source or _hedge_risk_source(portfolio_risk_intent),
+            generated_hedge_action=_generated_hedge_action(portfolio_risk_intent),
         )
 
     def _current_sector_weight(self, sector: str | None, portfolio_context: PortfolioContext) -> float:
@@ -227,6 +278,9 @@ class RiskManager:
         reason_code: str,
         approved_weight: float,
         applied_rules: list[str],
+        binding_constraint: str | None = None,
+        lookahead_risk_source: str | None = None,
+        generated_hedge_action: dict[str, object] | None = None,
     ) -> RiskDecisionRecord:
         approved_notional = approved_weight * (sizing.final_notional / sizing.final_weight) if sizing.final_weight > 0 else 0.0
         approved_quantity = approved_notional / request.price if request.price > 0 else 0.0
@@ -242,6 +296,9 @@ class RiskManager:
             approved_quantity=approved_quantity,
             portfolio_risk_snapshot_id=snapshot_id,
             applied_rules=applied_rules,
+            binding_constraint=binding_constraint,
+            lookahead_risk_source=lookahead_risk_source,
+            generated_hedge_action=generated_hedge_action,
             decision_time=request.candidate.decision_time,
         )
 
@@ -275,3 +332,47 @@ def _effective_sector_cap(request: TradeRiskRequest, config: RiskLimitConfig) ->
     if request.liquidity_bucket == "thin":
         cap -= 0.01
     return max(0.05, cap)
+
+
+def _matching_planner_position_action(
+    portfolio_risk_intent: PortfolioRiskIntentRecord | None,
+    *,
+    ticker: str,
+    trade_identity: str,
+) -> PositionRiskActionRecord | None:
+    if portfolio_risk_intent is None:
+        return None
+    matches = [
+        action
+        for action in portfolio_risk_intent.position_actions
+        if action.ticker == ticker and action.trade_identity == trade_identity
+    ]
+    if not matches:
+        return None
+    priority = {"block_open": 0, "force_reduce": 1, "reduce": 2, "allow": 3}
+    return sorted(matches, key=lambda action: priority.get(action.action, 99))[0]
+
+
+def _generated_hedge_action(portfolio_risk_intent: PortfolioRiskIntentRecord | None) -> dict[str, object] | None:
+    if portfolio_risk_intent is None or not portfolio_risk_intent.hedge_actions:
+        return None
+    return _hedge_action_payload(portfolio_risk_intent.hedge_actions[0])
+
+
+def _hedge_risk_source(portfolio_risk_intent: PortfolioRiskIntentRecord | None) -> str | None:
+    if portfolio_risk_intent is None or not portfolio_risk_intent.hedge_actions:
+        return None
+    return portfolio_risk_intent.hedge_actions[0].risk_source
+
+
+def _hedge_action_payload(action: HedgeActionRecord) -> dict[str, object]:
+    return {
+        "action": action.action,
+        "risk_source": action.risk_source,
+        "severity": action.severity,
+        "target_underlier": action.target_underlier,
+        "target_exposure_type": action.target_exposure_type,
+        "coverage_ratio": action.coverage_ratio,
+        "reason_code": action.reason_code,
+        "metadata_json": dict(action.metadata_json),
+    }
