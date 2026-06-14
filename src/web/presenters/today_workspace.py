@@ -298,6 +298,8 @@ def _build_detail(
             "status": risk.get("status") or _EMPTY_MARKER,
             "status_label": risk_status_label(risk.get("status")) or _EMPTY_MARKER,
             "reason": risk.get("reason") or _EMPTY_MARKER,
+            "lookahead_risk_source": risk.get("lookahead_risk_source"),
+            "hedge_overlay_reason": _hedge_overlay_reason(risk.get("generated_hedge_action")),
         },
         "position_execution": {
             "position": position,
@@ -332,6 +334,7 @@ def _build_detail(
             "current_stance": latest_conclusion["risk_summary"],
             "position_state": position,
             "history": _build_risk_history(risk.get("history")),
+            "raw_json": risk.get("raw_json"),
         },
     }
 
@@ -503,6 +506,15 @@ def _build_risk_history(history: Any) -> list[dict[str, Any]]:
         )
     items.sort(key=lambda item: _sort_key(item.get("time")))
     return items or [_empty_risk_history_item()]
+
+
+def _hedge_overlay_reason(generated_hedge_action: Any) -> str | None:
+    if not isinstance(generated_hedge_action, dict):
+        return None
+    reason_code = generated_hedge_action.get("reason_code")
+    if reason_code is None:
+        return None
+    return str(reason_code).strip() or None
 
 
 def _build_lifecycle(

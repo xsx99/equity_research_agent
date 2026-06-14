@@ -27,6 +27,7 @@ from src.db.models.trading import (
     PaperOptionPosition as PaperOptionPositionModel,
     PaperOrder,
     PaperPosition,
+    PortfolioRiskIntent,
     PortfolioRiskSnapshot,
     PortfolioSnapshot as PortfolioSnapshotModel,
     PositionSizingDecision,
@@ -55,6 +56,7 @@ from src.trading.brokers.paper_stock import PaperExecutionRecord, PaperOrderReco
 from src.trading.intraday.news_alerts import NewsAlertRecord
 from src.trading.intraday.signals import IntradaySignalScanRecord, IntradaySignalSnapshotRecord
 from src.trading.risk.hedges import RiskHedgeDecisionRecord
+from src.trading.risk.lookahead import HedgeActionRecord, PortfolioRiskIntentRecord, PositionRiskActionRecord
 from src.trading.risk.options import OptionRiskSnapshotRecord
 from src.trading.options.strategy import OptionStrategyDecisionRecord, OptionStrategyLegRecord
 from src.trading.portfolio.state import PortfolioSnapshot, StockPosition
@@ -753,6 +755,34 @@ class SQLAlchemyTradingRepository:
         row.metadata_json = dict(snapshot.metadata_json)
         self.session.flush()
 
+    def save_portfolio_risk_intent(self, intent: PortfolioRiskIntentRecord) -> None:
+        row = self.session.query(PortfolioRiskIntent).filter_by(
+            portfolio_risk_intent_id=_to_uuid(intent.portfolio_risk_intent_id)
+        ).one_or_none()
+        if row is None:
+            row = PortfolioRiskIntent(
+                portfolio_risk_intent_id=_to_uuid(intent.portfolio_risk_intent_id)
+            )
+            self.session.add(row)
+        row.portfolio_risk_snapshot_id = _to_uuid_or_none(intent.portfolio_risk_snapshot_id)
+        row.decision_time = intent.decision_time
+        row.risk_window = intent.risk_window
+        row.aggregate_risk_state = intent.aggregate_risk_state
+        row.position_actions_json = [_position_risk_action_payload(action) for action in intent.position_actions]
+        row.hedge_actions_json = [_hedge_action_payload(action) for action in intent.hedge_actions]
+        row.binding_constraints_json = list(intent.binding_constraints)
+        row.metadata_json = dict(intent.metadata_json)
+        self.session.flush()
+
+    def load_portfolio_risk_intents(self, *, trade_date: date) -> tuple[PortfolioRiskIntentRecord, ...]:
+        rows = [
+            row
+            for row in self.session.query(PortfolioRiskIntent).all()
+            if row.decision_time.date() == trade_date
+        ]
+        rows.sort(key=lambda row: row.decision_time)
+        return tuple(_portfolio_risk_intent_record(row) for row in rows)
+
     def save_risk_factor_exposures(
         self,
         exposures: list[Any] | tuple[Any, ...],
@@ -797,7 +827,12 @@ class SQLAlchemyTradingRepository:
             dict(decision.generated_hedge_action) if decision.generated_hedge_action is not None else None
         )
         row.decision_time = decision.decision_time
-        row.metadata_json = dict(decision.metadata_json)
+        metadata_json = dict(decision.metadata_json)
+        if getattr(decision, "binding_constraint", None) is not None:
+            metadata_json.setdefault("binding_constraint", decision.binding_constraint)
+        if getattr(decision, "lookahead_risk_source", None) is not None:
+            metadata_json.setdefault("lookahead_risk_source", decision.lookahead_risk_source)
+        row.metadata_json = metadata_json
         self.session.flush()
 
     def save_prompt_template(self, template: object) -> None:
@@ -1656,6 +1691,80 @@ def _portfolio_risk_snapshot_payload(row: Any) -> dict[str, Any]:
         "gross_exposure": _decimal_to_float(row.gross_exposure),
         "metadata_json": dict(row.metadata_json or {}),
     }
+
+
+def _position_risk_action_payload(action: PositionRiskActionRecord) -> dict[str, Any]:
+    return {
+        "ticker": action.ticker,
+        "trade_identity": action.trade_identity,
+        "action": action.action,
+        "risk_source": action.risk_source,
+        "severity": action.severity,
+        "max_allowed_weight_override": action.max_allowed_weight_override,
+        "reason_code": action.reason_code,
+        "metadata_json": dict(action.metadata_json),
+    }
+
+
+def _hedge_action_payload(action: HedgeActionRecord) -> dict[str, Any]:
+    return {
+        "action": action.action,
+        "risk_source": action.risk_source,
+        "severity": action.severity,
+        "target_underlier": action.target_underlier,
+        "target_exposure_type": action.target_exposure_type,
+        "coverage_ratio": action.coverage_ratio,
+        "reason_code": action.reason_code,
+        "metadata_json": dict(action.metadata_json),
+    }
+
+
+def _position_risk_action_record(payload: dict[str, Any]) -> PositionRiskActionRecord:
+    return PositionRiskActionRecord(
+        ticker=str(payload.get("ticker", "")),
+        trade_identity=str(payload.get("trade_identity", "")),
+        action=str(payload.get("action", "")),
+        risk_source=str(payload.get("risk_source", "")),
+        severity=str(payload.get("severity", "")),
+        max_allowed_weight_override=_decimal_to_float(payload.get("max_allowed_weight_override")),
+        reason_code=str(payload.get("reason_code", "")),
+        metadata_json=dict(payload.get("metadata_json") or {}),
+    )
+
+
+def _hedge_action_record(payload: dict[str, Any]) -> HedgeActionRecord:
+    return HedgeActionRecord(
+        action=str(payload.get("action", "")),
+        risk_source=str(payload.get("risk_source", "")),
+        severity=str(payload.get("severity", "")),
+        target_underlier=str(payload.get("target_underlier", "")),
+        target_exposure_type=str(payload.get("target_exposure_type", "")),
+        coverage_ratio=float(payload.get("coverage_ratio", 0.0)),
+        reason_code=str(payload.get("reason_code", "")),
+        metadata_json=dict(payload.get("metadata_json") or {}),
+    )
+
+
+def _portfolio_risk_intent_record(row: Any) -> PortfolioRiskIntentRecord:
+    return PortfolioRiskIntentRecord(
+        portfolio_risk_intent_id=str(row.portfolio_risk_intent_id),
+        portfolio_risk_snapshot_id=(
+            str(row.portfolio_risk_snapshot_id) if row.portfolio_risk_snapshot_id is not None else None
+        ),
+        decision_time=row.decision_time,
+        risk_window=row.risk_window,
+        aggregate_risk_state=row.aggregate_risk_state,
+        position_actions=tuple(
+            _position_risk_action_record(payload)
+            for payload in list(row.position_actions_json or ())
+        ),
+        hedge_actions=tuple(
+            _hedge_action_record(payload)
+            for payload in list(row.hedge_actions_json or ())
+        ),
+        binding_constraints=tuple(row.binding_constraints_json or ()),
+        metadata_json=dict(row.metadata_json or {}),
+    )
 
 
 def _risk_factor_exposure_payload(row: Any) -> dict[str, Any]:

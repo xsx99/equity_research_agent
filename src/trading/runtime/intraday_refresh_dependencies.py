@@ -25,6 +25,7 @@ class LiveIntradayRefreshDependencies:
     candidate_context_loader: Callable[[tuple[str, ...], datetime], dict[str, tuple[str, ...]]]
     position_context_loader: Callable[[tuple[str, ...], tuple[object, ...]], dict[str, tuple[str, ...]]]
     theme_context_loader: Callable[[tuple[str, ...], datetime], dict[str, tuple[str, ...]]]
+    lookahead_helper: Any | None = None
 
 
 def build_live_intraday_refresh_dependencies(session: Any | None = None) -> LiveIntradayRefreshDependencies:
@@ -37,6 +38,8 @@ def build_live_intraday_refresh_dependencies(session: Any | None = None) -> Live
     from src.trading.brokers.paper_stock import PaperStockBroker
     from src.trading.repositories.source_sqlalchemy import SQLAlchemySignalSourceRepository
     from src.trading.repositories.sqlalchemy import SqlAlchemyTradingRepository
+    from src.trading.risk import PortfolioHedgePlanner
+    from src.trading.runtime.lookahead_risk import LookaheadRiskWorkflowHelper
     from src.trading.workflows.portfolio_sync import BrokerPortfolioSyncWorkflow
 
     trading_repository = SqlAlchemyTradingRepository(session)
@@ -72,6 +75,7 @@ def build_live_intraday_refresh_dependencies(session: Any | None = None) -> Live
             if ticker in {getattr(position, "ticker", None) for position in positions}
         },
         theme_context_loader=lambda tickers, decision_time: {},
+        lookahead_helper=LookaheadRiskWorkflowHelper(hedge_planner=PortfolioHedgePlanner()),
     )
 
 

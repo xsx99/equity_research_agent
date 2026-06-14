@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from src.trading.data_sources.universe import UniverseAsset, UniverseFilterConfig
 from src.trading.data_sources.live_universe import LiveUniverseProvider
-from src.trading.risk import RiskDecisionRecord
+from src.trading.risk import HedgeActionRecord, PortfolioRiskIntentRecord, RiskDecisionRecord
 from src.trading.runtime.preopen_dependencies import _ConfiguredLiveUniverseScanPipeline
 from src.trading.runtime.preopen_risk import _LiveRiskWorkflow
 from src.trading.runtime.preopen import (
@@ -614,3 +615,198 @@ def test_live_risk_workflow_reuses_persisted_portfolio_snapshot_id_for_risk_deci
     assert len(result.risk_decisions) == 1
     assert len(captured_decisions) == 1
     assert captured_decisions[0].portfolio_risk_snapshot_id == portfolio_snapshot_id
+
+
+def test_live_risk_workflow_persists_portfolio_risk_intent_and_materializes_generated_hedge():
+    decision_time = datetime(2026, 6, 3, 12, 45, tzinfo=timezone.utc)
+    saved_intents: list[PortfolioRiskIntentRecord] = []
+    saved_decisions: list[RiskDecisionRecord] = []
+    captured_intents: list[PortfolioRiskIntentRecord | None] = []
+
+    class _Repository:
+        def load_signal_snapshots_for_decision(self, *, decision_time, snapshot_type):
+            del decision_time, snapshot_type
+            return (
+                SimpleNamespace(
+                    signal_snapshot_id="snapshot-1",
+                    signal_json={"events_news": {"earnings_in_days": 2}},
+                    source_freshness_json={"technical": "fresh"},
+                ),
+            )
+
+        def save_portfolio_risk_snapshot(self, snapshot):
+            del snapshot
+
+        def save_risk_factor_exposures(self, exposures):
+            del exposures
+
+        def save_portfolio_risk_intent(self, intent):
+            saved_intents.append(intent)
+
+        def save_position_sizing_decision(self, sizing):
+            del sizing
+
+        def save_risk_decision(self, decision):
+            saved_decisions.append(decision)
+
+    class _SourceRepository:
+        def latest_available_by_family(self, ticker, family, decision_time):
+            del ticker, family, decision_time
+            return [SimpleNamespace(payload={"bars": [{"close": 200.0}]})]
+
+    class _ConfigResolver:
+        def resolve(self, **kwargs):
+            del kwargs
+            return SimpleNamespace(
+                risk_appetite="balanced",
+                resolver_version="v1",
+                margin_model_profile="alpaca",
+                margin_model_version="broker",
+                max_sector_weight=0.30,
+            )
+
+    class _PositionSizer:
+        def size_position(self, request, portfolio_context, config):
+            del request, portfolio_context, config
+            return SimpleNamespace(
+                position_sizing_decision_id="sizing-1",
+                candidate_score_id="candidate-1",
+                trade_classification_id="classification-1",
+                ticker="AAPL",
+                risk_appetite="balanced",
+                base_weight=0.05,
+                volatility_adjusted_weight=0.05,
+                liquidity_capped_weight=0.05,
+                final_weight=0.05,
+                final_notional=5000.0,
+                applied_caps=[],
+                binding_constraint=None,
+                decision_time=decision_time,
+                metadata_json={},
+            )
+
+    class _RiskManager:
+        def build_portfolio_risk_snapshot(self, portfolio_context, config):
+            del portfolio_context, config
+            return SimpleNamespace(
+                portfolio_risk_snapshot_id="snapshot-portfolio-1",
+                decision_time=decision_time,
+                risk_appetite="balanced",
+                resolver_version="v1",
+                margin_model_profile="alpaca",
+                margin_model_version="broker",
+                account_equity=100000.0,
+                cash_balance=100000.0,
+                buying_power=200000.0,
+                excess_liquidity=100000.0,
+                stock_margin_requirement=0.0,
+                option_margin_requirement=0.0,
+                total_margin_requirement=0.0,
+                initial_margin_requirement=0.0,
+                maintenance_margin_requirement=0.0,
+                margin_requirement_source="broker_reported",
+                net_exposure=0.0,
+                gross_exposure=0.0,
+                beta_adjusted_net_exposure=0.0,
+                concentration_flags=[],
+                metadata_json={},
+            )
+
+        def compute_factor_exposures(self, portfolio_context):
+            del portfolio_context
+            return ()
+
+        def evaluate(self, request, sizing, portfolio_context, config, portfolio_risk_intent=None):
+            del request, sizing, portfolio_context, config
+            captured_intents.append(portfolio_risk_intent)
+            return RiskDecisionRecord(
+                risk_decision_id="risk-1",
+                candidate_score_id="candidate-1",
+                trade_classification_id="classification-1",
+                position_sizing_decision_id="sizing-1",
+                ticker="AAPL",
+                status="approved",
+                reason_code="within_limits",
+                approved_weight=0.05,
+                approved_notional=5000.0,
+                approved_quantity=25.0,
+                portfolio_risk_snapshot_id="snapshot-portfolio-1",
+                applied_rules=["single_name_limit_ok"],
+                generated_hedge_action=None,
+                decision_time=decision_time,
+                metadata_json={},
+            )
+
+    class _LookaheadHelper:
+        def build_preopen_portfolio_risk_intent(self, **kwargs):
+            del kwargs
+            return PortfolioRiskIntentRecord.create(
+                portfolio_risk_snapshot_id="snapshot-portfolio-1",
+                decision_time=decision_time,
+                risk_window="1-5d",
+                aggregate_risk_state="macro_high_risk",
+                hedge_actions=(
+                    HedgeActionRecord(
+                        action="open_hedge",
+                        risk_source="macro",
+                        severity="high",
+                        target_underlier="QQQ",
+                        target_exposure_type="broad_market",
+                        coverage_ratio=0.5,
+                        reason_code="macro_high_overlay",
+                        metadata_json={},
+                    ),
+                ),
+            )
+
+        def materialize_generated_hedges(self, *, risk_decisions, portfolio_risk_intent):
+            del portfolio_risk_intent
+            payload = {
+                "action": "open_hedge",
+                "risk_source": "macro",
+                "severity": "high",
+                "target_underlier": "QQQ",
+                "target_exposure_type": "broad_market",
+                "coverage_ratio": 0.5,
+                "reason_code": "macro_high_overlay",
+                "option_strategy_type": "long_put",
+                "underlying_price": 500.0,
+                "protected_notional": 5000.0,
+            }
+            return (replace(risk_decisions[0], generated_hedge_action=payload),)
+
+    workflow = _LiveRiskWorkflow(
+        repository=_Repository(),
+        source_repository=_SourceRepository(),
+        config_resolver=_ConfigResolver(),
+        position_sizer=_PositionSizer(),
+        risk_manager=_RiskManager(),
+        lookahead_helper=_LookaheadHelper(),
+    )
+
+    result = workflow.run(
+        candidates=(
+            SimpleNamespace(
+                candidate_score_id="candidate-1",
+                signal_snapshot_id="snapshot-1",
+                ticker="AAPL",
+                candidate_score=0.5,
+                decision_time=decision_time,
+            ),
+        ),
+        classifications=(
+            SimpleNamespace(
+                candidate_score_id="candidate-1",
+                trade_classification_id="classification-1",
+                trade_identity="tactical_stock_trade",
+            ),
+        ),
+        portfolio_context=SimpleNamespace(account_equity=100000.0, positions=()),
+        decision_time=decision_time,
+    )
+
+    assert len(saved_intents) == 1
+    assert captured_intents == [saved_intents[0]]
+    assert result.risk_decisions[0].generated_hedge_action is not None
+    assert result.risk_decisions[0].generated_hedge_action["target_underlier"] == "QQQ"
+    assert saved_decisions[-1].generated_hedge_action["target_underlier"] == "QQQ"

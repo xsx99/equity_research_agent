@@ -49,7 +49,7 @@ Morning workflow semantics:
 9. Pass only the selected candidates plus current positions and paper option positions into `TradingPipeline`.
 10. `TradingPipeline` proposes an action, thesis, invalidators, suggested size, horizon, instrument expression, and trade identity.
 11. Deterministic risk constraints and portfolio budget decide whether the proposed action becomes an approved Alpaca paper stock order request, a staged tactical paper option order, is reduced, or is rejected.
-12. Separately, `RiskManager` may generate paper-only `risk_hedge_overlay` actions when portfolio-level beta, concentration, or event risk should be hedged instead of handled only by sizing.
+12. Separately, a pure `PortfolioHedgePlanner` may emit `portfolio_risk_intents` with deterministic `reduce`, `block_open`, `force_reduce`, and hedge proposals for the next `1-5` trading days. `RiskManager` remains the final owner of paper-only `risk_hedge_overlay` actions and only materializes them after residual post-approval exposure is known.
 
 The final morning output is not just a ranked list. It is a trade plan: selected ticker, selected strategy, horizon, action, target exposure, risk budget used, and explicit reason if a high-scoring candidate was skipped.
 

@@ -36,3 +36,5 @@ def test_lifecycle_label_translates_primary_states():
 def test_risk_status_label_keeps_approved_but_humanizes_blocks():
     assert risk_status_label("approved") == "Approved"
     assert risk_status_label("reduced_by_concentration_limit") == "Reduced: concentration limit"
+    assert risk_status_label("lookahead_force_reduce") == "Reduced: lookahead risk"
+    assert risk_status_label("lookahead_block_open") == "Blocked: lookahead risk"

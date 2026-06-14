@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from src.trading.intraday.signals import IntradaySignalScanRecord, IntradaySignalSnapshotRecord
+from src.trading.risk import PortfolioRiskIntentRecord
 from src.trading.runtime.dispatch import get_job_phase_handler
 from src.trading.runtime.intraday_refresh import (
     LiveIntradayRefreshDependencies,
@@ -127,6 +128,7 @@ class _RebalancePipeline:
         self.recorder = recorder
         self.result = result
         self.last_requests: tuple[object, ...] = ()
+        self.last_portfolio_risk_intent = None
 
     def run(
         self,
@@ -134,6 +136,7 @@ class _RebalancePipeline:
         rebalance_requests: tuple[object, ...],
         portfolio_context: object,
         risk_appetite: str,
+        portfolio_risk_intent: object | None = None,
         trade_date: datetime | None = None,
         execute_approved: bool = False,
     ) -> object:
@@ -142,6 +145,7 @@ class _RebalancePipeline:
         assert trade_date is None
         assert execute_approved is False
         self.last_requests = rebalance_requests
+        self.last_portfolio_risk_intent = portfolio_risk_intent
         self.recorder.record("rebalance")
         return self.result
 
@@ -261,7 +265,12 @@ def _build_runtime() -> tuple[LiveIntradayRefreshRuntime, _CallRecorder, _Rebala
         ("MSFT", "events_news"): (),
     }
     portfolio_result = SimpleNamespace(
-        portfolio_context=SimpleNamespace(account_equity=100000.0),
+        portfolio_context=SimpleNamespace(
+            account_equity=100000.0,
+            total_margin_requirement=0.0,
+            margin_model_profile="estimated_fidelity_like_conservative_v1",
+            margin_model_version="v1",
+        ),
         positions=(SimpleNamespace(ticker="AAPL"),),
     )
     rebalance_pipeline = _RebalancePipeline(
@@ -359,6 +368,27 @@ def test_live_intraday_refresh_runtime_runs_live_intraday_chain_in_dry_run_mode(
     assert trading_repository.saved_scan is not None
     assert len(trading_repository.saved_snapshots) == 2
     assert len(trading_repository.saved_alerts) == 1
+
+
+def test_live_intraday_refresh_runtime_passes_portfolio_risk_intent_into_rebalance_pipeline():
+    runtime, _recorder, rebalance_pipeline, _trading_repository = _build_runtime()
+    runtime.dependencies = LiveIntradayRefreshDependencies(
+        **{
+            **runtime.dependencies.__dict__,
+            "lookahead_helper": SimpleNamespace(
+                build_intraday_portfolio_risk_intent=lambda **kwargs: PortfolioRiskIntentRecord.create(
+                    decision_time=kwargs["decision_time"],
+                    risk_window="1-5d",
+                    aggregate_risk_state="macro_high_risk",
+                )
+            ),
+        }
+    )
+
+    runtime.run()
+
+    assert rebalance_pipeline.last_portfolio_risk_intent is not None
+    assert rebalance_pipeline.last_portfolio_risk_intent.aggregate_risk_state == "macro_high_risk"
 
 
 def test_run_live_intraday_refresh_once_builds_default_dependencies_when_not_injected(monkeypatch):

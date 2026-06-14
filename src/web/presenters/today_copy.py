@@ -24,6 +24,9 @@ _LIFECYCLE_LABELS = {
 _RISK_STATUS_LABELS = {
     "approved": "Approved",
     "reduced_by_concentration_limit": "Reduced: concentration limit",
+    "lookahead_force_reduce": "Reduced: lookahead risk",
+    "lookahead_reduce": "Reduced: lookahead risk",
+    "lookahead_block_open": "Blocked: lookahead risk",
 }
 
 _TRADE_IDENTITY_LABELS = {

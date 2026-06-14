@@ -29,6 +29,7 @@ from src.db.models.trading import (
     PortfolioIntent,
     PortfolioIntentLifecycleStatus,
     PortfolioIntentType,
+    PortfolioRiskIntent,
     PortfolioSnapshot,
     ProviderRequestRun,
     ProviderRequestStatus,
@@ -862,6 +863,69 @@ def test_pr_4_models_can_be_instantiated():
     assert snapshot.margin_model_profile == "estimated_fidelity_like_conservative_v1"
     assert exposure.portfolio_risk_snapshot is snapshot
     assert decision.position_sizing_decision is sizing
+
+
+def test_portfolio_risk_intent_model_persists_position_and_hedge_actions():
+    now = datetime(2026, 6, 13, 12, 0, tzinfo=timezone.utc)
+    snapshot = PortfolioRiskSnapshot(
+        decision_time=now,
+        risk_appetite="balanced",
+        resolver_version="risk_config_resolver_v1",
+        margin_model_profile="estimated_fidelity_like_conservative_v1",
+        margin_model_version="v1",
+        account_equity=100_000,
+        cash_balance=40_000,
+        buying_power=180_000,
+        excess_liquidity=70_000,
+        stock_margin_requirement=10_000,
+        option_margin_requirement=0,
+        total_margin_requirement=10_000,
+        initial_margin_requirement=10_000,
+        maintenance_margin_requirement=8_000,
+        margin_requirement_source="estimated",
+        net_exposure=40_000,
+        gross_exposure=45_000,
+        beta_adjusted_net_exposure=42_000,
+        concentration_flags_json=[],
+        metadata_json={},
+    )
+    intent = PortfolioRiskIntent(
+        portfolio_risk_snapshot=snapshot,
+        decision_time=now,
+        risk_window="1-5d",
+        aggregate_risk_state="mixed_risk",
+        position_actions_json=[
+            {
+                "ticker": "NVDA",
+                "trade_identity": "tactical_stock_trade",
+                "action": "block_open",
+                "risk_source": "own_event",
+                "severity": "high",
+                "max_allowed_weight_override": None,
+                "reason_code": "own_event_block",
+                "metadata_json": {"days_until_event": 2},
+            }
+        ],
+        hedge_actions_json=[
+            {
+                "action": "open_hedge",
+                "risk_source": "macro",
+                "severity": "watch",
+                "target_underlier": "QQQ",
+                "target_exposure_type": "broad_market",
+                "coverage_ratio": 0.25,
+                "reason_code": "macro_watch_overlay",
+                "metadata_json": {},
+            }
+        ],
+        binding_constraints_json=["own_event_block", "macro_watch_overlay"],
+        metadata_json={"source": "planner"},
+    )
+
+    assert intent.portfolio_risk_snapshot is snapshot
+    assert intent.position_actions_json[0]["action"] == "block_open"
+    assert intent.hedge_actions_json[0]["target_underlier"] == "QQQ"
+    assert intent.binding_constraints_json == ["own_event_block", "macro_watch_overlay"]
 
 
 def test_pr_5_models_can_be_instantiated():

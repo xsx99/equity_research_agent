@@ -1,7 +1,7 @@
 """Small in-memory repositories for PR02 orchestration tests."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import TYPE_CHECKING
 
 from src.trading.replay.historical import HistoricalReplayRunRecord
@@ -20,6 +20,7 @@ from src.trading.risk.options import OptionRiskSnapshotRecord
 from src.trading.options.strategy import OptionStrategyDecisionRecord, OptionStrategyLegRecord
 from src.trading.portfolio.state import PortfolioSnapshot, StockPosition
 from src.trading.risk import (
+    PortfolioRiskIntentRecord,
     PortfolioRiskSnapshotRecord,
     PositionSizingDecisionRecord,
     RiskDecisionRecord,
@@ -65,6 +66,7 @@ class InMemoryTradingRepository:
         self.candidate_outcome_evaluations: list[CandidateOutcomeEvaluationRecord] = []
         self.position_sizing_decisions: list[PositionSizingDecisionRecord] = []
         self.portfolio_risk_snapshots: list[PortfolioRiskSnapshotRecord] = []
+        self.portfolio_risk_intents: list[PortfolioRiskIntentRecord] = []
         self.risk_factor_exposures: list[RiskFactorExposureRecord] = []
         self.risk_decisions: list[RiskDecisionRecord] = []
         self.llm_prompt_templates: list[object] = []
@@ -224,6 +226,19 @@ class InMemoryTradingRepository:
 
     def save_portfolio_risk_snapshot(self, snapshot: PortfolioRiskSnapshotRecord) -> None:
         self.portfolio_risk_snapshots.append(snapshot)
+
+    def save_portfolio_risk_intent(self, intent: PortfolioRiskIntentRecord) -> None:
+        self.portfolio_risk_intents = [
+            item for item in self.portfolio_risk_intents if item.portfolio_risk_intent_id != intent.portfolio_risk_intent_id
+        ]
+        self.portfolio_risk_intents.append(intent)
+
+    def load_portfolio_risk_intents(self, *, trade_date: date) -> tuple[PortfolioRiskIntentRecord, ...]:
+        return tuple(
+            intent
+            for intent in sorted(self.portfolio_risk_intents, key=lambda item: item.decision_time)
+            if intent.decision_time.date() == trade_date
+        )
 
     def save_risk_factor_exposures(
         self,

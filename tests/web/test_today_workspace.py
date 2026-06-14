@@ -515,6 +515,48 @@ def test_build_ticker_workspace_shapes_latest_conclusion_and_evidence():
     assert detail["tabs"]["risk"]["history"][0]["summary"] == "Within limits"
 
 
+def test_build_ticker_workspace_surfaces_lookahead_risk_source_and_hedge_overlay_reason():
+    workspace = build_ticker_workspace(
+        trade_rows=[
+            {
+                "ticker": "NVDA",
+                "decision": "trim",
+                "selected_strategy_id": "valuation_repair_quality_software_v1",
+                "expression_bucket_id": "long_stock",
+                "confidence": 0.52,
+                "risk_status": "approved",
+                "created_at": "2026-06-03T14:20:00Z",
+            },
+        ],
+        selected_ticker="NVDA",
+        positions_by_ticker={"NVDA": {"summary": "Trimmed before binary event"}},
+        risk_by_ticker={
+            "NVDA": {
+                "status": "approved",
+                "reason": "own_event_force_reduce",
+                "lookahead_risk_source": "own_event",
+                "generated_hedge_action": {"reason_code": "macro_high_overlay"},
+                "raw_json": {
+                    "status": "approved",
+                    "reason_code": "own_event_force_reduce",
+                    "lookahead_risk_source": "own_event",
+                    "generated_hedge_action": {"reason_code": "macro_high_overlay"},
+                },
+                "history": [{"time": "2026-06-03T14:36:00Z", "status": "approved", "summary": "Trimmed before event"}],
+            }
+        },
+        signal_history_by_ticker={"NVDA": {"technical": [], "summary": [], "timeline": []}},
+        news_by_ticker={},
+        fundamentals_by_ticker={},
+    )
+
+    risk_summary = workspace["detail"]["latest_conclusion"]["risk_summary"]
+
+    assert risk_summary["lookahead_risk_source"] == "own_event"
+    assert risk_summary["hedge_overlay_reason"] == "macro_high_overlay"
+    assert workspace["detail"]["tabs"]["risk"]["raw_json"]["generated_hedge_action"]["reason_code"] == "macro_high_overlay"
+
+
 def test_build_ticker_workspace_detail_includes_entry_exit_reason_times_and_pnl():
     workspace = build_ticker_workspace(
         trade_rows=[

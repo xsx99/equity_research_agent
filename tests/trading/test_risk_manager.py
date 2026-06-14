@@ -1,8 +1,11 @@
 from datetime import datetime, timezone
 
 from src.trading.risk import (
+    HedgeActionRecord,
     PortfolioContext,
+    PortfolioRiskIntentRecord,
     PortfolioPosition,
+    PositionRiskActionRecord,
     RiskAppetiteProfile,
     RiskConfigResolver,
     RiskManager,
@@ -137,6 +140,25 @@ def _existing_position(ticker: str, *, sector: str, market_value: float) -> Port
     )
 
 
+def _planner_intent(
+    *,
+    position_actions: tuple[PositionRiskActionRecord, ...] = (),
+    hedge_actions: tuple[HedgeActionRecord, ...] = (),
+) -> PortfolioRiskIntentRecord:
+    return PortfolioRiskIntentRecord.create(
+        decision_time=datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc),
+        risk_window="1-5d",
+        aggregate_risk_state="mixed_risk" if position_actions else "macro_high_risk",
+        position_actions=position_actions,
+        hedge_actions=hedge_actions,
+        binding_constraints=tuple(
+            [action.reason_code for action in position_actions]
+            + [action.reason_code for action in hedge_actions]
+        ),
+        metadata_json={},
+    )
+
+
 def test_risk_manager_rejects_core_holding_without_approved_portfolio_intent():
     portfolio = _portfolio()
     config = RiskConfigResolver().resolve(
@@ -190,3 +212,99 @@ def test_risk_manager_reduces_trade_when_sector_cap_would_be_exceeded():
     assert decision.status == "reduced"
     assert decision.approved_weight < sizing.final_weight
     assert decision.reason_code == "sector_concentration_cap"
+
+
+def test_risk_manager_blocks_tactical_trade_when_planner_marks_block_open():
+    portfolio = _portfolio()
+    config = RiskConfigResolver().resolve(
+        risk_appetite=RiskAppetiteProfile.BALANCED,
+        portfolio_context=portfolio,
+        macro_risk_budget_multiplier=1.0,
+    )
+    request = _request()
+    sizing = PositionSizer().size_position(request, portfolio, config)
+    intent = _planner_intent(
+        position_actions=(
+            PositionRiskActionRecord(
+                ticker="TSLA",
+                trade_identity="tactical_stock_trade",
+                action="block_open",
+                risk_source="own_event",
+                severity="high",
+                max_allowed_weight_override=None,
+                reason_code="own_event_block",
+                metadata_json={},
+            ),
+        ),
+    )
+
+    decision = RiskManager().evaluate(request, sizing, portfolio, config, portfolio_risk_intent=intent)
+
+    assert decision.status == "rejected"
+    assert decision.reason_code == "own_event_block"
+    assert decision.approved_weight == 0.0
+
+
+def test_risk_manager_reduces_trade_to_planner_override_weight():
+    portfolio = _portfolio()
+    config = RiskConfigResolver().resolve(
+        risk_appetite=RiskAppetiteProfile.BALANCED,
+        portfolio_context=portfolio,
+        macro_risk_budget_multiplier=1.0,
+    )
+    request = _request()
+    sizing = PositionSizer().size_position(request, portfolio, config)
+    intent = _planner_intent(
+        position_actions=(
+            PositionRiskActionRecord(
+                ticker="TSLA",
+                trade_identity="tactical_stock_trade",
+                action="reduce",
+                risk_source="macro",
+                severity="high",
+                max_allowed_weight_override=0.02,
+                reason_code="macro_reduce",
+                metadata_json={},
+            ),
+        ),
+    )
+
+    decision = RiskManager().evaluate(request, sizing, portfolio, config, portfolio_risk_intent=intent)
+
+    assert decision.status == "reduced"
+    assert decision.approved_weight == 0.02
+    assert decision.reason_code == "macro_reduce"
+
+
+def test_risk_manager_emits_generated_hedge_payload_when_trade_stays_open():
+    portfolio = _portfolio(
+        _existing_position("AMZN", sector="Consumer Discretionary", market_value=10_000)
+    )
+    config = RiskConfigResolver().resolve(
+        risk_appetite=RiskAppetiteProfile.BALANCED,
+        portfolio_context=portfolio,
+        macro_risk_budget_multiplier=1.0,
+    )
+    request = _request(sector="Technology")
+    sizing = PositionSizer().size_position(request, portfolio, config)
+    intent = _planner_intent(
+        hedge_actions=(
+            HedgeActionRecord(
+                action="open_hedge",
+                risk_source="macro",
+                severity="high",
+                target_underlier="QQQ",
+                target_exposure_type="broad_market",
+                coverage_ratio=0.5,
+                reason_code="macro_high_overlay",
+                metadata_json={},
+            ),
+        ),
+    )
+
+    decision = RiskManager().evaluate(request, sizing, portfolio, config, portfolio_risk_intent=intent)
+
+    assert decision.status == "approved"
+    assert decision.generated_hedge_action is not None
+    assert decision.generated_hedge_action["target_underlier"] == "QQQ"
+    assert decision.generated_hedge_action["coverage_ratio"] == 0.5

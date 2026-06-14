@@ -8,6 +8,7 @@ from src.trading.brokers.paper_stock import PaperStockBroker
 from src.trading.intraday.rebalance import IntradayRebalancePipeline, IntradayRebalanceRequest
 from src.trading.portfolio.state import PortfolioLedger
 from src.trading.repositories.in_memory import InMemoryTradingRepository
+from src.trading.risk import PortfolioRiskIntentRecord, PositionRiskActionRecord
 
 
 class _StubResponse:
@@ -241,3 +242,69 @@ def test_intraday_rebalance_pipeline_executes_exit_for_existing_position(tmp_pat
     assert result.decisions[0].status == "approved"
     assert len(repository.paper_orders) == 1
     assert repository.paper_orders[0].action == "exit"
+
+
+def test_intraday_rebalance_pipeline_forces_reduce_from_portfolio_risk_intent(tmp_path):
+    repository = InMemoryTradingRepository()
+    registry = _write_prompt(tmp_path)
+    now = datetime(2026, 6, 2, 15, 30, tzinfo=timezone.utc)
+    ledger = PortfolioLedger(starting_cash_balance=100000.0)
+    ledger.record_stock_execution(
+        ticker="AAPL",
+        quantity=5.0,
+        fill_price=125.0,
+        trade_date=now.date(),
+        strategy_id="relative_strength_rotation_v1",
+        trade_identity="tactical_stock_trade",
+        executed_at=now,
+    )
+    intent = PortfolioRiskIntentRecord.create(
+        decision_time=now,
+        risk_window="1-5d",
+        aggregate_risk_state="mixed_risk",
+        position_actions=(
+            PositionRiskActionRecord(
+                ticker="AAPL",
+                trade_identity="tactical_stock_trade",
+                action="force_reduce",
+                risk_source="own_event",
+                severity="high",
+                max_allowed_weight_override=None,
+                reason_code="own_event_force_reduce",
+                metadata_json={},
+            ),
+        ),
+        metadata_json={},
+    )
+    pipeline = IntradayRebalancePipeline(
+        repository=repository,
+        prompt_registry=registry,
+        model_name="gpt-5-mini",
+        agent_runner=lambda prompt, model: {
+            "content": {
+                "ticker": "AAPL",
+                "action": "hold",
+                "thesis": "Hold unless external risk overrides.",
+                "confidence": 0.40,
+                "target_weight": 0.05,
+                "max_loss_pct": 0.02,
+                "urgency": "medium",
+                "rationale": ["waiting"],
+                "risk_checks": ["liquidity_ok"],
+                "schema_version": "v1",
+                "generated_at": "2026-06-02T15:30:00+00:00",
+            }
+        },
+    )
+
+    result = pipeline.run(
+        rebalance_requests=(_request(existing_position=True, allow_open_new=False),),
+        portfolio_context=ledger.build_portfolio_context(as_of=now),
+        risk_appetite="balanced",
+        portfolio_risk_intent=intent,
+    )
+
+    assert result.decisions[0].action == "reduce"
+    assert result.decisions[0].status == "approved"
+    assert result.decisions[0].reason_code == "own_event_force_reduce"
+    assert result.decisions[0].approved_quantity == 5.0

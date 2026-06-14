@@ -1,8 +1,12 @@
 from datetime import datetime, timezone
 
 from src.trading.risk import (
+    HedgeActionRecord,
     PortfolioContext,
+    PortfolioEventRiskAssessmentRecord,
     PortfolioPosition,
+    PortfolioRiskIntentRecord,
+    PositionRiskActionRecord,
     RiskAppetiteProfile,
     RiskConfigResolver,
     RiskFactorExposureRecord,
@@ -118,3 +122,54 @@ def test_risk_manager_computes_factor_exposures_from_portfolio_context():
     assert any(item.factor_type == "strategy" and item.factor_value == "relative_strength_rotation_v1" for item in exposures)
     assert any(item.factor_type == "event_type" and item.factor_value == "earnings" for item in exposures)
     assert any(item.factor_type == "macro_sensitivity" and item.factor_value == "rates_sensitive" and item.position_count == 2 for item in exposures)
+
+
+def test_risk_context_exposes_lookahead_event_assessment_record():
+    assessment = PortfolioEventRiskAssessmentRecord(
+        ticker="NVDA",
+        risk_source="own_event",
+        severity="high",
+        event_type="earnings",
+        days_until_event=2,
+        affects_existing_position=True,
+        affects_pending_trade=False,
+        metadata_json={"event_date": "2026-06-15"},
+    )
+
+    intent = PortfolioRiskIntentRecord.create(
+        decision_time=datetime(2026, 6, 13, 12, 0, tzinfo=timezone.utc),
+        risk_window="1-5d",
+        aggregate_risk_state="mixed_risk",
+        position_actions=(
+            PositionRiskActionRecord(
+                ticker="NVDA",
+                trade_identity="tactical_stock_trade",
+                action="block_open",
+                risk_source="own_event",
+                severity="high",
+                max_allowed_weight_override=None,
+                reason_code="own_event_block",
+                metadata_json={"days_until_event": 2},
+            ),
+        ),
+        hedge_actions=(
+            HedgeActionRecord(
+                action="open_hedge",
+                risk_source="macro",
+                severity="watch",
+                target_underlier="QQQ",
+                target_exposure_type="broad_market",
+                coverage_ratio=0.25,
+                reason_code="macro_watch_overlay",
+                metadata_json={},
+            ),
+        ),
+        binding_constraints=("own_event_block", "macro_watch_overlay"),
+        metadata_json={"assessment_ids": ("evt-1",)},
+    )
+
+    assert assessment.event_type == "earnings"
+    assert assessment.days_until_event == 2
+    assert intent.aggregate_risk_state == "mixed_risk"
+    assert intent.position_actions[0].action == "block_open"
+    assert intent.hedge_actions[0].target_underlier == "QQQ"

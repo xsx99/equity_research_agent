@@ -5,6 +5,8 @@ from dataclasses import replace
 from datetime import datetime
 from typing import Any
 
+from src.trading.runtime.lookahead_risk import LookaheadRiskWorkflowHelper
+
 
 class _LiveRiskWorkflow:
     def __init__(
@@ -15,12 +17,14 @@ class _LiveRiskWorkflow:
         config_resolver: Any,
         position_sizer: Any,
         risk_manager: Any,
+        lookahead_helper: Any | None = None,
     ) -> None:
         self.repository = repository
         self.source_repository = source_repository
         self.config_resolver = config_resolver
         self.position_sizer = position_sizer
         self.risk_manager = risk_manager
+        self.lookahead_helper = lookahead_helper or LookaheadRiskWorkflowHelper()
 
     def run(
         self,
@@ -48,6 +52,22 @@ class _LiveRiskWorkflow:
         exposures = self.risk_manager.compute_factor_exposures(portfolio_context)
         self.repository.save_portfolio_risk_snapshot(portfolio_snapshot)
         self.repository.save_risk_factor_exposures(exposures)
+        portfolio_risk_intent = self.lookahead_helper.build_preopen_portfolio_risk_intent(
+            candidates=candidates,
+            classifications=classifications,
+            signal_by_id=signal_by_id,
+            portfolio_context=portfolio_context,
+            config=config,
+            decision_time=decision_time,
+            portfolio_risk_snapshot_id=portfolio_snapshot.portfolio_risk_snapshot_id,
+        )
+        if hasattr(self.repository, "save_portfolio_risk_intent"):
+            self.repository.save_portfolio_risk_intent(
+                replace(
+                    portfolio_risk_intent,
+                    portfolio_risk_snapshot_id=portfolio_snapshot.portfolio_risk_snapshot_id,
+                )
+            )
         candidate_by_id = {candidate.candidate_score_id: candidate for candidate in candidates}
         decisions: list[object] = []
         for classification in classifications:
@@ -63,15 +83,30 @@ class _LiveRiskWorkflow:
                 decision_time=decision_time,
             )
             sizing = self.position_sizer.size_position(request, portfolio_context, config)
-            decision = self.risk_manager.evaluate(request, sizing, portfolio_context, config)
+            decision = _evaluate_with_optional_lookahead(
+                self.risk_manager,
+                request=request,
+                sizing=sizing,
+                portfolio_context=portfolio_context,
+                config=config,
+                portfolio_risk_intent=portfolio_risk_intent,
+            )
             decision = replace(
                 decision,
                 portfolio_risk_snapshot_id=portfolio_snapshot.portfolio_risk_snapshot_id,
             )
             self.repository.save_position_sizing_decision(sizing)
-            self.repository.save_risk_decision(decision)
             decisions.append(decision)
-        return SimpleNamespace(risk_decisions=tuple(decisions))
+        materialized = self.lookahead_helper.materialize_generated_hedges(
+            risk_decisions=tuple(decisions),
+            portfolio_risk_intent=portfolio_risk_intent,
+        )
+        for decision in materialized:
+            self.repository.save_risk_decision(decision)
+        return SimpleNamespace(
+            risk_decisions=materialized,
+            portfolio_risk_intent=portfolio_risk_intent,
+        )
 
 
 def _build_trade_risk_request(
@@ -130,3 +165,26 @@ def _latest_price_from_sources(*, source_repository: Any, ticker: str, decision_
     if isinstance(close, (int, float)) and close > 0:
         return float(close)
     return 1.0
+
+
+def _evaluate_with_optional_lookahead(
+    risk_manager: Any,
+    *,
+    request: Any,
+    sizing: Any,
+    portfolio_context: Any,
+    config: Any,
+    portfolio_risk_intent: Any,
+) -> Any:
+    try:
+        return risk_manager.evaluate(
+            request,
+            sizing,
+            portfolio_context,
+            config,
+            portfolio_risk_intent=portfolio_risk_intent,
+        )
+    except TypeError as exc:
+        if "portfolio_risk_intent" not in str(exc):
+            raise
+        return risk_manager.evaluate(request, sizing, portfolio_context, config)
