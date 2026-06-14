@@ -82,6 +82,50 @@ class LookaheadRiskWorkflowHelper:
             )
         )
 
+    def build_intraday_portfolio_risk_intent(
+        self,
+        *,
+        rebalance_requests: tuple[object, ...],
+        portfolio_context: object,
+        config: object,
+        decision_time: datetime,
+    ) -> PortfolioRiskIntentRecord:
+        if not hasattr(portfolio_context, "positions"):
+            return PortfolioRiskIntentRecord.create(
+                portfolio_risk_snapshot_id=None,
+                decision_time=decision_time,
+                risk_window="1-5d",
+                aggregate_risk_state="risk_normalized",
+            )
+
+        pending_trades: list[PendingTradeRiskRecord] = []
+        event_assessments: list[PortfolioEventRiskAssessmentRecord] = []
+        for request in rebalance_requests:
+            if not getattr(request, "existing_position", False) and bool(getattr(request, "allow_open_new", False)):
+                pending_trades.append(
+                    PendingTradeRiskRecord(
+                        ticker=str(getattr(request, "ticker", "")),
+                        trade_identity=str(getattr(request, "trade_identity", "")),
+                        sector=None,
+                        event_type=None,
+                        macro_sensitivity=None,
+                    )
+                )
+            for alert in tuple(getattr(request, "alerts", ())):
+                assessment = _intraday_event_assessment(request=request, alert=alert)
+                if assessment is not None:
+                    event_assessments.append(assessment)
+        return self.hedge_planner.plan(
+            PortfolioHedgePlannerRequest(
+                decision_time=decision_time,
+                risk_window="1-5d",
+                portfolio_context=portfolio_context,
+                risk_limit_config=config,
+                event_assessments=tuple(event_assessments),
+                pending_trades=tuple(pending_trades),
+            )
+        )
+
     def materialize_generated_hedges(
         self,
         *,
@@ -147,3 +191,28 @@ def _sector_from_snapshot(snapshot: object | None) -> str | None:
         if isinstance(sector, str) and sector.strip():
             return sector.strip()
     return None
+
+
+def _intraday_event_assessment(
+    *,
+    request: object,
+    alert: object,
+) -> PortfolioEventRiskAssessmentRecord | None:
+    if not isinstance(alert, dict):
+        return None
+    severity = str(alert.get("severity") or "low").lower()
+    if severity not in {"high", "critical"}:
+        return None
+    event_type = str(alert.get("alert_type") or "").lower()
+    if not any(keyword in event_type for keyword in ("earnings", "guidance", "fda", "litigation", "approval", "trial")):
+        return None
+    return PortfolioEventRiskAssessmentRecord(
+        ticker=str(getattr(request, "ticker", "")),
+        risk_source="own_event",
+        severity=severity,
+        event_type=event_type,
+        days_until_event=0,
+        affects_existing_position=bool(getattr(request, "existing_position", False)),
+        affects_pending_trade=not bool(getattr(request, "existing_position", False)),
+        metadata_json={"source": "intraday_alert"},
+    )

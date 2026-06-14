@@ -16,7 +16,7 @@ from src.agents.trading_schemas import (
     IntradayRebalanceOutput,
     IntradayRebalanceOutputFallback,
 )
-from src.trading.risk import RiskConfigResolver, RiskDecisionRecord
+from src.trading.risk import PortfolioRiskIntentRecord, PositionRiskActionRecord, RiskConfigResolver, RiskDecisionRecord
 from src.trading.workflows.paper_execution import PaperExecutionWorkflow
 from src.trading.workflows.trading_decision import TradingDecisionRecord
 
@@ -114,6 +114,7 @@ class IntradayRebalancePipeline:
         rebalance_requests: tuple[IntradayRebalanceRequest, ...],
         portfolio_context: Any,
         risk_appetite: str,
+        portfolio_risk_intent: PortfolioRiskIntentRecord | None = None,
         trade_date: datetime | None = None,
         execute_approved: bool = False,
     ) -> IntradayRebalancePipelineResult:
@@ -135,6 +136,13 @@ class IntradayRebalancePipeline:
                 status=status,
                 reason_code=reason_code,
             )
+            final_output, status, reason_code = self._apply_portfolio_risk_intent(
+                request=request,
+                output=final_output,
+                status=status,
+                reason_code=reason_code,
+                portfolio_risk_intent=portfolio_risk_intent,
+            )
             risk_decision = None
             approved_quantity = 0.0
             if final_output["action"] in {"exit", "reduce"} and request.existing_position:
@@ -151,6 +159,12 @@ class IntradayRebalancePipeline:
                     approved_quantity=approved_quantity,
                     portfolio_risk_snapshot_id=None,
                     applied_rules=["intraday_existing_position"],
+                    binding_constraint=_binding_constraint(portfolio_risk_intent),
+                    lookahead_risk_source=_lookahead_risk_source(
+                        portfolio_risk_intent,
+                        request=request,
+                    ),
+                    generated_hedge_action=_generated_hedge_action(portfolio_risk_intent),
                     decision_time=request.decision_time,
                 )
 
@@ -317,6 +331,31 @@ class IntradayRebalancePipeline:
             return output, "blocked", "no_existing_position"
         return output, status, reason_code
 
+    def _apply_portfolio_risk_intent(
+        self,
+        *,
+        request: IntradayRebalanceRequest,
+        output: dict[str, Any],
+        status: str,
+        reason_code: str,
+        portfolio_risk_intent: PortfolioRiskIntentRecord | None,
+    ) -> tuple[dict[str, Any], str, str]:
+        planner_action = _matching_planner_position_action(
+            portfolio_risk_intent,
+            ticker=request.ticker,
+            trade_identity=request.trade_identity,
+        )
+        if planner_action is None:
+            return output, status, reason_code
+        if planner_action.action == "block_open" and not request.existing_position:
+            output["action"] = "hold"
+            return output, "blocked", planner_action.reason_code
+        if planner_action.action in {"force_reduce", "reduce"} and request.existing_position:
+            output["action"] = "reduce"
+            output["target_weight"] = 0.0
+            return output, "approved", planner_action.reason_code
+        return output, status, reason_code
+
     def _to_trading_decision(
         self,
         request: IntradayRebalanceRequest,
@@ -363,3 +402,61 @@ def _repair_prompt(rendered_text: str, validation_error: str) -> str:
         f"{validation_error}\n\n"
         "Return only one corrected JSON object with no markdown."
     )
+
+
+def _matching_planner_position_action(
+    portfolio_risk_intent: PortfolioRiskIntentRecord | None,
+    *,
+    ticker: str,
+    trade_identity: str,
+) -> PositionRiskActionRecord | None:
+    if portfolio_risk_intent is None:
+        return None
+    matches = [
+        action
+        for action in portfolio_risk_intent.position_actions
+        if action.ticker == ticker and action.trade_identity == trade_identity
+    ]
+    if not matches:
+        return None
+    priority = {"block_open": 0, "force_reduce": 1, "reduce": 2, "allow": 3}
+    return sorted(matches, key=lambda action: priority.get(action.action, 99))[0]
+
+
+def _generated_hedge_action(portfolio_risk_intent: PortfolioRiskIntentRecord | None) -> dict[str, object] | None:
+    if portfolio_risk_intent is None or not portfolio_risk_intent.hedge_actions:
+        return None
+    action = portfolio_risk_intent.hedge_actions[0]
+    return {
+        "action": action.action,
+        "risk_source": action.risk_source,
+        "severity": action.severity,
+        "target_underlier": action.target_underlier,
+        "target_exposure_type": action.target_exposure_type,
+        "coverage_ratio": action.coverage_ratio,
+        "reason_code": action.reason_code,
+        "metadata_json": dict(action.metadata_json),
+    }
+
+
+def _binding_constraint(portfolio_risk_intent: PortfolioRiskIntentRecord | None) -> str | None:
+    if portfolio_risk_intent is None or not portfolio_risk_intent.binding_constraints:
+        return None
+    return portfolio_risk_intent.binding_constraints[0]
+
+
+def _lookahead_risk_source(
+    portfolio_risk_intent: PortfolioRiskIntentRecord | None,
+    *,
+    request: IntradayRebalanceRequest,
+) -> str | None:
+    planner_action = _matching_planner_position_action(
+        portfolio_risk_intent,
+        ticker=request.ticker,
+        trade_identity=request.trade_identity,
+    )
+    if planner_action is not None:
+        return planner_action.risk_source
+    if portfolio_risk_intent is None or not portfolio_risk_intent.hedge_actions:
+        return None
+    return portfolio_risk_intent.hedge_actions[0].risk_source

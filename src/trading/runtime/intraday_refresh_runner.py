@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 
 from src.trading.intraday.signals import IntradaySignalScanRecord, build_intraday_signal_snapshot
+from src.trading.risk import RiskConfigResolver
 from src.trading.runtime.intraday_refresh_dependencies import LiveIntradayRefreshDependencies
 from src.trading.runtime.intraday_refresh_helpers import (
     _build_alert_map,
@@ -131,10 +132,25 @@ class LiveIntradayRefreshRuntime:
             )
             for snapshot in snapshots
         )
+        portfolio_context = getattr(portfolio_result, "portfolio_context", portfolio_result)
+        portfolio_risk_intent = None
+        if self.dependencies.lookahead_helper is not None:
+            config = RiskConfigResolver().resolve(
+                risk_appetite="balanced",
+                portfolio_context=portfolio_context,
+                macro_risk_budget_multiplier=1.0,
+            )
+            portfolio_risk_intent = self.dependencies.lookahead_helper.build_intraday_portfolio_risk_intent(
+                rebalance_requests=rebalance_requests,
+                portfolio_context=portfolio_context,
+                config=config,
+                decision_time=decision_time,
+            )
         rebalance_result = self.dependencies.rebalance_pipeline.run(
             rebalance_requests=rebalance_requests,
-            portfolio_context=getattr(portfolio_result, "portfolio_context", portfolio_result),
+            portfolio_context=portfolio_context,
             risk_appetite="balanced",
+            portfolio_risk_intent=portfolio_risk_intent,
             trade_date=decision_time if self.execute_paper_orders else None,
             execute_approved=self.execute_paper_orders,
         )
