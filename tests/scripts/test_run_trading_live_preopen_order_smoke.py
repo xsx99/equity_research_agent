@@ -13,16 +13,42 @@ from src.trading.workflows.strategy_scoring import StrategyPipelineResult
 def test_smoke_agent_runner_emits_enter_long_for_eligible_approved_stock():
     payload = {
         "ticker": "NVDA",
-        "strategy_id": "relative_strength_rotation_v1",
-        "expression_bucket_id": "long_stock",
-        "trade_identity": "tactical_stock_trade",
-        "instrument_type": "stock",
-        "selection_source": "manual_request",
-        "manual_request_id": "request-1",
-        "manual_request_mode": "paper_trade_eligible",
-        "candidate_score": 0.7,
-        "benchmark_context": {"primary_benchmark": "QQQ"},
+        "signal_snapshot": {
+            "signal_snapshot_id": "snapshot-1",
+            "snapshot_type": "pre_open",
+            "decision_time": "2026-06-03T12:45:00+00:00",
+            "available_for_decision_at": "2026-06-03T12:45:00+00:00",
+            "signal_json": {},
+            "source_freshness_json": {},
+            "missing_signals_json": [],
+            "stale_signals_json": [],
+            "evidence_items": [],
+        },
+        "candidate_context": {
+            "candidate_score": 0.7,
+            "strategy_run_id": "run-1",
+            "strategy_id": "relative_strength_rotation_v1",
+            "strategy_version": "v1",
+            "direction": "bullish",
+            "selection_source": "manual_request",
+            "selection_reason": "smoke test",
+            "benchmark_context": {"primary_benchmark": "QQQ"},
+            "core_signal_evidence": {},
+            "historical_outcomes": [],
+        },
+        "classification_context": {
+            "expression_bucket_id": "long_stock",
+            "trade_identity": "tactical_stock_trade",
+            "classification_result_status": "actionable_trade",
+            "instrument_type": "stock",
+            "selected_strategy_context": {},
+            "expression_fallback_plan": [],
+        },
         "risk_context": {"status": "approved", "approved_weight": 0.03},
+        "manual_request_context": {
+            "manual_request_id": "request-1",
+            "manual_request_mode": "paper_trade_eligible",
+        },
     }
 
     response = run_trading_live_preopen_order_smoke._smoke_agent_runner(
@@ -32,6 +58,19 @@ def test_smoke_agent_runner_emits_enter_long_for_eligible_approved_stock():
 
     assert response["content"]["decision"] == "enter_long"
     assert response["content"]["target_weight"] == 0.03
+    assert response["content"]["counterarguments"] == ["smoke_only"]
+
+
+def test_extract_input_payload_ignores_prompt_text_after_json():
+    payload = {"ticker": "NVDA", "candidate_context": {"strategy_id": "relative_strength_rotation_v1"}}
+
+    parsed = run_trading_live_preopen_order_smoke._extract_input_payload(
+        "Header\nInput JSON:\n"
+        f"{json.dumps(payload, ensure_ascii=False)}\n\n"
+        "Return only one corrected JSON object with no markdown."
+    )
+
+    assert parsed == payload
 
 
 def test_smoke_strategy_pipeline_forces_actionable_trade_for_target_ticker():
@@ -123,3 +162,24 @@ def test_main_prints_json_report(monkeypatch, capsys):
     assert exit_code == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["ticker"] == "NVDA"
+
+
+def test_resolve_smoke_status_treats_dry_run_decision_generation_as_passed():
+    runtime = {
+        "summary": {
+            "risk_decision_count": 1,
+            "trading_decision_count": 1,
+        },
+        "execution": {
+            "mode": "dry_run",
+            "orders_submitted": 0,
+        },
+    }
+
+    status = run_trading_live_preopen_order_smoke._resolve_smoke_status(
+        runtime=runtime,
+        execute_paper_orders=False,
+        order=None,
+    )
+
+    assert status == "passed"

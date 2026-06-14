@@ -109,7 +109,11 @@ def run_smoke(
                         .order_by(PaperExecution.executed_at.desc())
                         .first()
                     )
-            status = "passed" if result["execution"]["orders_submitted"] >= 1 and order is not None else "failed"
+            status = _resolve_smoke_status(
+                runtime=result,
+                execute_paper_orders=execute_paper_orders,
+                order=order,
+            )
             return {
                 "status": status,
                 "ticker": ticker,
@@ -256,11 +260,25 @@ class _SmokeRiskWorkflow:
 def _smoke_agent_runner(prompt: str, model_name: str) -> dict[str, Any]:
     del model_name
     payload = _extract_input_payload(prompt)
+    candidate_context = dict(payload.get("candidate_context") or {})
+    classification_context = dict(payload.get("classification_context") or {})
+    manual_request_context = dict(payload.get("manual_request_context") or {})
     risk_context = dict(payload.get("risk_context") or {})
+    strategy_id = str(payload.get("strategy_id") or candidate_context.get("strategy_id") or "")
+    expression_bucket_id = str(
+        payload.get("expression_bucket_id") or classification_context.get("expression_bucket_id") or ""
+    )
+    trade_identity = str(payload.get("trade_identity") or classification_context.get("trade_identity") or "")
+    instrument_type = str(payload.get("instrument_type") or classification_context.get("instrument_type") or "")
+    selection_source = str(payload.get("selection_source") or candidate_context.get("selection_source") or "")
+    manual_request_id = payload.get("manual_request_id") or manual_request_context.get("manual_request_id")
+    manual_request_mode = payload.get("manual_request_mode") or manual_request_context.get("manual_request_mode")
+    candidate_score = float(payload.get("candidate_score") or candidate_context.get("candidate_score") or 0.0)
+    benchmark_context = dict(payload.get("benchmark_context") or candidate_context.get("benchmark_context") or {})
     should_enter = (
-        payload.get("trade_identity") == "tactical_stock_trade"
-        and payload.get("instrument_type") == "stock"
-        and payload.get("manual_request_mode") == "paper_trade_eligible"
+        trade_identity == "tactical_stock_trade"
+        and instrument_type == "stock"
+        and manual_request_mode == "paper_trade_eligible"
         and risk_context.get("status") == "approved"
     )
     target_weight = float(risk_context.get("approved_weight") or 0.0)
@@ -268,15 +286,15 @@ def _smoke_agent_runner(prompt: str, model_name: str) -> dict[str, Any]:
         "content": {
             "ticker": payload["ticker"],
             "decision": "enter_long" if should_enter else "no_trade",
-            "strategy_id": payload["strategy_id"],
-            "expression_bucket_id": payload["expression_bucket_id"],
-            "trade_identity": payload["trade_identity"],
-            "instrument_type": payload["instrument_type"],
-            "selection_source": payload["selection_source"],
-            "manual_request_id": payload.get("manual_request_id"),
-            "confidence": float(payload.get("candidate_score") or 0.0),
+            "strategy_id": strategy_id,
+            "expression_bucket_id": expression_bucket_id,
+            "trade_identity": trade_identity,
+            "instrument_type": instrument_type,
+            "selection_source": selection_source,
+            "manual_request_id": manual_request_id,
+            "confidence": candidate_score,
             "confidence_basis": {"smoke_mode": True},
-            "benchmark_context": dict(payload.get("benchmark_context") or {}),
+            "benchmark_context": benchmark_context,
             "target_weight": target_weight if should_enter else 0.0,
             "max_loss_pct": 0.02 if should_enter else 0.0,
             "time_horizon": "1d-5d" if should_enter else "monitor_only",
@@ -288,6 +306,7 @@ def _smoke_agent_runner(prompt: str, model_name: str) -> dict[str, Any]:
                 else "Smoke override preserved a no-trade outcome."
             ),
             "key_signals": ["smoke_override"],
+            "counterarguments": ["smoke_only"],
             "risk_checks": ["risk_status_approved"] if should_enter else ["no_trade_path"],
             "invalidators": ["smoke_only"],
             "learning_factors_used": [],
@@ -302,7 +321,26 @@ def _extract_input_payload(prompt: str) -> dict[str, Any]:
     if marker not in prompt:
         raise ValueError("smoke_prompt_missing_input_json")
     payload = prompt.split(marker, 1)[1].strip()
-    return json.loads(payload)
+    left = payload.find("{")
+    if left == -1:
+        raise ValueError("smoke_prompt_missing_json_object")
+    decoder = json.JSONDecoder()
+    parsed, _end = decoder.raw_decode(payload[left:])
+    if not isinstance(parsed, dict):
+        raise ValueError("smoke_prompt_input_payload_is_not_object")
+    return parsed
+
+
+def _resolve_smoke_status(*, runtime: dict[str, Any], execute_paper_orders: bool, order: Any) -> str:
+    execution = dict(runtime.get("execution") or {})
+    summary = dict(runtime.get("summary") or {})
+    if execute_paper_orders:
+        return "passed" if execution.get("orders_submitted", 0) >= 1 and order is not None else "failed"
+    return (
+        "passed"
+        if int(summary.get("risk_decision_count", 0)) >= 1 and int(summary.get("trading_decision_count", 0)) >= 1
+        else "failed"
+    )
 
 
 def _decision_json(decision: Any) -> dict[str, Any] | None:
