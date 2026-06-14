@@ -89,6 +89,7 @@ class LookaheadRiskWorkflowHelper:
         portfolio_context: object,
         config: object,
         decision_time: datetime,
+        macro_risk_state: str | None,
     ) -> PortfolioRiskIntentRecord:
         if not hasattr(portfolio_context, "positions"):
             return PortfolioRiskIntentRecord.create(
@@ -123,6 +124,7 @@ class LookaheadRiskWorkflowHelper:
                 risk_limit_config=config,
                 event_assessments=tuple(event_assessments),
                 pending_trades=tuple(pending_trades),
+                macro_risk_state=macro_risk_state,
             )
         )
 

@@ -12,6 +12,7 @@ from src.trading.runtime.intraday_refresh import (
     LiveIntradayRefreshRuntime,
     run_live_intraday_refresh_once,
 )
+from src.trading.runtime.lookahead_risk import LookaheadRiskWorkflowHelper
 from src.trading.signals import SignalSnapshotResult
 from src.trading.signals.sources import EventNewsItemRecord, SourceRecord
 
@@ -337,6 +338,7 @@ def _build_runtime() -> tuple[LiveIntradayRefreshRuntime, _CallRecorder, _Rebala
         candidate_context_loader=lambda tickers, decision_time: {"MSFT": ("MSFT",)},
         position_context_loader=lambda tickers, positions: {"AAPL": ("AAPL",)},
         theme_context_loader=lambda tickers, decision_time: {},
+        macro_state_loader=lambda decision_time: None,
     )
     runtime = LiveIntradayRefreshRuntime(
         dependencies=dependencies,
@@ -400,6 +402,35 @@ def test_live_intraday_refresh_runtime_passes_portfolio_risk_intent_into_rebalan
 
     assert rebalance_pipeline.last_portfolio_risk_intent is not None
     assert rebalance_pipeline.last_portfolio_risk_intent.aggregate_risk_state == "macro_high_risk"
+
+
+def test_live_intraday_refresh_runtime_passes_macro_risk_state_into_intraday_lookahead_helper():
+    runtime, _recorder, rebalance_pipeline, _repository = _build_runtime()
+    runtime.dependencies = LiveIntradayRefreshDependencies(
+        **{
+            **runtime.dependencies.__dict__,
+            "portfolio_sync_workflow": _PortfolioSyncWorkflow(
+                _CallRecorder(),
+                SimpleNamespace(
+                    portfolio_context=SimpleNamespace(
+                        account_equity=100000.0,
+                        total_margin_requirement=0.0,
+                        margin_model_profile="estimated_fidelity_like_conservative_v1",
+                        margin_model_version="v1",
+                        positions=(SimpleNamespace(ticker="AAPL", trade_identity="tactical_stock_trade", sector=None),),
+                    ),
+                    positions=(SimpleNamespace(ticker="AAPL", trade_identity="tactical_stock_trade", sector=None),),
+                ),
+            ),
+            "macro_state_loader": lambda decision_time: "high",
+            "lookahead_helper": LookaheadRiskWorkflowHelper(),
+        }
+    )
+
+    runtime.run()
+
+    assert rebalance_pipeline.last_portfolio_risk_intent.aggregate_risk_state == "macro_high_risk"
+    assert rebalance_pipeline.last_portfolio_risk_intent.hedge_actions[0].risk_source == "macro"
 
 
 def test_live_intraday_refresh_runtime_keeps_readthrough_and_theme_fields_on_rebalance_requests():
