@@ -41,6 +41,7 @@ class _BaselineLoader:
         self.baselines = baselines
 
     def load_for_tickers(self, *, tickers: tuple[str, ...], decision_time: datetime) -> dict[str, SignalSnapshotResult]:
+        assert tickers == ("AAPL", "MSFT")
         assert decision_time.tzinfo is not None
         self.recorder.record("load_baselines")
         return dict(self.baselines)
@@ -54,6 +55,7 @@ class _PreviousSnapshotLoader:
     def load_for_tickers(
         self, *, tickers: tuple[str, ...], decision_time: datetime
     ) -> dict[str, IntradaySignalSnapshotRecord]:
+        assert tickers == ("AAPL", "MSFT")
         assert decision_time.tzinfo is not None
         self.recorder.record("load_previous_intraday")
         return dict(self.previous)
@@ -65,6 +67,7 @@ class _RequestContextLoader:
         self.contexts = contexts
 
     def load_for_tickers(self, *, tickers: tuple[str, ...], decision_time: datetime) -> dict[str, object]:
+        assert tickers == ("AAPL", "MSFT")
         assert decision_time.tzinfo is not None
         self.recorder.record("load_request_context")
         return dict(self.contexts)
@@ -115,6 +118,7 @@ class _NewsAlertService:
         assert existing_dedupe_keys == frozenset({"seen-news"})
         assert affected_positions_by_ticker["AAPL"] == ("AAPL",)
         assert affected_candidates_by_ticker["MSFT"] == ("MSFT",)
+        assert affected_themes_by_ticker == {}
         self.recorder.record("build_alerts")
         return self.alerts
 
@@ -400,20 +404,52 @@ def test_live_intraday_refresh_runtime_passes_portfolio_risk_intent_into_rebalan
 
 def test_live_intraday_refresh_runtime_keeps_readthrough_and_theme_fields_on_rebalance_requests():
     runtime, recorder, rebalance_pipeline, _repository = _build_runtime()
+
+    class _LocalLoader:
+        def __init__(self, name: str, result: dict[str, object]) -> None:
+            self.name = name
+            self.result = result
+
+        def load_for_tickers(self, *, tickers: tuple[str, ...], decision_time: datetime) -> dict[str, object]:
+            assert decision_time.tzinfo is not None
+            recorder.record(self.name)
+            return dict(self.result)
+
+    class _LocalNewsAlertService:
+        def __init__(self, alerts: tuple[object, ...]) -> None:
+            self.alerts = alerts
+
+        def build_alerts(
+            self,
+            *,
+            event_items,
+            existing_dedupe_keys,
+            affected_positions_by_ticker,
+            affected_candidates_by_ticker,
+            affected_themes_by_ticker,
+        ):
+            assert {item.ticker for item in event_items} == {"AAPL"}
+            assert existing_dedupe_keys == frozenset({"seen-news"})
+            assert affected_positions_by_ticker["AAPL"] == ("AAPL",)
+            assert affected_candidates_by_ticker["MSFT"] == ("MSFT",)
+            assert affected_themes_by_ticker == {"NVDA": ("ai_semis",)}
+            recorder.record("build_alerts")
+            return self.alerts
+
     runtime.dependencies = LiveIntradayRefreshDependencies(
         **{
             **runtime.dependencies.__dict__,
             "scope_loader": _ScopeLoader(recorder, ("AAPL", "MSFT", "NVDA")),
-            "baseline_loader": _BaselineLoader(
-                recorder,
+            "baseline_loader": _LocalLoader(
+                "load_baselines",
                 {
                     "AAPL": _baseline_snapshot(ticker="AAPL"),
                     "MSFT": _baseline_snapshot(ticker="MSFT"),
                     "NVDA": _baseline_snapshot(ticker="NVDA", sector="Semiconductors"),
                 },
             ),
-            "previous_snapshot_loader": _PreviousSnapshotLoader(
-                recorder,
+            "previous_snapshot_loader": _LocalLoader(
+                "load_previous_intraday",
                 {
                     "AAPL": _previous_intraday(ticker="AAPL"),
                     "NVDA": _previous_intraday(ticker="NVDA"),
@@ -450,8 +486,8 @@ def test_live_intraday_refresh_runtime_keeps_readthrough_and_theme_fields_on_reb
                     ("NVDA", "events_news"): (),
                 },
             ),
-            "request_context_loader": _RequestContextLoader(
-                recorder,
+            "request_context_loader": _LocalLoader(
+                "load_request_context",
                 {
                     "AAPL": SimpleNamespace(
                         selection_source="portfolio",
@@ -494,8 +530,7 @@ def test_live_intraday_refresh_runtime_keeps_readthrough_and_theme_fields_on_reb
             "candidate_context_loader": lambda tickers, decision_time: {"MSFT": ("MSFT",), "NVDA": ("NVDA",)},
             "position_context_loader": lambda tickers, positions: {"AAPL": ("AAPL",)},
             "theme_context_loader": lambda tickers, decision_time: {"NVDA": ("ai_semis",)},
-            "news_alert_service": _NewsAlertService(
-                recorder,
+            "news_alert_service": _LocalNewsAlertService(
                 (
                     _NewsAlert(ticker="AAPL", dedupe_key="aapl-news-1"),
                     _NewsAlert(
@@ -520,6 +555,7 @@ def test_live_intraday_refresh_runtime_keeps_readthrough_and_theme_fields_on_reb
     request = next(item for item in rebalance_pipeline.last_requests if item.ticker == "NVDA")
     assert request.metadata_json["sector"] == "Semiconductors"
     assert request.alerts[0]["affected_themes"] == ["ai_semis"]
+    assert request.alerts[0]["source_ticker"] == "AVGO"
     assert request.alerts[0]["readthrough_source_ticker"] == "AVGO"
 
 

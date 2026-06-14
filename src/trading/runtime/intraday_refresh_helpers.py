@@ -6,7 +6,6 @@ from types import SimpleNamespace
 from typing import Any
 
 from src.trading.intraday.rebalance import IntradayRebalanceRequest
-from src.trading.runtime.lookahead_risk import _sector_from_baseline
 from src.trading.signals.sources import EventNewsItemRecord, SourceRecord
 
 
@@ -150,3 +149,15 @@ def _build_rebalance_request(
 
 def _position_by_ticker(positions: tuple[object, ...]) -> dict[str, object]:
     return {getattr(position, "ticker"): position for position in positions}
+
+
+def _sector_from_baseline(baseline: object | None) -> str | None:
+    if baseline is None:
+        return None
+    signal_json = dict(getattr(baseline, "signal_json", {}) or {})
+    for key in ("fundamental", "company"):
+        payload = dict(signal_json.get(key, {}) or {})
+        sector = payload.get("sector")
+        if isinstance(sector, str) and sector.strip():
+            return sector.strip()
+    return None
