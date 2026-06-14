@@ -25,6 +25,7 @@ from src.trading.risk.options import (
     OptionRiskManager,
     OptionRiskSnapshotRecord,
 )
+from src.trading.risk.planner import PendingTradeRiskRecord, PortfolioHedgePlanner, PortfolioHedgePlannerRequest
 from src.trading.risk.sizing import PositionSizer
 
 __all__ = [
@@ -33,9 +34,12 @@ __all__ = [
     "OptionRiskInput",
     "OptionRiskManager",
     "OptionRiskSnapshotRecord",
+    "PendingTradeRiskRecord",
     "HedgeActionRecord",
     "PortfolioContext",
     "PortfolioEventRiskAssessmentRecord",
+    "PortfolioHedgePlanner",
+    "PortfolioHedgePlannerRequest",
     "PortfolioPosition",
     "PortfolioRiskIntentRecord",
     "PortfolioRiskSnapshotRecord",
