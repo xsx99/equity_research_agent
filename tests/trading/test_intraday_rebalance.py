@@ -8,7 +8,7 @@ from src.trading.brokers.paper_stock import PaperStockBroker
 from src.trading.intraday.rebalance import IntradayRebalancePipeline, IntradayRebalanceRequest
 from src.trading.portfolio.state import PortfolioLedger
 from src.trading.repositories.in_memory import InMemoryTradingRepository
-from src.trading.risk import PortfolioRiskIntentRecord, PositionRiskActionRecord
+from src.trading.risk import HedgeActionRecord, PortfolioRiskIntentRecord, PositionRiskActionRecord
 
 
 class _StubResponse:
@@ -308,3 +308,66 @@ def test_intraday_rebalance_pipeline_forces_reduce_from_portfolio_risk_intent(tm
     assert result.decisions[0].status == "approved"
     assert result.decisions[0].reason_code == "own_event_force_reduce"
     assert result.decisions[0].approved_quantity == 5.0
+
+
+def test_intraday_rebalance_attaches_sector_cluster_generated_hedge_payload(tmp_path):
+    repository = InMemoryTradingRepository()
+    registry = _write_prompt(tmp_path)
+    now = datetime(2026, 6, 2, 15, 30, tzinfo=timezone.utc)
+    ledger = PortfolioLedger(starting_cash_balance=100000.0)
+    ledger.record_stock_execution(
+        ticker="AAPL",
+        quantity=5.0,
+        fill_price=125.0,
+        trade_date=now.date(),
+        strategy_id="relative_strength_rotation_v1",
+        trade_identity="tactical_stock_trade",
+        executed_at=now,
+    )
+    intent = PortfolioRiskIntentRecord.create(
+        decision_time=now,
+        risk_window="1-5d",
+        aggregate_risk_state="event_cluster_risk",
+        hedge_actions=(
+            HedgeActionRecord(
+                action="open_hedge",
+                risk_source="sector_event_cluster",
+                severity="high",
+                target_underlier="SMH",
+                target_exposure_type="sector",
+                coverage_ratio=0.5,
+                reason_code="sector_event_cluster_overlay",
+                metadata_json={"sector": "Semiconductors"},
+            ),
+        ),
+    )
+    pipeline = IntradayRebalancePipeline(
+        repository=repository,
+        prompt_registry=registry,
+        model_name="gpt-5-mini",
+        agent_runner=lambda prompt, model: {
+            "content": {
+                "ticker": "AAPL",
+                "action": "reduce",
+                "thesis": "Trim while the cluster alert is active.",
+                "confidence": 0.79,
+                "target_weight": 0.0,
+                "max_loss_pct": 0.02,
+                "urgency": "high",
+                "rationale": ["cluster_risk"],
+                "risk_checks": ["liquidity_ok"],
+                "schema_version": "v1",
+                "generated_at": "2026-06-02T15:30:00+00:00",
+            }
+        },
+    )
+
+    result = pipeline.run(
+        rebalance_requests=(_request(existing_position=True, allow_open_new=False),),
+        portfolio_context=ledger.build_portfolio_context(as_of=now),
+        risk_appetite="balanced",
+        portfolio_risk_intent=intent,
+    )
+
+    assert result.decisions[0].risk_decision_id is not None
+    assert repository.risk_decisions[0].generated_hedge_action["risk_source"] == "sector_event_cluster"

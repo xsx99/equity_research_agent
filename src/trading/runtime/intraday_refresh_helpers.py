@@ -77,6 +77,9 @@ def _build_alert_map(alerts: tuple[object, ...]) -> dict[str, list[dict[str, Any
                 "sentiment": getattr(alert, "sentiment", None),
                 "headline": getattr(alert, "headline", None),
                 "summary": getattr(alert, "summary", None),
+                "source_ticker": getattr(alert, "source_ticker", None),
+                "readthrough_source_ticker": getattr(alert, "readthrough_source_ticker", None),
+                "affected_themes": list(getattr(alert, "affected_themes", ())),
             }
         )
     return alert_map
@@ -138,9 +141,23 @@ def _build_rebalance_request(
             for alert in alerts
             if alert.get("sentiment") == "negative"
         ),
-        metadata_json={},
+        metadata_json={
+            "sector": _sector_from_baseline(baseline),
+        },
     )
 
 
 def _position_by_ticker(positions: tuple[object, ...]) -> dict[str, object]:
     return {getattr(position, "ticker"): position for position in positions}
+
+
+def _sector_from_baseline(baseline: object | None) -> str | None:
+    if baseline is None:
+        return None
+    signal_json = dict(getattr(baseline, "signal_json", {}) or {})
+    for key in ("fundamental", "company"):
+        payload = dict(signal_json.get(key, {}) or {})
+        sector = payload.get("sector")
+        if isinstance(sector, str) and sector.strip():
+            return sector.strip()
+    return None

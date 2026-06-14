@@ -135,6 +135,7 @@ class LiveIntradayRefreshRuntime:
         portfolio_context = getattr(portfolio_result, "portfolio_context", portfolio_result)
         portfolio_risk_intent = None
         if self.dependencies.lookahead_helper is not None:
+            macro_risk_state = self.dependencies.macro_state_loader(decision_time)
             config = RiskConfigResolver().resolve(
                 risk_appetite="balanced",
                 portfolio_context=portfolio_context,
@@ -145,6 +146,7 @@ class LiveIntradayRefreshRuntime:
                 portfolio_context=portfolio_context,
                 config=config,
                 decision_time=decision_time,
+                macro_risk_state=macro_risk_state,
             )
         rebalance_result = self.dependencies.rebalance_pipeline.run(
             rebalance_requests=rebalance_requests,

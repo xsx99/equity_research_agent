@@ -5,13 +5,14 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from src.trading.intraday.signals import IntradaySignalScanRecord, IntradaySignalSnapshotRecord
-from src.trading.risk import PortfolioRiskIntentRecord
+from src.trading.risk import HedgeActionRecord, PortfolioRiskIntentRecord, RiskConfigResolver
 from src.trading.runtime.dispatch import get_job_phase_handler
 from src.trading.runtime.intraday_refresh import (
     LiveIntradayRefreshDependencies,
     LiveIntradayRefreshRuntime,
     run_live_intraday_refresh_once,
 )
+from src.trading.runtime.lookahead_risk import LookaheadRiskWorkflowHelper
 from src.trading.signals import SignalSnapshotResult
 from src.trading.signals.sources import EventNewsItemRecord, SourceRecord
 
@@ -100,6 +101,40 @@ class _PortfolioSyncWorkflow:
         return self.result
 
 
+class _MacroLookaheadHelper:
+    def __init__(self) -> None:
+        self.received_macro_risk_state: str | None = None
+
+    def build_intraday_portfolio_risk_intent(
+        self,
+        *,
+        rebalance_requests,
+        portfolio_context,
+        config,
+        decision_time: datetime,
+        macro_risk_state: str | None,
+    ) -> PortfolioRiskIntentRecord:
+        self.received_macro_risk_state = macro_risk_state
+        assert macro_risk_state == "high"
+        return PortfolioRiskIntentRecord.create(
+            decision_time=decision_time,
+            risk_window="1-5d",
+            aggregate_risk_state="macro_high_risk",
+            hedge_actions=(
+                HedgeActionRecord(
+                    action="open_hedge",
+                    risk_source="macro",
+                    severity="high",
+                    target_underlier="SPY",
+                    target_exposure_type="broad_market",
+                    coverage_ratio=0.5,
+                    reason_code="macro_high_overlay",
+                    metadata_json={},
+                ),
+            ),
+        )
+
+
 class _NewsAlertService:
     def __init__(self, recorder: _CallRecorder, alerts: tuple[object, ...]) -> None:
         self.recorder = recorder
@@ -174,6 +209,14 @@ class _TradingRepository:
 class _NewsAlert:
     ticker: str
     dedupe_key: str
+    alert_type: str = "news"
+    severity: str = "high"
+    sentiment: str | None = None
+    headline: str | None = None
+    summary: str | None = None
+    source_ticker: str | None = None
+    affected_themes: tuple[str, ...] = ()
+    readthrough_source_ticker: str | None = None
 
 
 def _source_record(*, ticker: str, family: str, payload: dict) -> SourceRecord:
@@ -192,8 +235,11 @@ def _source_record(*, ticker: str, family: str, payload: dict) -> SourceRecord:
     )
 
 
-def _baseline_snapshot(*, ticker: str) -> SignalSnapshotResult:
+def _baseline_snapshot(*, ticker: str, sector: str | None = None) -> SignalSnapshotResult:
     now = datetime(2026, 6, 4, 16, 0, tzinfo=timezone.utc)
+    fundamental_json = {"market_cap": 1_000_000_000}
+    if sector is not None:
+        fundamental_json["sector"] = sector
     return SignalSnapshotResult(
         signal_snapshot_id=f"{ticker}-baseline",
         ticker=ticker,
@@ -203,7 +249,7 @@ def _baseline_snapshot(*, ticker: str) -> SignalSnapshotResult:
         max_input_available_for_decision_at=now,
         signal_json={
             "technical": {"last_price": 100.0, "atr_pct": 0.02, "dollar_volume": 50_000_000.0},
-            "fundamental": {"market_cap": 1_000_000_000},
+            "fundamental": fundamental_json,
         },
         source_freshness_json={"technical": "fresh", "fundamental": "fresh"},
         missing_signals_json=[],
@@ -326,6 +372,7 @@ def _build_runtime() -> tuple[LiveIntradayRefreshRuntime, _CallRecorder, _Rebala
         candidate_context_loader=lambda tickers, decision_time: {"MSFT": ("MSFT",)},
         position_context_loader=lambda tickers, positions: {"AAPL": ("AAPL",)},
         theme_context_loader=lambda tickers, decision_time: {},
+        macro_state_loader=lambda decision_time: None,
     )
     runtime = LiveIntradayRefreshRuntime(
         dependencies=dependencies,
@@ -389,6 +436,321 @@ def test_live_intraday_refresh_runtime_passes_portfolio_risk_intent_into_rebalan
 
     assert rebalance_pipeline.last_portfolio_risk_intent is not None
     assert rebalance_pipeline.last_portfolio_risk_intent.aggregate_risk_state == "macro_high_risk"
+
+
+def test_live_intraday_refresh_runtime_passes_macro_risk_state_into_intraday_lookahead_helper():
+    runtime, _recorder, rebalance_pipeline, _repository = _build_runtime()
+    runtime.dependencies = LiveIntradayRefreshDependencies(
+        **{
+            **runtime.dependencies.__dict__,
+            "macro_state_loader": lambda decision_time: "high",
+            "lookahead_helper": _MacroLookaheadHelper(),
+        }
+    )
+
+    runtime.run()
+
+    assert runtime.dependencies.lookahead_helper.received_macro_risk_state == "high"
+    assert rebalance_pipeline.last_portfolio_risk_intent.aggregate_risk_state == "macro_high_risk"
+    assert rebalance_pipeline.last_portfolio_risk_intent.hedge_actions[0].risk_source == "macro"
+
+
+def test_intraday_helper_derives_sector_cluster_assessment_from_readthrough_alert():
+    helper = LookaheadRiskWorkflowHelper()
+    now = datetime(2026, 6, 4, 16, 0, tzinfo=timezone.utc)
+    portfolio_context = SimpleNamespace(
+        account_equity=100000.0,
+        total_margin_requirement=0.0,
+        margin_model_profile="estimated_fidelity_like_conservative_v1",
+        margin_model_version="v1",
+        positions=(
+            SimpleNamespace(
+                ticker="NVDA",
+                trade_identity="tactical_stock_trade",
+                sector="Semiconductors",
+            ),
+        ),
+    )
+    config = RiskConfigResolver().resolve(
+        risk_appetite="balanced",
+        portfolio_context=portfolio_context,
+        macro_risk_budget_multiplier=1.0,
+    )
+
+    intent = helper.build_intraday_portfolio_risk_intent(
+        rebalance_requests=(
+            SimpleNamespace(
+                ticker="NVDA",
+                trade_identity="tactical_stock_trade",
+                existing_position=True,
+                allow_open_new=False,
+                alerts=(
+                    {
+                        "alert_type": "earnings_readthrough",
+                        "severity": "high",
+                        "source_ticker": "AVGO",
+                        "readthrough_source_ticker": "AVGO",
+                        "affected_themes": ["ai_semis"],
+                    },
+                ),
+                metadata_json={"sector": "Semiconductors"},
+            ),
+        ),
+        portfolio_context=portfolio_context,
+        config=config,
+        decision_time=now,
+        macro_risk_state=None,
+    )
+
+    assert intent.aggregate_risk_state == "event_cluster_risk"
+    assert intent.hedge_actions[0].risk_source == "sector_event_cluster"
+    assert intent.hedge_actions[0].target_underlier == "SMH"
+
+
+def test_intraday_helper_keeps_same_ticker_themed_earnings_alert_on_own_event_path():
+    helper = LookaheadRiskWorkflowHelper()
+    now = datetime(2026, 6, 4, 16, 0, tzinfo=timezone.utc)
+    portfolio_context = SimpleNamespace(
+        account_equity=100000.0,
+        total_margin_requirement=0.0,
+        margin_model_profile="estimated_fidelity_like_conservative_v1",
+        margin_model_version="v1",
+        positions=(
+            SimpleNamespace(
+                ticker="NVDA",
+                trade_identity="tactical_stock_trade",
+                sector="Semiconductors",
+            ),
+        ),
+    )
+    config = RiskConfigResolver().resolve(
+        risk_appetite="balanced",
+        portfolio_context=portfolio_context,
+        macro_risk_budget_multiplier=1.0,
+    )
+
+    intent = helper.build_intraday_portfolio_risk_intent(
+        rebalance_requests=(
+            SimpleNamespace(
+                ticker="NVDA",
+                trade_identity="tactical_stock_trade",
+                existing_position=True,
+                allow_open_new=False,
+                alerts=(
+                    {
+                        "alert_type": "earnings_update",
+                        "severity": "high",
+                        "source_ticker": "NVDA",
+                        "affected_themes": ["ai_semis"],
+                    },
+                ),
+                metadata_json={"sector": "Semiconductors"},
+            ),
+        ),
+        portfolio_context=portfolio_context,
+        config=config,
+        decision_time=now,
+        macro_risk_state=None,
+    )
+
+    assert intent.aggregate_risk_state == "mixed_risk"
+    assert intent.position_actions[0].risk_source == "own_event"
+    assert intent.hedge_actions == ()
+
+
+def test_intraday_helper_ignores_non_dict_alert_before_cluster_path():
+    helper = LookaheadRiskWorkflowHelper()
+    now = datetime(2026, 6, 4, 16, 0, tzinfo=timezone.utc)
+    portfolio_context = SimpleNamespace(
+        account_equity=100000.0,
+        total_margin_requirement=0.0,
+        margin_model_profile="estimated_fidelity_like_conservative_v1",
+        margin_model_version="v1",
+        positions=(),
+    )
+    config = RiskConfigResolver().resolve(
+        risk_appetite="balanced",
+        portfolio_context=portfolio_context,
+        macro_risk_budget_multiplier=1.0,
+    )
+
+    intent = helper.build_intraday_portfolio_risk_intent(
+        rebalance_requests=(
+            SimpleNamespace(
+                ticker="NVDA",
+                trade_identity="tactical_stock_trade",
+                existing_position=True,
+                allow_open_new=False,
+                alerts=("bad-alert-shape",),
+                metadata_json={"sector": "Semiconductors"},
+            ),
+        ),
+        portfolio_context=portfolio_context,
+        config=config,
+        decision_time=now,
+        macro_risk_state=None,
+    )
+
+    assert intent.aggregate_risk_state == "risk_normalized"
+    assert intent.position_actions == ()
+    assert intent.hedge_actions == ()
+
+
+def test_live_intraday_refresh_runtime_keeps_readthrough_and_theme_fields_on_rebalance_requests():
+    runtime, recorder, rebalance_pipeline, _repository = _build_runtime()
+
+    class _LocalLoader:
+        def __init__(self, name: str, result: dict[str, object]) -> None:
+            self.name = name
+            self.result = result
+
+        def load_for_tickers(self, *, tickers: tuple[str, ...], decision_time: datetime) -> dict[str, object]:
+            assert decision_time.tzinfo is not None
+            recorder.record(self.name)
+            return dict(self.result)
+
+    class _LocalNewsAlertService:
+        def __init__(self, alerts: tuple[object, ...]) -> None:
+            self.alerts = alerts
+
+        def build_alerts(
+            self,
+            *,
+            event_items,
+            existing_dedupe_keys,
+            affected_positions_by_ticker,
+            affected_candidates_by_ticker,
+            affected_themes_by_ticker,
+        ):
+            assert {item.ticker for item in event_items} == {"AAPL"}
+            assert existing_dedupe_keys == frozenset({"seen-news"})
+            assert affected_positions_by_ticker["AAPL"] == ("AAPL",)
+            assert affected_candidates_by_ticker["MSFT"] == ("MSFT",)
+            assert affected_themes_by_ticker == {"NVDA": ("ai_semis",)}
+            recorder.record("build_alerts")
+            return self.alerts
+
+    runtime.dependencies = LiveIntradayRefreshDependencies(
+        **{
+            **runtime.dependencies.__dict__,
+            "scope_loader": _ScopeLoader(recorder, ("AAPL", "MSFT", "NVDA")),
+            "baseline_loader": _LocalLoader(
+                "load_baselines",
+                {
+                    "AAPL": _baseline_snapshot(ticker="AAPL"),
+                    "MSFT": _baseline_snapshot(ticker="MSFT"),
+                    "NVDA": _baseline_snapshot(ticker="NVDA", sector="Semiconductors"),
+                },
+            ),
+            "previous_snapshot_loader": _LocalLoader(
+                "load_previous_intraday",
+                {
+                    "AAPL": _previous_intraday(ticker="AAPL"),
+                    "NVDA": _previous_intraday(ticker="NVDA"),
+                },
+            ),
+            "source_repository": _IntradaySourceRepository(
+                recorder,
+                {
+                    ("AAPL", "technical"): (_source_record(ticker="AAPL", family="technical", payload={"bars": [{"close": 104.0}]}),),
+                    ("AAPL", "events_news"): (
+                        _source_record(
+                            ticker="AAPL",
+                            family="events_news",
+                            payload={
+                                "event_news_item_id": "news-aapl-1",
+                                "ticker": "AAPL",
+                                "source_ticker": "AAPL",
+                                "event_type": "earnings_update",
+                                "direction": "positive",
+                                "sentiment": "positive",
+                                "importance": "high",
+                                "headline": "AAPL guide raised",
+                                "summary": "Raised guide",
+                                "provider": "fixture",
+                                "source_refs_json": [],
+                                "dedupe_key": "aapl-news-1",
+                                "metadata_json": {},
+                            },
+                        ),
+                    ),
+                    ("MSFT", "technical"): (_source_record(ticker="MSFT", family="technical", payload={"bars": [{"close": 98.0}]}),),
+                    ("MSFT", "events_news"): (),
+                    ("NVDA", "technical"): (_source_record(ticker="NVDA", family="technical", payload={"bars": [{"close": 121.0}]}),),
+                    ("NVDA", "events_news"): (),
+                },
+            ),
+            "request_context_loader": _LocalLoader(
+                "load_request_context",
+                {
+                    "AAPL": SimpleNamespace(
+                        selection_source="portfolio",
+                        strategy_id="relative_strength_rotation_v1",
+                        strategy_version="v1",
+                        expression_bucket_id="long_stock",
+                        expression_bucket_version="v1",
+                        trade_identity="tactical_stock_trade",
+                        instrument_type="stock",
+                        candidate_score=0.82,
+                        target_weight=0.05,
+                        allow_open_new=False,
+                    ),
+                    "MSFT": SimpleNamespace(
+                        selection_source="manual_request",
+                        strategy_id="earnings_reaction_v1",
+                        strategy_version="v1",
+                        expression_bucket_id="long_stock",
+                        expression_bucket_version="v1",
+                        trade_identity="tactical_stock_trade",
+                        instrument_type="stock",
+                        candidate_score=0.67,
+                        target_weight=0.03,
+                        allow_open_new=True,
+                    ),
+                    "NVDA": SimpleNamespace(
+                        selection_source="manual_request",
+                        strategy_id="semis_readthrough_v1",
+                        strategy_version="v1",
+                        expression_bucket_id="long_stock",
+                        expression_bucket_version="v1",
+                        trade_identity="tactical_stock_trade",
+                        instrument_type="stock",
+                        candidate_score=0.74,
+                        target_weight=0.04,
+                        allow_open_new=True,
+                    ),
+                },
+            ),
+            "candidate_context_loader": lambda tickers, decision_time: {"MSFT": ("MSFT",), "NVDA": ("NVDA",)},
+            "position_context_loader": lambda tickers, positions: {"AAPL": ("AAPL",)},
+            "theme_context_loader": lambda tickers, decision_time: {"NVDA": ("ai_semis",)},
+            "news_alert_service": _LocalNewsAlertService(
+                (
+                    _NewsAlert(ticker="AAPL", dedupe_key="aapl-news-1"),
+                    _NewsAlert(
+                        ticker="NVDA",
+                        dedupe_key="nvda-news-1",
+                        alert_type="guidance_update",
+                        severity="high",
+                        sentiment="positive",
+                        headline="NVDA raised after AVGO readthrough",
+                        summary="Semiconductor readthrough from AVGO",
+                        source_ticker="AVGO",
+                        affected_themes=("ai_semis",),
+                        readthrough_source_ticker="AVGO",
+                    ),
+                ),
+            ),
+        }
+    )
+
+    runtime.run()
+
+    request = next(item for item in rebalance_pipeline.last_requests if item.ticker == "NVDA")
+    assert request.metadata_json["sector"] == "Semiconductors"
+    assert request.alerts[0]["affected_themes"] == ["ai_semis"]
+    assert request.alerts[0]["source_ticker"] == "AVGO"
+    assert request.alerts[0]["readthrough_source_ticker"] == "AVGO"
 
 
 def test_run_live_intraday_refresh_once_builds_default_dependencies_when_not_injected(monkeypatch):
