@@ -11,11 +11,7 @@ from src.trading.data_sources.universe import UniverseAsset, UniverseFilterConfi
 from src.trading.data_sources.universe import UniverseSnapshotResult, UniverseSymbolDecision
 from src.trading.brokers.paper_option import PaperOptionExecutionRecord, PaperOptionOrderRecord, PaperOptionPosition
 from src.trading.brokers.paper_stock import PaperExecutionRecord, PaperOrderRecord
-from src.trading.risk.context import (
-    PortfolioRiskSnapshotRecord,
-    PositionSizingDecisionRecord,
-    RiskFactorExposureRecord,
-)
+from src.trading.risk.context import PortfolioRiskSnapshotRecord, PositionSizingDecisionRecord, RiskFactorExposureRecord
 from src.trading.risk.hedges import RiskHedgeDecisionRecord
 from src.trading.risk.options import OptionRiskSnapshotRecord
 from src.trading.options.strategy import OptionStrategyDecisionRecord, OptionStrategyLegRecord
@@ -23,7 +19,7 @@ from src.trading.portfolio.state import PortfolioSnapshot, StockPosition
 from src.trading.repositories.sqlalchemy import SqlAlchemyTradingRepository, _trading_decision_payload
 from src.trading.workflows.paper_execution import PaperExecutionWorkflow
 from src.trading.manual_review.requests import ManualTickerRequestService
-from src.trading.risk import RiskDecisionRecord
+from src.trading.risk import HedgeActionRecord, PortfolioRiskIntentRecord, PositionRiskActionRecord, RiskDecisionRecord
 from src.trading.workflows.trading_decision import TradingDecisionRecord
 
 
@@ -245,6 +241,77 @@ def test_sqlalchemy_repository_persists_pr4_risk_artifacts():
     repository.save_risk_decision(risk_decision)
 
     assert session.flush_calls >= 4
+
+
+def test_sqlalchemy_repository_round_trips_portfolio_risk_intent():
+    now = datetime(2026, 6, 13, 12, 45, tzinfo=timezone.utc)
+    session = _FakeSession()
+    repository = SqlAlchemyTradingRepository(session)
+
+    portfolio_snapshot = PortfolioRiskSnapshotRecord(
+        portfolio_risk_snapshot_id="risk-snapshot-1",
+        decision_time=now,
+        risk_appetite="balanced",
+        resolver_version="v1",
+        margin_model_profile="alpaca_paper_account",
+        margin_model_version="broker",
+        account_equity=100000.0,
+        cash_balance=50000.0,
+        buying_power=100000.0,
+        excess_liquidity=50000.0,
+        stock_margin_requirement=1000.0,
+        option_margin_requirement=0.0,
+        total_margin_requirement=1000.0,
+        initial_margin_requirement=1000.0,
+        maintenance_margin_requirement=500.0,
+        margin_requirement_source="broker_reported",
+        net_exposure=10000.0,
+        gross_exposure=10000.0,
+        beta_adjusted_net_exposure=9000.0,
+        concentration_flags=["single_name_warning"],
+        metadata_json={"macro_regime": "risk_on"},
+    )
+    intent = PortfolioRiskIntentRecord.create(
+        portfolio_risk_snapshot_id="risk-snapshot-1",
+        decision_time=now,
+        risk_window="1-5d",
+        aggregate_risk_state="mixed_risk",
+        position_actions=(
+            PositionRiskActionRecord(
+                ticker="NVDA",
+                trade_identity="tactical_stock_trade",
+                action="block_open",
+                risk_source="own_event",
+                severity="high",
+                max_allowed_weight_override=None,
+                reason_code="own_event_block",
+                metadata_json={"days_until_event": 2},
+            ),
+        ),
+        hedge_actions=(
+            HedgeActionRecord(
+                action="open_hedge",
+                risk_source="macro",
+                severity="watch",
+                target_underlier="QQQ",
+                target_exposure_type="broad_market",
+                coverage_ratio=0.25,
+                reason_code="macro_watch_overlay",
+                metadata_json={},
+            ),
+        ),
+        binding_constraints=("own_event_block", "macro_watch_overlay"),
+        metadata_json={"source": "planner"},
+    )
+
+    repository.save_portfolio_risk_snapshot(portfolio_snapshot)
+    repository.save_portfolio_risk_intent(intent)
+    loaded = repository.load_portfolio_risk_intents(trade_date=now.date())
+
+    assert len(loaded) == 1
+    assert loaded[0].portfolio_risk_snapshot_id == str(uuid.uuid5(uuid.NAMESPACE_URL, "risk-snapshot-1"))
+    assert loaded[0].position_actions[0].action == "block_open"
+    assert loaded[0].hedge_actions[0].target_underlier == "QQQ"
 
 
 def test_sqlalchemy_repository_persists_pr6_order_execution_snapshot_and_positions():

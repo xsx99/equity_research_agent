@@ -45,6 +45,7 @@ Proposed new tables:
 | `risk_limit_configs` | Versioned generated risk limits and factor exposure caps produced by `RiskConfigResolver` from a risk appetite preset; persisted for audit/replay rather than edited as the primary UI config |
 | `position_sizing_decisions` | Deterministic sizing inputs, applied caps, final target weight/quantity |
 | `portfolio_risk_snapshots` | Portfolio-level gross/net exposure, active risk appetite, generated risk config id/version, unified margin-account risk, and factor exposures before/after proposed trades and after fills |
+| `portfolio_risk_intents` | Persisted `PortfolioHedgePlanner` lookahead intent with aggregate risk state, position actions, hedge proposals, binding constraints, and optional linkage to the current risk snapshot |
 | `risk_factor_exposures` | Normalized per-position and portfolio exposures by factor type/name |
 | `paper_orders` | Staged/submitted/filled/rejected paper orders; stock rows mirror Alpaca paper broker state and include broker/client order identifiers |
 | `paper_executions` | Broker-reported stock fills and simulated option fills when applicable |

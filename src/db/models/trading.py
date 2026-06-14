@@ -1389,6 +1389,7 @@ class PortfolioRiskSnapshot(Base):
     metadata_json = Column(JSONB, nullable=False, default=dict)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
+    portfolio_risk_intents = relationship("PortfolioRiskIntent", back_populates="portfolio_risk_snapshot")
     risk_factor_exposures = relationship("RiskFactorExposure", back_populates="portfolio_risk_snapshot")
     risk_decisions = relationship("RiskDecision", back_populates="portfolio_risk_snapshot")
 
@@ -1398,6 +1399,30 @@ class PortfolioRiskSnapshot(Base):
             name="ck_portfolio_risk_snapshots_risk_appetite",
         ),
     )
+
+
+class PortfolioRiskIntent(Base):
+    """Persisted lookahead risk intent emitted before final risk approvals."""
+
+    __tablename__ = "portfolio_risk_intents"
+
+    portfolio_risk_intent_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    portfolio_risk_snapshot_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("portfolio_risk_snapshots.portfolio_risk_snapshot_id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    decision_time = Column(DateTime(timezone=True), nullable=False, index=True)
+    risk_window = Column(String(32), nullable=False)
+    aggregate_risk_state = Column(String(32), nullable=False, index=True)
+    position_actions_json = Column(JSONB, nullable=False, default=list)
+    hedge_actions_json = Column(JSONB, nullable=False, default=list)
+    binding_constraints_json = Column(JSONB, nullable=False, default=list)
+    metadata_json = Column(JSONB, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    portfolio_risk_snapshot = relationship("PortfolioRiskSnapshot", back_populates="portfolio_risk_intents")
 
 
 class RiskFactorExposure(Base):

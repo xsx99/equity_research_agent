@@ -189,6 +189,7 @@ Hard safety rails do not change across `conservative`, `balanced`, and `aggressi
 - Macro-only bearish evidence cannot create a high-confidence single-name short or bearish trade.
 - Core holdings cannot be sold solely because of a short-term tactical signal.
 - Risk hedge overlays remain paper-only `RiskManager` actions and are excluded from tactical strategy win-rate attribution.
+- Lookahead hedge proposals may be persisted before final approval, but executable hedge overlays are generated only from residual post-approval exposure rather than pre-approval projections.
 - No averaging down in V2 unless explicitly added later.
 
 ### Generated Risk Limits and Actions
