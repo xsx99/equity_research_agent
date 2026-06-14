@@ -199,6 +199,8 @@ class IntradayRebalancePipeline:
             self.repository.save_prompt_template(prompt_template)
             self.repository.save_prompt_run(prompt_run)
             self.repository.save_usage_events(usage_events)
+            if risk_decision is not None:
+                self.repository.save_risk_decision(risk_decision)
             self.repository.save_intraday_rebalance_decision(decision)
             decisions.append(decision)
 

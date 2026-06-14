@@ -5,13 +5,14 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from src.trading.intraday.signals import IntradaySignalScanRecord, IntradaySignalSnapshotRecord
-from src.trading.risk import HedgeActionRecord, PortfolioRiskIntentRecord
+from src.trading.risk import HedgeActionRecord, PortfolioRiskIntentRecord, RiskConfigResolver
 from src.trading.runtime.dispatch import get_job_phase_handler
 from src.trading.runtime.intraday_refresh import (
     LiveIntradayRefreshDependencies,
     LiveIntradayRefreshRuntime,
     run_live_intraday_refresh_once,
 )
+from src.trading.runtime.lookahead_risk import LookaheadRiskWorkflowHelper
 from src.trading.signals import SignalSnapshotResult
 from src.trading.signals.sources import EventNewsItemRecord, SourceRecord
 
@@ -452,6 +453,58 @@ def test_live_intraday_refresh_runtime_passes_macro_risk_state_into_intraday_loo
     assert runtime.dependencies.lookahead_helper.received_macro_risk_state == "high"
     assert rebalance_pipeline.last_portfolio_risk_intent.aggregate_risk_state == "macro_high_risk"
     assert rebalance_pipeline.last_portfolio_risk_intent.hedge_actions[0].risk_source == "macro"
+
+
+def test_intraday_helper_derives_sector_cluster_assessment_from_readthrough_alert():
+    helper = LookaheadRiskWorkflowHelper()
+    now = datetime(2026, 6, 4, 16, 0, tzinfo=timezone.utc)
+    portfolio_context = SimpleNamespace(
+        account_equity=100000.0,
+        total_margin_requirement=0.0,
+        margin_model_profile="estimated_fidelity_like_conservative_v1",
+        margin_model_version="v1",
+        positions=(
+            SimpleNamespace(
+                ticker="NVDA",
+                trade_identity="tactical_stock_trade",
+                sector="Semiconductors",
+            ),
+        ),
+    )
+    config = RiskConfigResolver().resolve(
+        risk_appetite="balanced",
+        portfolio_context=portfolio_context,
+        macro_risk_budget_multiplier=1.0,
+    )
+
+    intent = helper.build_intraday_portfolio_risk_intent(
+        rebalance_requests=(
+            SimpleNamespace(
+                ticker="NVDA",
+                trade_identity="tactical_stock_trade",
+                existing_position=True,
+                allow_open_new=False,
+                alerts=(
+                    {
+                        "alert_type": "earnings_readthrough",
+                        "severity": "high",
+                        "source_ticker": "AVGO",
+                        "readthrough_source_ticker": "AVGO",
+                        "affected_themes": ["ai_semis"],
+                    },
+                ),
+                metadata_json={"sector": "Semiconductors"},
+            ),
+        ),
+        portfolio_context=portfolio_context,
+        config=config,
+        decision_time=now,
+        macro_risk_state=None,
+    )
+
+    assert intent.aggregate_risk_state == "event_cluster_risk"
+    assert intent.hedge_actions[0].risk_source == "sector_event_cluster"
+    assert intent.hedge_actions[0].target_underlier == "SMH"
 
 
 def test_live_intraday_refresh_runtime_keeps_readthrough_and_theme_fields_on_rebalance_requests():
