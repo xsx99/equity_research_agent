@@ -203,6 +203,59 @@ def test_paper_stock_broker_submits_alpaca_market_day_order_and_reads_fill_by_cl
     assert execution.quantity == 0.01
 
 
+def test_paper_execution_workflow_executes_generated_risk_hedge_overlay():
+    now = datetime(2026, 6, 2, 16, 31, tzinfo=timezone.utc)
+    repository = InMemoryTradingRepository()
+    workflow = PaperExecutionWorkflow(
+        repository=repository,
+        broker=PaperStockBroker(api_key="key", secret_key="secret", client=_CapturingClient()),
+        option_broker=PaperOptionBroker(now=lambda: now),
+        manual_request_service=ManualTickerRequestService(now=lambda: now),
+    )
+    hedge_risk = RiskDecisionRecord(
+        risk_decision_id="hedge-risk-1",
+        candidate_score_id=None,
+        trade_classification_id=None,
+        position_sizing_decision_id=None,
+        ticker="AAPL",
+        status="approved",
+        reason_code="within_limits",
+        approved_weight=0.02,
+        approved_notional=2000.0,
+        approved_quantity=1.0,
+        portfolio_risk_snapshot_id="portfolio-risk-1",
+        applied_rules=["portfolio_risk_intent"],
+        generated_hedge_action={
+            "action": "open_hedge",
+            "risk_source": "macro",
+            "severity": "high",
+            "target_underlier": "QQQ",
+            "target_exposure_type": "broad_market",
+            "coverage_ratio": 0.5,
+            "reason_code": "macro_high_overlay",
+            "option_strategy_type": "long_put",
+            "underlying_price": 500.0,
+            "protected_notional": 10000.0,
+        },
+        decision_time=now,
+        metadata_json={},
+    )
+
+    workflow.run(
+        trading_decisions=(),
+        risk_decisions=(hedge_risk,),
+        trade_date=now,
+    )
+
+    assert len(repository.option_strategy_decisions) == 1
+    assert repository.option_strategy_decisions[0].trade_identity == "risk_hedge_overlay"
+    assert repository.option_strategy_decisions[0].ticker == "QQQ"
+    assert len(repository.paper_option_orders) == 1
+    assert repository.paper_option_orders[0].trade_identity == "risk_hedge_overlay"
+    assert len(repository.risk_hedge_decisions) == 1
+    assert repository.risk_hedge_decisions[0].ticker == "QQQ"
+
+
 def test_paper_stock_broker_submits_sell_order_for_exit_action():
     client = _CapturingClient()
     broker = PaperStockBroker(api_key="key", secret_key="secret", client=client)

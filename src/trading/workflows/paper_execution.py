@@ -87,10 +87,53 @@ class PaperExecutionWorkflow:
                 orders=orders,
                 snapshots=snapshots,
             )
+        self._execute_generated_hedges(
+            risk_decisions=risk_decisions,
+            trade_date=trade_date,
+        )
         return PaperExecutionWorkflowResult(
             paper_orders=tuple(orders),
             portfolio_snapshots=tuple(snapshots),
         )
+
+    def _execute_generated_hedges(
+        self,
+        *,
+        risk_decisions: tuple[RiskDecisionRecord, ...],
+        trade_date: datetime,
+    ) -> None:
+        if self.option_broker is None:
+            return
+        seen: set[tuple[str, str, str]] = set()
+        for risk_decision in risk_decisions:
+            payload = risk_decision.generated_hedge_action
+            if risk_decision.status not in {"approved", "reduced"} or not isinstance(payload, dict):
+                continue
+            key = (
+                str(payload.get("action") or ""),
+                str(payload.get("target_underlier") or ""),
+                str(payload.get("reason_code") or ""),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            trading_decision = _hedge_trading_decision_from_generated_action(
+                risk_decision=risk_decision,
+                hedge_action=payload,
+                trade_date=trade_date,
+            )
+            if trading_decision is None:
+                continue
+            self.repository.save_trading_decision(trading_decision)
+            hedge_risk_decision = _hedge_risk_decision_from_generated_action(
+                risk_decision=risk_decision,
+                hedge_action=payload,
+            )
+            self._handle_option_decision(
+                trading_decision=trading_decision,
+                risk_decision=hedge_risk_decision,
+                trade_date=trade_date,
+            )
 
     def _execute_option_expression_plan(
         self,
@@ -653,6 +696,165 @@ class PaperExecutionWorkflow:
             if request.request_id == request_id:
                 return request.mode
         return None
+
+
+def _hedge_trading_decision_from_generated_action(
+    *,
+    risk_decision: RiskDecisionRecord,
+    hedge_action: dict[str, Any],
+    trade_date: datetime,
+) -> TradingDecisionRecord | None:
+    decision_action = _hedge_decision_action(hedge_action)
+    if decision_action is None:
+        return None
+    ticker = str(hedge_action.get("target_underlier") or "").strip().upper()
+    if not ticker:
+        return None
+    option_strategy_payload = _generated_hedge_option_strategy_payload(
+        hedge_action=hedge_action,
+        trade_date=trade_date,
+    )
+    metadata_json = {
+        "paper_trade_authorized": True,
+        "generated_hedge_action": dict(hedge_action),
+        "option_strategy": option_strategy_payload,
+    }
+    return TradingDecisionRecord(
+        trading_decision_id=str(uuid.uuid4()),
+        candidate_score_id=risk_decision.candidate_score_id,
+        trade_classification_id=None,
+        risk_decision_id=risk_decision.risk_decision_id,
+        ticker=ticker,
+        decision=decision_action,
+        strategy_id="risk_manager_hedge_overlay_v1",
+        strategy_version="v1",
+        expression_bucket_id="defined_risk_directional_option",
+        expression_bucket_version="v1",
+        trade_identity="risk_hedge_overlay",
+        instrument_type="option",
+        selection_source="risk_manager",
+        manual_request_id=None,
+        confidence=1.0,
+        target_weight=0.0,
+        approved_weight=0.0,
+        max_loss_pct=1.0,
+        time_horizon="1d-5d",
+        thesis="Risk hedge overlay generated from residual portfolio risk.",
+        prompt_template=object(),
+        prompt_run=None,
+        usage_events=[],
+        decision_time=trade_date,
+        available_for_decision_at=trade_date,
+        key_drivers=[str(hedge_action.get("reason_code") or "risk_overlay")],
+        counterarguments=[],
+        invalidators=[],
+        context_snapshot_json={
+            "generated_by": "risk_manager",
+            "source_risk_decision_id": risk_decision.risk_decision_id,
+        },
+        metadata_json=metadata_json,
+    )
+
+
+def _hedge_risk_decision_from_generated_action(
+    *,
+    risk_decision: RiskDecisionRecord,
+    hedge_action: dict[str, Any],
+) -> RiskDecisionRecord:
+    underlying_price = max(float(hedge_action.get("underlying_price") or 100.0), 1.0)
+    protected_notional = max(float(hedge_action.get("protected_notional") or 0.0), underlying_price * 100.0)
+    contracts = max(1.0, round(protected_notional / (underlying_price * 100.0)))
+    return RiskDecisionRecord(
+        risk_decision_id=risk_decision.risk_decision_id,
+        candidate_score_id=risk_decision.candidate_score_id,
+        trade_classification_id=None,
+        position_sizing_decision_id=risk_decision.position_sizing_decision_id,
+        ticker=str(hedge_action.get("target_underlier") or risk_decision.ticker),
+        status=risk_decision.status,
+        reason_code=str(hedge_action.get("reason_code") or risk_decision.reason_code),
+        approved_weight=0.0,
+        approved_notional=protected_notional,
+        approved_quantity=contracts,
+        portfolio_risk_snapshot_id=risk_decision.portfolio_risk_snapshot_id,
+        applied_rules=[*list(risk_decision.applied_rules), "generated_risk_hedge_overlay"],
+        generated_hedge_action=dict(hedge_action),
+        decision_time=risk_decision.decision_time,
+        metadata_json=dict(risk_decision.metadata_json),
+    )
+
+
+def _hedge_decision_action(hedge_action: dict[str, Any]) -> str | None:
+    action = str(hedge_action.get("action") or "")
+    return {
+        "open_hedge": "open_option_strategy",
+        "close_hedge": "close_option_strategy",
+        "adjust_hedge": "adjust_option_strategy",
+    }.get(action)
+
+
+def _generated_hedge_option_strategy_payload(
+    *,
+    hedge_action: dict[str, Any],
+    trade_date: datetime,
+) -> dict[str, Any]:
+    option_strategy_type = str(hedge_action.get("option_strategy_type") or "long_put")
+    underlying_price = max(float(hedge_action.get("underlying_price") or 100.0), 1.0)
+    chosen_price = round(max(1.0, underlying_price * 0.02), 2)
+    if option_strategy_type == "long_call":
+        option_type = "call"
+        delta = 0.30
+    else:
+        option_type = "put"
+        delta = -0.30
+    strike = round(underlying_price * 0.95, 2) if option_type == "put" else round(underlying_price * 1.05, 2)
+    leg_payload = {
+        "option_type": option_type,
+        "side": "buy",
+        "quantity": 1,
+        "strike": strike,
+        "expiry": trade_date.date().isoformat(),
+        "dte": 5,
+        "delta": delta,
+        "gamma": 0.02,
+        "theta": -0.01,
+        "vega": 0.05,
+        "iv_rank": None,
+        "bid": round(chosen_price * 0.95, 2),
+        "ask": round(chosen_price * 1.05, 2),
+        "mid": chosen_price,
+        "chosen_price": chosen_price,
+        "implied_volatility": None,
+    }
+    max_loss = chosen_price * 100.0
+    return {
+        "option_strategy_decision_id": str(uuid.uuid4()),
+        "option_strategy_type": option_strategy_type,
+        "status": "ready",
+        "rejection_reason": None,
+        "underlying_price": underlying_price,
+        "net_debit_or_credit": chosen_price,
+        "max_loss": max_loss,
+        "max_profit": None,
+        "breakevens": (),
+        "margin_requirement": max_loss,
+        "buying_power_effect": max_loss,
+        "assignment_notional": 0.0,
+        "portfolio_delta": delta,
+        "portfolio_gamma": 0.02,
+        "portfolio_theta": -0.01,
+        "portfolio_vega": 0.05,
+        "event_through_expiry": False,
+        "strategy_pairing_method": "single_leg",
+        "assignment_plan": None,
+        "margin_model_profile": "estimated_fidelity_like_conservative_v1",
+        "margin_model_version": "v1",
+        "margin_requirement_source": "simulated_formula",
+        "profit_target_pct": 0.0,
+        "max_loss_rule": "",
+        "roll_conditions": (),
+        "close_conditions": (),
+        "metadata_json": {"legs": [leg_payload], "hedge_action": dict(hedge_action)},
+    }
 
 
 def _build_execution_fallback_trade_risk_request(

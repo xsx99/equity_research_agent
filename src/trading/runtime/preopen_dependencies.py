@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Any, Protocol
 
 from src.core import config as app_config
+from src.trading.runtime.lookahead_risk import LookaheadRiskWorkflowHelper
 from src.trading.runtime.preopen_risk import _LiveRiskWorkflow
 from src.trading.runtime.support import (
     build_default_news_provider,
@@ -108,6 +109,7 @@ def build_live_preopen_dependencies(session: Any | None = None) -> LivePreopenDe
     from src.trading.risk.config import RiskConfigResolver
     from src.trading.risk.manager import RiskManager
     from src.trading.risk.options import OptionRiskManager
+    from src.trading.risk.planner import PortfolioHedgePlanner
     from src.trading.risk.sizing import PositionSizer
     from src.trading.signals.source_ingestion import SourceIngestionService
     from src.trading.workflows.paper_execution import PaperExecutionWorkflow
@@ -160,6 +162,9 @@ def build_live_preopen_dependencies(session: Any | None = None) -> LivePreopenDe
             config_resolver=config_resolver,
             position_sizer=position_sizer,
             risk_manager=risk_manager,
+            lookahead_helper=LookaheadRiskWorkflowHelper(
+                hedge_planner=PortfolioHedgePlanner()
+            ),
         ),
         trading_decision_pipeline=TradingDecisionPipeline(
             repository=trading_repository,
