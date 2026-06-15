@@ -994,7 +994,7 @@ class CandidateScore(Base):
             name="ck_candidate_scores_macro_compatibility",
         ),
         CheckConstraint(
-            "selection_source IN ('scanner', 'manual_request', 'watchlist_pin')",
+            "selection_source IN ('scanner', 'manual_request', 'watchlist_pin', 'risk_manager')",
             name="ck_candidate_scores_selection_source",
         ),
         Index("ix_candidate_scores_run_score", "strategy_run_id", "candidate_score"),
@@ -1592,7 +1592,7 @@ class TradingDecision(Base):
             name="ck_trading_decisions_instrument_type",
         ),
         CheckConstraint(
-            "selection_source IN ('scanner', 'manual_request', 'watchlist_pin')",
+            "selection_source IN ('scanner', 'manual_request', 'watchlist_pin', 'risk_manager')",
             name="ck_trading_decisions_selection_source",
         ),
         CheckConstraint(

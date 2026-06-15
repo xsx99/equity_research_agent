@@ -53,7 +53,7 @@ template: |
   - `expression_bucket_id`: string
   - `trade_identity`: one of `core_holding`, `tactical_stock_trade`, `tactical_option_trade`, `risk_hedge_overlay`, `watch_only`
   - `instrument_type`: one of `stock`, `option`, `watch`
-  - `selection_source`: one of `scanner`, `manual_request`, `watchlist_pin`
+  - `selection_source`: one of `scanner`, `manual_request`, `watchlist_pin`, `risk_manager`
   - `manual_request_id`: string or null
   - `confidence`: number between 0 and 1
   - `confidence_basis`: object

@@ -1,5 +1,6 @@
 from datetime import date, datetime, timezone
 from pathlib import Path
+from sqlalchemy import CheckConstraint
 
 from src.db.models.trading import (
     OptionStrategyLeg,
@@ -968,6 +969,27 @@ def test_pr_5_models_can_be_instantiated():
     assert decision.key_drivers_json == ["sector_relative_strength"]
 
 
+def test_selection_source_constraints_allow_risk_manager_overlays():
+    def _constraint_texts(model: type[object]) -> tuple[str, ...]:
+        return tuple(
+            str(constraint.sqltext)
+            for constraint in model.__table__.constraints
+            if isinstance(constraint, CheckConstraint)
+        )
+
+    candidate_constraints = _constraint_texts(CandidateScore)
+    trading_constraints = _constraint_texts(TradingDecision)
+
+    assert any(
+        "selection_source IN ('scanner', 'manual_request', 'watchlist_pin', 'risk_manager')" in text
+        for text in candidate_constraints
+    )
+    assert any(
+        "selection_source IN ('scanner', 'manual_request', 'watchlist_pin', 'risk_manager')" in text
+        for text in trading_constraints
+    )
+
+
 def test_pr_6_models_can_be_instantiated():
     now = datetime(2026, 6, 1, 20, 0, tzinfo=timezone.utc)
     order = PaperOrder(
@@ -1173,3 +1195,13 @@ def test_trading_migration_contains_pr_6_tables_and_constraints():
         "ck_paper_positions_status",
     ):
         assert constraint_name in text
+
+
+def test_trading_migration_contains_selection_source_constraint_fix_for_risk_manager():
+    migration_path = Path("alembic/versions/020_risk_manager_selection_source.py")
+    text = migration_path.read_text(encoding="utf-8")
+
+    assert 'down_revision: Union[str, None] = "019"' in text
+    assert "ck_candidate_scores_selection_source" in text
+    assert "ck_trading_decisions_selection_source" in text
+    assert "risk_manager" in text

@@ -21,7 +21,7 @@ DecisionLiteral = Literal[
     "avoid_event_option",
 ]
 InstrumentTypeLiteral = Literal["stock", "option", "watch"]
-SelectionSourceLiteral = Literal["scanner", "manual_request", "watchlist_pin"]
+SelectionSourceLiteral = Literal["scanner", "manual_request", "watchlist_pin", "risk_manager"]
 TradeIdentityLiteral = Literal[
     "core_holding",
     "tactical_stock_trade",

@@ -386,6 +386,8 @@ def test_paper_execution_workflow_executes_generated_risk_hedge_overlay():
         trade_date=now,
     )
 
+    assert len(repository.trading_decisions) == 1
+    assert repository.trading_decisions[0].selection_source == "risk_manager"
     assert len(repository.option_strategy_decisions) == 1
     assert repository.option_strategy_decisions[0].trade_identity == "risk_hedge_overlay"
     assert repository.option_strategy_decisions[0].ticker == "QQQ"
