@@ -7,7 +7,12 @@ from types import SimpleNamespace
 from typing import Any
 import uuid
 
-from src.trading.brokers.paper_option import PaperOptionBroker, PaperOptionOrderRequest, PaperOptionPosition
+from src.trading.brokers.paper_option import (
+    PaperOptionBroker,
+    PaperOptionOrderRecord,
+    PaperOptionOrderRequest,
+    PaperOptionPosition,
+)
 from src.trading.brokers.paper_stock import PaperOrderRequest, PaperOrderRecord, PaperStockBroker
 from src.trading.manual_review.requests import ManualTickerRequestService
 from src.trading.options.strategy import OptionStrategyDecisionRecord, OptionsStrategyLayer
@@ -31,6 +36,7 @@ class PaperExecutionWorkflowResult:
     """Persisted artifacts produced by the PR06 stock paper broker path."""
 
     paper_orders: tuple[PaperOrderRecord, ...]
+    paper_option_orders: tuple[PaperOptionOrderRecord, ...]
     portfolio_snapshots: tuple[PortfolioSnapshot, ...]
 
 
@@ -69,6 +75,7 @@ class PaperExecutionWorkflow:
     ) -> PaperExecutionWorkflowResult:
         risk_by_id = {decision.risk_decision_id: decision for decision in risk_decisions}
         orders: list[PaperOrderRecord] = []
+        option_orders: list[PaperOptionOrderRecord] = []
         snapshots: list[PortfolioSnapshot] = []
         for trading_decision in trading_decisions:
             if trading_decision.instrument_type == "option":
@@ -76,6 +83,7 @@ class PaperExecutionWorkflow:
                     trading_decision=trading_decision,
                     risk_decision=risk_by_id.get(trading_decision.risk_decision_id),
                     trade_date=trade_date,
+                    option_orders=option_orders,
                     orders=orders,
                     snapshots=snapshots,
                 )
@@ -90,9 +98,11 @@ class PaperExecutionWorkflow:
         self._execute_generated_hedges(
             risk_decisions=risk_decisions,
             trade_date=trade_date,
+            option_orders=option_orders,
         )
         return PaperExecutionWorkflowResult(
             paper_orders=tuple(orders),
+            paper_option_orders=tuple(option_orders),
             portfolio_snapshots=tuple(snapshots),
         )
 
@@ -101,6 +111,7 @@ class PaperExecutionWorkflow:
         *,
         risk_decisions: tuple[RiskDecisionRecord, ...],
         trade_date: datetime,
+        option_orders: list[PaperOptionOrderRecord],
     ) -> None:
         if self.option_broker is None:
             return
@@ -133,6 +144,7 @@ class PaperExecutionWorkflow:
                 trading_decision=trading_decision,
                 risk_decision=hedge_risk_decision,
                 trade_date=trade_date,
+                option_orders=option_orders,
             )
 
     def _execute_option_expression_plan(
@@ -141,6 +153,7 @@ class PaperExecutionWorkflow:
         trading_decision: TradingDecisionRecord,
         risk_decision: RiskDecisionRecord | None,
         trade_date: datetime,
+        option_orders: list[PaperOptionOrderRecord],
         orders: list[PaperOrderRecord],
         snapshots: list[PortfolioSnapshot],
     ) -> None:
@@ -169,6 +182,7 @@ class PaperExecutionWorkflow:
                 trading_decision=current_decision,
                 risk_decision=current_risk_decision,
                 trade_date=trade_date,
+                option_orders=option_orders,
             )
             if next_decision is not None and next_decision.expression_bucket_id != current_decision.expression_bucket_id:
                 current_decision = self._persist_fallback_resolution(
@@ -185,6 +199,7 @@ class PaperExecutionWorkflow:
         trading_decision: TradingDecisionRecord,
         risk_decision: RiskDecisionRecord | None,
         trade_date: datetime,
+        option_orders: list[PaperOptionOrderRecord],
     ) -> tuple[TradingDecisionRecord | None, RiskDecisionRecord | None]:
         option_decision = _option_decision_from_trading_decision(
             trading_decision=trading_decision,
@@ -230,6 +245,7 @@ class PaperExecutionWorkflow:
             )
         )
         self.repository.save_paper_option_order(order)
+        option_orders.append(order)
         if order.status == "rejected":
             return self._next_expression_decision(trading_decision), active_risk_decision
         execution = self.option_broker.find_execution_by_order_id(order.paper_option_order_id)

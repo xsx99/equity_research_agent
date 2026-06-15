@@ -27,12 +27,15 @@ class LiveIntradayRefreshRuntime:
         dependencies: LiveIntradayRefreshDependencies,
         now: Callable[[], datetime] | None = None,
         execute_paper_orders: bool = False,
+        execute_paper_option_orders: bool = False,
     ) -> None:
         self.dependencies = dependencies
         self.now = now or (lambda: datetime.now(timezone.utc))
         self.execute_paper_orders = execute_paper_orders
+        self.execute_paper_option_orders = execute_paper_option_orders
 
     def run(self) -> dict[str, Any]:
+        self._validate_execution_policy()
         decision_time = self.now()
         tickers = self.dependencies.scope_loader.load_scope(decision_time=decision_time)
         if not tickers:
@@ -45,7 +48,7 @@ class LiveIntradayRefreshRuntime:
                     "news_alert_count": 0,
                     "intraday_rebalance_decision_count": 0,
                 },
-                execution=build_execution_report(mode="dry_run", orders_submitted=0),
+                execution=build_execution_report(mode="dry_run", orders_submitted=0, option_orders_submitted=0),
             )
 
         baselines = self.dependencies.baseline_loader.load_for_tickers(
@@ -168,7 +171,8 @@ class LiveIntradayRefreshRuntime:
         )
         execution = build_execution_report(
             mode="execute" if self.execute_paper_orders else "dry_run",
-            orders_submitted=0,
+            orders_submitted=self._submitted_orders(rebalance_result),
+            option_orders_submitted=self._submitted_option_orders(rebalance_result),
         )
         return build_runtime_report(
             phase="intraday_refresh",
@@ -181,6 +185,20 @@ class LiveIntradayRefreshRuntime:
             },
             execution=execution,
         )
+
+    def _submitted_orders(self, rebalance_result: object) -> int:
+        summary = getattr(rebalance_result, "execution_summary", {}) or {}
+        return int(summary.get("orders_submitted", 0) or 0) if self.execute_paper_orders else 0
+
+    def _submitted_option_orders(self, rebalance_result: object) -> int:
+        if not self.execute_paper_orders or not self.execute_paper_option_orders:
+            return 0
+        summary = getattr(rebalance_result, "execution_summary", {}) or {}
+        return int(summary.get("option_orders_submitted", 0) or 0)
+
+    def _validate_execution_policy(self) -> None:
+        if self.execute_paper_option_orders and not self.execute_paper_orders:
+            raise ValueError("option_execution_requires_paper_order_execution")
 
 
 def _intraday_positions(

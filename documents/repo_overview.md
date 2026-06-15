@@ -147,6 +147,14 @@ PR 8 adds the first intraday refresh and rebalance path on top of the morning ba
 
 The current PR 8 implementation intentionally keeps intraday rebalance separate from the morning trading-decision pipeline. It reuses prompt telemetry and paper-execution building blocks, but it does not collapse morning and intraday flows into one shared top-level workflow.
 
+## Live Option Execution Wiring
+
+- Live preopen execution now distinguishes stock vs option submission policy with `execute_paper_orders` and `execute_paper_option_orders`, and the default preopen dependency graph injects `PaperOptionBroker` into `PaperExecutionWorkflow`.
+- Live intraday request contexts now carry persisted option execution metadata, including the latest `option_strategy` payload plus open-position linkage fields such as `option_strategy_type` and `paper_option_position_id`.
+- `IntradayRebalancePipeline` now injects `PaperOptionBroker`, executes approved `close_option_strategy` / `roll_option_strategy` / `adjust_option_strategy` actions through the shared `PaperExecutionWorkflow`, and returns an `execution_summary` with separate stock vs option submission counts.
+- Generated `risk_hedge_overlay` actions still execute through the same `PaperExecutionWorkflow` path; preopen and intraday now share one option-order persistence contract instead of maintaining a separate hedge executor.
+- `scripts/run_trading_live_preopen_order_smoke.py` now supports both `--instrument stock` and `--instrument option` so operators can verify real simulated live-preopen stock or option order submission without switching to fixture-only smoke modes.
+
 ## Lookahead Risk Planner
 
 - Added `PortfolioHedgePlanner` as a pure lookahead risk-planning layer ahead of final `RiskManager` approval.

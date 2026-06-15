@@ -17,12 +17,15 @@ class LivePreopenRuntime:
         dependencies: LivePreopenDependencies,
         now: Callable[[], datetime] | None = None,
         execute_paper_orders: bool = False,
+        execute_paper_option_orders: bool = False,
     ) -> None:
         self.dependencies = dependencies
         self.now = now or (lambda: datetime.now(timezone.utc))
         self.execute_paper_orders = execute_paper_orders
+        self.execute_paper_option_orders = execute_paper_option_orders
 
     def run(self) -> dict[str, Any]:
+        self._validate_execution_policy()
         decision_time = self.now()
         config = self.dependencies.universe_filter_loader.load_active()
         manual_requests = self.dependencies.manual_request_loader.load_active()
@@ -83,7 +86,7 @@ class LivePreopenRuntime:
         as_of: datetime,
     ) -> dict[str, Any]:
         if not self.execute_paper_orders:
-            return build_execution_report(mode="dry_run", orders_submitted=0)
+            return build_execution_report(mode="dry_run", orders_submitted=0, option_orders_submitted=0)
         workflow = self.dependencies.paper_execution_workflow
         if workflow is None:
             raise RuntimeError("paper_execution_workflow_not_configured")
@@ -93,4 +96,13 @@ class LivePreopenRuntime:
             trade_date=as_of,
         )
         submitted_orders = tuple(getattr(result, "paper_orders", ()))
-        return build_execution_report(mode="execute", orders_submitted=len(submitted_orders))
+        submitted_option_orders = tuple(getattr(result, "paper_option_orders", ()))
+        return build_execution_report(
+            mode="execute",
+            orders_submitted=len(submitted_orders),
+            option_orders_submitted=len(submitted_option_orders) if self.execute_paper_option_orders else 0,
+        )
+
+    def _validate_execution_policy(self) -> None:
+        if self.execute_paper_option_orders and not self.execute_paper_orders:
+            raise ValueError("option_execution_requires_paper_order_execution")

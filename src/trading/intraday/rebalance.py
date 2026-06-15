@@ -88,6 +88,7 @@ class IntradayRebalancePipelineResult:
     """Persisted intraday rebalance artifacts."""
 
     decisions: tuple[IntradayRebalanceDecisionRecord, ...]
+    execution_summary: dict[str, int] = field(default_factory=dict)
 
 
 class IntradayRebalancePipeline:
@@ -101,12 +102,14 @@ class IntradayRebalancePipeline:
         model_name: str,
         agent_runner: AgentRunner,
         broker: Any | None = None,
+        option_broker: Any | None = None,
     ) -> None:
         self.repository = repository
         self.prompt_registry = prompt_registry
         self.model_name = model_name
         self.agent_runner = agent_runner
         self.broker = broker
+        self.option_broker = option_broker
 
     def run(
         self,
@@ -145,8 +148,8 @@ class IntradayRebalancePipeline:
             )
             risk_decision = None
             approved_quantity = 0.0
-            if final_output["action"] in {"exit", "reduce"} and request.existing_position:
-                approved_quantity = request.current_position_quantity
+            if self._requires_execution_risk_decision(request=request, action=str(final_output["action"])):
+                approved_quantity = self._approved_execution_quantity(request=request)
                 risk_decision = RiskDecisionRecord.create(
                     candidate_score_id=None,
                     trade_classification_id=None,
@@ -204,27 +207,35 @@ class IntradayRebalancePipeline:
             self.repository.save_intraday_rebalance_decision(decision)
             decisions.append(decision)
 
-            if (
-                execute_approved
-                and self.broker is not None
-                and risk_decision is not None
-                and decision.status == "approved"
-                and decision.action in {"exit", "reduce"}
+            if self._should_execute_decision(
+                request=request,
+                decision=decision,
+                risk_decision=risk_decision,
+                execute_approved=execute_approved,
             ):
                 execution_decisions.append(self._to_trading_decision(request, decision, prompt_template, prompt_run, usage_events))
                 execution_risk_decisions.append(risk_decision)
 
+        execution_summary = {"orders_submitted": 0, "option_orders_submitted": 0}
         if execute_approved and self.broker is not None and execution_decisions:
-            PaperExecutionWorkflow(
+            execution_result = PaperExecutionWorkflow(
                 repository=self.repository,
                 broker=self.broker,
+                option_broker=self.option_broker,
             ).run(
                 trading_decisions=tuple(execution_decisions),
                 risk_decisions=tuple(execution_risk_decisions),
                 trade_date=trade_date or rebalance_requests[0].decision_time,
             )
+            execution_summary = {
+                "orders_submitted": len(tuple(getattr(execution_result, "paper_orders", ()))),
+                "option_orders_submitted": len(tuple(getattr(execution_result, "paper_option_orders", ()))),
+            }
 
-        return IntradayRebalancePipelineResult(decisions=tuple(decisions))
+        return IntradayRebalancePipelineResult(
+            decisions=tuple(decisions),
+            execution_summary=execution_summary,
+        )
 
     def _run_agent(
         self,
@@ -374,6 +385,11 @@ class IntradayRebalancePipeline:
         prompt_run: PromptRunRecord,
         usage_events: list[UsageEventRecord],
     ) -> TradingDecisionRecord:
+        metadata_json = {
+            **dict(request.metadata_json),
+            "paper_trade_authorized": True,
+            "intraday_rebalance": True,
+        }
         return TradingDecisionRecord(
             trading_decision_id=str(uuid.uuid4()),
             candidate_score_id=None,
@@ -401,7 +417,36 @@ class IntradayRebalancePipeline:
             usage_events=list(usage_events),
             decision_time=request.decision_time,
             available_for_decision_at=request.available_for_decision_at,
-            metadata_json={"paper_trade_authorized": True, "intraday_rebalance": True},
+            metadata_json=metadata_json,
+        )
+
+    def _requires_execution_risk_decision(self, *, request: IntradayRebalanceRequest, action: str) -> bool:
+        if not request.existing_position:
+            return False
+        if request.instrument_type == "option":
+            return action in {"close_option_strategy", "roll_option_strategy", "adjust_option_strategy"}
+        return action in {"exit", "reduce"}
+
+    def _approved_execution_quantity(self, *, request: IntradayRebalanceRequest) -> float:
+        quantity = float(request.current_position_quantity or 0.0)
+        if request.instrument_type == "option":
+            return quantity if quantity > 0 else 1.0
+        return quantity
+
+    def _should_execute_decision(
+        self,
+        *,
+        request: IntradayRebalanceRequest,
+        decision: IntradayRebalanceDecisionRecord,
+        risk_decision: RiskDecisionRecord | None,
+        execute_approved: bool,
+    ) -> bool:
+        return bool(
+            execute_approved
+            and self.broker is not None
+            and risk_decision is not None
+            and decision.status == "approved"
+            and self._requires_execution_risk_decision(request=request, action=decision.action)
         )
 
 

@@ -645,12 +645,13 @@ def test_paper_execution_workflow_persists_option_artifacts_and_overlay():
     )
     risk = _risk_decision(approved_quantity=1)
 
-    workflow.run(
+    result = workflow.run(
         trading_decisions=(option_decision,),
         risk_decisions=(risk,),
         trade_date=now,
     )
 
+    assert len(result.paper_option_orders) == 1
     assert len(repository.option_strategy_decisions) == 1
     assert len(repository.paper_option_orders) == 1
     assert len(repository.paper_option_positions) == 1

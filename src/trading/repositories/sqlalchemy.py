@@ -1322,7 +1322,8 @@ class SQLAlchemyTradingRepository:
     ) -> dict[str, Any]:
         ticker_set = {ticker.strip().upper() for ticker in tickers}
         contexts: dict[str, Any] = {}
-        positions_by_ticker = {position.ticker: position for position in self.load_paper_positions()}
+        stock_positions_by_ticker = {position.ticker: position for position in self.load_paper_positions()}
+        option_positions_by_ticker = {position.ticker: position for position in self.load_paper_option_positions()}
         manual_mode_by_ticker = {
             row.ticker: row.mode
             for row in self.session.query(ManualTickerRequest).filter_by(status="active").all()
@@ -1351,11 +1352,18 @@ class SQLAlchemyTradingRepository:
         for ticker in ticker_set:
             decision = latest_decision_by_ticker.get(ticker)
             candidate = latest_candidate_by_ticker.get(ticker)
-            position = positions_by_ticker.get(ticker)
+            stock_position = stock_positions_by_ticker.get(ticker)
+            option_position = option_positions_by_ticker.get(ticker)
+            position = option_position or stock_position
             manual_mode = manual_mode_by_ticker.get(ticker)
             classification = None
             if decision is not None and decision.trade_classification_id is not None:
                 classification = classifications_by_id.get(str(decision.trade_classification_id))
+            metadata_json = _intraday_context_metadata(
+                decision=decision,
+                option_position=option_position,
+            )
+            instrument_type = "option" if option_position is not None else (decision.instrument_type if decision is not None else "stock")
             contexts[ticker] = SimpleNamespace(
                 selection_source=(
                     "portfolio"
@@ -1391,13 +1399,14 @@ class SQLAlchemyTradingRepository:
                         else (classification.trade_identity if classification is not None else "tactical_stock_trade")
                     )
                 ),
-                instrument_type=decision.instrument_type if decision is not None else "stock",
+                instrument_type=instrument_type,
                 candidate_score=float(candidate.candidate_score) if candidate is not None else 0.0,
                 target_weight=float(decision.target_weight) if decision is not None else 0.0,
                 allow_open_new=bool(
                     manual_mode == "paper_trade_eligible"
                     or (decision is not None and bool(decision.paper_trade_authorized))
                 ),
+                metadata_json=metadata_json,
             )
         return contexts
 
@@ -1881,6 +1890,23 @@ def _paper_option_position_payload(row: Any) -> dict[str, Any]:
         "status": row.status,
         "opened_at": row.opened_at.isoformat(),
     }
+
+
+def _intraday_context_metadata(*, decision: Any | None, option_position: Any | None) -> dict[str, Any]:
+    metadata_json: dict[str, Any] = {}
+    decision_metadata = dict(getattr(decision, "metadata_json", {}) or {})
+    option_strategy = decision_metadata.get("option_strategy")
+    if isinstance(option_strategy, dict):
+        metadata_json["option_strategy"] = dict(option_strategy)
+    option_strategy_type = None
+    if option_position is not None:
+        metadata_json["paper_option_position_id"] = option_position.paper_option_position_id
+        option_strategy_type = option_position.option_strategy_type
+    elif isinstance(option_strategy, dict):
+        option_strategy_type = option_strategy.get("option_strategy_type")
+    if isinstance(option_strategy_type, str) and option_strategy_type:
+        metadata_json["option_strategy_type"] = option_strategy_type
+    return metadata_json
 
 
 def _option_risk_snapshot_payload(row: Any) -> dict[str, Any]:

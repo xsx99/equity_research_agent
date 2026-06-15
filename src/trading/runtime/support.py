@@ -17,11 +17,17 @@ def seed_initial_strategy_definitions(repository: Any) -> None:
         repository.save_strategy_definition(StrategyDefinitionRecord.from_mapping(row))
 
 
-def build_execution_report(*, mode: str, orders_submitted: int) -> dict[str, Any]:
+def build_execution_report(
+    *,
+    mode: str,
+    orders_submitted: int,
+    option_orders_submitted: int = 0,
+) -> dict[str, Any]:
     """Normalize runtime execution reporting across live trading phases."""
     return {
         "mode": mode,
         "orders_submitted": orders_submitted,
+        "option_orders_submitted": option_orders_submitted,
     }
 
 

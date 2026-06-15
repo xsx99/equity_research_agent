@@ -141,6 +141,24 @@ PR 12 smoke modes:
 
 ## Option Operator Checks
 
+Live preopen stock order smoke:
+
+```bash
+source ~/.venv/bin/activate
+python scripts/run_trading_live_preopen_order_smoke.py --ticker NVDA --instrument stock --json
+```
+
+This runs the real live preopen runtime with a scoped manual request and should return `runtime.execution.orders_submitted >= 1` plus a populated `order` payload when paper execution is enabled.
+
+Live preopen option order smoke:
+
+```bash
+source ~/.venv/bin/activate
+python scripts/run_trading_live_preopen_order_smoke.py --ticker QQQ --instrument option --json
+```
+
+This uses the same live preopen runtime but forces the smoke override onto the option expression path. A passing run should return `runtime.execution.option_orders_submitted >= 1` plus populated `option_order` and `option_execution` payloads.
+
 Preopen option approval smoke:
 
 ```bash
