@@ -19,12 +19,14 @@
 - `docs/superpowers/specs/2026-06-05-today-trend-panel-design.md`
 - `docs/superpowers/plans/2026-06-15-risk-macro-event-backend-contract.md`
 - `docs/superpowers/plans/2026-06-15-manual-review-execution-audit-contract.md`
+- `docs/superpowers/plans/2026-06-15-research-signal-expansion-into-trading.md`
 
 ## Dependency Boundary
 
 - This frontend plan can start with fixture-backed presenter tests.
 - The final `Risk & Macro` tab must consume the backend read model from `src/web/presenters/today_risk_macro.py`.
 - Manual-review queue/detail UI must consume backend request-audit fields from `2026-06-15-manual-review-execution-audit-contract.md` instead of re-deriving decision/order linkage inside Jinja loops.
+- Insider and social/policy signal display must consume structured fields from `2026-06-15-research-signal-expansion-into-trading.md` instead of dumping raw `signal_json` families or raw source rows into Jinja.
 - Do not make the frontend query macro/event tables directly.
 - Do not implement manual-review execution policy changes in this plan; only consume the backend linkage/availability contract.
 - Do not hide backend data gaps with optimistic placeholder text; show degraded availability from the backend model.
@@ -39,6 +41,7 @@
 - Dense sections like `Signal Summary` show too many bullets at once.
 - The `Trades` tab does not make differences between pre-open/intraday runs visible.
 - The `Risk & Macro` tab is mostly a shallow metadata view instead of an operator risk surface.
+- Material insider pressure and policy/social shocks are not selectively surfaced; they would either be invisible or appear as noisy raw snapshot text.
 
 ## File Map
 
@@ -118,6 +121,7 @@ Rules:
 - Templates render only read-model fields, not raw SQLAlchemy model fields.
 - Default view shows the highest-signal 3 to 5 bullets; the rest lives under collapsible details.
 - Every repeated row must have an explicit `duplicate_count`, `alternatives`, or `source_refs` explanation.
+- `insider` and `social_macro` families are selective-display families: default UI only shows material cluster buys/sales, large net insider imbalance, or fresh high-importance policy/social items with ticker/theme impact; the rest stays behind audit details.
 - Scroll is layout behavior, not data loss: counts must still show total available items.
 
 ## Task 1: Create Candidate Dedupe Presenter
@@ -185,13 +189,13 @@ Expected result: the `Trades` timeline explains what changed in each run instead
 - Test: `tests/web/test_today_workspace.py`
 
 - [ ] Step 1: Write failing tests that a 26-bullet signal summary renders 3 to 5 primary bullets plus grouped hidden sections.
-- [ ] Step 2: Rank bullets by materiality: decision/risk blockers, direct catalysts, technical trend, fundamentals, freshness.
+- [ ] Step 2: Rank bullets by materiality: decision/risk blockers, direct catalysts, insider pressure, policy/social shocks, technical trend, fundamentals, freshness.
 - [ ] Step 3: Dedupe semantically identical bullets from consecutive snapshots.
-- [ ] Step 4: Add grouped sections: `Decision drivers`, `Risk blockers`, `Trend`, `Evidence`, `Data quality`.
+- [ ] Step 4: Add grouped sections: `Decision drivers`, `Risk blockers`, `Insider`, `Policy / Social`, `Trend`, `Evidence`, `Data quality`.
 - [ ] Step 5: Add collapsed audit details for full source text.
 - [ ] Step 6: Run `source ~/.venv/bin/activate && pytest tests/web/test_today_workspace.py -q`.
 
-Expected result: signal summary becomes scannable while retaining auditability.
+Expected result: signal summary becomes scannable while retaining auditability, and only material insider/policy-social items appear in the default view.
 
 ## Task 5: Render The Full Risk & Macro Surface
 
@@ -204,14 +208,14 @@ Expected result: signal summary becomes scannable while retaining auditability.
 - Test: `tests/web/test_today_risk_macro.py`
 - Test: `tests/web/test_today.py`
 
-- [ ] Step 1: Write failing tests for visible macro regime, risk budget multiplier, blocked tags, top risk sources, event calendar cards, binding constraints, exposures, and availability issues.
+- [ ] Step 1: Write failing tests for visible macro regime, risk budget multiplier, blocked tags, top risk sources, event calendar cards, selective policy/social shock cards, binding constraints, exposures, and availability issues.
 - [ ] Step 2: Render macro as a compact status strip: `regime`, `risk budget`, `volatility`, `rates`, `liquidity`, `freshness`.
-- [ ] Step 3: Render event risk as a filtered table/card list with `event`, `affected ticker`, `days`, `severity`, `recommended action`, and `why visible`.
+- [ ] Step 3: Render event risk and policy/social risk as filtered table/card lists with `event`, `affected ticker or theme`, `days`, `severity`, `recommended action`, and `why visible`.
 - [ ] Step 4: Render risk sources and binding constraints as priority chips, not paragraph text.
 - [ ] Step 5: Render advanced risk audit under collapsed details with raw exposure rows and metadata refs.
 - [ ] Step 6: Run `source ~/.venv/bin/activate && pytest tests/web/test_today_risk_macro.py tests/web/test_today.py -q`.
 
-Expected result: `Risk & Macro` is no longer empty/degraded when backend data exists, and degraded mode is explicit when it does not.
+Expected result: `Risk & Macro` is no longer empty/degraded when backend data exists, material policy/social shocks are selectively visible, and degraded mode is explicit when it does not.
 
 ## Task 6: Refactor `/today` Route Around Presenters
 
@@ -295,6 +299,7 @@ Expected result: the UI fixes are locked by route/presenter tests, not only visu
 - Manual-review queue cards show dismiss controls, latest evaluation recency, and a drill-down path into the same audit surface when backend linkage exists.
 - `Trades` timeline shows material deltas and source/time context for each run.
 - `Signal Summary` shows a concise primary summary with grouped/collapsible details.
+- Material insider and social/policy signals are selectively surfaced in default views and otherwise remain available behind progressive disclosure.
 - Long rails and lists have bounded scroll behavior on desktop and sane stacking on mobile.
 - Existing tab navigation and pinned review/manual request actions keep working.
 - Empty/degraded states are explicit and do not imply data exists when backend contract is missing, including when manual-review linkage fields are not yet available from the backend.
