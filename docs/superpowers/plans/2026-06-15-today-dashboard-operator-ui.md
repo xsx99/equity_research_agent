@@ -18,12 +18,15 @@
 - `docs/superpowers/specs/2026-06-04-today-dashboard-visual-refresh-design.md`
 - `docs/superpowers/specs/2026-06-05-today-trend-panel-design.md`
 - `docs/superpowers/plans/2026-06-15-risk-macro-event-backend-contract.md`
+- `docs/superpowers/plans/2026-06-15-manual-review-execution-audit-contract.md`
 
 ## Dependency Boundary
 
 - This frontend plan can start with fixture-backed presenter tests.
 - The final `Risk & Macro` tab must consume the backend read model from `src/web/presenters/today_risk_macro.py`.
+- Manual-review queue/detail UI must consume backend request-audit fields from `2026-06-15-manual-review-execution-audit-contract.md` instead of re-deriving decision/order linkage inside Jinja loops.
 - Do not make the frontend query macro/event tables directly.
+- Do not implement manual-review execution policy changes in this plan; only consume the backend linkage/availability contract.
 - Do not hide backend data gaps with optimistic placeholder text; show degraded availability from the backend model.
 
 ## Current UI Problems This Plan Addresses
@@ -31,6 +34,7 @@
 - Macro/risk data is missing because backend contracts are absent or not consumed.
 - Signal summaries and timeline entries repeat raw snapshot text instead of surfacing deltas.
 - Candidate decisions show many duplicate rows for the same ticker, especially `AAPL`.
+- Manual review cards do not show dismiss controls, evaluation recency, or whether a request is linked to a signal snapshot / trade audit path yet.
 - Long rails/lists do not have bounded scroll, so the page becomes visually unbounded.
 - Dense sections like `Signal Summary` show too many bullets at once.
 - The `Trades` tab does not make differences between pre-open/intraday runs visible.
@@ -144,14 +148,14 @@ Expected result: `Candidates` no longer shows repeated `AAPL` cards as separate 
 - Modify: `src/static/style.css`
 - Test: `tests/web/test_today_candidates.py`
 
-- [ ] Step 1: Write failing tests for pinned/manual requests being separated from scanner-derived candidate rows.
-- [ ] Step 2: Build `action_queue`, `manual_review_queue`, and `decision_readout` as separate presenter sections.
-- [ ] Step 3: Show only reason, latest result, and required operator action in queue cards.
+- [ ] Step 1: Write failing tests for pinned/manual requests being separated from scanner-derived candidate rows and for each manual-review card to expose dismiss controls, latest evaluation recency, and linked-audit state.
+- [ ] Step 2: Build `action_queue`, `manual_review_queue`, and `decision_readout` as separate presenter sections, with manual-review rows carrying backend-fed fields such as `last_evaluated_label`, `linked_detail_url`, `execution_status_label`, and `dismiss_form_action`.
+- [ ] Step 3: Show only reason, latest result, evaluation recency, and required operator action in queue cards, plus explicit degraded copy when backend audit linkage is still unavailable.
 - [ ] Step 4: Move raw advanced fields behind `<details>`.
 - [ ] Step 5: Add bounded scroll to long queue/readout lists.
 - [ ] Step 6: Run `source ~/.venv/bin/activate && pytest tests/web/test_today_candidates.py -q`.
 
-Expected result: operator queue becomes actionable and dense candidate audit stays available without dominating the page.
+Expected result: operator queue becomes actionable, manual-review cards expose controls and auditability, and dense candidate audit stays available without dominating the page.
 
 ## Task 3: Build Meaningful Trade Timeline Delta Model
 
@@ -222,7 +226,7 @@ Expected result: `Risk & Macro` is no longer empty/degraded when backend data ex
 - Test: `tests/web/test_today_candidates.py`
 - Test: `tests/web/test_today_risk_macro.py`
 
-- [ ] Step 1: Write tests that the route context contains presenter outputs, not raw repeated rows for tabs.
+- [ ] Step 1: Write tests that the route context contains presenter outputs, not raw repeated rows for tabs, including manual-review presenter outputs that normalize backend audit linkage into stable fields and an explicit unlinked/degraded state when the backend contract has not produced one yet.
 - [ ] Step 2: Keep DB loading in `today.py`, but move aggregation/ranking/grouping to presenters.
 - [ ] Step 3: Add small loader helpers only where DB joins are unavoidable.
 - [ ] Step 4: Preserve existing tab URLs and form actions.
@@ -276,7 +280,7 @@ Expected result: long content is navigable without making the whole page visuall
 - Modify: `plan/research_app/trading_agent_refactor/progress_tracker.md`
 
 - [ ] Step 1: Add route tests for all primary tabs: `overview`, `portfolio`, `trades`, `risk_macro`, `candidates`, `learning`, `ops`.
-- [ ] Step 2: Add regression tests for empty states, degraded backend availability, and large repeated candidate/timeline fixtures.
+- [ ] Step 2: Add regression tests for empty states, degraded backend availability, large repeated candidate/timeline fixtures, and manual-review cards with both linked and unlinked backend audit states.
 - [ ] Step 3: Update docs with the new presenter-based UI architecture.
 - [ ] Step 4: Update the progress tracker with implementation status and verification evidence after each completed task.
 - [ ] Step 5: Run `source ~/.venv/bin/activate && pytest tests/web/test_today.py tests/web/test_today_workspace.py tests/web/test_today_copy.py tests/web/test_today_candidates.py tests/web/test_today_risk_macro.py -q`.
@@ -288,15 +292,17 @@ Expected result: the UI fixes are locked by route/presenter tests, not only visu
 
 - `Risk & Macro` renders backend macro, event calendar, event-risk, exposure, and availability data when present.
 - `Candidates` defaults to one visible group per ticker/outcome, with strategy alternatives nested.
+- Manual-review queue cards show dismiss controls, latest evaluation recency, and a drill-down path into the same audit surface when backend linkage exists.
 - `Trades` timeline shows material deltas and source/time context for each run.
 - `Signal Summary` shows a concise primary summary with grouped/collapsible details.
 - Long rails and lists have bounded scroll behavior on desktop and sane stacking on mobile.
 - Existing tab navigation and pinned review/manual request actions keep working.
-- Empty/degraded states are explicit and do not imply data exists when backend contract is missing.
+- Empty/degraded states are explicit and do not imply data exists when backend contract is missing, including when manual-review linkage fields are not yet available from the backend.
 
 ## Non-Goals
 
 - Do not create or migrate macro/event backend tables in this frontend plan.
 - Do not change trading, sizing, risk approval, or broker execution behavior.
+- Do not define or change `paper_trade_eligible` execution policy in this frontend plan; that belongs to the dedicated manual-review backend contract plan.
 - Do not add a client-side framework; keep this server-rendered unless a future plan justifies the dependency.
 - Do not remove audit detail; move it behind progressive disclosure.
