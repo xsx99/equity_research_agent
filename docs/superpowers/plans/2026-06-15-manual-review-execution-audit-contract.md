@@ -34,6 +34,7 @@
 - Active manual requests are not unique by ticker. The current signal pipeline collapses requests into a `ticker -> request` map, so duplicate active requests silently lose evaluation updates.
 - Intraday refresh includes active manual-review tickers in scope, but the request identity and mode are not carried through to intraday trading decisions or execution guardrails.
 - `/today` only shows `latest_result_status` for manual requests. It does not expose `last_evaluated_at`, `latest_signal_snapshot_id`, latest linked trading decision, or latest order/execution state.
+- `/today` cannot clearly distinguish model intent from execution path, so an operator cannot tell whether a request is still pending, risk-blocked, eligible but not submitted, submitted with no fill, or actually executed.
 - Dismiss/create logic is route-local and not enforcing the same lifecycle contract as the runtime-side manual-review services.
 
 ## File Map
@@ -55,7 +56,7 @@
 - `scripts/run_trading_once.py`
   - Expose a manual-review live mode with explicit execution opt-in.
 - `src/trading/repositories/sqlalchemy.py`
-  - Add a manual-review request audit loader for `/today`.
+  - Add a manual-review request audit loader for `/today`, including operator-facing decision/execution-path state fields.
 - `src/trading/runtime/intraday_refresh_dependencies.py`
   - Carry manual-request audit identity into intraday request contexts.
 - `src/trading/intraday/rebalance.py`
@@ -104,9 +105,13 @@ class ManualReviewAuditRow:
     latest_result_status: str | None
     latest_signal_snapshot_id: str | None
     latest_trading_decision_id: str | None
+    latest_decision_action: str | None
+    latest_risk_outcome: str | None
     latest_order_status: str | None
     latest_execution_status: str | None
     latest_execution_time: datetime | None
+    execution_path_state: str
+    latest_block_reason: str | None
     linkage_state: str
 ```
 
@@ -118,6 +123,8 @@ Rules:
 - `paper_trade_eligible` requests may create paper stock orders only through the normal decision/risk pipeline.
 - Intraday follow-up decisions for active manual-review tickers must preserve `manual_request_id` and `manual_request_mode`.
 - If a request has not yet reached snapshot/decision/order linkage, the backend should expose `linkage_state` explicitly rather than relying on UI inference.
+- The backend must distinguish model intent from execution outcome, e.g. `enter_long + risk_blocked`, `enter_long + eligible_no_order`, or `enter_long + order_submitted`, without asking the template to infer it from missing joins.
+- If no order exists, `execution_path_state` and `latest_block_reason` must explain whether the request is still pending evaluation, blocked by risk, dry-run only, or eligible but not yet submitted.
 
 ## Task 1: Enforce One Active Manual Request Per Ticker
 
@@ -155,7 +162,7 @@ Expected result: each ticker has at most one active request, and every active re
 
 - [ ] Step 1: Write failing tests for a dedicated manual-review live mode that can run in dry-run or `--execute-paper-orders` mode without changing scheduler defaults.
 - [ ] Step 2: Keep `run_job_phase("manual_review")` dry-run by default, but expose an explicit operator path such as `--mode live-manual-review --phase manual_review`.
-- [ ] Step 3: Extend the runtime report so manual-review execution shows counts that matter operationally, such as request counts, orders submitted, and request-mode breakdown.
+- [ ] Step 3: Extend the runtime report so manual-review execution shows counts that matter operationally, such as request counts, risk-blocked requests, eligible-no-order requests, orders submitted, and request-mode breakdown.
 - [ ] Step 4: Keep manual-review option execution out of scope and report zero option-order submissions explicitly if a unified execution report shape is needed.
 - [ ] Step 5: Run `source ~/.venv/bin/activate && pytest tests/trading/test_runtime_manual_review_live.py tests/scripts/test_run_trading_once.py -q`.
 
@@ -190,13 +197,13 @@ Expected result: intraday refresh no longer severs manual-review lineage or acci
 - Test: `tests/trading/test_sqlalchemy_repository.py`
 - Test: `tests/web/test_today.py`
 
-- [ ] Step 1: Write failing tests for a backend audit row that exposes `last_evaluated_at`, `latest_signal_snapshot_id`, latest linked trading decision ID, and latest order/execution state.
-- [ ] Step 2: Implement a repository/service loader that joins manual requests to their latest decision/order artifacts by `manual_request_id` instead of asking the template to infer linkage.
-- [ ] Step 3: Return an explicit `linkage_state` such as `pending_evaluation`, `snapshot_only`, `decision_linked`, or `order_linked` when the chain is incomplete.
+- [ ] Step 1: Write failing tests for a backend audit row that exposes `last_evaluated_at`, `latest_signal_snapshot_id`, latest linked trading decision ID, `latest_decision_action`, `latest_risk_outcome`, and latest order/execution state.
+- [ ] Step 2: Implement a repository/service loader that joins manual requests to their latest decision, risk, and order artifacts by `manual_request_id` instead of asking the template to infer linkage.
+- [ ] Step 3: Return explicit `linkage_state` and `execution_path_state` values such as `pending_evaluation`, `snapshot_only`, `risk_blocked`, `eligible_no_order`, `order_submitted`, or `filled` when the chain is incomplete or stopped.
 - [ ] Step 4: Wire `/today` to consume that backend loader while keeping template redesign in the UI plan.
 - [ ] Step 5: Run `source ~/.venv/bin/activate && pytest tests/trading/test_manual_request_sqlalchemy.py tests/trading/test_sqlalchemy_repository.py tests/web/test_today.py -q`.
 
-Expected result: the UI plan gets one stable backend audit contract for manual-review cards and drill-down links.
+Expected result: the UI plan gets one stable backend audit contract for manual-review cards and drill-down links, including a clear model-intent-vs-execution-path summary.
 
 ## Task 5: Add Standalone Smoke Coverage And Operator Docs
 

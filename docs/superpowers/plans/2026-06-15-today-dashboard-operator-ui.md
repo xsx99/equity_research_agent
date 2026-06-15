@@ -34,6 +34,8 @@
 ## Current UI Problems This Plan Addresses
 
 - Macro/risk data is missing because backend contracts are absent or not consumed.
+- The page header does not keep session-state chips such as market phase, macro/risk posture, runtime mode, and live/degraded state in one compact always-visible strip.
+- KPI cards and panels do not consistently disclose `last updated`, source-of-truth, or whether a number is broker/live, review-window realized, or estimated.
 - Signal summaries and timeline entries repeat raw snapshot text instead of surfacing deltas.
 - Candidate decisions show many duplicate rows for the same ticker, especially `AAPL`.
 - Manual review cards do not show dismiss controls, evaluation recency, or whether a request is linked to a signal snapshot / trade audit path yet.
@@ -42,6 +44,14 @@
 - The `Trades` tab does not make differences between pre-open/intraday runs visible.
 - The `Risk & Macro` tab is mostly a shallow metadata view instead of an operator risk surface.
 - Material insider pressure and policy/social shocks are not selectively surfaced; they would either be invisible or appear as noisy raw snapshot text.
+
+## Reference Patterns To Borrow
+
+- Add a compact operator strip that keeps `session state`, `macro/risk posture`, `runtime mode`, and `alert count` visible without forcing a scroll back to the top.
+- Add per-card and per-panel freshness plus truth-basis metadata so mixed metrics do not read like they came from the same source.
+- Treat `Risk & Macro` as a command center first, with a terse summary row and warning banner before deep audit tables.
+- Use row-summary plus expandable evidence modules for signals, trades, and manual-review audit instead of long raw bullet piles.
+- Keep live alerts compact by default: show count/severity first, details second.
 
 ## File Map
 
@@ -52,7 +62,7 @@
 - `src/web/presenters/today_candidates.py`
   - New candidate dedupe and action-queue presenter.
 - `src/web/presenters/today_overview.py`
-  - New overview command-surface presenter if the route cleanup needs it.
+  - New overview command-surface presenter for the operator strip, KPI cards, truth-basis copy, and current-summary card.
 - `src/web/presenters/today_risk_macro.py`
   - Consume backend risk/macro/event read model; if implemented by the backend plan, refine frontend-specific sections here.
 - `src/web/presenters/today_copy.py`
@@ -81,6 +91,25 @@
 Presenters should emit stable structures like this before template rendering:
 
 ```python
+@dataclass(frozen=True)
+class PanelMetaView:
+    updated_at_label: str | None
+    refresh_mode_label: str | None
+    source_of_truth_label: str | None
+    basis_note: str | None
+    degraded_reasons: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class OperatorMetricCardView:
+    metric_id: str
+    label: str
+    primary_value: str
+    secondary_value: str | None
+    tone: str
+    meta: PanelMetaView
+
+
 @dataclass(frozen=True)
 class CandidateGroupView:
     ticker: str
@@ -119,10 +148,34 @@ class SignalSummaryView:
 Rules:
 
 - Templates render only read-model fields, not raw SQLAlchemy model fields.
+- Every top metric, command panel, and AI-cost summary exposes `updated_at_label`; metrics with non-obvious provenance also expose `source_of_truth_label` and `basis_note`.
 - Default view shows the highest-signal 3 to 5 bullets; the rest lives under collapsible details.
 - Every repeated row must have an explicit `duplicate_count`, `alternatives`, or `source_refs` explanation.
+- Surfaces that compare model intent vs execution must carry separate decision-state and execution-state labels instead of collapsing them into one ambiguous status string.
+- Panels that mix live broker numbers with review-window or estimated analytics must render a brief truth-basis explainer rather than implying identical provenance.
 - `insider` and `social_macro` families are selective-display families: default UI only shows material cluster buys/sales, large net insider imbalance, or fresh high-importance policy/social items with ticker/theme impact; the rest stays behind audit details.
 - Scroll is layout behavior, not data loss: counts must still show total available items.
+
+## Task 0: Build Operator Strip And Metric-Provenance Surface
+
+**Files:**
+
+- Create: `src/web/presenters/today_overview.py`
+- Modify: `src/web/presenters/today_copy.py`
+- Modify: `src/web/routers/today.py`
+- Modify: `src/templates/today.html`
+- Modify: `src/static/style.css`
+- Test: `tests/web/test_today.py`
+- Test: `tests/web/test_today_copy.py`
+
+- [ ] Step 1: Write failing tests for an operator strip that shows `market phase`, `macro regime`, `risk appetite`, `runtime mode`, live/degraded status, and alert count, plus KPI cards with `updated_at_label`, `source_of_truth_label`, and optional `basis_note`.
+- [ ] Step 2: Build `today_overview` presenter output for `operator_strip`, `metric_cards`, `alert_bar`, and `current_summary`.
+- [ ] Step 3: Render a compact header that stays scannable on one screen and visually separates action-driving chips from contextual chips.
+- [ ] Step 4: Add truth-basis copy for mixed metrics such as broker equity vs realized review-window P&L vs estimated AI cost.
+- [ ] Step 5: Keep the longer current-state narrative behind a bounded, collapsible summary card with explicit timestamp.
+- [ ] Step 6: Run `source ~/.venv/bin/activate && pytest tests/web/test_today.py tests/web/test_today_copy.py -q`.
+
+Expected result: the top of `/today` answers “what state am I operating in right now?” without forcing the operator to infer metric provenance.
 
 ## Task 1: Create Candidate Dedupe Presenter
 
@@ -153,8 +206,8 @@ Expected result: `Candidates` no longer shows repeated `AAPL` cards as separate 
 - Test: `tests/web/test_today_candidates.py`
 
 - [ ] Step 1: Write failing tests for pinned/manual requests being separated from scanner-derived candidate rows and for each manual-review card to expose dismiss controls, latest evaluation recency, and linked-audit state.
-- [ ] Step 2: Build `action_queue`, `manual_review_queue`, and `decision_readout` as separate presenter sections, with manual-review rows carrying backend-fed fields such as `last_evaluated_label`, `linked_detail_url`, `execution_status_label`, and `dismiss_form_action`.
-- [ ] Step 3: Show only reason, latest result, evaluation recency, and required operator action in queue cards, plus explicit degraded copy when backend audit linkage is still unavailable.
+- [ ] Step 2: Build `action_queue`, `manual_review_queue`, and `decision_readout` as separate presenter sections, with manual-review rows carrying backend-fed fields such as `last_evaluated_label`, `linked_detail_url`, `decision_state_label`, `execution_state_label`, `latest_block_reason`, and `dismiss_form_action`.
+- [ ] Step 3: Show only reason, latest result, evaluation recency, required operator action, and model-intent-vs-execution-state summary in queue cards, plus explicit degraded copy when backend audit linkage is still unavailable.
 - [ ] Step 4: Move raw advanced fields behind `<details>`.
 - [ ] Step 5: Add bounded scroll to long queue/readout lists.
 - [ ] Step 6: Run `source ~/.venv/bin/activate && pytest tests/web/test_today_candidates.py -q`.
@@ -209,9 +262,9 @@ Expected result: signal summary becomes scannable while retaining auditability, 
 - Test: `tests/web/test_today.py`
 
 - [ ] Step 1: Write failing tests for visible macro regime, risk budget multiplier, blocked tags, top risk sources, event calendar cards, selective policy/social shock cards, binding constraints, exposures, and availability issues.
-- [ ] Step 2: Render macro as a compact status strip: `regime`, `risk budget`, `volatility`, `rates`, `liquidity`, `freshness`.
+- [ ] Step 2: Render macro as a compact command strip: `regime`, `risk appetite`, `exposure usage`, `event risk`, `volatility`, and `freshness`.
 - [ ] Step 3: Render event risk and policy/social risk as filtered table/card lists with `event`, `affected ticker or theme`, `days`, `severity`, `recommended action`, and `why visible`.
-- [ ] Step 4: Render risk sources and binding constraints as priority chips, not paragraph text.
+- [ ] Step 4: Render risk sources, binding constraints, favored/avoided exposures, and hedge posture as priority chips, not paragraph text.
 - [ ] Step 5: Render advanced risk audit under collapsed details with raw exposure rows and metadata refs.
 - [ ] Step 6: Run `source ~/.venv/bin/activate && pytest tests/web/test_today_risk_macro.py tests/web/test_today.py -q`.
 
@@ -249,7 +302,7 @@ Expected result: UI behavior is testable without inspecting template loops or li
 - Test: `tests/web/test_today_risk_macro.py`
 
 - [ ] Step 1: Split each tab into clear sections: `status strip`, `primary work area`, `secondary audit/details`.
-- [ ] Step 2: Replace repeated `<ul>` dumps with semantic cards/tables that show count, status, and reason.
+- [ ] Step 2: Replace repeated `<ul>` dumps with semantic cards/tables that show count, status, reason, freshness, and truth-basis metadata where needed.
 - [ ] Step 3: Use `<details>` for advanced source context and raw metadata.
 - [ ] Step 4: Add stable `data-testid` attributes for critical sections: candidate groups, timeline events, signal summary, macro strip, event risk list.
 - [ ] Step 5: Preserve accessibility basics: headings, table headers, form labels, and focusable controls.
@@ -295,6 +348,7 @@ Expected result: the UI fixes are locked by route/presenter tests, not only visu
 ## Acceptance Criteria
 
 - `Risk & Macro` renders backend macro, event calendar, event-risk, exposure, and availability data when present.
+- The operator strip and KPI cards disclose freshness and truth-basis so broker/live, review-window, and estimated metrics are not visually conflated.
 - `Candidates` defaults to one visible group per ticker/outcome, with strategy alternatives nested.
 - Manual-review queue cards show dismiss controls, latest evaluation recency, and a drill-down path into the same audit surface when backend linkage exists.
 - `Trades` timeline shows material deltas and source/time context for each run.

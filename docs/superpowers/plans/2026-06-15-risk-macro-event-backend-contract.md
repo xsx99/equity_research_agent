@@ -25,6 +25,7 @@
 - `PortfolioHedgePlanner` exists, but its event assessments are built opportunistically from signal snapshots/news, not persisted as canonical event-risk rows.
 - `macro_snapshots`, `macro_readthrough_events`, `calendar_events`, and `portfolio_event_risk_assessments` are described in design docs but are not implemented as ORM/repository/runtime contracts.
 - `/today` currently derives `header.macro_regime` from `latest_risk.metadata_json["macro_regime"]`, so missing backend data becomes `unavailable`.
+- `/today` has no backend-fed command-center summary for current risk posture, exposure usage, event risk, favored/avoided exposures, hedge posture, freshness, or truth-basis copy, so the template would have to invent that operator summary ad hoc.
 
 ## File Map
 
@@ -65,7 +66,7 @@
 - `src/trading/repositories/sqlalchemy.py`
   - Add save/load methods for macro snapshots, calendar events, event-risk assessments, and the `/today` risk macro read inputs.
 - `src/web/presenters/today_risk_macro.py`
-  - New backend presenter that converts persisted macro/event/risk rows into a stable UI read model.
+  - New backend presenter that converts persisted macro/event/risk rows into a stable UI read model, including a compact command-center summary plus per-section freshness/availability metadata.
 - `src/web/routers/today.py`
   - Replace ad hoc risk/macro assembly with the presenter output.
 - `scripts/run_trading_macro_event_db_smoke.py`
@@ -153,6 +154,9 @@ Rules:
 - `CalendarEventRecord.event_key` is idempotent and source-stable, e.g. `earnings:AAPL:2026-07-24` or `macro:fomc:2026-06-17`.
 - `PortfolioEventRiskAssessmentRecord` is portfolio-specific and decision-time-specific; it can point to a calendar event or represent a synthetic cluster/macro risk.
 - All read methods must filter by `available_for_decision_at <= decision_time` to preserve point-in-time behavior.
+- The `/today` backend read model must support a compact command-center summary derived from canonical rows: `regime`, `risk_appetite_label`, `exposure_usage_pct`, `event_risk_level`, `favored_exposures`, `avoided_exposures`, `hedge_posture`, `warning_banner`, `operator_note`, `updated_at`, and `basis_note`.
+- Summary labels and warning copy must be derived from persisted macro/event/risk context, not template-side heuristics or freehand strings.
+- Every `/today` summary/detail section must carry freshness and availability metadata so the UI can distinguish stale background refresh from true data absence.
 
 ## Task 1: Add The Schema And Pure Records
 
@@ -232,7 +236,7 @@ Expected result: `/today` can show whether macro is genuinely neutral/risk-off/d
 - [ ] Step 1: Write failing tests that normalize earnings, Fed/macro, option-expiry, company-specific, and sector/theme read-through events.
 - [ ] Step 2: Implement idempotent calendar event keys and dedupe by source, event type, ticker, and event time.
 - [ ] Step 3: Build portfolio-aware risk assessments from open positions, pending candidates, option expiries, event severity, and days to event.
-- [ ] Step 4: Include relevance metadata: `position_notional`, `candidate_score_id`, `option_strategy_id`, `relationship_context`, and `why_visible`.
+- [ ] Step 4: Include relevance metadata: `position_notional`, `candidate_score_id`, `option_strategy_id`, `relationship_context`, `why_visible`, and any command-center support fields such as summary bucket, affected exposure/theme, or hedge-posture hints that can be derived from canonical risk context.
 - [ ] Step 5: Make low-relevance events persist but not appear in the default `/today` risk/macro read model.
 - [ ] Step 6: Run `source ~/.venv/bin/activate && pytest tests/trading/test_event_calendar.py tests/trading/test_event_news_signals.py -q`.
 
@@ -294,7 +298,7 @@ Expected result: intraday timeline entries show real deltas, not repeated `pre_o
 - [ ] Step 1: Write failing tests where macro risk reduces size, an upcoming own event blocks a tactical open, and a portfolio cluster event generates a hedge intent.
 - [ ] Step 2: Extend planner requests with `macro_snapshot` and persisted `event_assessments`.
 - [ ] Step 3: Apply macro `risk_budget_multiplier` before final approval, while hard safety rails remain invariant.
-- [ ] Step 4: Preserve clear `binding_constraints`, `top_risk_sources`, and `data_availability_issues` in risk decision metadata.
+- [ ] Step 4: Preserve clear `binding_constraints`, `top_risk_sources`, `exposure_usage`, `hedge_posture`, and `data_availability_issues` in risk decision metadata.
 - [ ] Step 5: Run `source ~/.venv/bin/activate && pytest tests/trading/test_portfolio_hedge_planner.py tests/trading/test_lookahead_risk.py tests/trading/test_risk_manager.py -q`.
 
 Expected result: risk approvals explain what macro/event/risk source changed the decision.
@@ -309,11 +313,11 @@ Expected result: risk approvals explain what macro/event/risk source changed the
 - Test: `tests/web/test_today_risk_macro.py`
 - Test: `tests/web/test_today.py`
 
-- [ ] Step 1: Write failing web tests for macro regime, event calendar cards, event-risk assessments, risk budget, blocked tags, binding constraints, and degraded availability.
+- [ ] Step 1: Write failing web tests for command-center summary fields, warning banner copy, macro regime, event calendar cards, event-risk assessments, risk budget, blocked tags, binding constraints, and degraded availability.
 - [ ] Step 2: Build a presenter that accepts repository-loaded macro/event/risk rows and emits one stable read model.
 - [ ] Step 3: Replace `_build_risk_macro_summary` ad hoc logic with the presenter.
 - [ ] Step 4: Replace `header.macro_regime` fallback from `PortfolioRiskSnapshot.metadata_json` with latest `MacroSnapshotRecord`.
-- [ ] Step 5: Include compact `summary`, `macro`, `events`, `risk_sources`, `exposures`, `binding_constraints`, and `availability` sections.
+- [ ] Step 5: Include compact `command_center`, `summary`, `macro`, `events`, `risk_sources`, `exposures`, `binding_constraints`, `availability`, and per-section `updated_at` / `basis_note` fields.
 - [ ] Step 6: Run `source ~/.venv/bin/activate && pytest tests/web/test_today_risk_macro.py tests/web/test_today.py -q`.
 
 Expected result: the frontend can render risk/macro without querying raw DB tables or inventing fallback text.
@@ -339,7 +343,7 @@ Expected result: a real DB-backed smoke proves the backend contract is not just 
 ## Acceptance Criteria
 
 - Macro regime no longer shows `unavailable` when a valid macro snapshot exists.
-- `Risk & Macro` has persisted macro, event, risk source, exposure, and availability data.
+- `Risk & Macro` has persisted macro, event, risk source, exposure, availability data, and a backend-derived command-center summary with freshness/basis metadata.
 - `PortfolioHedgePlanner` and `RiskManager` consume the same macro/event context shown in `/today`.
 - Intraday event changes are delta-based and point-in-time safe.
 - Missing provider data is explicit and auditable, not silently collapsed into empty UI sections.
