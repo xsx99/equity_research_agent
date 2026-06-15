@@ -230,6 +230,11 @@ class SQLAlchemyTradingRepository:
                 default=None,
             )
         )
+        hedge_rows = tuple(
+            row
+            for row in self.session.query(RiskHedgeDecision).all()
+            if row.created_at.date() == trade_date
+        )
         return {
             "portfolio_outcome": _portfolio_outcome_payload(latest_snapshot),
             "morning_macro_snapshot": {},
@@ -307,6 +312,8 @@ class SQLAlchemyTradingRepository:
                 if row.created_at.date() == trade_date
             ),
             "worst_case_assignment_snapshots": (),
+            "risk_hedge_overlays": tuple(_risk_hedge_overlay_payload(row) for row in hedge_rows),
+            "hedge_effectiveness": _hedge_effectiveness_payload(hedge_rows),
             "learning_factors_used": tuple(
                 latest_reflection.metadata_json.get("learning_factors_used", ())
                 if latest_reflection is not None and isinstance(latest_reflection.metadata_json, dict)
@@ -1883,6 +1890,51 @@ def _option_risk_snapshot_payload(row: Any) -> dict[str, Any]:
         "risk_status": row.risk_status,
         "reason_code": row.reason_code,
         "created_at": row.created_at.isoformat(),
+    }
+
+
+def _risk_hedge_overlay_payload(row: Any) -> dict[str, Any]:
+    metadata_json = dict(row.metadata_json or {})
+    generated_hedge_action = dict(metadata_json.get("generated_hedge_action") or {})
+    return {
+        "ticker": row.ticker,
+        "action": row.action,
+        "option_strategy_type": row.option_strategy_type,
+        "rationale": row.rationale,
+        "hedge_cost": _decimal_to_float(row.hedge_cost),
+        "protected_notional": _decimal_to_float(row.protected_notional),
+        "target_exposure_type": generated_hedge_action.get("target_exposure_type"),
+        "protected_exposure_basis": generated_hedge_action.get("protected_exposure_basis"),
+        "created_at": row.created_at.isoformat(),
+        "metadata_json": metadata_json,
+    }
+
+
+def _hedge_effectiveness_payload(rows: tuple[Any, ...]) -> dict[str, Any]:
+    action_counts: dict[str, int] = {}
+    exposure_basis_counts: dict[str, int] = {}
+    assignment_overlay_count = 0
+    protected_notional = 0.0
+    hedge_cost = 0.0
+    for row in rows:
+        action_counts[row.action] = action_counts.get(row.action, 0) + 1
+        protected_notional += _decimal_to_float(row.protected_notional)
+        hedge_cost += _decimal_to_float(row.hedge_cost)
+        metadata_json = dict(row.metadata_json or {})
+        generated_hedge_action = dict(metadata_json.get("generated_hedge_action") or {})
+        target_exposure_type = generated_hedge_action.get("target_exposure_type")
+        if target_exposure_type == "assignment":
+            assignment_overlay_count += 1
+        basis = generated_hedge_action.get("protected_exposure_basis")
+        if isinstance(basis, str) and basis:
+            exposure_basis_counts[basis] = exposure_basis_counts.get(basis, 0) + 1
+    return {
+        "overlay_count": len(rows),
+        "assignment_overlay_count": assignment_overlay_count,
+        "protected_notional": protected_notional,
+        "hedge_cost": hedge_cost,
+        "action_counts": action_counts,
+        "protected_exposure_basis_counts": exposure_basis_counts,
     }
 
 

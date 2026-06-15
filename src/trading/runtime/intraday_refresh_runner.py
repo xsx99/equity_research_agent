@@ -61,7 +61,8 @@ class LiveIntradayRefreshRuntime:
             decision_time=decision_time,
         )
         portfolio_result = self.dependencies.portfolio_sync_workflow.run(as_of=decision_time)
-        positions = tuple(getattr(portfolio_result, "positions", ()))
+        portfolio_context = getattr(portfolio_result, "portfolio_context", portfolio_result)
+        positions = _intraday_positions(portfolio_result=portfolio_result, portfolio_context=portfolio_context)
 
         scan = IntradaySignalScanRecord(
             intraday_signal_scan_id=str(uuid.uuid4()),
@@ -85,9 +86,18 @@ class LiveIntradayRefreshRuntime:
                 "technical",
                 decision_time,
             )
+            context = request_contexts.get(ticker)
+            instrument_type = _intraday_instrument_type(context=context, position=_position_by_ticker(positions).get(ticker))
+            option_chain_rows = self.dependencies.source_repository.latest_available_by_family(
+                ticker,
+                "option_chain",
+                decision_time,
+            ) if instrument_type == "option" else ()
             refreshed_signals_json, source_freshness = _build_intraday_refresh_payload(
                 baseline=baseline,
                 technical_rows=technical_rows,
+                option_chain_rows=option_chain_rows,
+                instrument_type=instrument_type,
             )
             snapshot = build_intraday_signal_snapshot(
                 intraday_signal_scan_id=scan.intraday_signal_scan_id,
@@ -171,3 +181,28 @@ class LiveIntradayRefreshRuntime:
             },
             execution=execution,
         )
+
+
+def _intraday_positions(
+    *,
+    portfolio_result: object,
+    portfolio_context: object,
+) -> tuple[object, ...]:
+    context_positions = tuple(getattr(portfolio_context, "positions", ()) or ())
+    if context_positions:
+        return context_positions
+    return tuple(getattr(portfolio_result, "positions", ()) or ())
+
+
+def _intraday_instrument_type(
+    *,
+    context: object | None,
+    position: object | None,
+) -> str:
+    instrument_type = str(getattr(context, "instrument_type", "stock") or "stock")
+    if instrument_type == "option":
+        return "option"
+    trade_identity = str(getattr(position, "trade_identity", "") or "")
+    if trade_identity in {"tactical_option_trade", "risk_hedge_overlay"}:
+        return "option"
+    return instrument_type

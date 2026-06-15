@@ -225,6 +225,47 @@ def build_portfolio_snapshot_from_account(account_payload: dict[str, Any], *, as
     )
 
 
+def apply_option_overlay_to_snapshot(
+    snapshot: PortfolioSnapshot,
+    *,
+    option_positions: tuple[OptionPosition, ...] = (),
+) -> PortfolioSnapshot:
+    if not option_positions:
+        return snapshot
+    option_market_value = sum(float(position.market_value) for position in option_positions)
+    option_margin_requirement = sum(float(position.margin_requirement) for position in option_positions)
+    option_buying_power_effect = sum(float(position.buying_power_effect) for position in option_positions)
+    maintenance_margin_requirement = snapshot.maintenance_margin_requirement + option_margin_requirement
+    initial_margin_requirement = snapshot.initial_margin_requirement + option_margin_requirement
+    return PortfolioSnapshot(
+        as_of=snapshot.as_of,
+        cash_balance=snapshot.cash_balance,
+        account_equity=snapshot.account_equity,
+        net_liquidation_value=snapshot.net_liquidation_value,
+        buying_power=max(0.0, snapshot.buying_power - option_buying_power_effect),
+        excess_liquidity=max(0.0, snapshot.account_equity - maintenance_margin_requirement),
+        stock_market_value=snapshot.stock_market_value,
+        option_market_value=snapshot.option_market_value + option_market_value,
+        stock_margin_requirement=snapshot.stock_margin_requirement,
+        option_margin_requirement=snapshot.option_margin_requirement + option_margin_requirement,
+        total_margin_requirement=snapshot.total_margin_requirement + option_margin_requirement,
+        initial_margin_requirement=initial_margin_requirement,
+        maintenance_margin_requirement=maintenance_margin_requirement,
+        margin_model_profile=snapshot.margin_model_profile,
+        margin_model_version=snapshot.margin_model_version,
+        margin_requirement_source="broker_plus_local_option_overlay",
+        day_pnl=snapshot.day_pnl,
+        realized_pnl=snapshot.realized_pnl,
+        unrealized_pnl=snapshot.unrealized_pnl,
+        metadata_json={
+            **dict(snapshot.metadata_json),
+            "stock_margin_requirement_source": "broker_reported",
+            "option_overlay_source": "local_simulation",
+            "option_overlay_position_count": len(option_positions),
+        },
+    )
+
+
 def build_positions_from_broker(
     *,
     broker_positions: list[dict[str, Any]],

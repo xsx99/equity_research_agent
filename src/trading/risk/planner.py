@@ -56,12 +56,13 @@ class PortfolioHedgePlanner:
 
         if request.macro_risk_state in {"watch", "high", "critical"}:
             severity = request.macro_risk_state
+            underlier = _broad_underlier(request)
             hedge_actions.append(
                 HedgeActionRecord(
-                    action="open_hedge",
+                    action=_hedge_overlay_action(request, target_underlier=underlier),
                     risk_source="macro",
                     severity=severity,
-                    target_underlier=_broad_underlier(request),
+                    target_underlier=underlier,
                     target_exposure_type="broad_market",
                     coverage_ratio=_coverage_ratio(severity),
                     reason_code=f"macro_{severity}_overlay",
@@ -69,6 +70,22 @@ class PortfolioHedgePlanner:
                 )
             )
             binding_constraints.append(f"macro_{severity}_overlay")
+        elif not hedge_actions:
+            existing_overlay = _first_existing_overlay(request)
+            if existing_overlay is not None:
+                hedge_actions.append(
+                    HedgeActionRecord(
+                        action="close_hedge",
+                        risk_source="risk_normalized",
+                        severity="watch",
+                        target_underlier=existing_overlay.ticker,
+                        target_exposure_type="broad_market",
+                        coverage_ratio=1.0,
+                        reason_code="risk_overlay_normalized",
+                        metadata_json={"risk_window": request.risk_window},
+                    )
+                )
+                binding_constraints.append("risk_overlay_normalized")
 
         aggregate_risk_state = _aggregate_risk_state(
             position_actions=position_actions,
@@ -173,7 +190,7 @@ class PortfolioHedgePlanner:
             return
         hedge_actions.append(
             HedgeActionRecord(
-                action="open_hedge",
+                action=_hedge_overlay_action(request, target_underlier=underlier),
                 risk_source="sector_event_cluster",
                 severity=assessment.severity,
                 target_underlier=underlier,
@@ -244,3 +261,29 @@ def _sector_values(request: PortfolioHedgePlannerRequest) -> Iterable[str]:
     for pending_trade in request.pending_trades:
         if pending_trade.sector:
             yield pending_trade.sector
+
+
+def _hedge_overlay_action(
+    request: PortfolioHedgePlannerRequest,
+    *,
+    target_underlier: str,
+) -> str:
+    return "adjust_hedge" if _has_existing_overlay(request, target_underlier=target_underlier) else "open_hedge"
+
+
+def _has_existing_overlay(
+    request: PortfolioHedgePlannerRequest,
+    *,
+    target_underlier: str,
+) -> bool:
+    return any(
+        position.trade_identity == "risk_hedge_overlay" and position.ticker == target_underlier
+        for position in request.portfolio_context.positions
+    )
+
+
+def _first_existing_overlay(request: PortfolioHedgePlannerRequest):
+    for position in request.portfolio_context.positions:
+        if position.trade_identity == "risk_hedge_overlay":
+            return position
+    return None

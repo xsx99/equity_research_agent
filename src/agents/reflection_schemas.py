@@ -67,6 +67,8 @@ class ReflectionInput(BaseModel):
     paper_option_positions: list[dict[str, Any]] = Field(default_factory=list)
     option_risk_snapshots: list[dict[str, Any]] = Field(default_factory=list)
     worst_case_assignment_snapshots: list[dict[str, Any]] = Field(default_factory=list)
+    risk_hedge_overlays: list[dict[str, Any]] = Field(default_factory=list)
+    hedge_effectiveness: dict[str, Any] = Field(default_factory=dict)
     learning_factors_used: list[dict[str, Any] | str] = Field(default_factory=list)
 
 

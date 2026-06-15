@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from src.trading.manual_review.requests import ManualTickerRequestService
-from src.trading.brokers.paper_option import PaperOptionBroker
+from src.trading.brokers.paper_option import PaperOptionBroker, PaperOptionPosition
 from src.trading.brokers.paper_stock import PaperOrderRequest, PaperStockBroker
 from src.trading.repositories.in_memory import InMemoryTradingRepository
 from src.trading.risk import OptionRiskAssessment, RiskDecisionRecord
@@ -147,6 +147,145 @@ def _risk_decision(*, approved_quantity: float = 0.01, status: str = "approved")
     )
 
 
+def _option_trading_decision(
+    *,
+    now: datetime,
+    decision: str,
+    option_strategy_type: str = "long_call",
+    ticker: str = "NVDA",
+    strategy_id: str = "strong_theme_catalyst_continuation_v1",
+    expiry: str = "2026-06-12",
+    quantity: int = 1,
+    net_debit_or_credit: float = 2.2,
+    max_loss: float = 220.0,
+    margin_requirement: float = 220.0,
+    buying_power_effect: float = 220.0,
+    assignment_notional: float = 0.0,
+) -> TradingDecisionRecord:
+    return TradingDecisionRecord(
+        trading_decision_id=f"{decision}-{ticker}-decision",
+        candidate_score_id=f"{ticker}-candidate",
+        trade_classification_id=f"{ticker}-classification",
+        risk_decision_id=f"{ticker}-risk",
+        ticker=ticker,
+        decision=decision,
+        strategy_id=strategy_id,
+        strategy_version="v1",
+        expression_bucket_id="defined_risk_directional_option",
+        expression_bucket_version="v1",
+        trade_identity="tactical_option_trade",
+        instrument_type="option",
+        selection_source="scanner",
+        manual_request_id=None,
+        confidence=0.78,
+        target_weight=0.02,
+        approved_weight=0.02,
+        max_loss_pct=0.02,
+        time_horizon="1w-4w",
+        thesis="Option lifecycle test.",
+        invalidators=["event risk"],
+        prompt_template=object(),
+        prompt_run=object(),
+        usage_events=[],
+        decision_time=now,
+        available_for_decision_at=now,
+        metadata_json={
+            "paper_trade_authorized": True,
+            "option_strategy": {
+                "option_strategy_decision_id": f"{decision}-{ticker}-option-strategy",
+                "option_strategy_type": option_strategy_type,
+                "status": "ready",
+                "underlying_price": 118.0,
+                "net_debit_or_credit": net_debit_or_credit,
+                "max_loss": max_loss,
+                "max_profit": None,
+                "breakevens": [120.2],
+                "margin_requirement": margin_requirement,
+                "buying_power_effect": buying_power_effect,
+                "assignment_notional": assignment_notional,
+                "portfolio_delta": 0.32,
+                "portfolio_gamma": 0.04,
+                "portfolio_theta": -0.03,
+                "portfolio_vega": 0.12,
+                "event_through_expiry": True,
+                "strategy_pairing_method": "single_leg",
+                "assignment_plan": None,
+                "metadata_json": {
+                    "legs": [
+                        {
+                            "option_type": "call",
+                            "side": "buy",
+                            "quantity": quantity,
+                            "strike": 120.0,
+                            "expiry": expiry,
+                            "dte": 10,
+                            "delta": 0.32,
+                            "gamma": 0.04,
+                            "theta": -0.03,
+                            "vega": 0.12,
+                            "iv_rank": 0.62,
+                            "bid": 2.1,
+                            "ask": 2.3,
+                            "mid": 2.2,
+                            "chosen_price": 2.2,
+                        }
+                    ]
+                },
+            },
+        },
+    )
+
+
+def _option_risk_decision(*, now: datetime, ticker: str = "NVDA", approved_quantity: float = 1.0) -> RiskDecisionRecord:
+    return RiskDecisionRecord(
+        risk_decision_id=f"{ticker}-risk",
+        candidate_score_id=f"{ticker}-candidate",
+        trade_classification_id=f"{ticker}-classification",
+        position_sizing_decision_id=f"{ticker}-sizing",
+        ticker=ticker,
+        status="approved",
+        reason_code="within_limits",
+        approved_weight=0.02,
+        approved_notional=2000.0,
+        approved_quantity=approved_quantity,
+        portfolio_risk_snapshot_id=f"{ticker}-portfolio-risk",
+        applied_rules=["single_name_limit_ok"],
+        generated_hedge_action=None,
+        decision_time=now,
+        metadata_json={},
+    )
+
+
+def _seed_open_option_position(
+    repository: InMemoryTradingRepository,
+    *,
+    now: datetime,
+    ticker: str = "NVDA",
+    option_strategy_type: str = "long_call",
+    quantity: int = 1,
+) -> PaperOptionPosition:
+    position = PaperOptionPosition(
+        paper_option_position_id=f"{ticker.lower()}-open-position",
+        option_strategy_decision_id=f"{ticker.lower()}-open-option-strategy",
+        ticker=ticker,
+        strategy_id="strong_theme_catalyst_continuation_v1",
+        option_strategy_type=option_strategy_type,
+        trade_identity="tactical_option_trade",
+        quantity=quantity,
+        opened_at=now,
+        updated_at=now,
+        status="open",
+        expiry=now.date(),
+        max_loss=220.0,
+        margin_requirement=220.0,
+        buying_power_effect=220.0,
+        assignment_notional=0.0,
+        metadata_json={},
+    )
+    repository.save_paper_option_position(position)
+    return position
+
+
 def test_paper_stock_broker_rejects_review_only_manual_request_without_hitting_broker():
     client = _CapturingClient()
     broker = PaperStockBroker(api_key="key", secret_key="secret", client=client)
@@ -254,6 +393,150 @@ def test_paper_execution_workflow_executes_generated_risk_hedge_overlay():
     assert repository.paper_option_orders[0].trade_identity == "risk_hedge_overlay"
     assert len(repository.risk_hedge_decisions) == 1
     assert repository.risk_hedge_decisions[0].ticker == "QQQ"
+
+
+def test_paper_execution_workflow_closes_existing_generated_risk_hedge_overlay_without_strategy_type_hint():
+    now = datetime(2026, 6, 2, 16, 31, tzinfo=timezone.utc)
+    repository = InMemoryTradingRepository()
+    repository.save_paper_option_position(
+        PaperOptionPosition(
+            paper_option_position_id="existing-hedge-1",
+            option_strategy_decision_id="existing-option-decision-1",
+            ticker="QQQ",
+            strategy_id="risk_manager_hedge_overlay_v1",
+            option_strategy_type="long_call",
+            trade_identity="risk_hedge_overlay",
+            quantity=1,
+            opened_at=now,
+            updated_at=now,
+            status="open",
+            expiry=now.date(),
+            max_loss=1000.0,
+            margin_requirement=1000.0,
+            buying_power_effect=1000.0,
+            assignment_notional=0.0,
+            metadata_json={"generated_hedge_action": {"option_strategy_type": "long_call"}},
+        )
+    )
+    workflow = PaperExecutionWorkflow(
+        repository=repository,
+        broker=PaperStockBroker(api_key="key", secret_key="secret", client=_CapturingClient()),
+        option_broker=PaperOptionBroker(now=lambda: now),
+        manual_request_service=ManualTickerRequestService(now=lambda: now),
+    )
+    hedge_risk = RiskDecisionRecord(
+        risk_decision_id="hedge-risk-close-1",
+        candidate_score_id=None,
+        trade_classification_id=None,
+        position_sizing_decision_id=None,
+        ticker="AAPL",
+        status="approved",
+        reason_code="within_limits",
+        approved_weight=0.0,
+        approved_notional=0.0,
+        approved_quantity=0.0,
+        portfolio_risk_snapshot_id="portfolio-risk-1",
+        applied_rules=["portfolio_risk_intent"],
+        generated_hedge_action={
+            "action": "close_hedge",
+            "risk_source": "assignment",
+            "severity": "watch",
+            "target_underlier": "QQQ",
+            "target_exposure_type": "assignment",
+            "coverage_ratio": 1.0,
+            "reason_code": "assignment_overlay_normalized",
+            "protected_notional": 15000.0,
+        },
+        decision_time=now,
+        metadata_json={},
+    )
+
+    workflow.run(
+        trading_decisions=(),
+        risk_decisions=(hedge_risk,),
+        trade_date=now,
+    )
+
+    closed_positions = [position for position in repository.paper_option_positions if position.status == "closed"]
+    assert len(closed_positions) == 1
+    assert closed_positions[0].paper_option_position_id == "existing-hedge-1"
+    assert closed_positions[0].option_strategy_type == "long_call"
+    assert len(repository.risk_hedge_decisions) == 1
+    assert repository.risk_hedge_decisions[0].option_strategy_type == "long_call"
+    assert repository.risk_hedge_decisions[0].protected_notional == 15000.0
+
+
+def test_paper_execution_workflow_adjusts_existing_generated_risk_hedge_overlay_without_duplicate_open():
+    now = datetime(2026, 6, 2, 16, 31, tzinfo=timezone.utc)
+    repository = InMemoryTradingRepository()
+    repository.save_paper_option_position(
+        PaperOptionPosition(
+            paper_option_position_id="existing-hedge-1",
+            option_strategy_decision_id="existing-option-decision-1",
+            ticker="QQQ",
+            strategy_id="risk_manager_hedge_overlay_v1",
+            option_strategy_type="long_call",
+            trade_identity="risk_hedge_overlay",
+            quantity=1,
+            opened_at=now,
+            updated_at=now,
+            status="open",
+            expiry=now.date(),
+            max_loss=1000.0,
+            margin_requirement=1000.0,
+            buying_power_effect=1000.0,
+            assignment_notional=0.0,
+            metadata_json={"generated_hedge_action": {"option_strategy_type": "long_call"}},
+        )
+    )
+    workflow = PaperExecutionWorkflow(
+        repository=repository,
+        broker=PaperStockBroker(api_key="key", secret_key="secret", client=_CapturingClient()),
+        option_broker=PaperOptionBroker(now=lambda: now),
+        manual_request_service=ManualTickerRequestService(now=lambda: now),
+    )
+    hedge_risk = RiskDecisionRecord(
+        risk_decision_id="hedge-risk-adjust-1",
+        candidate_score_id=None,
+        trade_classification_id=None,
+        position_sizing_decision_id=None,
+        ticker="AAPL",
+        status="approved",
+        reason_code="within_limits",
+        approved_weight=0.0,
+        approved_notional=0.0,
+        approved_quantity=0.0,
+        portfolio_risk_snapshot_id="portfolio-risk-1",
+        applied_rules=["portfolio_risk_intent"],
+        generated_hedge_action={
+            "action": "adjust_hedge",
+            "risk_source": "macro",
+            "severity": "high",
+            "target_underlier": "QQQ",
+            "target_exposure_type": "broad_market",
+            "coverage_ratio": 0.75,
+            "reason_code": "macro_high_overlay",
+            "underlying_price": 500.0,
+            "protected_notional": 120000.0,
+        },
+        decision_time=now,
+        metadata_json={},
+    )
+
+    workflow.run(
+        trading_decisions=(),
+        risk_decisions=(hedge_risk,),
+        trade_date=now,
+    )
+
+    open_positions = [position for position in repository.paper_option_positions if position.status == "open"]
+    assert len(open_positions) == 1
+    assert open_positions[0].paper_option_position_id == "existing-hedge-1"
+    assert open_positions[0].option_strategy_type == "long_call"
+    assert open_positions[0].quantity == 2
+    assert len(repository.risk_hedge_decisions) == 1
+    assert repository.risk_hedge_decisions[0].option_strategy_type == "long_call"
+    assert repository.risk_hedge_decisions[0].protected_notional == 120000.0
 
 
 def test_paper_stock_broker_submits_sell_order_for_exit_action():
@@ -370,6 +653,146 @@ def test_paper_execution_workflow_persists_option_artifacts_and_overlay():
     assert len(repository.paper_option_orders) == 1
     assert len(repository.paper_option_positions) == 1
     assert len(repository.option_risk_snapshots) == 1
+
+
+def test_paper_execution_workflow_closes_existing_option_position():
+    now = datetime(2026, 6, 2, 16, 31, tzinfo=timezone.utc)
+    repository = InMemoryTradingRepository()
+    existing = _seed_open_option_position(repository, now=now)
+    workflow = PaperExecutionWorkflow(
+        repository=repository,
+        broker=PaperStockBroker(api_key="key", secret_key="secret", client=_CapturingClient()),
+        option_broker=PaperOptionBroker(now=lambda: now),
+        manual_request_service=ManualTickerRequestService(now=lambda: now),
+    )
+
+    workflow.run(
+        trading_decisions=(
+            _option_trading_decision(
+                now=now,
+                decision="close_option_strategy",
+                ticker=existing.ticker,
+                option_strategy_type=existing.option_strategy_type,
+            ),
+        ),
+        risk_decisions=(_option_risk_decision(now=now, ticker=existing.ticker),),
+        trade_date=now,
+    )
+
+    assert len(repository.paper_option_orders) == 1
+    assert repository.paper_option_orders[0].action == "close_option_strategy"
+    assert any(
+        position.paper_option_position_id == existing.paper_option_position_id and position.status == "closed"
+        for position in repository.paper_option_positions
+    )
+
+
+def test_paper_execution_workflow_rolls_option_strategy_by_closing_then_opening():
+    now = datetime(2026, 6, 2, 16, 31, tzinfo=timezone.utc)
+    repository = InMemoryTradingRepository()
+    existing = _seed_open_option_position(repository, now=now)
+    workflow = PaperExecutionWorkflow(
+        repository=repository,
+        broker=PaperStockBroker(api_key="key", secret_key="secret", client=_CapturingClient()),
+        option_broker=PaperOptionBroker(now=lambda: now),
+        manual_request_service=ManualTickerRequestService(now=lambda: now),
+    )
+
+    workflow.run(
+        trading_decisions=(
+            _option_trading_decision(
+                now=now,
+                decision="roll_option_strategy",
+                ticker=existing.ticker,
+                option_strategy_type=existing.option_strategy_type,
+                expiry="2026-07-17",
+                max_loss=280.0,
+                margin_requirement=280.0,
+                buying_power_effect=280.0,
+            ),
+        ),
+        risk_decisions=(_option_risk_decision(now=now, ticker=existing.ticker),),
+        trade_date=now,
+    )
+
+    assert len(repository.paper_option_orders) == 1
+    assert repository.paper_option_orders[0].action == "roll_option_strategy"
+    assert any(
+        position.paper_option_position_id == existing.paper_option_position_id and position.status == "closed"
+        for position in repository.paper_option_positions
+    )
+    assert any(
+        position.paper_option_position_id != existing.paper_option_position_id and position.status == "open"
+        for position in repository.paper_option_positions
+    )
+
+
+def test_paper_execution_workflow_adjusts_existing_option_strategy_in_place():
+    now = datetime(2026, 6, 2, 16, 31, tzinfo=timezone.utc)
+    repository = InMemoryTradingRepository()
+    existing = _seed_open_option_position(repository, now=now, quantity=1)
+    workflow = PaperExecutionWorkflow(
+        repository=repository,
+        broker=PaperStockBroker(api_key="key", secret_key="secret", client=_CapturingClient()),
+        option_broker=PaperOptionBroker(now=lambda: now),
+        manual_request_service=ManualTickerRequestService(now=lambda: now),
+    )
+
+    workflow.run(
+        trading_decisions=(
+            _option_trading_decision(
+                now=now,
+                decision="adjust_option_strategy",
+                ticker=existing.ticker,
+                option_strategy_type=existing.option_strategy_type,
+                quantity=2,
+                max_loss=440.0,
+                margin_requirement=440.0,
+                buying_power_effect=440.0,
+            ),
+        ),
+        risk_decisions=(_option_risk_decision(now=now, ticker=existing.ticker, approved_quantity=2.0),),
+        trade_date=now,
+    )
+
+    assert len(repository.paper_option_orders) == 1
+    assert repository.paper_option_orders[0].action == "adjust_option_strategy"
+    adjusted = next(
+        position
+        for position in repository.paper_option_positions
+        if position.paper_option_position_id == existing.paper_option_position_id
+    )
+    assert adjusted.status == "open"
+    assert adjusted.quantity == 2
+    assert adjusted.metadata_json["lifecycle_action"] == "adjust_option_strategy"
+
+
+def test_paper_execution_workflow_persists_avoid_event_option_without_filled_order():
+    now = datetime(2026, 6, 2, 16, 31, tzinfo=timezone.utc)
+    repository = InMemoryTradingRepository()
+    workflow = PaperExecutionWorkflow(
+        repository=repository,
+        broker=PaperStockBroker(api_key="key", secret_key="secret", client=_CapturingClient()),
+        option_broker=PaperOptionBroker(now=lambda: now),
+        manual_request_service=ManualTickerRequestService(now=lambda: now),
+    )
+
+    workflow.run(
+        trading_decisions=(
+            _option_trading_decision(
+                now=now,
+                decision="avoid_event_option",
+            ),
+        ),
+        risk_decisions=(_option_risk_decision(now=now),),
+        trade_date=now,
+    )
+
+    assert len(repository.option_strategy_decisions) == 1
+    assert len(repository.paper_option_orders) == 1
+    assert repository.paper_option_orders[0].action == "avoid_event_option"
+    assert repository.paper_option_orders[0].status == "rejected"
+    assert len(repository.paper_option_positions) == 0
 
 
 def test_paper_execution_workflow_falls_back_to_stock_when_option_expression_is_rejected():

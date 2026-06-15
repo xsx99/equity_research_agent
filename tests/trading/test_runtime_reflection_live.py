@@ -24,7 +24,7 @@ class _Repository:
         return dict(self.payload)
 
 
-def test_live_reflection_request_loader_assembles_same_day_artifacts():
+def test_live_reflection_request_loader_assembles_same_day_option_and_hedge_artifacts():
     decision_time = datetime(2026, 6, 4, 22, 0, tzinfo=timezone.utc)
     payload = {
         "portfolio_outcome": {"account_equity": 100250.0, "day_pnl": 250.0},
@@ -46,6 +46,19 @@ def test_live_reflection_request_loader_assembles_same_day_artifacts():
         "paper_option_positions": ({"ticker": "AAPL", "quantity": 1},),
         "option_risk_snapshots": ({"ticker": "AAPL", "risk_status": "approved"},),
         "worst_case_assignment_snapshots": (),
+        "risk_hedge_overlays": (
+            {
+                "ticker": "QQQ",
+                "action": "adjust_hedge",
+                "option_strategy_type": "long_put",
+                "protected_notional": 15000.0,
+            },
+        ),
+        "hedge_effectiveness": {
+            "overlay_count": 1,
+            "assignment_overlay_count": 0,
+            "protected_notional": 15000.0,
+        },
         "learning_factors_used": ({"factor_key": "lf_2026_06_03_01"},),
     }
     loader = LiveReflectionRequestLoader(repository=_Repository(payload))
@@ -60,6 +73,8 @@ def test_live_reflection_request_loader_assembles_same_day_artifacts():
     assert result.request.trading_decisions[0]["ticker"] == "AAPL"
     assert result.request.intraday_news_alerts[0]["severity"] == "high"
     assert result.request.candidate_outcome_evaluations[0]["alpha"] == 0.03
+    assert result.request.risk_hedge_overlays[0]["ticker"] == "QQQ"
+    assert result.request.hedge_effectiveness["protected_notional"] == 15000.0
     assert result.request.learning_factors_used[0]["factor_key"] == "lf_2026_06_03_01"
 
 

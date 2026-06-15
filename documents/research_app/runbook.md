@@ -134,9 +134,53 @@ PR 12 smoke modes:
 - `paper_trade_dry_run`: workflow-driven paper-trade dry run using a fake broker
 - `manual_review_fixture`: active `review_only` manual ticker request remains active and is re-evaluated
 - `paper_option_fixture`: whitelisted paper option decision, leg derivation, and assignment-risk evaluation
+- `paper_option_lifecycle_fixture`: end-to-end option open approval, assignment-risk rejection, and assignment-targeted hedge-overlay materialization
 - `intraday_refresh_fixture`: hourly intraday signal delta plus deduped alert generation
 - `reflection_fixture`: post-close reflection and learning-factor extraction
 - `strategy_evolution_fixture`: strategy proposal generation from reflection fixtures
+
+## Option Operator Checks
+
+Preopen option approval smoke:
+
+```bash
+source ~/.venv/bin/activate
+python scripts/run_trading_smoke_test.py --mode paper_option_fixture --json
+```
+
+This should return `decision_status="ready"` and `risk_status="approved"` for the whitelisted long-call fixture.
+
+Option lifecycle and hedge smoke:
+
+```bash
+source ~/.venv/bin/activate
+python scripts/run_trading_smoke_test.py --mode paper_option_lifecycle_fixture --json
+```
+
+This should return:
+- `open_risk_status="approved"` for the opening option path
+- `rejection_reason_code="event_through_expiry_short_premium_blocked"` for the short-premium assignment-risk rejection path
+- `hedge_overlay_action="adjust_hedge"` plus `hedge_overlay_basis="approved_assignment_notional"` for the assignment-targeted overlay path
+
+Intraday option refresh smoke:
+
+```bash
+source ~/.venv/bin/activate
+python scripts/run_trading_smoke_test.py --mode intraday_refresh_fixture --json
+```
+
+Use this to confirm the hourly runtime can refresh option marks/Greeks and still emit rebalance-safe snapshots.
+
+Post-close reflection now loads same-day option and hedge artifacts from the live repository payload:
+- `paper_option_decisions`
+- `paper_option_positions`
+- `option_risk_snapshots`
+- `risk_hedge_overlays`
+- `hedge_effectiveness`
+
+Use that reflection surface to inspect:
+- assignment-risk rejection paths after preopen
+- hedge overlay sizing basis and protected notional after intraday or preopen hedge generation
 
 These smoke modes are fixture-only operator checks. Scheduler-facing `preopen`, `manual_review`, `intraday_refresh`, `reflection`, and `strategy_evolution` now use live runtimes, while standalone smoke verification should keep using these isolated fixture paths.
 

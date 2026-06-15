@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+from types import SimpleNamespace
 
 from src.agents.prompt_registry import PromptRegistry
 from src.trading.post_close.reflection import ReflectionPipeline, ReflectionPipelineRequest
 from src.trading.repositories.in_memory import InMemoryTradingRepository
+from src.agents.trading import PromptRunRecord
 
 
 def _write_prompt(tmp_path) -> PromptRegistry:
@@ -50,6 +52,8 @@ def _request() -> ReflectionPipelineRequest:
         paper_option_positions=(),
         option_risk_snapshots=(),
         worst_case_assignment_snapshots=(),
+        risk_hedge_overlays=(),
+        hedge_effectiveness={},
         learning_factors_used=(),
     )
 
@@ -134,3 +138,67 @@ def test_reflection_pipeline_does_not_mutate_learning_factors_on_fallback(tmp_pa
     assert result.daily_reflections[0].metadata_json["fallback_action"] == "reflection_failed"
     assert result.learning_factors == ()
     assert repository.learning_factors == []
+
+
+def test_reflection_pipeline_passes_option_and_hedge_payloads_to_agent(tmp_path):
+    repository = InMemoryTradingRepository()
+    registry = _write_prompt(tmp_path)
+    pipeline = ReflectionPipeline(
+        repository=repository,
+        prompt_registry=registry,
+        model_name="gpt-5",
+        agent_runner=lambda prompt, model_name: {"content": "unused"},
+    )
+    captured: dict[str, object] = {}
+
+    def _run(payload, context):
+        captured.update(payload)
+        return SimpleNamespace(
+            success=True,
+            output_data={
+                "trade_date": "2026-06-02",
+                "portfolio_summary": {},
+                "what_worked": [],
+                "what_failed": [],
+                "attribution": [],
+                "learning_factors": [],
+                "strategy_proposal_hints": [],
+                "schema_version": "v1",
+                "generated_at": "2026-06-02T22:00:00+00:00",
+            },
+            metadata={
+                "prompt_template": object(),
+                "prompt_run": PromptRunRecord(
+                    pipeline_name="reflection",
+                    rendered_prompt_hash="hash",
+                    rendered_prompt_redacted="prompt",
+                    input_context_json={},
+                    raw_output_text="{}",
+                    parsed_output_json={},
+                    parse_status="succeeded",
+                    validation_errors_json=[],
+                    fallback_action=None,
+                    error_message=None,
+                ),
+                "usage_events": [],
+            },
+        )
+
+    pipeline.agent = SimpleNamespace(run=_run)
+    request = _request()
+    request = ReflectionPipelineRequest(
+        **{
+            **request.__dict__,
+            "paper_option_decisions": ({"ticker": "NVDA", "option_strategy_type": "long_call"},),
+            "option_risk_snapshots": ({"ticker": "NVDA", "risk_status": "rejected"},),
+            "risk_hedge_overlays": ({"ticker": "QQQ", "action": "open_hedge"},),
+            "hedge_effectiveness": {"overlay_count": 1, "protected_notional": 12000.0},
+        }
+    )
+
+    pipeline.run(request=request)
+
+    assert captured["paper_option_decisions"] == [{"ticker": "NVDA", "option_strategy_type": "long_call"}]
+    assert captured["option_risk_snapshots"] == [{"ticker": "NVDA", "risk_status": "rejected"}]
+    assert captured["risk_hedge_overlays"] == [{"ticker": "QQQ", "action": "open_hedge"}]
+    assert captured["hedge_effectiveness"] == {"overlay_count": 1, "protected_notional": 12000.0}

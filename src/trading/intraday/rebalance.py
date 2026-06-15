@@ -325,6 +325,14 @@ class IntradayRebalancePipeline:
         reason_code: str,
     ) -> tuple[dict[str, Any], str, str]:
         action = str(output["action"])
+        if request.instrument_type == "option":
+            option_freshness = str(request.signal_freshness.get("option_chain") or "").lower()
+            if action in {"roll_option_strategy", "adjust_option_strategy"} and option_freshness in {"missing", "stale", "failed"}:
+                output["action"] = "hold"
+                return output, "blocked", "stale_option_data"
+            if action == "roll_option_strategy" and bool(request.metadata_json.get("event_through_expiry")):
+                output["action"] = "hold"
+                return output, "blocked", "event_risk_blocked"
         if action == "open_new" and (not request.allow_open_new or request.existing_position):
             output["action"] = "hold"
             return output, "blocked", "open_new_disabled"

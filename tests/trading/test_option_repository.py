@@ -179,3 +179,73 @@ def test_in_memory_repository_persists_option_artifacts():
     assert len(repository.paper_option_positions) == 1
     assert len(repository.option_risk_snapshots) == 1
     assert len(repository.risk_hedge_decisions) == 1
+
+
+def test_in_memory_repository_keeps_closed_option_position_and_replacement_open_position():
+    repository = InMemoryTradingRepository()
+    now = datetime(2026, 6, 2, 14, 0, tzinfo=timezone.utc)
+
+    repository.save_paper_option_position(
+        PaperOptionPosition(
+            paper_option_position_id="option-position-1",
+            option_strategy_decision_id="option-decision-1",
+            ticker="NVDA",
+            strategy_id="earnings_drift_v1",
+            option_strategy_type="long_call",
+            trade_identity="tactical_option_trade",
+            quantity=1,
+            opened_at=now,
+            updated_at=now,
+            status="open",
+            expiry=date(2026, 7, 17),
+            max_loss=220.0,
+            margin_requirement=220.0,
+            buying_power_effect=220.0,
+            assignment_notional=0.0,
+            metadata_json={},
+        )
+    )
+    repository.save_paper_option_position(
+        PaperOptionPosition(
+            paper_option_position_id="option-position-1",
+            option_strategy_decision_id="option-decision-1",
+            ticker="NVDA",
+            strategy_id="earnings_drift_v1",
+            option_strategy_type="long_call",
+            trade_identity="tactical_option_trade",
+            quantity=1,
+            opened_at=now,
+            updated_at=now,
+            status="closed",
+            expiry=date(2026, 7, 17),
+            max_loss=220.0,
+            margin_requirement=0.0,
+            buying_power_effect=0.0,
+            assignment_notional=0.0,
+            metadata_json={"lifecycle_action": "close_option_strategy"},
+        )
+    )
+    repository.save_paper_option_position(
+        PaperOptionPosition(
+            paper_option_position_id="option-position-2",
+            option_strategy_decision_id="option-decision-2",
+            ticker="NVDA",
+            strategy_id="earnings_drift_v1",
+            option_strategy_type="long_call",
+            trade_identity="tactical_option_trade",
+            quantity=2,
+            opened_at=now,
+            updated_at=now,
+            status="open",
+            expiry=date(2026, 8, 21),
+            max_loss=440.0,
+            margin_requirement=440.0,
+            buying_power_effect=440.0,
+            assignment_notional=0.0,
+            metadata_json={"supersedes_option_position_id": "option-position-1"},
+        )
+    )
+
+    assert len(repository.paper_option_positions) == 2
+    assert repository.paper_option_positions[0].status == "closed"
+    assert repository.paper_option_positions[1].status == "open"

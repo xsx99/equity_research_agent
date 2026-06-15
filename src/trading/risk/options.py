@@ -50,6 +50,7 @@ class OptionRiskAssessment:
     portfolio_gamma: float
     portfolio_theta: float
     portfolio_vega: float
+    metadata_json: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -158,6 +159,54 @@ class OptionRiskManager:
             assignment_ratio = total_assignment / portfolio_context.account_equity
         else:
             assignment_ratio = 1.0
+        if _blocks_short_premium_through_event(option_risk):
+            return OptionRiskAssessment(
+                status="rejected",
+                reason_code="event_through_expiry_short_premium_blocked",
+                worst_case_assignment_notional=assignment_notional,
+                portfolio_delta=delta,
+                portfolio_gamma=gamma,
+                portfolio_theta=theta,
+                portfolio_vega=vega,
+                metadata_json={
+                    "assignment_ratio": assignment_ratio,
+                    "event_type": option_risk.event_type,
+                    "event_through_expiry": option_risk.event_through_expiry,
+                    "blocked_exposure_basis": "event_through_expiry",
+                },
+            )
+        sector_exposure_after_assignment = _sector_exposure_after_assignment(
+            portfolio_context=portfolio_context,
+            sector=option_risk.sector,
+            assignment_notional=assignment_notional,
+        )
+        if portfolio_context.account_equity > 0:
+            sector_exposure_after_assignment_ratio = (
+                sector_exposure_after_assignment / portfolio_context.account_equity
+            )
+        else:
+            sector_exposure_after_assignment_ratio = 1.0
+        if (
+            option_risk.sector
+            and assignment_notional > 0
+            and sector_exposure_after_assignment_ratio > config.max_sector_weight
+        ):
+            return OptionRiskAssessment(
+                status="rejected",
+                reason_code="assignment_sector_concentration_cap",
+                worst_case_assignment_notional=assignment_notional,
+                portfolio_delta=delta,
+                portfolio_gamma=gamma,
+                portfolio_theta=theta,
+                portfolio_vega=vega,
+                metadata_json={
+                    "assignment_ratio": assignment_ratio,
+                    "sector": option_risk.sector,
+                    "sector_exposure_after_assignment": sector_exposure_after_assignment,
+                    "sector_exposure_after_assignment_ratio": sector_exposure_after_assignment_ratio,
+                    "blocked_exposure_basis": "sector_after_assignment",
+                },
+            )
         if assignment_ratio > config.assignment_concentration_limit:
             return OptionRiskAssessment(
                 status="rejected",
@@ -167,6 +216,11 @@ class OptionRiskManager:
                 portfolio_gamma=gamma,
                 portfolio_theta=theta,
                 portfolio_vega=vega,
+                metadata_json={
+                    "assignment_ratio": assignment_ratio,
+                    "assignment_concentration_limit": config.assignment_concentration_limit,
+                    "blocked_exposure_basis": "assignment_notional",
+                },
             )
         return OptionRiskAssessment(
             status="approved",
@@ -176,4 +230,34 @@ class OptionRiskManager:
             portfolio_gamma=gamma,
             portfolio_theta=theta,
             portfolio_vega=vega,
+            metadata_json={
+                "assignment_ratio": assignment_ratio,
+                "sector": option_risk.sector,
+                "sector_exposure_after_assignment": sector_exposure_after_assignment,
+                "sector_exposure_after_assignment_ratio": sector_exposure_after_assignment_ratio,
+            },
         )
+
+
+def _blocks_short_premium_through_event(option_risk: OptionRiskInput) -> bool:
+    if not option_risk.event_through_expiry:
+        return False
+    if option_risk.option_strategy_type not in {"put_credit_spread", "call_credit_spread"}:
+        return False
+    return any(leg.side == "sell" for leg in option_risk.legs)
+
+
+def _sector_exposure_after_assignment(
+    *,
+    portfolio_context: PortfolioContext,
+    sector: str | None,
+    assignment_notional: float,
+) -> float:
+    if not sector:
+        return 0.0
+    current_sector_exposure = sum(
+        abs(position.notional_exposure) + float(position.assignment_notional)
+        for position in portfolio_context.positions
+        if position.sector == sector
+    )
+    return current_sector_exposure + max(assignment_notional, 0.0)

@@ -98,23 +98,37 @@ def _write_prompt(tmp_path) -> PromptRegistry:
     return PromptRegistry(root=tmp_path / "prompts")
 
 
-def _request(*, existing_position: bool, allow_open_new: bool, action: str = "exit") -> IntradayRebalanceRequest:
+def _request(
+    *,
+    existing_position: bool,
+    allow_open_new: bool,
+    action: str = "exit",
+    ticker: str = "AAPL",
+    trade_identity: str = "tactical_stock_trade",
+    instrument_type: str = "stock",
+    strategy_id: str = "relative_strength_rotation_v1",
+    expression_bucket_id: str = "long_stock",
+    current_price: float = 125.0,
+    signal_freshness: dict[str, Any] | None = None,
+    alerts: tuple[dict[str, Any], ...] = (),
+    metadata_json: dict[str, Any] | None = None,
+) -> IntradayRebalanceRequest:
     now = datetime(2026, 6, 2, 15, 30, tzinfo=timezone.utc)
     return IntradayRebalanceRequest(
-        ticker="AAPL",
+        ticker=ticker,
         baseline_signal_snapshot_id="baseline-1",
         intraday_signal_snapshot_id="intraday-1",
         previous_intraday_snapshot_id="intraday-0",
         selection_source="scanner",
-        strategy_id="relative_strength_rotation_v1",
+        strategy_id=strategy_id,
         strategy_version="v1",
-        expression_bucket_id="long_stock",
+        expression_bucket_id=expression_bucket_id,
         expression_bucket_version="v1",
-        trade_identity="tactical_stock_trade",
-        instrument_type="stock",
+        trade_identity=trade_identity,
+        instrument_type=instrument_type,
         decision_time=now,
         available_for_decision_at=now,
-        current_price=125.0,
+        current_price=current_price,
         atr_pct=0.02,
         average_daily_dollar_volume=50_000_000.0,
         existing_position=existing_position,
@@ -122,14 +136,14 @@ def _request(*, existing_position: bool, allow_open_new: bool, action: str = "ex
         current_position_market_value=625.0 if existing_position else 0.0,
         candidate_score=0.82,
         target_weight=0.05,
-        signal_freshness={"technical": "fresh", "events_news": "fresh"},
+        signal_freshness=signal_freshness or {"technical": "fresh", "events_news": "fresh"},
         delta_vs_baseline_json={"technical": {"last_price": 5.0}},
         delta_vs_previous_json={"technical": {"last_price": 2.0}},
-        alerts=(),
+        alerts=alerts,
         allow_open_new=allow_open_new,
         direct_company_negative_evidence=(action == "exit"),
         bearish_signal_sources=("events_news",) if action == "exit" else (),
-        metadata_json={},
+        metadata_json=metadata_json or {},
     )
 
 
@@ -371,3 +385,165 @@ def test_intraday_rebalance_attaches_sector_cluster_generated_hedge_payload(tmp_
 
     assert result.decisions[0].risk_decision_id is not None
     assert repository.risk_decisions[0].generated_hedge_action["risk_source"] == "sector_event_cluster"
+
+
+def test_intraday_rebalance_attaches_close_generated_hedge_payload(tmp_path):
+    repository = InMemoryTradingRepository()
+    registry = _write_prompt(tmp_path)
+    now = datetime(2026, 6, 2, 15, 30, tzinfo=timezone.utc)
+    ledger = PortfolioLedger(starting_cash_balance=100000.0)
+    ledger.record_stock_execution(
+        ticker="AAPL",
+        quantity=5.0,
+        fill_price=125.0,
+        trade_date=now.date(),
+        strategy_id="relative_strength_rotation_v1",
+        trade_identity="tactical_stock_trade",
+        executed_at=now,
+    )
+    intent = PortfolioRiskIntentRecord.create(
+        decision_time=now,
+        risk_window="1-5d",
+        aggregate_risk_state="risk_normalized",
+        hedge_actions=(
+            HedgeActionRecord(
+                action="close_hedge",
+                risk_source="risk_normalized",
+                severity="watch",
+                target_underlier="QQQ",
+                target_exposure_type="assignment",
+                coverage_ratio=1.0,
+                reason_code="risk_overlay_normalized",
+                metadata_json={"option_strategy_type": "long_call"},
+            ),
+        ),
+    )
+    pipeline = IntradayRebalancePipeline(
+        repository=repository,
+        prompt_registry=registry,
+        model_name="gpt-5-mini",
+        agent_runner=lambda prompt, model: {
+            "content": {
+                "ticker": "AAPL",
+                "action": "reduce",
+                "thesis": "Risk normalized, keep trimming the cash equity.",
+                "confidence": 0.79,
+                "target_weight": 0.0,
+                "max_loss_pct": 0.02,
+                "urgency": "high",
+                "rationale": ["risk_normalized"],
+                "risk_checks": ["liquidity_ok"],
+                "schema_version": "v1",
+                "generated_at": "2026-06-02T15:30:00+00:00",
+            }
+        },
+    )
+
+    result = pipeline.run(
+        rebalance_requests=(_request(existing_position=True, allow_open_new=False),),
+        portfolio_context=ledger.build_portfolio_context(as_of=now),
+        risk_appetite="balanced",
+        portfolio_risk_intent=intent,
+    )
+
+    assert result.decisions[0].risk_decision_id is not None
+    assert repository.risk_decisions[0].generated_hedge_action["action"] == "close_hedge"
+    assert repository.risk_decisions[0].generated_hedge_action["target_exposure_type"] == "assignment"
+
+
+def test_intraday_rebalance_blocks_option_add_when_option_data_is_stale(tmp_path):
+    repository = InMemoryTradingRepository()
+    registry = _write_prompt(tmp_path)
+    ledger = PortfolioLedger(starting_cash_balance=100000.0)
+    pipeline = IntradayRebalancePipeline(
+        repository=repository,
+        prompt_registry=registry,
+        model_name="gpt-5-mini",
+        agent_runner=lambda prompt, model: {
+            "content": {
+                "ticker": "QQQ",
+                "action": "adjust_option_strategy",
+                "thesis": "Resize the hedge intraday.",
+                "confidence": 0.7,
+                "target_weight": 0.0,
+                "max_loss_pct": 0.02,
+                "urgency": "high",
+                "rationale": ["option_mark_changed"],
+                "risk_checks": ["structure_ok"],
+                "schema_version": "v1",
+                "generated_at": "2026-06-02T15:30:00+00:00",
+            }
+        },
+    )
+
+    result = pipeline.run(
+        rebalance_requests=(
+            _request(
+                existing_position=True,
+                allow_open_new=False,
+                ticker="QQQ",
+                trade_identity="risk_hedge_overlay",
+                instrument_type="option",
+                strategy_id="risk_manager_hedge_overlay_v1",
+                expression_bucket_id="defined_risk_directional_option",
+                current_price=320.0,
+                signal_freshness={"technical": "fresh", "option_chain": "stale"},
+                metadata_json={"option_mark_price": 320.0},
+            ),
+        ),
+        portfolio_context=ledger.build_portfolio_context(as_of=datetime(2026, 6, 2, 15, 30, tzinfo=timezone.utc)),
+        risk_appetite="balanced",
+    )
+
+    assert result.decisions[0].action == "hold"
+    assert result.decisions[0].status == "blocked"
+    assert result.decisions[0].reason_code == "stale_option_data"
+
+
+def test_intraday_rebalance_can_emit_roll_option_strategy_for_event_risk(tmp_path):
+    repository = InMemoryTradingRepository()
+    registry = _write_prompt(tmp_path)
+    ledger = PortfolioLedger(starting_cash_balance=100000.0)
+    pipeline = IntradayRebalancePipeline(
+        repository=repository,
+        prompt_registry=registry,
+        model_name="gpt-5-mini",
+        agent_runner=lambda prompt, model: {
+            "content": {
+                "ticker": "NVDA",
+                "action": "roll_option_strategy",
+                "thesis": "Roll before the event reaches expiry.",
+                "confidence": 0.83,
+                "target_weight": 0.0,
+                "max_loss_pct": 0.03,
+                "urgency": "high",
+                "rationale": ["event_risk"],
+                "risk_checks": ["roll_preferred"],
+                "schema_version": "v1",
+                "generated_at": "2026-06-02T15:30:00+00:00",
+            }
+        },
+    )
+
+    result = pipeline.run(
+        rebalance_requests=(
+            _request(
+                existing_position=True,
+                allow_open_new=False,
+                ticker="NVDA",
+                trade_identity="tactical_option_trade",
+                instrument_type="option",
+                strategy_id="strong_theme_catalyst_continuation_v1",
+                expression_bucket_id="defined_risk_income_spread",
+                current_price=540.0,
+                signal_freshness={"technical": "fresh", "option_chain": "fresh"},
+                metadata_json={"event_through_expiry": True, "option_mark_price": 540.0},
+            ),
+        ),
+        portfolio_context=ledger.build_portfolio_context(as_of=datetime(2026, 6, 2, 15, 30, tzinfo=timezone.utc)),
+        risk_appetite="balanced",
+    )
+
+    assert result.decisions[0].action == "hold"
+    assert result.decisions[0].status == "blocked"
+    assert result.decisions[0].reason_code == "event_risk_blocked"

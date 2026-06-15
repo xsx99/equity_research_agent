@@ -67,6 +67,8 @@ class ReflectionPipelineRequest:
     paper_option_positions: tuple[dict[str, Any], ...] = ()
     option_risk_snapshots: tuple[dict[str, Any], ...] = ()
     worst_case_assignment_snapshots: tuple[dict[str, Any], ...] = ()
+    risk_hedge_overlays: tuple[dict[str, Any], ...] = ()
+    hedge_effectiveness: dict[str, Any] = field(default_factory=dict)
     learning_factors_used: tuple[dict[str, Any] | str, ...] = ()
 
 
@@ -158,6 +160,8 @@ class ReflectionPipeline:
             "paper_option_positions": list(request.paper_option_positions),
             "option_risk_snapshots": list(request.option_risk_snapshots),
             "worst_case_assignment_snapshots": list(request.worst_case_assignment_snapshots),
+            "risk_hedge_overlays": list(request.risk_hedge_overlays),
+            "hedge_effectiveness": dict(request.hedge_effectiveness),
             "learning_factors_used": list(request.learning_factors_used),
         }
         result = self.agent.run(payload, context=None)
@@ -178,6 +182,9 @@ class ReflectionPipeline:
             metadata_json={
                 "fallback_action": reflection_json.get("fallback_action"),
                 "portfolio_outcome": request.portfolio_outcome,
+                "hedge_effectiveness": dict(request.hedge_effectiveness),
+                "risk_hedge_overlay_count": len(request.risk_hedge_overlays),
+                "option_risk_snapshot_count": len(request.option_risk_snapshots),
             },
         )
         self.repository.save_prompt_template(prompt_template)

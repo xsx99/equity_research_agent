@@ -20,10 +20,12 @@ from src.trading.options.strategy import (
 from src.trading.replay.historical import HistoricalReplayRunner
 from src.trading.replay.outcomes import OutcomeEvaluator, PricePoint
 from src.trading.repositories.in_memory import InMemoryTradingRepository
+from src.trading.risk import HedgeActionRecord, PortfolioRiskIntentRecord, RiskDecisionRecord
 from src.trading.risk.config import RiskConfigResolver
 from src.trading.risk.options import OptionLegRiskInput, OptionRiskInput, OptionRiskManager
 from src.trading.signals.sources import EventNewsItemRecord
 
+from .lookahead_risk import LookaheadRiskWorkflowHelper
 from .smoke_support import (
     _FakePaperStockBroker,
     _build_preopen_fixture_run,
@@ -219,7 +221,7 @@ def _run_historical_replay_fixture() -> dict[str, Any]:
         "mode": "historical_replay_fixture",
         "summary": {
             "candidate_count": len(replay.candidates),
-            "selected_count": len(replay.selected),
+            "selected_count": len(replay.selected_trades),
             "outcome_count": len(replay.outcomes),
             "tickers": [candidate.ticker for candidate in replay.candidates],
         },
@@ -371,6 +373,202 @@ def _run_paper_option_fixture() -> dict[str, Any]:
     }
 
 
+def _run_paper_option_lifecycle_fixture() -> dict[str, Any]:
+    decision_time = _fixed_now()
+    portfolio_context = _empty_portfolio_context(decision_time)
+    config = RiskConfigResolver().resolve(
+        risk_appetite="balanced",
+        portfolio_context=portfolio_context,
+        macro_risk_budget_multiplier=1.0,
+    )
+    layer = OptionsStrategyLayer()
+
+    open_input = OptionStrategyDecisionInput(
+        trading_decision_id=str(uuid.uuid4()),
+        ticker="NVDA",
+        trade_identity="tactical_option_trade",
+        option_strategy_type="long_call",
+        decision_action="open_option_strategy",
+        strategy_id="relative_strength_rotation_v1",
+        strategy_version="v1",
+        expression_bucket_id="defined_risk_directional_option",
+        expression_bucket_version="v1",
+        decision_time=decision_time,
+        expiry=date(2026, 6, 19),
+        underlying_price=120.0,
+        earnings_date=date(2026, 6, 30),
+        event_through_expiry=False,
+        profit_target_pct=0.5,
+        max_loss_rule="premium_paid",
+        roll_conditions=("delta_drops",),
+        close_conditions=("take_profit",),
+        margin_model_profile="estimated_fidelity_like_conservative_v1",
+        margin_model_version="v1",
+        margin_requirement_source="simulated_formula",
+        strategy_pairing_method="single_leg",
+        assignment_plan=None,
+        legs=(
+            OptionLegDefinition(
+                option_type="call",
+                side="buy",
+                quantity=1,
+                strike=125.0,
+                expiry=date(2026, 6, 19),
+                dte=17,
+                delta=0.42,
+                gamma=0.03,
+                theta=-0.02,
+                vega=0.08,
+                iv_rank=0.65,
+                bid=2.2,
+                ask=2.4,
+                mid=2.3,
+                chosen_price=2.3,
+            ),
+        ),
+    )
+    open_decision = layer.build_strategy(open_input)
+    open_legs = layer.build_legs(open_decision)
+    open_risk = OptionRiskManager().evaluate_assignment_risk(
+        _option_risk_input(
+            decision=open_decision,
+            legs=open_legs,
+            sector="Technology",
+            event_type="earnings",
+        ),
+        portfolio_context=portfolio_context,
+        config=config,
+    )
+
+    reject_input = OptionStrategyDecisionInput(
+        trading_decision_id=str(uuid.uuid4()),
+        ticker="NVDA",
+        trade_identity="tactical_option_trade",
+        option_strategy_type="put_credit_spread",
+        decision_action="open_option_strategy",
+        strategy_id="earnings_drift_v1",
+        strategy_version="v1",
+        expression_bucket_id="defined_risk_income_spread",
+        expression_bucket_version="v1",
+        decision_time=decision_time,
+        expiry=date(2026, 6, 19),
+        underlying_price=118.0,
+        earnings_date=date(2026, 6, 18),
+        event_through_expiry=True,
+        profit_target_pct=0.5,
+        max_loss_rule="close_at_2x_credit",
+        roll_conditions=("7_dte_if_otm",),
+        close_conditions=("take_profit_50pct",),
+        margin_model_profile="estimated_fidelity_like_conservative_v1",
+        margin_model_version="v1",
+        margin_requirement_source="simulated_formula",
+        strategy_pairing_method="vertical_by_expiry_and_width",
+        assignment_plan="close_or_roll_before_expiry_if_itm",
+        legs=(
+            OptionLegDefinition(
+                option_type="put",
+                side="sell",
+                quantity=1,
+                strike=115.0,
+                expiry=date(2026, 6, 19),
+                dte=17,
+                delta=-0.29,
+                gamma=0.02,
+                theta=0.01,
+                vega=-0.07,
+                iv_rank=0.61,
+                bid=1.4,
+                ask=1.6,
+                mid=1.5,
+                chosen_price=1.5,
+            ),
+            OptionLegDefinition(
+                option_type="put",
+                side="buy",
+                quantity=1,
+                strike=110.0,
+                expiry=date(2026, 6, 19),
+                dte=17,
+                delta=-0.18,
+                gamma=0.01,
+                theta=-0.01,
+                vega=0.04,
+                iv_rank=0.61,
+                bid=0.8,
+                ask=1.0,
+                mid=0.9,
+                chosen_price=0.9,
+            ),
+        ),
+    )
+    rejected_decision = layer.build_strategy(reject_input)
+    rejected_legs = layer.build_legs(rejected_decision)
+    rejected_risk = OptionRiskManager().evaluate_assignment_risk(
+        _option_risk_input(
+            decision=rejected_decision,
+            legs=rejected_legs,
+            sector="Technology",
+            event_type="earnings",
+        ),
+        portfolio_context=portfolio_context,
+        config=config,
+    )
+
+    hedge_seed = RiskDecisionRecord.create(
+        candidate_score_id="candidate-NVDA",
+        trade_classification_id="classification-NVDA",
+        position_sizing_decision_id="sizing-NVDA",
+        ticker="NVDA",
+        status="approved",
+        reason_code="within_limits",
+        approved_weight=0.02,
+        approved_notional=rejected_decision.margin_requirement,
+        approved_quantity=1.0,
+        portfolio_risk_snapshot_id="snapshot-1",
+        applied_rules=["portfolio_risk_intent"],
+        decision_time=decision_time,
+        metadata_json={
+            "approved_margin_exposure": rejected_decision.margin_requirement,
+            "approved_assignment_notional": rejected_decision.assignment_notional,
+        },
+    )
+    hedge_intent = PortfolioRiskIntentRecord.create(
+        decision_time=decision_time,
+        risk_window="1-5d",
+        aggregate_risk_state="assignment_risk",
+        hedge_actions=(
+            HedgeActionRecord(
+                action="adjust_hedge",
+                risk_source="assignment",
+                severity="high",
+                target_underlier="QQQ",
+                target_exposure_type="assignment",
+                coverage_ratio=0.5,
+                reason_code="assignment_overlay",
+                metadata_json={
+                    "option_strategy_type": "long_put",
+                    "underlying_price": 500.0,
+                },
+            ),
+        ),
+    )
+    hedge_payload = LookaheadRiskWorkflowHelper().materialize_generated_hedges(
+        risk_decisions=(hedge_seed,),
+        portfolio_risk_intent=hedge_intent,
+    )[0].generated_hedge_action
+
+    return {
+        "status": "passed",
+        "mode": "paper_option_lifecycle_fixture",
+        "summary": {
+            "open_risk_status": open_risk.status,
+            "rejection_reason_code": rejected_risk.reason_code,
+            "hedge_overlay_action": hedge_payload["action"] if hedge_payload is not None else None,
+            "hedge_overlay_basis": hedge_payload["protected_exposure_basis"] if hedge_payload is not None else None,
+        },
+    }
+
+
 def _run_intraday_refresh_fixture() -> dict[str, Any]:
     decision_time = _fixed_now()
     baseline = _manual_snapshot("NVDA", decision_time)
@@ -429,10 +627,49 @@ def _run_intraday_refresh_fixture() -> dict[str, Any]:
     }
 
 
+def _option_risk_input(
+    *,
+    decision: Any,
+    legs: tuple[Any, ...],
+    sector: str | None,
+    event_type: str | None,
+) -> OptionRiskInput:
+    return OptionRiskInput(
+        ticker=decision.ticker,
+        trade_identity=decision.trade_identity,
+        option_strategy_type=decision.option_strategy_type,
+        underlying_price=decision.underlying_price,
+        sector=sector,
+        event_type=event_type,
+        event_through_expiry=decision.event_through_expiry,
+        margin_requirement=decision.margin_requirement,
+        buying_power_effect=decision.buying_power_effect,
+        max_loss=decision.max_loss,
+        max_profit=decision.max_profit,
+        net_debit_or_credit=decision.net_debit_or_credit,
+        legs=[
+            OptionLegRiskInput(
+                option_type=leg.option_type,
+                side=leg.side,
+                quantity=leg.quantity,
+                strike=leg.strike,
+                expiry=leg.expiry,
+                delta=leg.delta,
+                gamma=leg.gamma,
+                theta=leg.theta,
+                vega=leg.vega,
+                premium=leg.chosen_price,
+            )
+            for leg in legs
+        ],
+    )
+
+
 __all__ = [
     "_run_historical_replay_fixture",
     "_run_intraday_refresh_fixture",
     "_run_manual_review_fixture",
+    "_run_paper_option_lifecycle_fixture",
     "_run_paper_option_fixture",
     "_run_paper_trade_dry_run",
     "_run_provider_guardrail_fixture",

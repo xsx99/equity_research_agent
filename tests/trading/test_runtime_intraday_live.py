@@ -753,6 +753,132 @@ def test_live_intraday_refresh_runtime_keeps_readthrough_and_theme_fields_on_reb
     assert request.alerts[0]["readthrough_source_ticker"] == "AVGO"
 
 
+def test_live_intraday_refresh_runtime_refreshes_open_option_position_marks_and_greeks():
+    recorder = _CallRecorder()
+    decision_time = datetime(2026, 6, 4, 16, 0, tzinfo=timezone.utc)
+    class _LocalLoader:
+        def __init__(self, name: str, result: dict[str, object]) -> None:
+            self.name = name
+            self.result = result
+
+        def load_for_tickers(self, *, tickers: tuple[str, ...], decision_time: datetime) -> dict[str, object]:
+            assert decision_time.tzinfo is not None
+            recorder.record(self.name)
+            return dict(self.result)
+
+    class _LocalNewsAlertService:
+        def build_alerts(
+            self,
+            *,
+            event_items,
+            existing_dedupe_keys,
+            affected_positions_by_ticker,
+            affected_candidates_by_ticker,
+            affected_themes_by_ticker,
+        ):
+            recorder.record("build_alerts")
+            return ()
+
+    source_rows = {
+        ("QQQ", "technical"): (_source_record(ticker="QQQ", family="technical", payload={"bars": [{"close": 500.0}]}),),
+        ("QQQ", "option_chain"): (
+            _source_record(
+                ticker="QQQ",
+                family="option_chain",
+                payload={
+                    "contracts": [
+                        {
+                            "option_type": "put",
+                            "strike": 475.0,
+                            "expiry": "2026-06-09",
+                            "delta": -0.31,
+                            "gamma": 0.02,
+                            "theta": -0.03,
+                            "vega": 0.07,
+                            "chosen_price": 3.2,
+                            "mid": 3.2,
+                        }
+                    ]
+                },
+            ),
+        ),
+        ("QQQ", "events_news"): (),
+    }
+    portfolio_result = SimpleNamespace(
+        portfolio_context=SimpleNamespace(
+            account_equity=100000.0,
+            total_margin_requirement=0.0,
+            margin_model_profile="estimated_fidelity_like_conservative_v1",
+            margin_model_version="v1",
+            positions=(
+                SimpleNamespace(
+                    ticker="QQQ",
+                    trade_identity="risk_hedge_overlay",
+                    quantity=1.0,
+                    market_value=320.0,
+                    sector="Technology",
+                ),
+            ),
+        ),
+        positions=(),
+    )
+    rebalance_pipeline = _RebalancePipeline(
+        recorder,
+        SimpleNamespace(decisions=(SimpleNamespace(ticker="QQQ"),)),
+    )
+    trading_repository = _TradingRepository(recorder)
+    runtime = LiveIntradayRefreshRuntime(
+        dependencies=LiveIntradayRefreshDependencies(
+            scope_loader=_ScopeLoader(recorder, ("QQQ",)),
+            baseline_loader=_LocalLoader("load_baselines", {"QQQ": _baseline_snapshot(ticker="QQQ", sector="Technology")}),
+            previous_snapshot_loader=_LocalLoader("load_previous_intraday", {}),
+            request_context_loader=_LocalLoader(
+                "load_request_context",
+                {
+                    "QQQ": SimpleNamespace(
+                        selection_source="portfolio",
+                        strategy_id="risk_manager_hedge_overlay_v1",
+                        strategy_version="v1",
+                        expression_bucket_id="defined_risk_directional_option",
+                        expression_bucket_version="v1",
+                        trade_identity="risk_hedge_overlay",
+                        instrument_type="option",
+                        candidate_score=0.0,
+                        target_weight=0.0,
+                        allow_open_new=False,
+                    )
+                },
+            ),
+            source_repository=_IntradaySourceRepository(recorder, source_rows),
+            portfolio_sync_workflow=_PortfolioSyncWorkflow(recorder, portfolio_result),
+            news_alert_service=_LocalNewsAlertService(),
+            rebalance_pipeline=rebalance_pipeline,
+            trading_repository=trading_repository,
+            existing_news_dedupe_key_loader=lambda tickers, decision_time: frozenset(),
+            candidate_context_loader=lambda tickers, decision_time: {},
+            position_context_loader=lambda tickers, positions: {"QQQ": ("QQQ",)},
+            theme_context_loader=lambda tickers, decision_time: {},
+            macro_state_loader=lambda decision_time: None,
+        ),
+        now=lambda: decision_time,
+    )
+
+    runtime.run()
+
+    assert "latest:QQQ:option_chain" in recorder.calls
+    assert len(trading_repository.saved_snapshots) == 1
+    snapshot = trading_repository.saved_snapshots[0]
+    assert snapshot.refreshed_signals_json["option"]["mark_price"] == 320.0
+    assert snapshot.refreshed_signals_json["option"]["delta"] == -0.31
+    assert snapshot.source_freshness_json["option_chain"] == "fresh"
+    request = rebalance_pipeline.last_requests[0]
+    assert request.instrument_type == "option"
+    assert request.existing_position is True
+    assert request.current_price == 320.0
+    assert request.signal_freshness["option_chain"] == "fresh"
+    assert request.metadata_json["option_mark_price"] == 320.0
+
+
 def test_run_live_intraday_refresh_once_builds_default_dependencies_when_not_injected(monkeypatch):
     runtime, _recorder, _pipeline, _repository = _build_runtime()
 

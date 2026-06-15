@@ -57,6 +57,8 @@ class LiveReflectionRequestLoader:
             paper_option_positions=tuple(payload.get("paper_option_positions") or ()),
             option_risk_snapshots=tuple(payload.get("option_risk_snapshots") or ()),
             worst_case_assignment_snapshots=tuple(payload.get("worst_case_assignment_snapshots") or ()),
+            risk_hedge_overlays=tuple(payload.get("risk_hedge_overlays") or ()),
+            hedge_effectiveness=dict(payload.get("hedge_effectiveness") or {}),
             learning_factors_used=tuple(payload.get("learning_factors_used") or ()),
         )
         return ReflectionLoadResult(status="ready", request=request)

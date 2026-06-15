@@ -159,7 +159,10 @@ class LookaheadRiskWorkflowHelper:
             )
             for decision in approved
         ]
-        protected_notional = sum(value for _, value in protected_exposures) * hedge_action.coverage_ratio
+        protected_notional = _materialized_protected_notional(
+            hedge_action=hedge_action,
+            protected_exposures=protected_exposures,
+        )
         payload = {
             "action": hedge_action.action,
             "risk_source": hedge_action.risk_source,
@@ -168,10 +171,13 @@ class LookaheadRiskWorkflowHelper:
             "target_exposure_type": hedge_action.target_exposure_type,
             "coverage_ratio": hedge_action.coverage_ratio,
             "reason_code": hedge_action.reason_code,
-            "option_strategy_type": "long_put",
-            "underlying_price": 100.0,
+            "option_strategy_type": _hedge_option_strategy_type(hedge_action),
+            "underlying_price": _hedge_underlying_price(hedge_action),
             "protected_notional": protected_notional,
-            "protected_exposure_basis": _dominant_protected_exposure_basis(protected_exposures),
+            "protected_exposure_basis": _protected_exposure_basis(
+                hedge_action=hedge_action,
+                protected_exposures=protected_exposures,
+            ),
             "metadata_json": dict(hedge_action.metadata_json),
         }
         materialized: list[RiskDecisionRecord] = []
@@ -242,6 +248,49 @@ def _dominant_protected_exposure_basis(protected_exposures: list[tuple[str, floa
     for basis, value in protected_exposures:
         basis_totals[basis] = basis_totals.get(basis, 0.0) + value
     return max(basis_totals.items(), key=lambda item: item[1])[0]
+
+
+def _materialized_protected_notional(
+    *,
+    hedge_action: object,
+    protected_exposures: list[tuple[str, float]],
+) -> float:
+    metadata_json = dict(getattr(hedge_action, "metadata_json", {}) or {})
+    if getattr(hedge_action, "action", "") == "close_hedge":
+        existing = float(metadata_json.get("existing_protected_notional") or 0.0)
+        if existing > 0:
+            return existing
+    return sum(value for _, value in protected_exposures) * float(getattr(hedge_action, "coverage_ratio", 0.0) or 0.0)
+
+
+def _protected_exposure_basis(
+    *,
+    hedge_action: object,
+    protected_exposures: list[tuple[str, float]],
+) -> str:
+    metadata_json = dict(getattr(hedge_action, "metadata_json", {}) or {})
+    configured = metadata_json.get("protected_exposure_basis")
+    if isinstance(configured, str) and configured:
+        return configured
+    if getattr(hedge_action, "action", "") == "close_hedge" and float(metadata_json.get("existing_protected_notional") or 0.0) > 0:
+        return "existing_protected_notional"
+    return _dominant_protected_exposure_basis(protected_exposures)
+
+
+def _hedge_option_strategy_type(hedge_action: object) -> str:
+    metadata_json = dict(getattr(hedge_action, "metadata_json", {}) or {})
+    configured = metadata_json.get("option_strategy_type")
+    if isinstance(configured, str) and configured:
+        return configured
+    return "long_put"
+
+
+def _hedge_underlying_price(hedge_action: object) -> float:
+    metadata_json = dict(getattr(hedge_action, "metadata_json", {}) or {})
+    value = metadata_json.get("underlying_price")
+    if isinstance(value, (int, float)) and float(value) > 0:
+        return float(value)
+    return 100.0
 
 
 def _intraday_event_assessment(

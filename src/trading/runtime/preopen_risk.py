@@ -154,6 +154,7 @@ class _LiveRiskWorkflow:
             option_payload=option_payload,
             trade_identity=str(getattr(classification, "trade_identity", "") or ""),
             ticker=str(getattr(candidate, "ticker", "") or ""),
+            sector=getattr(request, "sector", None),
         )
         if option_risk is None:
             return decision
@@ -166,37 +167,43 @@ class _LiveRiskWorkflow:
             return decision
         from src.trading.risk import OptionRiskSnapshotRecord, RiskDecisionRecord
 
+        saved_snapshot = None
         if hasattr(self.repository, "save_option_risk_snapshot"):
-            self.repository.save_option_risk_snapshot(
-                OptionRiskSnapshotRecord.create(
-                    ticker=option_risk.ticker,
-                    trade_identity=option_risk.trade_identity,
-                    option_strategy_type=option_risk.option_strategy_type,
-                    underlying_price=option_risk.underlying_price,
-                    portfolio_delta=assessment.portfolio_delta,
-                    portfolio_gamma=assessment.portfolio_gamma,
-                    portfolio_theta=assessment.portfolio_theta,
-                    portfolio_vega=assessment.portfolio_vega,
-                    net_debit_or_credit=option_risk.net_debit_or_credit,
-                    max_loss=option_risk.max_loss,
-                    max_profit=option_risk.max_profit,
-                    margin_requirement=option_risk.margin_requirement,
-                    buying_power_effect=option_risk.buying_power_effect,
-                    assignment_notional=float(option_payload.get("assignment_notional") or 0.0),
-                    worst_case_assignment_notional=assessment.worst_case_assignment_notional,
-                    margin_model_profile=str(
-                        option_payload.get("margin_model_profile") or "estimated_fidelity_like_conservative_v1"
-                    ),
-                    margin_model_version=str(option_payload.get("margin_model_version") or "v1"),
-                    margin_requirement_source=str(
-                        option_payload.get("margin_requirement_source") or "simulated_formula"
-                    ),
-                    risk_status=assessment.status,
-                    reason_code=assessment.reason_code,
-                    created_at=getattr(decision, "decision_time"),
-                    metadata_json=dict(option_payload.get("metadata_json") or {}),
-                )
+            snapshot_metadata = {
+                **dict(option_payload.get("metadata_json") or {}),
+                "option_risk_reason_code": assessment.reason_code,
+                "option_risk_status": assessment.status,
+                "option_risk_checks": dict(getattr(assessment, "metadata_json", {}) or {}),
+            }
+            saved_snapshot = OptionRiskSnapshotRecord.create(
+                ticker=option_risk.ticker,
+                trade_identity=option_risk.trade_identity,
+                option_strategy_type=option_risk.option_strategy_type,
+                underlying_price=option_risk.underlying_price,
+                portfolio_delta=assessment.portfolio_delta,
+                portfolio_gamma=assessment.portfolio_gamma,
+                portfolio_theta=assessment.portfolio_theta,
+                portfolio_vega=assessment.portfolio_vega,
+                net_debit_or_credit=option_risk.net_debit_or_credit,
+                max_loss=option_risk.max_loss,
+                max_profit=option_risk.max_profit,
+                margin_requirement=option_risk.margin_requirement,
+                buying_power_effect=option_risk.buying_power_effect,
+                assignment_notional=float(option_payload.get("assignment_notional") or 0.0),
+                worst_case_assignment_notional=assessment.worst_case_assignment_notional,
+                margin_model_profile=str(
+                    option_payload.get("margin_model_profile") or "estimated_fidelity_like_conservative_v1"
+                ),
+                margin_model_version=str(option_payload.get("margin_model_version") or "v1"),
+                margin_requirement_source=str(
+                    option_payload.get("margin_requirement_source") or "simulated_formula"
+                ),
+                risk_status=assessment.status,
+                reason_code=assessment.reason_code,
+                created_at=getattr(decision, "decision_time"),
+                metadata_json=snapshot_metadata,
             )
+            self.repository.save_option_risk_snapshot(saved_snapshot)
         return RiskDecisionRecord.create(
             candidate_score_id=getattr(decision, "candidate_score_id", None),
             trade_classification_id=getattr(decision, "trade_classification_id", None),
@@ -210,7 +217,13 @@ class _LiveRiskWorkflow:
             portfolio_risk_snapshot_id=getattr(decision, "portfolio_risk_snapshot_id", None),
             applied_rules=[*list(getattr(decision, "applied_rules", ())), "option_assignment_risk_check"],
             decision_time=getattr(decision, "decision_time"),
-            metadata_json={"superseded_risk_decision_id": getattr(decision, "risk_decision_id", None)},
+            metadata_json={
+                "superseded_risk_decision_id": getattr(decision, "risk_decision_id", None),
+                "option_risk_reason_code": assessment.reason_code,
+                "option_risk_status": assessment.status,
+                "option_risk_snapshot_id": getattr(saved_snapshot, "option_risk_snapshot_id", None),
+                "option_risk_checks": dict(getattr(assessment, "metadata_json", {}) or {}),
+            },
         )
 
 
@@ -246,6 +259,7 @@ def _build_trade_risk_request(
         expression_definitions=expression_definitions or {},
     )
     option_price_proxy = _option_price_proxy(option_contracts)
+    sector = _sector_from_snapshot(snapshot)
     atr_pct = float(technical.get("atr_pct") or 0.0)
     average_daily_dollar_volume = float(technical.get("dollar_volume") or 0.0)
     option_metadata_complete = bool(option_contracts) if instrument_type == "option" else True
@@ -270,7 +284,7 @@ def _build_trade_risk_request(
         instrument_type=instrument_type,
         target_weight=min(max(float(candidate.candidate_score) * 0.05, 0.0), 0.10),
         confidence=min(max(float(candidate.candidate_score), 0.0), 1.0),
-        sector=None,
+        sector=sector,
         beta_bucket=None,
         volatility_bucket="high" if atr_pct >= 0.05 else "medium",
         liquidity_bucket="thin"
@@ -388,6 +402,7 @@ def _build_preopen_option_risk_input(
     option_payload: dict[str, Any] | None,
     trade_identity: str,
     ticker: str,
+    sector: str | None,
 ) -> Any | None:
     if not isinstance(option_payload, dict) or option_payload.get("status") != "ready":
         return None
@@ -424,7 +439,7 @@ def _build_preopen_option_risk_input(
         trade_identity=trade_identity,
         option_strategy_type=str(option_payload["option_strategy_type"]),
         underlying_price=float(option_payload["underlying_price"]),
-        sector=None,
+        sector=sector,
         event_type="earnings" if bool(option_payload.get("event_through_expiry")) else None,
         event_through_expiry=bool(option_payload.get("event_through_expiry")),
         margin_requirement=float(option_payload["margin_requirement"]),
@@ -461,3 +476,15 @@ def _evaluate_with_optional_lookahead(
         if "portfolio_risk_intent" not in str(exc):
             raise
         return risk_manager.evaluate(request, sizing, portfolio_context, config)
+
+
+def _sector_from_snapshot(snapshot: Any) -> str | None:
+    if snapshot is None:
+        return None
+    signal_json = dict(getattr(snapshot, "signal_json", {}) or {})
+    for key in ("fundamental", "company"):
+        payload = dict(signal_json.get(key) or {})
+        sector = payload.get("sector")
+        if isinstance(sector, str) and sector.strip():
+            return sector.strip()
+    return None

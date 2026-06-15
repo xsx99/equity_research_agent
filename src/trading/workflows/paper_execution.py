@@ -235,25 +235,23 @@ class PaperExecutionWorkflow:
         execution = self.option_broker.find_execution_by_order_id(order.paper_option_order_id)
         if execution is not None and not self.repository.has_paper_option_execution(execution.paper_option_execution_id):
             self.repository.save_paper_option_execution(execution)
-            self.repository.save_paper_option_position(
-                PaperOptionPosition(
-                    paper_option_position_id=order.paper_option_order_id,
-                    option_strategy_decision_id=option_decision.option_strategy_decision_id,
-                    ticker=order.ticker,
-                    strategy_id=order.strategy_id,
-                    option_strategy_type=order.option_strategy_type,
-                    trade_identity=order.trade_identity,
-                    quantity=order.quantity,
-                    opened_at=execution.executed_at,
-                    updated_at=execution.executed_at,
-                    status="open",
-                    expiry=option_decision.expiry,
-                    max_loss=option_decision.max_loss,
-                    margin_requirement=option_decision.margin_requirement,
-                    buying_power_effect=option_decision.buying_power_effect,
-                    assignment_notional=option_decision.assignment_notional,
-                    metadata_json=option_decision.metadata_json,
-                )
+            existing_position = _matching_open_option_position(
+                repository=self.repository,
+                trading_decision=trading_decision,
+                option_decision=option_decision,
+            )
+            for position in _materialized_option_positions(
+                trading_decision=trading_decision,
+                option_decision=option_decision,
+                order=order,
+                execution=execution,
+                existing_position=existing_position,
+            ):
+                self.repository.save_paper_option_position(position)
+            hedge_payload = (
+                dict(trading_decision.metadata_json.get("generated_hedge_action") or {})
+                if trading_decision.trade_identity == "risk_hedge_overlay"
+                else None
             )
             self.repository.save_option_risk_snapshot(
                 OptionRiskSnapshotRecord.create(
@@ -287,14 +285,22 @@ class PaperExecutionWorkflow:
                         risk_decision_id=active_risk_decision.risk_decision_id,
                         ticker=trading_decision.ticker,
                         action=trading_decision.decision,
-                        option_strategy_type=option_decision.option_strategy_type,
+                        option_strategy_type=_risk_hedge_option_strategy_type(
+                            trading_decision=trading_decision,
+                            option_decision=option_decision,
+                            existing_position=existing_position,
+                        ),
                         rationale="risk_manager_generated_overlay",
                         hedge_cost=abs(execution.net_cash_effect),
                         protected_notional=max(
+                            float((hedge_payload or {}).get("protected_notional") or 0.0),
                             option_decision.assignment_notional,
                             option_decision.buying_power_effect,
                         ),
-                        metadata_json=option_decision.metadata_json,
+                        metadata_json={
+                            **dict(option_decision.metadata_json),
+                            **({"generated_hedge_action": hedge_payload} if hedge_payload is not None else {}),
+                        },
                     )
                 )
         return None, None
@@ -855,6 +861,189 @@ def _generated_hedge_option_strategy_payload(
         "close_conditions": (),
         "metadata_json": {"legs": [leg_payload], "hedge_action": dict(hedge_action)},
     }
+
+
+def _matching_open_option_position(
+    *,
+    repository: Any,
+    trading_decision: TradingDecisionRecord,
+    option_decision: OptionStrategyDecisionRecord,
+) -> PaperOptionPosition | None:
+    positions = getattr(repository, "load_paper_option_positions", lambda: ())()
+    hedge_overlay_fallback: PaperOptionPosition | None = None
+    for position in positions:
+        if position.status != "open":
+            continue
+        if position.ticker != trading_decision.ticker:
+            continue
+        if position.trade_identity != trading_decision.trade_identity:
+            continue
+        if position.strategy_id != trading_decision.strategy_id:
+            continue
+        if (
+            trading_decision.trade_identity == "risk_hedge_overlay"
+            and trading_decision.strategy_id == "risk_manager_hedge_overlay_v1"
+            and hedge_overlay_fallback is None
+        ):
+            hedge_overlay_fallback = position
+        if position.option_strategy_type != option_decision.option_strategy_type:
+            continue
+        return position
+    return hedge_overlay_fallback
+
+
+def _risk_hedge_option_strategy_type(
+    *,
+    trading_decision: TradingDecisionRecord,
+    option_decision: OptionStrategyDecisionRecord,
+    existing_position: PaperOptionPosition | None,
+) -> str:
+    if (
+        trading_decision.trade_identity == "risk_hedge_overlay"
+        and existing_position is not None
+        and trading_decision.decision in {"close_option_strategy", "adjust_option_strategy"}
+    ):
+        return existing_position.option_strategy_type
+    return option_decision.option_strategy_type
+
+
+def _materialized_option_positions(
+    *,
+    trading_decision: TradingDecisionRecord,
+    option_decision: OptionStrategyDecisionRecord,
+    order: PaperOptionOrderRequest | Any,
+    execution: Any,
+    existing_position: PaperOptionPosition | None,
+) -> tuple[PaperOptionPosition, ...]:
+    action = trading_decision.decision
+    if action == "close_option_strategy":
+        if existing_position is None:
+            return ()
+        return (
+            PaperOptionPosition(
+                paper_option_position_id=existing_position.paper_option_position_id,
+                option_strategy_decision_id=existing_position.option_strategy_decision_id,
+                ticker=existing_position.ticker,
+                strategy_id=existing_position.strategy_id,
+                option_strategy_type=existing_position.option_strategy_type,
+                trade_identity=existing_position.trade_identity,
+                quantity=existing_position.quantity,
+                opened_at=existing_position.opened_at,
+                updated_at=execution.executed_at,
+                status="closed",
+                expiry=existing_position.expiry,
+                max_loss=existing_position.max_loss,
+                margin_requirement=0.0,
+                buying_power_effect=0.0,
+                assignment_notional=0.0,
+                metadata_json={
+                    **dict(existing_position.metadata_json),
+                    "lifecycle_action": action,
+                    "closing_order_id": order.paper_option_order_id,
+                },
+            ),
+        )
+    if action == "roll_option_strategy":
+        positions: list[PaperOptionPosition] = []
+        if existing_position is not None:
+            positions.append(
+                PaperOptionPosition(
+                    paper_option_position_id=existing_position.paper_option_position_id,
+                    option_strategy_decision_id=existing_position.option_strategy_decision_id,
+                    ticker=existing_position.ticker,
+                    strategy_id=existing_position.strategy_id,
+                    option_strategy_type=existing_position.option_strategy_type,
+                    trade_identity=existing_position.trade_identity,
+                    quantity=existing_position.quantity,
+                    opened_at=existing_position.opened_at,
+                    updated_at=execution.executed_at,
+                    status="closed",
+                    expiry=existing_position.expiry,
+                    max_loss=existing_position.max_loss,
+                    margin_requirement=0.0,
+                    buying_power_effect=0.0,
+                    assignment_notional=0.0,
+                    metadata_json={
+                        **dict(existing_position.metadata_json),
+                        "lifecycle_action": action,
+                        "replacement_order_id": order.paper_option_order_id,
+                    },
+                )
+            )
+        positions.append(
+            PaperOptionPosition(
+                paper_option_position_id=order.paper_option_order_id,
+                option_strategy_decision_id=option_decision.option_strategy_decision_id,
+                ticker=order.ticker,
+                strategy_id=order.strategy_id,
+                option_strategy_type=order.option_strategy_type,
+                trade_identity=order.trade_identity,
+                quantity=order.quantity,
+                opened_at=execution.executed_at,
+                updated_at=execution.executed_at,
+                status="open",
+                expiry=option_decision.expiry,
+                max_loss=option_decision.max_loss,
+                margin_requirement=option_decision.margin_requirement,
+                buying_power_effect=option_decision.buying_power_effect,
+                assignment_notional=option_decision.assignment_notional,
+                metadata_json={
+                    **dict(option_decision.metadata_json),
+                    "lifecycle_action": action,
+                    **(
+                        {"supersedes_option_position_id": existing_position.paper_option_position_id}
+                        if existing_position is not None
+                        else {}
+                    ),
+                },
+            )
+        )
+        return tuple(positions)
+    if action == "adjust_option_strategy" and existing_position is not None:
+        return (
+            PaperOptionPosition(
+                paper_option_position_id=existing_position.paper_option_position_id,
+                option_strategy_decision_id=option_decision.option_strategy_decision_id,
+                ticker=existing_position.ticker,
+                strategy_id=existing_position.strategy_id,
+                option_strategy_type=existing_position.option_strategy_type,
+                trade_identity=existing_position.trade_identity,
+                quantity=order.quantity,
+                opened_at=existing_position.opened_at,
+                updated_at=execution.executed_at,
+                status="open",
+                expiry=option_decision.expiry,
+                max_loss=option_decision.max_loss,
+                margin_requirement=option_decision.margin_requirement,
+                buying_power_effect=option_decision.buying_power_effect,
+                assignment_notional=option_decision.assignment_notional,
+                metadata_json={
+                    **dict(existing_position.metadata_json),
+                    **dict(option_decision.metadata_json),
+                    "lifecycle_action": action,
+                },
+            ),
+        )
+    return (
+        PaperOptionPosition(
+            paper_option_position_id=order.paper_option_order_id,
+            option_strategy_decision_id=option_decision.option_strategy_decision_id,
+            ticker=order.ticker,
+            strategy_id=order.strategy_id,
+            option_strategy_type=order.option_strategy_type,
+            trade_identity=order.trade_identity,
+            quantity=order.quantity,
+            opened_at=execution.executed_at,
+            updated_at=execution.executed_at,
+            status="open",
+            expiry=option_decision.expiry,
+            max_loss=option_decision.max_loss,
+            margin_requirement=option_decision.margin_requirement,
+            buying_power_effect=option_decision.buying_power_effect,
+            assignment_notional=option_decision.assignment_notional,
+            metadata_json=option_decision.metadata_json,
+        ),
+    )
 
 
 def _build_execution_fallback_trade_risk_request(

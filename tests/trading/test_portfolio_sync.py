@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from src.trading.brokers.paper_option import PaperOptionPosition
 from src.trading.portfolio.state import StockPosition
 from src.trading.repositories.in_memory import InMemoryTradingRepository
 from src.trading.workflows.portfolio_sync import BrokerPortfolioSyncWorkflow
@@ -65,3 +66,45 @@ def test_broker_portfolio_sync_workflow_persists_broker_state_and_builds_portfol
     assert result.portfolio_context.margin_model_profile == "alpaca_paper_account"
     assert repository.paper_positions[0].strategy_id == "relative_strength_rotation_v1"
     assert repository.portfolio_snapshots[-1].account_equity == 1000000.12
+
+
+def test_broker_portfolio_sync_workflow_includes_open_option_overlay_in_snapshot_and_context():
+    now = datetime(2026, 6, 2, 16, 31, tzinfo=timezone.utc)
+    repository = InMemoryTradingRepository()
+    repository.save_paper_option_position(
+        PaperOptionPosition(
+            paper_option_position_id="option-position-1",
+            option_strategy_decision_id="option-decision-1",
+            ticker="NVDA",
+            strategy_id="earnings_drift_v1",
+            option_strategy_type="put_credit_spread",
+            trade_identity="tactical_option_trade",
+            quantity=1,
+            opened_at=now,
+            updated_at=now,
+            status="open",
+            expiry=now.date(),
+            max_loss=500.0,
+            margin_requirement=500.0,
+            buying_power_effect=500.0,
+            assignment_notional=11_000.0,
+            metadata_json={},
+        )
+    )
+    workflow = BrokerPortfolioSyncWorkflow(
+        repository=repository,
+        broker=_BrokerStub(),
+    )
+
+    result = workflow.run(as_of=now, approved_core_tickers=("MSFT",))
+
+    assert result.snapshot.option_market_value == 500.0
+    assert result.snapshot.option_margin_requirement == 500.0
+    assert result.snapshot.total_margin_requirement == 501.14
+    assert result.snapshot.buying_power == 1999495.46
+    assert result.snapshot.excess_liquidity == 999499.44
+    assert result.snapshot.metadata_json["stock_margin_requirement_source"] == "broker_reported"
+    assert result.snapshot.metadata_json["option_overlay_source"] == "local_simulation"
+    assert result.portfolio_context.option_margin_requirement == 500.0
+    assert result.portfolio_context.buying_power == 1999495.46
+    assert any(position.ticker == "NVDA" and position.assignment_notional == 11_000.0 for position in result.portfolio_context.positions)

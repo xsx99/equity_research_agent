@@ -8,6 +8,7 @@ from typing import Any
 from src.trading.portfolio.state import (
     OptionPosition,
     PortfolioSnapshot,
+    apply_option_overlay_to_snapshot,
     StockPosition,
     build_portfolio_context,
     build_portfolio_snapshot_from_account,
@@ -56,9 +57,31 @@ class BrokerPortfolioSyncWorkflow:
             as_of=as_of,
             local_position_metadata=local_position_metadata,
         )
-        snapshot = build_portfolio_snapshot_from_account(
-            account_payload,
-            as_of=as_of,
+        option_positions = tuple(
+            OptionPosition(
+                ticker=position.ticker,
+                quantity=position.quantity,
+                market_value=position.buying_power_effect,
+                trade_identity=position.trade_identity,
+                strategy_id=position.strategy_id,
+                option_strategy_type=position.option_strategy_type,
+                opened_at=position.opened_at,
+                updated_at=position.updated_at,
+                expiry=position.expiry,
+                max_loss=position.max_loss,
+                margin_requirement=position.margin_requirement,
+                buying_power_effect=position.buying_power_effect,
+                assignment_notional=position.assignment_notional,
+            )
+            for position in getattr(self.repository, "load_paper_option_positions", lambda: ())()
+            if position.status == "open"
+        )
+        snapshot = apply_option_overlay_to_snapshot(
+            build_portfolio_snapshot_from_account(
+                account_payload,
+                as_of=as_of,
+            ),
+            option_positions=option_positions,
         )
         if persist:
             self.repository.replace_paper_positions(synced_positions)
@@ -69,25 +92,7 @@ class BrokerPortfolioSyncWorkflow:
             portfolio_context=build_portfolio_context(
                 snapshot=snapshot,
                 positions=synced_positions,
-                option_positions=tuple(
-                    OptionPosition(
-                        ticker=position.ticker,
-                        quantity=position.quantity,
-                        market_value=position.buying_power_effect,
-                        trade_identity=position.trade_identity,
-                        strategy_id=position.strategy_id,
-                        option_strategy_type=position.option_strategy_type,
-                        opened_at=position.opened_at,
-                        updated_at=position.updated_at,
-                        expiry=position.expiry,
-                        max_loss=position.max_loss,
-                        margin_requirement=position.margin_requirement,
-                        buying_power_effect=position.buying_power_effect,
-                        assignment_notional=position.assignment_notional,
-                    )
-                    for position in getattr(self.repository, "load_paper_option_positions", lambda: ())()
-                    if position.status == "open"
-                ),
+                option_positions=option_positions,
                 approved_core_tickers=approved_core_tickers,
             ),
         )
