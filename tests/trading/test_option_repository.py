@@ -61,9 +61,11 @@ def test_in_memory_repository_persists_option_artifacts():
                 option_strategy_leg_id="leg-1",
                 option_strategy_decision_id="option-decision-1",
                 ticker="NVDA",
+                contract_symbol="NVDA260717P00110000",
                 option_type="put",
                 side="sell",
                 quantity=1,
+                ratio_qty=1,
                 strike=110.0,
                 expiry=date(2026, 7, 17),
                 dte=45,
@@ -86,6 +88,9 @@ def test_in_memory_repository_persists_option_artifacts():
             trading_decision_id="decision-1",
             risk_decision_id="risk-1",
             option_strategy_decision_id="option-decision-1",
+            broker_order_id="alpaca-option-order-1",
+            client_order_id="2026-06-02:NVDA:earnings_drift_v1:open_option_strategy",
+            order_class="mleg",
             ticker="NVDA",
             strategy_id="earnings_drift_v1",
             option_strategy_type="put_credit_spread",
@@ -105,6 +110,7 @@ def test_in_memory_repository_persists_option_artifacts():
         PaperOptionExecutionRecord(
             paper_option_execution_id="option-execution-1",
             paper_option_order_id="option-order-1",
+            broker_order_id="alpaca-option-order-1",
             ticker="NVDA",
             quantity=1,
             fill_price=-1.5,
@@ -179,6 +185,12 @@ def test_in_memory_repository_persists_option_artifacts():
     assert len(repository.paper_option_positions) == 1
     assert len(repository.option_risk_snapshots) == 1
     assert len(repository.risk_hedge_decisions) == 1
+    assert repository.option_strategy_legs[0].contract_symbol == "NVDA260717P00110000"
+    assert repository.option_strategy_legs[0].ratio_qty == 1
+    assert repository.paper_option_orders[0].client_order_id == "2026-06-02:NVDA:earnings_drift_v1:open_option_strategy"
+    assert repository.paper_option_orders[0].broker_order_id == "alpaca-option-order-1"
+    assert repository.paper_option_orders[0].order_class == "mleg"
+    assert repository.paper_option_executions[0].broker_order_id == "alpaca-option-order-1"
 
 
 def test_in_memory_repository_keeps_closed_option_position_and_replacement_open_position():

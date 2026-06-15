@@ -1205,3 +1205,15 @@ def test_trading_migration_contains_selection_source_constraint_fix_for_risk_man
     assert "ck_candidate_scores_selection_source" in text
     assert "ck_trading_decisions_selection_source" in text
     assert "risk_manager" in text
+
+
+def test_trading_migration_contains_alpaca_option_execution_contract_updates():
+    migration_path = Path("alembic/versions/021_alpaca_option_execution_contract.py")
+    text = migration_path.read_text(encoding="utf-8")
+
+    assert 'down_revision: Union[str, None] = "020"' in text
+    assert '"contract_symbol"' in text
+    assert '"ratio_qty"' in text
+    assert '"broker_order_id"' in text
+    assert '"client_order_id"' in text
+    assert '"order_class"' in text

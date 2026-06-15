@@ -53,6 +53,9 @@ class PaperOptionOrderRecord:
     margin_requirement: float
     buying_power_effect: float
     created_at: datetime
+    broker_order_id: str | None = None
+    client_order_id: str | None = None
+    order_class: str = "simple"
 
 
 @dataclass(frozen=True)
@@ -65,6 +68,7 @@ class PaperOptionExecutionRecord:
     trade_date: date
     executed_at: datetime
     net_cash_effect: float
+    broker_order_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -124,6 +128,7 @@ class PaperOptionBroker:
             margin_requirement=request.margin_requirement,
             buying_power_effect=request.buying_power_effect,
             created_at=now,
+            client_order_id=key,
         )
         self.orders.append(order)
         self._orders_by_key[key] = order
@@ -137,6 +142,7 @@ class PaperOptionBroker:
                 trade_date=order.trade_date,
                 executed_at=now,
                 net_cash_effect=-(order.limit_price * 100.0 * order.quantity),
+                broker_order_id=order.broker_order_id,
             )
             self.executions.append(execution)
             self._executions_by_order_id[order.paper_option_order_id] = execution

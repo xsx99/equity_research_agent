@@ -1817,9 +1817,11 @@ class OptionStrategyLeg(Base):
     option_strategy_leg_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     option_strategy_decision_id = Column(UUID(as_uuid=True), ForeignKey("option_strategy_decisions.option_strategy_decision_id", ondelete="CASCADE"), nullable=False, index=True)
     ticker = Column(String(16), nullable=False, index=True)
+    contract_symbol = Column(String(32), nullable=False, index=True)
     option_type = Column(String(8), nullable=False)
     side = Column(String(8), nullable=False)
     quantity = Column(Integer, nullable=False)
+    ratio_qty = Column(Integer, nullable=False, default=1, server_default="1")
     strike = Column(Numeric, nullable=False)
     expiry = Column(Date, nullable=False, index=True)
     dte = Column(Integer, nullable=False)
@@ -1845,10 +1847,13 @@ class PaperOptionOrder(Base):
     trading_decision_id = Column(UUID(as_uuid=True), ForeignKey("trading_decisions.trading_decision_id", ondelete="SET NULL"), nullable=True, index=True)
     risk_decision_id = Column(UUID(as_uuid=True), ForeignKey("risk_decisions.risk_decision_id", ondelete="SET NULL"), nullable=True, index=True)
     option_strategy_decision_id = Column(UUID(as_uuid=True), ForeignKey("option_strategy_decisions.option_strategy_decision_id", ondelete="SET NULL"), nullable=True, index=True)
+    broker_order_id = Column(String(128), nullable=True, index=True)
+    client_order_id = Column(String(255), nullable=False)
     ticker = Column(String(16), nullable=False, index=True)
     strategy_id = Column(String(64), nullable=False, index=True)
     option_strategy_type = Column(String(64), nullable=False, index=True)
     action = Column(String(64), nullable=False, index=True)
+    order_class = Column(String(16), nullable=False, default="simple", server_default="simple")
     trade_identity = Column(String(64), nullable=False, index=True)
     trade_date = Column(Date, nullable=False, index=True)
     quantity = Column(Integer, nullable=False)
@@ -1859,6 +1864,8 @@ class PaperOptionOrder(Base):
     buying_power_effect = Column(Numeric, nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
+    __table_args__ = (UniqueConstraint("client_order_id", name="uq_paper_option_orders_client_order_id"),)
+
 
 class PaperOptionExecution(Base):
     """Paper-only option fill record."""
@@ -1867,6 +1874,7 @@ class PaperOptionExecution(Base):
 
     paper_option_execution_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     paper_option_order_id = Column(UUID(as_uuid=True), ForeignKey("paper_option_orders.paper_option_order_id", ondelete="CASCADE"), nullable=False, index=True)
+    broker_order_id = Column(String(128), nullable=True, index=True)
     ticker = Column(String(16), nullable=False, index=True)
     quantity = Column(Integer, nullable=False)
     fill_price = Column(Numeric, nullable=False)

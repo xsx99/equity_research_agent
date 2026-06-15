@@ -35,6 +35,8 @@ class OptionLegDefinition:
     mid: float
     chosen_price: float
     implied_volatility: float | None = None
+    contract_symbol: str | None = None
+    ratio_qty: int | None = None
 
 
 @dataclass(frozen=True)
@@ -112,9 +114,11 @@ class OptionStrategyLegRecord:
     option_strategy_leg_id: str
     option_strategy_decision_id: str
     ticker: str
+    contract_symbol: str | None
     option_type: str
     side: str
     quantity: int
+    ratio_qty: int
     strike: float
     expiry: date
     dte: int
@@ -200,7 +204,7 @@ class OptionsStrategyLayer:
             max_loss_rule=input_data.max_loss_rule,
             roll_conditions=tuple(input_data.roll_conditions),
             close_conditions=tuple(input_data.close_conditions),
-            metadata_json={"legs": [_serialize_leg(leg) for leg in legs]},
+            metadata_json={"legs": [_serialize_leg(input_data.ticker, leg) for leg in legs]},
             created_at=input_data.decision_time,
         )
 
@@ -212,9 +216,11 @@ class OptionsStrategyLayer:
                     option_strategy_leg_id=str(uuid.uuid4()),
                     option_strategy_decision_id=decision.option_strategy_decision_id,
                     ticker=decision.ticker,
+                    contract_symbol=_resolve_contract_symbol(decision.ticker, payload),
                     option_type=str(payload["option_type"]),
                     side=str(payload["side"]),
                     quantity=int(payload["quantity"]),
+                    ratio_qty=int(payload.get("ratio_qty") or payload["quantity"]),
                     strike=float(payload["strike"]),
                     expiry=date.fromisoformat(str(payload["expiry"])),
                     dte=int(payload["dte"]),
@@ -280,11 +286,19 @@ class OptionsStrategyLayer:
         )
 
 
-def _serialize_leg(leg: OptionLegDefinition) -> dict[str, Any]:
+def _serialize_leg(ticker: str, leg: OptionLegDefinition) -> dict[str, Any]:
     return {
+        "contract_symbol": leg.contract_symbol
+        or _format_occ_contract_symbol(
+            ticker=ticker,
+            expiry=leg.expiry,
+            option_type=leg.option_type,
+            strike=leg.strike,
+        ),
         "option_type": leg.option_type,
         "side": leg.side,
         "quantity": leg.quantity,
+        "ratio_qty": leg.ratio_qty if leg.ratio_qty is not None else leg.quantity,
         "strike": leg.strike,
         "expiry": leg.expiry.isoformat(),
         "dte": leg.dte,
@@ -299,6 +313,24 @@ def _serialize_leg(leg: OptionLegDefinition) -> dict[str, Any]:
         "mid": leg.mid,
         "chosen_price": leg.chosen_price,
     }
+
+
+def _resolve_contract_symbol(ticker: str, payload: dict[str, Any]) -> str:
+    contract_symbol = payload.get("contract_symbol")
+    if isinstance(contract_symbol, str) and contract_symbol:
+        return contract_symbol
+    return _format_occ_contract_symbol(
+        ticker=ticker,
+        expiry=date.fromisoformat(str(payload["expiry"])),
+        option_type=str(payload["option_type"]),
+        strike=float(payload["strike"]),
+    )
+
+
+def _format_occ_contract_symbol(*, ticker: str, expiry: date, option_type: str, strike: float) -> str:
+    option_code = "C" if option_type == "call" else "P"
+    strike_component = f"{int(round(strike * 1000)):08d}"
+    return f"{ticker.upper()}{expiry.strftime('%y%m%d')}{option_code}{strike_component}"
 
 
 def _premium_abs(net_debit_or_credit: float) -> float:

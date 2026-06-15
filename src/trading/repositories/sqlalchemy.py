@@ -1153,9 +1153,16 @@ class SQLAlchemyTradingRepository:
                 self.session.add(row)
             row.option_strategy_decision_id = _to_uuid(leg.option_strategy_decision_id)
             row.ticker = leg.ticker
+            row.contract_symbol = leg.contract_symbol or _format_option_contract_symbol(
+                ticker=leg.ticker,
+                expiry=leg.expiry,
+                option_type=leg.option_type,
+                strike=leg.strike,
+            )
             row.option_type = leg.option_type
             row.side = leg.side
             row.quantity = int(leg.quantity)
+            row.ratio_qty = int(leg.ratio_qty or leg.quantity)
             row.strike = Decimal(str(leg.strike))
             row.expiry = leg.expiry
             row.dte = int(leg.dte)
@@ -1233,10 +1240,13 @@ class SQLAlchemyTradingRepository:
         row.trading_decision_id = _to_uuid_or_none(order.trading_decision_id)
         row.risk_decision_id = _to_uuid_or_none(order.risk_decision_id)
         row.option_strategy_decision_id = _to_uuid_or_none(order.option_strategy_decision_id)
+        row.broker_order_id = order.broker_order_id
+        row.client_order_id = order.client_order_id or _legacy_option_client_order_id(order)
         row.ticker = order.ticker
         row.strategy_id = order.strategy_id
         row.option_strategy_type = order.option_strategy_type
         row.action = order.action
+        row.order_class = order.order_class or "simple"
         row.trade_identity = order.trade_identity
         row.trade_date = order.trade_date
         row.quantity = int(order.quantity)
@@ -1256,6 +1266,7 @@ class SQLAlchemyTradingRepository:
             row = PaperOptionExecution(paper_option_execution_id=_to_uuid(execution.paper_option_execution_id))
             self.session.add(row)
         row.paper_option_order_id = _to_uuid(execution.paper_option_order_id)
+        row.broker_order_id = execution.broker_order_id
         row.ticker = execution.ticker
         row.quantity = int(execution.quantity)
         row.fill_price = Decimal(str(execution.fill_price))
@@ -1564,6 +1575,19 @@ def _decimal_to_float(value: Any) -> float | None:
     if value is None:
         return None
     return float(value)
+
+
+def _legacy_option_client_order_id(order: PaperOptionOrderRecord) -> str:
+    return (
+        order.client_order_id
+        or f"{order.trade_date.isoformat()}:{order.ticker}:{order.strategy_id}:{order.action}"
+    )
+
+
+def _format_option_contract_symbol(*, ticker: str, expiry: date, option_type: str, strike: float) -> str:
+    option_code = "C" if option_type == "call" else "P"
+    strike_component = f"{int(round(float(strike) * 1000)):08d}"
+    return f"{ticker.upper()}{expiry.strftime('%y%m%d')}{option_code}{strike_component}"
 
 
 def _portfolio_snapshot_payload(row: Any) -> dict[str, Any]:

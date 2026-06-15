@@ -6,7 +6,15 @@ from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any
 
-from src.db.models.trading import OptionStrategyLeg, RiskDecision, UniverseFilterConfig, UniverseSnapshot, UniverseSymbol
+from src.db.models.trading import (
+    OptionStrategyLeg,
+    PaperOptionExecution,
+    PaperOptionOrder,
+    RiskDecision,
+    UniverseFilterConfig,
+    UniverseSnapshot,
+    UniverseSymbol,
+)
 from src.trading.data_sources.universe import UniverseAsset, UniverseFilterConfig as UniverseFilterConfigRecord
 from src.trading.data_sources.universe import UniverseSnapshotResult, UniverseSymbolDecision
 from src.trading.brokers.paper_option import PaperOptionExecutionRecord, PaperOptionOrderRecord, PaperOptionPosition
@@ -511,9 +519,11 @@ def test_sqlalchemy_repository_persists_pr7_option_artifacts():
                 option_strategy_leg_id="leg-1",
                 option_strategy_decision_id="option-decision-1",
                 ticker="NVDA",
+                contract_symbol="NVDA260717P00110000",
                 option_type="put",
                 side="sell",
                 quantity=1,
+                ratio_qty=1,
                 strike=110.0,
                 expiry=date(2026, 7, 17),
                 dte=45,
@@ -537,6 +547,9 @@ def test_sqlalchemy_repository_persists_pr7_option_artifacts():
             trading_decision_id="decision-1",
             risk_decision_id="risk-1",
             option_strategy_decision_id="option-decision-1",
+            broker_order_id="alpaca-option-order-1",
+            client_order_id="2026-06-02:NVDA:earnings_drift_v1:open_option_strategy",
+            order_class="mleg",
             ticker="NVDA",
             strategy_id="earnings_drift_v1",
             option_strategy_type="put_credit_spread",
@@ -556,6 +569,7 @@ def test_sqlalchemy_repository_persists_pr7_option_artifacts():
         PaperOptionExecutionRecord(
             paper_option_execution_id="option-execution-1",
             paper_option_order_id="option-order-1",
+            broker_order_id="alpaca-option-order-1",
             ticker="NVDA",
             quantity=1,
             fill_price=-1.5,
@@ -627,7 +641,17 @@ def test_sqlalchemy_repository_persists_pr7_option_artifacts():
     assert repository.load_paper_option_positions()[0].ticker == "NVDA"
     persisted_leg = session.query(OptionStrategyLeg).one_or_none()
     assert persisted_leg is not None
+    assert persisted_leg.contract_symbol == "NVDA260717P00110000"
+    assert persisted_leg.ratio_qty == 1
     assert persisted_leg.implied_volatility == Decimal("0.34")
+    persisted_order = session.query(PaperOptionOrder).one_or_none()
+    assert persisted_order is not None
+    assert persisted_order.client_order_id == "2026-06-02:NVDA:earnings_drift_v1:open_option_strategy"
+    assert persisted_order.broker_order_id == "alpaca-option-order-1"
+    assert persisted_order.order_class == "mleg"
+    persisted_execution = session.query(PaperOptionExecution).one_or_none()
+    assert persisted_execution is not None
+    assert persisted_execution.broker_order_id == "alpaca-option-order-1"
 
 
 class _BrokerStub:
