@@ -172,6 +172,7 @@ def _build_rebalance_request(
             if alert.get("sentiment") == "negative"
         ),
         metadata_json={
+            **dict(getattr(context, "metadata_json", {}) or {}),
             "sector": _sector_from_baseline(baseline),
             **(
                 {

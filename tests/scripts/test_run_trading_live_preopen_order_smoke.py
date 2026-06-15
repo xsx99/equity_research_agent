@@ -61,6 +61,67 @@ def test_smoke_agent_runner_emits_enter_long_for_eligible_approved_stock():
     assert response["content"]["counterarguments"] == ["smoke_only"]
 
 
+def test_smoke_agent_runner_emits_open_option_strategy_for_eligible_approved_option():
+    payload = {
+        "ticker": "QQQ",
+        "signal_snapshot": {
+            "signal_snapshot_id": "snapshot-1",
+            "snapshot_type": "pre_open",
+            "decision_time": "2026-06-03T12:45:00+00:00",
+            "available_for_decision_at": "2026-06-03T12:45:00+00:00",
+            "signal_json": {},
+            "source_freshness_json": {},
+            "missing_signals_json": [],
+            "stale_signals_json": [],
+            "evidence_items": [],
+        },
+        "candidate_context": {
+            "candidate_score": 0.64,
+            "strategy_run_id": "run-1",
+            "strategy_id": "macro_overlay_v1",
+            "strategy_version": "v1",
+            "direction": "bearish",
+            "selection_source": "manual_request",
+            "selection_reason": "smoke test",
+            "benchmark_context": {"primary_benchmark": "SPY"},
+            "core_signal_evidence": {},
+            "historical_outcomes": [],
+        },
+        "classification_context": {
+            "expression_bucket_id": "defined_risk_directional_option",
+            "trade_identity": "tactical_option_trade",
+            "classification_result_status": "actionable_trade",
+            "instrument_type": "stock",
+            "selected_strategy_context": {"selected_expression_bucket_id": "defined_risk_directional_option"},
+            "expression_fallback_plan": [
+                {
+                    "expression_bucket_id": "defined_risk_directional_option",
+                    "expression_bucket_version": "v1",
+                    "trade_identity": "tactical_option_trade",
+                    "instrument_type": "option",
+                    "decision_action": "open_option_strategy",
+                    "rank": 0,
+                    "is_selected": True,
+                }
+            ],
+        },
+        "risk_context": {"status": "approved", "approved_weight": 0.02},
+        "manual_request_context": {
+            "manual_request_id": "request-1",
+            "manual_request_mode": "paper_trade_eligible",
+        },
+    }
+
+    response = run_trading_live_preopen_order_smoke._smoke_agent_runner(
+        f"Ticker: QQQ\nInput JSON:\n{json.dumps(payload)}",
+        "gpt-5-mini",
+    )
+
+    assert response["content"]["decision"] == "open_option_strategy"
+    assert response["content"]["instrument_type"] == "option"
+    assert response["content"]["target_weight"] == 0.02
+
+
 def test_extract_input_payload_ignores_prompt_text_after_json():
     payload = {"ticker": "NVDA", "candidate_context": {"strategy_id": "relative_strength_rotation_v1"}}
 
@@ -136,6 +197,7 @@ def test_smoke_strategy_pipeline_forces_actionable_trade_for_target_ticker():
     result = run_trading_live_preopen_order_smoke._SmokeStrategyPipeline(
         wrapped=_Wrapped(),
         target_ticker="NVDA",
+        target_instrument="stock",
     ).run(
         snapshots=(),
         decision_time=now,
@@ -150,9 +212,10 @@ def test_main_prints_json_report(monkeypatch, capsys):
     monkeypatch.setattr(
         run_trading_live_preopen_order_smoke,
         "run_smoke",
-        lambda *, ticker, execute_paper_orders: {
+        lambda *, ticker, instrument, execute_paper_orders: {
             "status": "passed",
             "ticker": ticker,
+            "instrument": instrument,
             "runtime": {"execution": {"mode": "execute" if execute_paper_orders else "dry_run"}},
         },
     )
@@ -178,8 +241,34 @@ def test_resolve_smoke_status_treats_dry_run_decision_generation_as_passed():
 
     status = run_trading_live_preopen_order_smoke._resolve_smoke_status(
         runtime=runtime,
+        instrument="stock",
         execute_paper_orders=False,
         order=None,
+        option_order=None,
+    )
+
+    assert status == "passed"
+
+
+def test_resolve_smoke_status_treats_option_execution_as_passed():
+    runtime = {
+        "summary": {
+            "risk_decision_count": 1,
+            "trading_decision_count": 1,
+        },
+        "execution": {
+            "mode": "execute",
+            "orders_submitted": 0,
+            "option_orders_submitted": 1,
+        },
+    }
+
+    status = run_trading_live_preopen_order_smoke._resolve_smoke_status(
+        runtime=runtime,
+        instrument="option",
+        execute_paper_orders=True,
+        order=None,
+        option_order=object(),
     )
 
     assert status == "passed"

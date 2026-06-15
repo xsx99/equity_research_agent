@@ -36,6 +36,7 @@ def build_live_intraday_refresh_dependencies(session: Any | None = None) -> Live
 
     from src.agents.prompt_registry import PromptRegistry
     from src.agents.trading import _default_agent_runner
+    from src.trading.brokers.paper_option import PaperOptionBroker
     from src.trading.brokers.paper_stock import PaperStockBroker
     from src.trading.repositories.source_sqlalchemy import SQLAlchemySignalSourceRepository
     from src.trading.repositories.sqlalchemy import SqlAlchemyTradingRepository
@@ -46,6 +47,7 @@ def build_live_intraday_refresh_dependencies(session: Any | None = None) -> Live
     trading_repository = SqlAlchemyTradingRepository(session)
     source_repository = SQLAlchemySignalSourceRepository(session)
     broker = PaperStockBroker()
+    option_broker = PaperOptionBroker()
     return LiveIntradayRefreshDependencies(
         scope_loader=_RepositoryIntradayScopeLoader(trading_repository),
         baseline_loader=_RepositoryBaselineLoader(trading_repository),
@@ -60,6 +62,7 @@ def build_live_intraday_refresh_dependencies(session: Any | None = None) -> Live
             model_name=app_config.TRADING_MODEL_NAME,
             agent_runner=_default_agent_runner,
             broker=broker,
+            option_broker=option_broker,
         ),
         trading_repository=trading_repository,
         existing_news_dedupe_key_loader=lambda tickers, decision_time: trading_repository.load_existing_news_alert_dedupe_keys(

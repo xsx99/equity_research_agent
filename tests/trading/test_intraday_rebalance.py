@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from src.agents.prompt_registry import PromptRegistry
+from src.trading.brokers.paper_option import PaperOptionBroker, PaperOptionPosition
 from src.trading.brokers.paper_stock import PaperStockBroker
 from src.trading.intraday.rebalance import IntradayRebalancePipeline, IntradayRebalanceRequest
 from src.trading.portfolio.state import PortfolioLedger
@@ -387,6 +388,79 @@ def test_intraday_rebalance_attaches_sector_cluster_generated_hedge_payload(tmp_
     assert repository.risk_decisions[0].generated_hedge_action["risk_source"] == "sector_event_cluster"
 
 
+def test_intraday_rebalance_executes_generated_risk_hedge_overlay_with_reduce(tmp_path):
+    repository = InMemoryTradingRepository()
+    registry = _write_prompt(tmp_path)
+    now = datetime(2026, 6, 2, 15, 30, tzinfo=timezone.utc)
+    ledger = PortfolioLedger(starting_cash_balance=100000.0)
+    ledger.record_stock_execution(
+        ticker="AAPL",
+        quantity=5.0,
+        fill_price=125.0,
+        trade_date=now.date(),
+        strategy_id="relative_strength_rotation_v1",
+        trade_identity="tactical_stock_trade",
+        executed_at=now,
+    )
+    repository.replace_paper_positions(tuple(ledger.positions.values()))
+    intent = PortfolioRiskIntentRecord.create(
+        decision_time=now,
+        risk_window="1-5d",
+        aggregate_risk_state="event_cluster_risk",
+        hedge_actions=(
+            HedgeActionRecord(
+                action="open_hedge",
+                risk_source="sector_event_cluster",
+                severity="high",
+                target_underlier="SMH",
+                target_exposure_type="sector",
+                coverage_ratio=0.5,
+                reason_code="sector_event_cluster_overlay",
+                metadata_json={"sector": "Semiconductors"},
+            ),
+        ),
+    )
+    broker = PaperStockBroker(api_key="key", secret_key="secret", client=_CapturingClient(), now=lambda: now)
+    pipeline = IntradayRebalancePipeline(
+        repository=repository,
+        prompt_registry=registry,
+        model_name="gpt-5-mini",
+        agent_runner=lambda prompt, model: {
+            "content": {
+                "ticker": "AAPL",
+                "action": "reduce",
+                "thesis": "Trim while the cluster alert is active.",
+                "confidence": 0.79,
+                "target_weight": 0.0,
+                "max_loss_pct": 0.02,
+                "urgency": "high",
+                "rationale": ["cluster_risk"],
+                "risk_checks": ["liquidity_ok"],
+                "schema_version": "v1",
+                "generated_at": "2026-06-02T15:30:00+00:00",
+            }
+        },
+        broker=broker,
+        option_broker=PaperOptionBroker(now=lambda: now),
+    )
+
+    result = pipeline.run(
+        rebalance_requests=(_request(existing_position=True, allow_open_new=False),),
+        portfolio_context=ledger.build_portfolio_context(as_of=now),
+        risk_appetite="balanced",
+        portfolio_risk_intent=intent,
+        trade_date=now,
+        execute_approved=True,
+    )
+
+    assert result.decisions[0].action == "reduce"
+    assert result.execution_summary == {"orders_submitted": 1, "option_orders_submitted": 1}
+    assert len(repository.paper_orders) == 1
+    assert len(repository.paper_option_orders) == 1
+    assert repository.paper_option_orders[0].trade_identity == "risk_hedge_overlay"
+    assert len(repository.risk_hedge_decisions) == 1
+
+
 def test_intraday_rebalance_attaches_close_generated_hedge_payload(tmp_path):
     repository = InMemoryTradingRepository()
     registry = _write_prompt(tmp_path)
@@ -547,3 +621,126 @@ def test_intraday_rebalance_can_emit_roll_option_strategy_for_event_risk(tmp_pat
     assert result.decisions[0].action == "hold"
     assert result.decisions[0].status == "blocked"
     assert result.decisions[0].reason_code == "event_risk_blocked"
+
+
+def test_intraday_rebalance_pipeline_executes_close_option_strategy_for_existing_position(tmp_path):
+    repository = InMemoryTradingRepository()
+    registry = _write_prompt(tmp_path)
+    now = datetime(2026, 6, 2, 15, 30, tzinfo=timezone.utc)
+    repository.save_paper_option_position(
+        PaperOptionPosition(
+            paper_option_position_id="qqq-open-position",
+            option_strategy_decision_id="qqq-option-strategy",
+            ticker="QQQ",
+            strategy_id="risk_manager_hedge_overlay_v1",
+            option_strategy_type="long_put",
+            trade_identity="risk_hedge_overlay",
+            quantity=1,
+            opened_at=now,
+            updated_at=now,
+            status="open",
+            expiry=now.date(),
+            max_loss=320.0,
+            margin_requirement=320.0,
+            buying_power_effect=320.0,
+            assignment_notional=50000.0,
+            metadata_json={"protected_notional": 25000.0},
+        )
+    )
+    ledger = PortfolioLedger(starting_cash_balance=100000.0)
+    broker = PaperStockBroker(api_key="key", secret_key="secret", client=_CapturingClient(), now=lambda: now)
+    pipeline = IntradayRebalancePipeline(
+        repository=repository,
+        prompt_registry=registry,
+        model_name="gpt-5-mini",
+        agent_runner=lambda prompt, model: {
+            "content": {
+                "ticker": "QQQ",
+                "action": "close_option_strategy",
+                "thesis": "Close the hedge after the macro trigger normalized.",
+                "confidence": 0.81,
+                "target_weight": 0.0,
+                "max_loss_pct": 0.02,
+                "urgency": "high",
+                "rationale": ["macro_risk_normalized"],
+                "risk_checks": ["structure_ok"],
+                "schema_version": "v1",
+                "generated_at": "2026-06-02T15:30:00+00:00",
+            }
+        },
+        broker=broker,
+        option_broker=PaperOptionBroker(now=lambda: now),
+    )
+
+    result = pipeline.run(
+        rebalance_requests=(
+            _request(
+                existing_position=True,
+                allow_open_new=False,
+                ticker="QQQ",
+                trade_identity="risk_hedge_overlay",
+                instrument_type="option",
+                strategy_id="risk_manager_hedge_overlay_v1",
+                expression_bucket_id="defined_risk_directional_option",
+                current_price=320.0,
+                signal_freshness={"technical": "fresh", "option_chain": "fresh"},
+                metadata_json={
+                    "paper_option_position_id": "qqq-open-position",
+                    "option_strategy_type": "long_put",
+                    "option_mark_price": 320.0,
+                    "option_strategy": {
+                        "option_strategy_decision_id": "qqq-option-strategy",
+                        "option_strategy_type": "long_put",
+                        "status": "ready",
+                        "underlying_price": 500.0,
+                        "net_debit_or_credit": 3.2,
+                        "max_loss": 320.0,
+                        "max_profit": None,
+                        "breakevens": [471.8],
+                        "margin_requirement": 320.0,
+                        "buying_power_effect": 320.0,
+                        "assignment_notional": 50000.0,
+                        "portfolio_delta": -0.31,
+                        "portfolio_gamma": 0.02,
+                        "portfolio_theta": -0.03,
+                        "portfolio_vega": 0.07,
+                        "event_through_expiry": False,
+                        "strategy_pairing_method": "single_leg",
+                        "assignment_plan": None,
+                        "metadata_json": {
+                            "legs": [
+                                    {
+                                        "option_type": "put",
+                                        "side": "buy",
+                                        "quantity": 1,
+                                        "strike": 475.0,
+                                    "expiry": "2026-06-09",
+                                    "dte": 7,
+                                        "delta": -0.31,
+                                        "gamma": 0.02,
+                                        "theta": -0.03,
+                                        "vega": 0.07,
+                                        "iv_rank": 0.41,
+                                        "bid": 3.1,
+                                        "ask": 3.3,
+                                        "mid": 3.2,
+                                        "chosen_price": 3.2,
+                                    }
+                                ]
+                            },
+                    },
+                },
+            ),
+        ),
+        portfolio_context=ledger.build_portfolio_context(as_of=now),
+        risk_appetite="balanced",
+        trade_date=now,
+        execute_approved=True,
+    )
+
+    assert result.decisions[0].action == "close_option_strategy"
+    assert result.decisions[0].status == "approved"
+    assert result.execution_summary == {"orders_submitted": 0, "option_orders_submitted": 1}
+    assert len(repository.paper_option_orders) == 1
+    assert repository.paper_option_orders[0].action == "close_option_strategy"
+    assert any(position.status == "closed" for position in repository.paper_option_positions)

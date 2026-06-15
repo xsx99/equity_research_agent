@@ -26,12 +26,14 @@ def run_live_intraday_refresh_once(
     *,
     dependencies: LiveIntradayRefreshDependencies | None = None,
     execute_paper_orders: bool = False,
+    execute_paper_option_orders: bool = False,
     now: Callable[[], datetime] | None = None,
 ) -> dict[str, object]:
     """Execute one live intraday refresh run with injected dependencies."""
     return run_intraday_refresh_once(
         dependencies=dependencies,
         execute_paper_orders=execute_paper_orders,
+        execute_paper_option_orders=execute_paper_option_orders,
         now=now,
     )
 
@@ -40,6 +42,7 @@ def run_intraday_refresh_once(
     *,
     dependencies: LiveIntradayRefreshDependencies | None = None,
     execute_paper_orders: bool = False,
+    execute_paper_option_orders: bool = False,
     now: Callable[[], datetime] | None = None,
 ) -> dict[str, object]:
     """Execute one live intraday refresh run with injected dependencies."""
@@ -48,6 +51,7 @@ def run_intraday_refresh_once(
             dependencies=dependencies,
             now=now,
             execute_paper_orders=execute_paper_orders,
+            execute_paper_option_orders=execute_paper_option_orders,
         ).run()
 
     from src.db.connection import get_session
@@ -57,6 +61,7 @@ def run_intraday_refresh_once(
             dependencies=build_live_intraday_refresh_dependencies(session),
             now=now,
             execute_paper_orders=execute_paper_orders,
+            execute_paper_option_orders=execute_paper_option_orders,
         ).run()
 
 

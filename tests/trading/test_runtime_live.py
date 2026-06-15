@@ -166,7 +166,12 @@ class _PaperExecutionWorkflow:
         return self.result
 
 
-def _build_runtime(*, execute_paper_orders: bool) -> tuple[LivePreopenRuntime, _CallRecorder]:
+def _build_runtime(
+    *,
+    execute_paper_orders: bool,
+    execute_paper_option_orders: bool = False,
+    execution_result: object | None = None,
+) -> tuple[LivePreopenRuntime, _CallRecorder]:
     recorder = _CallRecorder()
     universe_result = SimpleNamespace(included_symbols=("AAPL", "MSFT"))
     strategy_result = SimpleNamespace(
@@ -176,7 +181,7 @@ def _build_runtime(*, execute_paper_orders: bool) -> tuple[LivePreopenRuntime, _
     portfolio_result = SimpleNamespace(portfolio_context=SimpleNamespace(account_equity=100000.0))
     risk_result = SimpleNamespace(risk_decisions=(SimpleNamespace(ticker="AAPL"),))
     decision_result = SimpleNamespace(decisions=(SimpleNamespace(ticker="AAPL", decision="enter_long"),))
-    execution_result = SimpleNamespace(paper_orders=(SimpleNamespace(ticker="AAPL"),))
+    execution_result = execution_result or SimpleNamespace(paper_orders=(SimpleNamespace(ticker="AAPL"),))
     dependencies = LivePreopenDependencies(
         universe_filter_loader=_UniverseFilterLoader(
             recorder,
@@ -195,6 +200,7 @@ def _build_runtime(*, execute_paper_orders: bool) -> tuple[LivePreopenRuntime, _
         dependencies=dependencies,
         now=lambda: datetime(2026, 6, 3, 12, 45, tzinfo=timezone.utc),
         execute_paper_orders=execute_paper_orders,
+        execute_paper_option_orders=execute_paper_option_orders,
     )
     return runtime, recorder
 
@@ -230,6 +236,40 @@ def test_live_preopen_runtime_executes_paper_orders_only_when_enabled():
     assert result["execution"]["orders_submitted"] == 1
 
 
+def test_live_preopen_runtime_requires_paper_execution_when_option_execution_enabled():
+    runtime, _recorder = _build_runtime(
+        execute_paper_orders=False,
+        execute_paper_option_orders=True,
+    )
+
+    try:
+        runtime.run()
+    except ValueError as exc:
+        assert str(exc) == "option_execution_requires_paper_order_execution"
+    else:
+        raise AssertionError("expected option execution policy validation to fail")
+
+
+def test_live_preopen_runtime_reports_option_orders_separately_when_enabled():
+    runtime, recorder = _build_runtime(
+        execute_paper_orders=True,
+        execute_paper_option_orders=True,
+        execution_result=SimpleNamespace(
+            paper_orders=(SimpleNamespace(ticker="AAPL"),),
+            paper_option_orders=(SimpleNamespace(ticker="AAPL", option_symbol="AAPL240621C00200000"),),
+        ),
+    )
+
+    result = runtime.run()
+
+    assert recorder.calls[-1] == "paper_execution"
+    assert result["execution"] == {
+        "mode": "execute",
+        "orders_submitted": 1,
+        "option_orders_submitted": 1,
+    }
+
+
 def test_run_live_preopen_once_builds_default_dependencies_when_not_injected(monkeypatch):
     runtime_instance, _recorder = _build_runtime(execute_paper_orders=False)
 
@@ -257,6 +297,9 @@ def test_build_live_preopen_dependencies_wires_fallback_reapproval_into_paper_ex
         pass
 
     class _Broker:
+        pass
+
+    class _OptionBroker:
         pass
 
     class _ConfigResolver:
@@ -303,6 +346,7 @@ def test_build_live_preopen_dependencies_wires_fallback_reapproval_into_paper_ex
     monkeypatch.setattr("src.agents.trading._default_agent_runner", "runner")
     monkeypatch.setattr("src.providers.market_data.AlpacaMarketDataProvider", lambda: "market-provider")
     monkeypatch.setattr("src.trading.brokers.paper_stock.PaperStockBroker", lambda: _Broker())
+    monkeypatch.setattr("src.trading.brokers.paper_option.PaperOptionBroker", lambda: _OptionBroker())
     monkeypatch.setattr("src.trading.data_sources.live_universe.LiveUniverseProvider", lambda **kwargs: ("live-universe-provider", kwargs))
     monkeypatch.setattr("src.trading.manual_review.sqlalchemy.SQLAlchemyManualTickerRequestService", lambda session: _ManualService())
     monkeypatch.setattr("src.trading.repositories.source_sqlalchemy.SQLAlchemySignalSourceRepository", lambda session: _SourceRepo())
@@ -327,6 +371,7 @@ def test_build_live_preopen_dependencies_wires_fallback_reapproval_into_paper_ex
     assert captured["paper_execution_kwargs"]["position_sizer"].__class__ is _PositionSizer
     assert captured["paper_execution_kwargs"]["risk_manager"].__class__ is _RiskManager
     assert captured["paper_execution_kwargs"]["option_risk_manager"].__class__ is _OptionRiskManager
+    assert captured["paper_execution_kwargs"]["option_broker"].__class__ is _OptionBroker
 
 
 def test_configured_live_universe_scan_pipeline_prefers_targeted_symbols_for_manual_scope():
@@ -471,9 +516,10 @@ def test_build_runtime_report_produces_normalized_contract():
 
 
 def test_build_execution_report_supports_dry_run_mode():
-    assert build_execution_report(mode="dry_run", orders_submitted=0) == {
+    assert build_execution_report(mode="dry_run", orders_submitted=0, option_orders_submitted=0) == {
         "mode": "dry_run",
         "orders_submitted": 0,
+        "option_orders_submitted": 0,
     }
 
 

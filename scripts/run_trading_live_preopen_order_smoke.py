@@ -19,7 +19,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.agents.prompt_registry import PromptRegistry
 from src.core import config as app_config  # noqa: F401
 from src.db.connection import SessionLocal
-from src.db.models.trading import ManualTickerRequest, PaperExecution, PaperOrder, TradingDecision
+from src.db.models.trading import (
+    ManualTickerRequest,
+    PaperExecution,
+    PaperOptionExecution,
+    PaperOptionOrder,
+    PaperOrder,
+    TradingDecision,
+)
 from src.trading.runtime.preopen import LivePreopenRuntime, build_live_preopen_dependencies
 from src.trading.strategies.classifier import TradeClassificationRecord
 from src.trading.workflows.strategy_scoring import StrategyPipelineResult
@@ -29,13 +36,15 @@ from src.trading.workflows.trading_decision import TradingDecisionPipeline
 def run_smoke(
     *,
     ticker: str,
+    instrument: str = "stock",
     execute_paper_orders: bool = True,
     as_of: datetime | None = None,
 ) -> dict[str, Any]:
     now = as_of or datetime.now(timezone.utc)
     ticker = ticker.strip().upper()
+    instrument = instrument.strip().lower()
     request_id = uuid.uuid4()
-    reason = f"codex live preopen order smoke:{ticker}"
+    reason = f"codex live preopen order smoke:{instrument}:{ticker}"
 
     with SessionLocal() as session:
         session.add(
@@ -67,10 +76,12 @@ def run_smoke(
                 strategy_pipeline=_SmokeStrategyPipeline(
                     wrapped=dependencies.strategy_pipeline,
                     target_ticker=ticker,
+                    target_instrument=instrument,
                 ),
                 risk_workflow=_SmokeRiskWorkflow(
                     wrapped=dependencies.risk_workflow,
                     target_ticker=ticker,
+                    target_instrument=instrument,
                 ),
                 trading_decision_pipeline=TradingDecisionPipeline(
                     repository=dependencies.trading_repository,
@@ -84,6 +95,7 @@ def run_smoke(
                 dependencies=dependencies,
                 now=lambda: now,
                 execute_paper_orders=execute_paper_orders,
+                execute_paper_option_orders=execute_paper_orders and instrument == "option",
             ).run()
             session.commit()
 
@@ -94,34 +106,56 @@ def run_smoke(
                 .first()
             )
             order = None
+            option_order = None
             execution = None
+            option_execution = None
             if decision is not None:
-                order = (
-                    session.query(PaperOrder)
-                    .filter_by(trading_decision_id=decision.trading_decision_id)
-                    .order_by(PaperOrder.created_at.desc())
-                    .first()
-                )
-                if order is not None:
-                    execution = (
-                        session.query(PaperExecution)
-                        .filter_by(paper_order_id=order.paper_order_id)
-                        .order_by(PaperExecution.executed_at.desc())
+                if decision.instrument_type == "option":
+                    option_order = (
+                        session.query(PaperOptionOrder)
+                        .filter_by(trading_decision_id=decision.trading_decision_id)
+                        .order_by(PaperOptionOrder.created_at.desc())
                         .first()
                     )
+                    if option_order is not None:
+                        option_execution = (
+                            session.query(PaperOptionExecution)
+                            .filter_by(paper_option_order_id=option_order.paper_option_order_id)
+                            .order_by(PaperOptionExecution.executed_at.desc())
+                            .first()
+                        )
+                else:
+                    order = (
+                        session.query(PaperOrder)
+                        .filter_by(trading_decision_id=decision.trading_decision_id)
+                        .order_by(PaperOrder.created_at.desc())
+                        .first()
+                    )
+                    if order is not None:
+                        execution = (
+                            session.query(PaperExecution)
+                            .filter_by(paper_order_id=order.paper_order_id)
+                            .order_by(PaperExecution.executed_at.desc())
+                            .first()
+                        )
             status = _resolve_smoke_status(
                 runtime=result,
+                instrument=instrument,
                 execute_paper_orders=execute_paper_orders,
                 order=order,
+                option_order=option_order,
             )
             return {
                 "status": status,
                 "ticker": ticker,
+                "instrument": instrument,
                 "as_of": now.isoformat(),
                 "runtime": result,
                 "decision": _decision_json(decision),
                 "order": _paper_order_json(order),
+                "option_order": _paper_option_order_json(option_order),
                 "execution": _paper_execution_json(execution),
+                "option_execution": _paper_option_execution_json(option_execution),
             }
         finally:
             session.rollback()
@@ -133,9 +167,10 @@ def run_smoke(
 
 
 class _SmokeStrategyPipeline:
-    def __init__(self, *, wrapped: Any, target_ticker: str) -> None:
+    def __init__(self, *, wrapped: Any, target_ticker: str, target_instrument: str) -> None:
         self.wrapped = wrapped
         self.target_ticker = target_ticker
+        self.target_instrument = target_instrument
 
     def run(self, *, snapshots: tuple[object, ...], decision_time: datetime) -> StrategyPipelineResult:
         result = self.wrapped.run(snapshots=snapshots, decision_time=decision_time)
@@ -167,9 +202,17 @@ class _SmokeStrategyPipeline:
             ticker=candidate.ticker,
             selected_strategy_id=candidate.strategy_id,
             selected_strategy_version=candidate.strategy_version,
-            expression_bucket_id="long_stock",
+            expression_bucket_id=(
+                "defined_risk_directional_option"
+                if self.target_instrument == "option"
+                else "long_stock"
+            ),
             expression_bucket_version="v1",
-            trade_identity="tactical_stock_trade",
+            trade_identity=(
+                "tactical_option_trade"
+                if self.target_instrument == "option"
+                else "tactical_stock_trade"
+            ),
             watch_type=None,
             direction=candidate.direction,
             intended_horizon=candidate.typical_horizon,
@@ -185,6 +228,12 @@ class _SmokeStrategyPipeline:
                 "selection_reason": candidate.selection_reason,
                 "benchmark_context": candidate.benchmark_context,
                 "smoke_override": True,
+                "selected_expression_bucket_id": (
+                    "defined_risk_directional_option"
+                    if self.target_instrument == "option"
+                    else "long_stock"
+                ),
+                "fallback_expression_bucket_ids": [],
             },
             decision_time=candidate.decision_time,
         )
@@ -221,9 +270,10 @@ class _ScopedManualRequestService:
 
 
 class _SmokeRiskWorkflow:
-    def __init__(self, *, wrapped: Any, target_ticker: str) -> None:
+    def __init__(self, *, wrapped: Any, target_ticker: str, target_instrument: str) -> None:
         self.wrapped = wrapped
         self.target_ticker = target_ticker
+        self.target_instrument = target_instrument
 
     def run(
         self,
@@ -244,7 +294,11 @@ class _SmokeRiskWorkflow:
             if getattr(decision, "ticker", None) != self.target_ticker:
                 normalized.append(decision)
                 continue
-            quantity = max(1.0, float(int(round(float(decision.approved_quantity or 0.0))) or 1))
+            quantity = (
+                max(1.0, float(int(round(float(decision.approved_quantity or 0.0))) or 1))
+                if self.target_instrument == "option"
+                else max(1.0, float(int(round(float(decision.approved_quantity or 0.0))) or 1))
+            )
             fill_price = float(decision.approved_notional or 0.0) / float(decision.approved_quantity or 1.0)
             approved_notional = quantity * fill_price if fill_price > 0 else float(decision.approved_notional or 0.0)
             normalized.append(
@@ -276,38 +330,53 @@ def _smoke_agent_runner(prompt: str, model_name: str) -> dict[str, Any]:
     candidate_score = float(payload.get("candidate_score") or candidate_context.get("candidate_score") or 0.0)
     benchmark_context = dict(payload.get("benchmark_context") or candidate_context.get("benchmark_context") or {})
     should_enter = (
-        trade_identity == "tactical_stock_trade"
-        and instrument_type == "stock"
-        and manual_request_mode == "paper_trade_eligible"
-        and risk_context.get("status") == "approved"
+        manual_request_mode == "paper_trade_eligible" and risk_context.get("status") == "approved"
     )
+    should_enter_stock = should_enter and trade_identity == "tactical_stock_trade" and instrument_type == "stock"
+    should_enter_option = should_enter and trade_identity == "tactical_option_trade"
     target_weight = float(risk_context.get("approved_weight") or 0.0)
     return {
         "content": {
             "ticker": payload["ticker"],
-            "decision": "enter_long" if should_enter else "no_trade",
+            "decision": (
+                "open_option_strategy"
+                if should_enter_option
+                else ("enter_long" if should_enter_stock else "no_trade")
+            ),
             "strategy_id": strategy_id,
             "expression_bucket_id": expression_bucket_id,
             "trade_identity": trade_identity,
-            "instrument_type": instrument_type,
+            "instrument_type": "option" if should_enter_option else instrument_type,
             "selection_source": selection_source,
             "manual_request_id": manual_request_id,
             "confidence": candidate_score,
             "confidence_basis": {"smoke_mode": True},
             "benchmark_context": benchmark_context,
-            "target_weight": target_weight if should_enter else 0.0,
-            "max_loss_pct": 0.02 if should_enter else 0.0,
-            "time_horizon": "1d-5d" if should_enter else "monitor_only",
-            "entry_plan": "market_open_fractional_buy" if should_enter else "do_not_enter",
-            "exit_plan": "risk_manager_stop_or_manual_exit" if should_enter else "no_position_to_exit",
+            "target_weight": target_weight if (should_enter_stock or should_enter_option) else 0.0,
+            "max_loss_pct": 0.02 if (should_enter_stock or should_enter_option) else 0.0,
+            "time_horizon": "1d-5d" if should_enter_stock else ("1w-4w" if should_enter_option else "monitor_only"),
+            "entry_plan": (
+                "market_open_fractional_buy"
+                if should_enter_stock
+                else ("open_defined_risk_option" if should_enter_option else "do_not_enter")
+            ),
+            "exit_plan": (
+                "risk_manager_stop_or_manual_exit"
+                if should_enter_stock
+                else ("close_or_roll_before_event_risk" if should_enter_option else "no_position_to_exit")
+            ),
             "thesis": (
                 "Smoke override produced a minimal executable long decision."
-                if should_enter
-                else "Smoke override preserved a no-trade outcome."
+                if should_enter_stock
+                else (
+                    "Smoke override produced a minimal executable option decision."
+                    if should_enter_option
+                    else "Smoke override preserved a no-trade outcome."
+                )
             ),
             "key_signals": ["smoke_override"],
             "counterarguments": ["smoke_only"],
-            "risk_checks": ["risk_status_approved"] if should_enter else ["no_trade_path"],
+            "risk_checks": ["risk_status_approved"] if (should_enter_stock or should_enter_option) else ["no_trade_path"],
             "invalidators": ["smoke_only"],
             "learning_factors_used": [],
             "schema_version": "v1",
@@ -331,10 +400,23 @@ def _extract_input_payload(prompt: str) -> dict[str, Any]:
     return parsed
 
 
-def _resolve_smoke_status(*, runtime: dict[str, Any], execute_paper_orders: bool, order: Any) -> str:
+def _resolve_smoke_status(
+    *,
+    runtime: dict[str, Any],
+    instrument: str,
+    execute_paper_orders: bool,
+    order: Any,
+    option_order: Any,
+) -> str:
     execution = dict(runtime.get("execution") or {})
     summary = dict(runtime.get("summary") or {})
     if execute_paper_orders:
+        if instrument == "option":
+            return (
+                "passed"
+                if execution.get("option_orders_submitted", 0) >= 1 and option_order is not None
+                else "failed"
+            )
         return "passed" if execution.get("orders_submitted", 0) >= 1 and order is not None else "failed"
     return (
         "passed"
@@ -383,9 +465,35 @@ def _paper_execution_json(execution: Any) -> dict[str, Any] | None:
     }
 
 
+def _paper_option_order_json(order: Any) -> dict[str, Any] | None:
+    if order is None:
+        return None
+    return {
+        "paper_option_order_id": str(order.paper_option_order_id),
+        "ticker": order.ticker,
+        "status": order.status,
+        "quantity": int(order.quantity),
+        "option_strategy_type": order.option_strategy_type,
+        "rejection_reason": order.rejection_reason,
+    }
+
+
+def _paper_option_execution_json(execution: Any) -> dict[str, Any] | None:
+    if execution is None:
+        return None
+    return {
+        "paper_option_execution_id": str(execution.paper_option_execution_id),
+        "ticker": execution.ticker,
+        "quantity": int(execution.quantity),
+        "fill_price": float(execution.fill_price),
+        "executed_at": execution.executed_at.isoformat(),
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ticker", default="NVDA")
+    parser.add_argument("--instrument", choices=("stock", "option"), default="stock")
     parser.add_argument("--env-file", help="Optional dotenv file to load before constructing live dependencies.")
     parser.add_argument("--dry-run", action="store_true", help="Run the smoke without actually submitting paper orders.")
     parser.add_argument("--json", action="store_true")
@@ -396,6 +504,7 @@ def main(argv: list[str] | None = None) -> int:
 
     report = run_smoke(
         ticker=args.ticker,
+        instrument=args.instrument,
         execute_paper_orders=not args.dry_run,
     )
     if args.json:

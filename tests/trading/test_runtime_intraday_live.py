@@ -12,6 +12,7 @@ from src.trading.runtime.intraday_refresh import (
     LiveIntradayRefreshRuntime,
     run_live_intraday_refresh_once,
 )
+from src.trading.runtime.intraday_refresh_dependencies import build_live_intraday_refresh_dependencies
 from src.trading.runtime.lookahead_risk import LookaheadRiskWorkflowHelper
 from src.trading.signals import SignalSnapshotResult
 from src.trading.signals.sources import EventNewsItemRecord, SourceRecord
@@ -177,8 +178,10 @@ class _RebalancePipeline:
     ) -> object:
         assert portfolio_context is not None
         assert risk_appetite == "balanced"
-        assert trade_date is None
-        assert execute_approved is False
+        if execute_approved:
+            assert trade_date is not None
+        else:
+            assert trade_date is None
         self.last_requests = rebalance_requests
         self.last_portfolio_risk_intent = portfolio_risk_intent
         self.recorder.record("rebalance")
@@ -411,10 +414,44 @@ def test_live_intraday_refresh_runtime_runs_live_intraday_chain_in_dry_run_mode(
     assert result["summary"]["ticker_count"] == 2
     assert result["summary"]["news_alert_count"] == 1
     assert result["summary"]["intraday_rebalance_decision_count"] == 1
-    assert result["execution"] == {"mode": "dry_run", "orders_submitted": 0}
+    assert result["execution"] == {
+        "mode": "dry_run",
+        "orders_submitted": 0,
+        "option_orders_submitted": 0,
+    }
     assert trading_repository.saved_scan is not None
     assert len(trading_repository.saved_snapshots) == 2
     assert len(trading_repository.saved_alerts) == 1
+
+
+def test_live_intraday_refresh_runtime_requires_paper_execution_when_option_execution_enabled():
+    runtime, _recorder, _rebalance_pipeline, _trading_repository = _build_runtime()
+    runtime.execute_paper_option_orders = True
+
+    try:
+        runtime.run()
+    except ValueError as exc:
+        assert str(exc) == "option_execution_requires_paper_order_execution"
+    else:
+        raise AssertionError("expected option execution policy validation to fail")
+
+
+def test_live_intraday_refresh_runtime_reports_option_orders_separately_when_enabled():
+    runtime, _recorder, rebalance_pipeline, _trading_repository = _build_runtime()
+    runtime.execute_paper_orders = True
+    runtime.execute_paper_option_orders = True
+    rebalance_pipeline.result = SimpleNamespace(
+        decisions=(SimpleNamespace(ticker="AAPL"),),
+        execution_summary={"orders_submitted": 1, "option_orders_submitted": 1},
+    )
+
+    result = runtime.run()
+
+    assert result["execution"] == {
+        "mode": "execute",
+        "orders_submitted": 1,
+        "option_orders_submitted": 1,
+    }
 
 
 def test_live_intraday_refresh_runtime_passes_portfolio_risk_intent_into_rebalance_pipeline():
@@ -846,6 +883,16 @@ def test_live_intraday_refresh_runtime_refreshes_open_option_position_marks_and_
                         candidate_score=0.0,
                         target_weight=0.0,
                         allow_open_new=False,
+                        metadata_json={
+                            "paper_option_position_id": "qqq-open-position",
+                            "option_strategy_type": "long_put",
+                            "event_through_expiry": True,
+                            "option_strategy": {
+                                "option_strategy_type": "long_put",
+                                "underlying_price": 500.0,
+                                "net_debit_or_credit": 3.2,
+                            },
+                        },
                     )
                 },
             ),
@@ -876,6 +923,8 @@ def test_live_intraday_refresh_runtime_refreshes_open_option_position_marks_and_
     assert request.existing_position is True
     assert request.current_price == 320.0
     assert request.signal_freshness["option_chain"] == "fresh"
+    assert request.metadata_json["paper_option_position_id"] == "qqq-open-position"
+    assert request.metadata_json["option_strategy"]["option_strategy_type"] == "long_put"
     assert request.metadata_json["option_mark_price"] == 320.0
 
 
@@ -893,7 +942,72 @@ def test_run_live_intraday_refresh_once_builds_default_dependencies_when_not_inj
     assert result["phase"] == "intraday_refresh"
 
 
+def test_run_live_intraday_refresh_once_builds_default_dependencies_for_option_execution(monkeypatch):
+    runtime, _recorder, _pipeline, _repository = _build_runtime()
+
+    monkeypatch.setattr(
+        "src.trading.runtime.intraday_refresh.build_live_intraday_refresh_dependencies",
+        lambda _session: runtime.dependencies,
+    )
+
+    result = run_live_intraday_refresh_once(
+        now=lambda: datetime(2026, 6, 4, 16, 0, tzinfo=timezone.utc),
+        execute_paper_orders=True,
+        execute_paper_option_orders=True,
+    )
+
+    assert result["status"] == "passed"
+    assert result["execution"]["mode"] == "execute"
+
+
 def test_runtime_dispatch_routes_intraday_refresh_to_live_runtime():
     from src.trading.runtime.intraday_refresh import run_live_intraday_refresh_once as live_handler
 
     assert get_job_phase_handler("intraday_refresh") is live_handler
+
+
+def test_build_live_intraday_refresh_dependencies_injects_option_broker_into_rebalance_pipeline(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class _Repo:
+        pass
+
+    class _SourceRepo:
+        pass
+
+    class _Broker:
+        pass
+
+    class _OptionBroker:
+        pass
+
+    class _PromptRegistry:
+        @staticmethod
+        def get_default():
+            return "prompt-registry"
+
+    class _PortfolioSyncWorkflow:
+        def __init__(self, **kwargs):
+            captured["portfolio_sync_kwargs"] = kwargs
+
+    class _RebalancePipeline:
+        def __init__(self, **kwargs):
+            captured["rebalance_kwargs"] = kwargs
+
+    monkeypatch.setattr("src.agents.prompt_registry.PromptRegistry", _PromptRegistry)
+    monkeypatch.setattr("src.agents.trading._default_agent_runner", "runner")
+    monkeypatch.setattr("src.trading.brokers.paper_stock.PaperStockBroker", lambda: _Broker())
+    monkeypatch.setattr("src.trading.brokers.paper_option.PaperOptionBroker", lambda: _OptionBroker())
+    monkeypatch.setattr("src.trading.repositories.source_sqlalchemy.SQLAlchemySignalSourceRepository", lambda session: _SourceRepo())
+    monkeypatch.setattr("src.trading.repositories.sqlalchemy.SqlAlchemyTradingRepository", lambda session: _Repo())
+    monkeypatch.setattr("src.trading.runtime.lookahead_risk.LookaheadRiskWorkflowHelper", lambda **kwargs: "lookahead-helper")
+    monkeypatch.setattr("src.trading.risk.PortfolioHedgePlanner", lambda: "hedge-planner")
+    monkeypatch.setattr("src.trading.workflows.portfolio_sync.BrokerPortfolioSyncWorkflow", _PortfolioSyncWorkflow)
+    monkeypatch.setattr("src.trading.runtime.intraday_refresh_dependencies.IntradayRebalancePipeline", _RebalancePipeline)
+
+    dependencies = build_live_intraday_refresh_dependencies(session=object())
+
+    assert isinstance(dependencies, LiveIntradayRefreshDependencies)
+    assert captured["portfolio_sync_kwargs"]["broker"].__class__ is _Broker
+    assert captured["rebalance_kwargs"]["broker"].__class__ is _Broker
+    assert captured["rebalance_kwargs"]["option_broker"].__class__ is _OptionBroker

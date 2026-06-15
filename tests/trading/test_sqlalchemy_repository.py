@@ -757,3 +757,81 @@ def test_paper_execution_workflow_persists_into_sqlalchemy_repository():
     assert len(result.paper_orders) == 1
     assert repository.has_paper_execution("execution-1") is True
     assert repository.load_paper_positions()[0].ticker == "AAPL"
+
+
+def test_load_intraday_request_contexts_includes_option_execution_metadata():
+    now = datetime(2026, 6, 4, 16, 0, tzinfo=timezone.utc)
+    session = _FakeSession()
+    repository = SqlAlchemyTradingRepository(session)
+
+    repository.save_trading_decision(
+        TradingDecisionRecord(
+            trading_decision_id="qqq-option-decision",
+            candidate_score_id="qqq-candidate",
+            trade_classification_id="qqq-classification",
+            risk_decision_id="qqq-risk",
+            ticker="QQQ",
+            decision="open_option_strategy",
+            strategy_id="risk_manager_hedge_overlay_v1",
+            strategy_version="v1",
+            expression_bucket_id="defined_risk_directional_option",
+            expression_bucket_version="v1",
+            trade_identity="risk_hedge_overlay",
+            instrument_type="option",
+            selection_source="risk_manager",
+            manual_request_id=None,
+            confidence=0.55,
+            target_weight=0.0,
+            approved_weight=0.0,
+            max_loss_pct=0.02,
+            time_horizon="1w-4w",
+            thesis="Macro hedge remains active.",
+            invalidators=["macro risk normalized"],
+            prompt_template=object(),
+            prompt_run=object(),
+            usage_events=[],
+            decision_time=now,
+            available_for_decision_at=now,
+            metadata_json={
+                "paper_trade_authorized": True,
+                "option_strategy": {
+                    "option_strategy_type": "long_put",
+                    "underlying_price": 500.0,
+                    "net_debit_or_credit": 3.2,
+                },
+            },
+        )
+    )
+    repository.save_paper_option_position(
+        PaperOptionPosition(
+            paper_option_position_id="qqq-open-position",
+            option_strategy_decision_id="qqq-option-strategy",
+            ticker="QQQ",
+            strategy_id="risk_manager_hedge_overlay_v1",
+            option_strategy_type="long_put",
+            trade_identity="risk_hedge_overlay",
+            quantity=1,
+            opened_at=now,
+            updated_at=now,
+            status="open",
+            expiry=now.date(),
+            max_loss=320.0,
+            margin_requirement=320.0,
+            buying_power_effect=320.0,
+            assignment_notional=50000.0,
+            metadata_json={"protected_notional": 25000.0},
+        )
+    )
+
+    expected_position_id = repository.load_paper_option_positions()[0].paper_option_position_id
+
+    context = repository.load_intraday_request_contexts(
+        tickers=("QQQ",),
+        trade_date=now.date(),
+    )["QQQ"]
+
+    assert context.instrument_type == "option"
+    assert context.trade_identity == "risk_hedge_overlay"
+    assert context.metadata_json["option_strategy"]["option_strategy_type"] == "long_put"
+    assert context.metadata_json["option_strategy_type"] == "long_put"
+    assert context.metadata_json["paper_option_position_id"] == expected_position_id
