@@ -83,12 +83,10 @@ def run_smoke(
                     target_ticker=ticker,
                     target_instrument=instrument,
                 ),
-                trading_decision_pipeline=TradingDecisionPipeline(
+                trading_decision_pipeline=_build_smoke_trading_decision_pipeline(
                     repository=dependencies.trading_repository,
-                    prompt_registry=PromptRegistry.get_default(),
+                    source_repository=getattr(dependencies.signal_pipeline, "source_repository", None),
                     manual_request_service=scoped_manual_requests,
-                    model_name=app_config.TRADING_MODEL_NAME,
-                    agent_runner=_smoke_agent_runner,
                 ),
             )
             result = LivePreopenRuntime(
@@ -251,6 +249,22 @@ class _SmokeStrategyPipeline:
             watch_candidates=result.watch_candidates,
             classifications=classifications,
         )
+
+
+def _build_smoke_trading_decision_pipeline(
+    *,
+    repository: Any,
+    source_repository: Any,
+    manual_request_service: Any,
+) -> TradingDecisionPipeline:
+    return TradingDecisionPipeline(
+        repository=repository,
+        source_repository=source_repository,
+        prompt_registry=PromptRegistry.get_default(),
+        manual_request_service=manual_request_service,
+        model_name=app_config.TRADING_MODEL_NAME,
+        agent_runner=_smoke_agent_runner,
+    )
 
 
 class _ScopedManualRequestService:
@@ -470,6 +484,8 @@ def _paper_option_order_json(order: Any) -> dict[str, Any] | None:
         return None
     return {
         "paper_option_order_id": str(order.paper_option_order_id),
+        "broker_order_id": str(order.broker_order_id) if order.broker_order_id is not None else None,
+        "client_order_id": order.client_order_id,
         "ticker": order.ticker,
         "status": order.status,
         "quantity": int(order.quantity),
@@ -483,6 +499,7 @@ def _paper_option_execution_json(execution: Any) -> dict[str, Any] | None:
         return None
     return {
         "paper_option_execution_id": str(execution.paper_option_execution_id),
+        "broker_order_id": str(execution.broker_order_id) if execution.broker_order_id is not None else None,
         "ticker": execution.ticker,
         "quantity": int(execution.quantity),
         "fill_price": float(execution.fill_price),

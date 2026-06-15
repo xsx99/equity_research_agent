@@ -117,8 +117,7 @@ PR 6 adds the first paper-broker and portfolio-state layer after bounded trading
 - ORM models and Alembic schema for `paper_orders`, `paper_executions`, `paper_positions`, and `portfolio_snapshots` now include broker order identifiers and client order identifiers for reconciliation
 - `scripts/run_trading_paper_order_smoke.py` submits a tiny real Alpaca paper order for smoke verification
 - `scripts/run_trading_paper_execution.py` constructs a minimal PR 6 `TradingDecisionRecord`/`RiskDecisionRecord` pair and runs the real `PaperExecutionWorkflow` against Alpaca, including `exit` sells for manual cleanup
-
-It intentionally does not add option execution, assignment-risk handling, or intraday rebalance behavior. Those remain in later PR slices.
+- later option slices now extend that same broker-backed execution model into whitelisted option strategies, assignment-risk gating, and intraday option lifecycle actions rather than keeping them on a separate local simulator path
 
 ## PR 7 Scope
 
@@ -134,7 +133,7 @@ PR 7 adds the initial paper-only options and assignment-risk layer:
 - intraday refresh now treats open option overlays as first-class positions, refreshes option-chain marks and Greeks into intraday snapshots, and applies option-specific stale-data and event-through-expiry rebalance guards
 - ORM models and Alembic schema for option decisions, option orders/executions/positions, and option risk snapshots
 
-It intentionally does not add a real broker-backed option execution path or intraday option rebalance behavior.
+This scope originally landed as a local option/paper overlay layer, but the current repo has since advanced it: live option execution now uses Alpaca-backed order submission and broker-native lifecycle payloads while keeping the local option tables as the strategy/audit mirror.
 
 ## PR 8 Scope
 
@@ -149,11 +148,13 @@ The current PR 8 implementation intentionally keeps intraday rebalance separate 
 
 ## Live Option Execution Wiring
 
-- Live preopen execution now distinguishes stock vs option submission policy with `execute_paper_orders` and `execute_paper_option_orders`, and the default preopen dependency graph injects `PaperOptionBroker` into `PaperExecutionWorkflow`.
+- Live preopen execution now distinguishes stock vs option submission policy with `execute_paper_orders` and `execute_paper_option_orders`, and the default preopen dependency graph injects an explicitly Alpaca-backed `PaperOptionBroker` into `PaperExecutionWorkflow`.
 - Live intraday request contexts now carry persisted option execution metadata, including the latest `option_strategy` payload plus open-position linkage fields such as `option_strategy_type` and `paper_option_position_id`.
-- `IntradayRebalancePipeline` now injects `PaperOptionBroker`, executes approved `close_option_strategy` / `roll_option_strategy` / `adjust_option_strategy` actions through the shared `PaperExecutionWorkflow`, and returns an `execution_summary` with separate stock vs option submission counts.
+- `IntradayRebalancePipeline` now injects the same Alpaca-backed `PaperOptionBroker`, executes approved `close_option_strategy` / `roll_option_strategy` / `adjust_option_strategy` actions through the shared `PaperExecutionWorkflow`, and returns an `execution_summary` with separate stock vs option submission counts.
 - Generated `risk_hedge_overlay` actions still execute through the same `PaperExecutionWorkflow` path; preopen and intraday now share one option-order persistence contract instead of maintaining a separate hedge executor.
-- `scripts/run_trading_live_preopen_order_smoke.py` now supports both `--instrument stock` and `--instrument option` so operators can verify real simulated live-preopen stock or option order submission without switching to fixture-only smoke modes.
+- Live portfolio sync now treats Alpaca account and option position state as the live exposure source of truth and reconciles local `paper_option_positions` as strategy-level mirrors instead of overlaying them on top of broker state.
+- `scripts/run_trading_live_preopen_order_smoke.py` now supports both `--instrument stock` and `--instrument option`, and the option JSON payload now exposes `client_order_id` / `broker_order_id` for broker-side reconciliation.
+- `scripts/run_trading_option_paper_execution.py` adds a standalone Alpaca option smoke entrypoint for a single-leg paper order path, returning broker identifiers plus the mirrored local option order/execution/position artifacts.
 
 ## Lookahead Risk Planner
 

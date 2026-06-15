@@ -473,6 +473,7 @@ def _normalize_option_snapshot(contract_symbol: str, snapshot: dict[str, Any]) -
     if parsed is None:
         return None
     latest_quote = snapshot.get("latestQuote") if isinstance(snapshot.get("latestQuote"), dict) else {}
+    daily_bar = snapshot.get("dailyBar") if isinstance(snapshot.get("dailyBar"), dict) else {}
     greeks = snapshot.get("greeks") if isinstance(snapshot.get("greeks"), dict) else {}
     bid = _to_float_or_none(latest_quote.get("bp"))
     ask = _to_float_or_none(latest_quote.get("ap"))
@@ -495,6 +496,7 @@ def _normalize_option_snapshot(contract_symbol: str, snapshot: dict[str, Any]) -
         "bid": bid,
         "ask": ask,
         "mid": mid,
+        "volume": _to_float_or_none(daily_bar.get("v")),
     }
 
 

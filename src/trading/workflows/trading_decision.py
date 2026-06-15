@@ -811,6 +811,7 @@ def _build_option_strategy_payload(
             metadata={"payload_generation_mode": "option_chain_snapshot"},
         )
     selected_legs = chain_legs or desired_legs
+    selected_expiry = chain_legs[0].expiry if chain_legs else expiry
     iv_context = _option_iv_context(
         legs=selected_legs,
         iv_required=_expression_requires_implied_volatility(
@@ -842,9 +843,9 @@ def _build_option_strategy_payload(
             expression_bucket_id=expression_bucket_id,
             expression_bucket_version=expression_bucket_version,
             decision_time=candidate.decision_time,
-            expiry=expiry,
+            expiry=selected_expiry,
             underlying_price=underlying_price,
-            earnings_date=expiry if event_through_expiry else None,
+            earnings_date=selected_expiry if event_through_expiry else None,
             event_through_expiry=event_through_expiry,
             profit_target_pct=_option_profit_target_pct(
                 option_strategy_type=option_strategy_type,

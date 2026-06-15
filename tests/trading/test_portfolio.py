@@ -84,6 +84,35 @@ def test_build_positions_from_broker_uses_broker_qty_price_and_local_trade_metad
     )
 
 
+def test_build_positions_from_broker_filters_option_contract_rows():
+    positions = build_positions_from_broker(
+        broker_positions=[
+            {
+                "symbol": "AAPL",
+                "qty": "0.01",
+                "avg_entry_price": "227.15",
+                "current_price": "227.27",
+                "market_value": "2.27",
+                "side": "long",
+                "asset_class": "us_equity",
+            },
+            {
+                "symbol": "AAPL260717C00200000",
+                "qty": "1",
+                "avg_entry_price": "2.20",
+                "current_price": "2.35",
+                "market_value": "235.0",
+                "side": "long",
+                "asset_class": "option",
+            },
+        ],
+        as_of=datetime(2026, 6, 2, 16, 31, tzinfo=timezone.utc),
+        local_position_metadata={"AAPL": {"strategy_id": "relative_strength_rotation_v1", "trade_identity": "tactical_stock_trade"}},
+    )
+
+    assert [position.ticker for position in positions] == ["AAPL"]
+
+
 def test_build_portfolio_context_uses_broker_snapshot_and_positions():
     snapshot = build_portfolio_snapshot_from_account(
         {

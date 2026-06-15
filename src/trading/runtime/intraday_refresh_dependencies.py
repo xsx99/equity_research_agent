@@ -36,7 +36,10 @@ def build_live_intraday_refresh_dependencies(session: Any | None = None) -> Live
 
     from src.agents.prompt_registry import PromptRegistry
     from src.agents.trading import _default_agent_runner
-    from src.trading.brokers.paper_option import PaperOptionBroker
+    from src.trading.brokers.paper_option import (
+        DEFAULT_ALPACA_PAPER_TRADING_BASE_URL,
+        PaperOptionBroker,
+    )
     from src.trading.brokers.paper_stock import PaperStockBroker
     from src.trading.repositories.source_sqlalchemy import SQLAlchemySignalSourceRepository
     from src.trading.repositories.sqlalchemy import SqlAlchemyTradingRepository
@@ -47,7 +50,9 @@ def build_live_intraday_refresh_dependencies(session: Any | None = None) -> Live
     trading_repository = SqlAlchemyTradingRepository(session)
     source_repository = SQLAlchemySignalSourceRepository(session)
     broker = PaperStockBroker()
-    option_broker = PaperOptionBroker()
+    option_broker = PaperOptionBroker(
+        trading_base_url=DEFAULT_ALPACA_PAPER_TRADING_BASE_URL,
+    )
     return LiveIntradayRefreshDependencies(
         scope_loader=_RepositoryIntradayScopeLoader(trading_repository),
         baseline_loader=_RepositoryBaselineLoader(trading_repository),

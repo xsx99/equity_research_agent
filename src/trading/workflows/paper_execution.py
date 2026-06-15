@@ -9,6 +9,7 @@ import uuid
 
 from src.trading.brokers.paper_option import (
     PaperOptionBroker,
+    PaperOptionOrderLeg,
     PaperOptionOrderRecord,
     PaperOptionOrderRequest,
     PaperOptionPosition,
@@ -226,24 +227,21 @@ class PaperExecutionWorkflow:
             trading_decision=trading_decision,
             risk_decision=active_risk_decision,
         )
-        order = self.option_broker.submit_order(
-            PaperOptionOrderRequest(
-                trading_decision_id=trading_decision.trading_decision_id,
-                risk_decision_id=active_risk_decision.risk_decision_id,
-                option_strategy_decision_id=option_decision.option_strategy_decision_id,
-                ticker=trading_decision.ticker,
-                strategy_id=trading_decision.strategy_id,
-                option_strategy_type=option_decision.option_strategy_type,
-                action=trading_decision.decision,
-                trade_date=trade_date.date(),
-                quantity=max(1, int(round(active_risk_decision.approved_quantity or 1))),
-                limit_price=option_decision.net_debit_or_credit,
-                max_loss=option_decision.max_loss,
-                margin_requirement=option_decision.margin_requirement,
-                buying_power_effect=option_decision.buying_power_effect,
-                trade_identity=trading_decision.trade_identity,
-            )
+        existing_position = _matching_open_option_position(
+            repository=self.repository,
+            trading_decision=trading_decision,
+            option_decision=option_decision,
         )
+        order_request = _build_option_order_request(
+            trading_decision=trading_decision,
+            risk_decision=active_risk_decision,
+            option_decision=option_decision,
+            trade_date=trade_date,
+            existing_position=existing_position,
+        )
+        if order_request is None:
+            return self._next_expression_decision(trading_decision), active_risk_decision
+        order = self.option_broker.submit_order(order_request)
         self.repository.save_paper_option_order(order)
         option_orders.append(order)
         if order.status == "rejected":
@@ -251,14 +249,10 @@ class PaperExecutionWorkflow:
         execution = self.option_broker.find_execution_by_order_id(order.paper_option_order_id)
         if execution is not None and not self.repository.has_paper_option_execution(execution.paper_option_execution_id):
             self.repository.save_paper_option_execution(execution)
-            existing_position = _matching_open_option_position(
-                repository=self.repository,
-                trading_decision=trading_decision,
-                option_decision=option_decision,
-            )
             for position in _materialized_option_positions(
                 trading_decision=trading_decision,
                 option_decision=option_decision,
+                order_request=order_request,
                 order=order,
                 execution=execution,
                 existing_position=existing_position,
@@ -908,6 +902,289 @@ def _matching_open_option_position(
     return hedge_overlay_fallback
 
 
+def _build_option_order_request(
+    *,
+    trading_decision: TradingDecisionRecord,
+    risk_decision: RiskDecisionRecord,
+    option_decision: OptionStrategyDecisionRecord,
+    trade_date: datetime,
+    existing_position: PaperOptionPosition | None,
+) -> PaperOptionOrderRequest | None:
+    quantity = max(1, int(round(risk_decision.approved_quantity or 1)))
+    open_legs = _paper_option_order_legs_from_decision(option_decision, action=trading_decision.decision)
+    close_legs = _paper_option_close_legs_from_position(
+        existing_position=existing_position,
+        option_decision=option_decision,
+    )
+    action = trading_decision.decision
+    if action == "open_option_strategy":
+        return _open_option_order_request(
+            trading_decision=trading_decision,
+            risk_decision=risk_decision,
+            option_decision=option_decision,
+            trade_date=trade_date,
+            quantity=quantity,
+            legs=open_legs,
+        )
+    if action == "close_option_strategy":
+        return _close_option_order_request(
+            trading_decision=trading_decision,
+            risk_decision=risk_decision,
+            option_decision=option_decision,
+            trade_date=trade_date,
+            quantity=quantity,
+            close_legs=close_legs,
+        )
+    if action in {"roll_option_strategy", "adjust_option_strategy"}:
+        if not close_legs or not open_legs:
+            return None
+        return PaperOptionOrderRequest(
+            trading_decision_id=trading_decision.trading_decision_id,
+            risk_decision_id=risk_decision.risk_decision_id,
+            option_strategy_decision_id=option_decision.option_strategy_decision_id,
+            ticker=trading_decision.ticker,
+            strategy_id=trading_decision.strategy_id,
+            option_strategy_type=option_decision.option_strategy_type,
+            action=action,
+            trade_date=trade_date.date(),
+            quantity=quantity,
+            limit_price=option_decision.net_debit_or_credit,
+            max_loss=option_decision.max_loss,
+            margin_requirement=option_decision.margin_requirement,
+            buying_power_effect=option_decision.buying_power_effect,
+            trade_identity=trading_decision.trade_identity,
+            order_class="mleg",
+            legs=tuple([*close_legs, *open_legs]),
+        )
+    return PaperOptionOrderRequest(
+        trading_decision_id=trading_decision.trading_decision_id,
+        risk_decision_id=risk_decision.risk_decision_id,
+        option_strategy_decision_id=option_decision.option_strategy_decision_id,
+        ticker=trading_decision.ticker,
+        strategy_id=trading_decision.strategy_id,
+        option_strategy_type=option_decision.option_strategy_type,
+        action=action,
+        trade_date=trade_date.date(),
+        quantity=quantity,
+        limit_price=option_decision.net_debit_or_credit,
+        max_loss=option_decision.max_loss,
+        margin_requirement=option_decision.margin_requirement,
+        buying_power_effect=option_decision.buying_power_effect,
+        trade_identity=trading_decision.trade_identity,
+    )
+
+
+def _open_option_order_request(
+    *,
+    trading_decision: TradingDecisionRecord,
+    risk_decision: RiskDecisionRecord,
+    option_decision: OptionStrategyDecisionRecord,
+    trade_date: datetime,
+    quantity: int,
+    legs: tuple[PaperOptionOrderLeg, ...],
+) -> PaperOptionOrderRequest | None:
+    if not legs:
+        return None
+    shared_kwargs = dict(
+        trading_decision_id=trading_decision.trading_decision_id,
+        risk_decision_id=risk_decision.risk_decision_id,
+        option_strategy_decision_id=option_decision.option_strategy_decision_id,
+        ticker=trading_decision.ticker,
+        strategy_id=trading_decision.strategy_id,
+        option_strategy_type=option_decision.option_strategy_type,
+        action=trading_decision.decision,
+        trade_date=trade_date.date(),
+        quantity=quantity,
+        limit_price=option_decision.net_debit_or_credit,
+        max_loss=option_decision.max_loss,
+        margin_requirement=option_decision.margin_requirement,
+        buying_power_effect=option_decision.buying_power_effect,
+        trade_identity=trading_decision.trade_identity,
+    )
+    if len(legs) == 1:
+        leg = legs[0]
+        return PaperOptionOrderRequest(
+            **shared_kwargs,
+            contract_symbol=leg.contract_symbol,
+            position_intent=leg.position_intent,
+        )
+    return PaperOptionOrderRequest(
+        **shared_kwargs,
+        order_class="mleg",
+        legs=legs,
+    )
+
+
+def _close_option_order_request(
+    *,
+    trading_decision: TradingDecisionRecord,
+    risk_decision: RiskDecisionRecord,
+    option_decision: OptionStrategyDecisionRecord,
+    trade_date: datetime,
+    quantity: int,
+    close_legs: tuple[PaperOptionOrderLeg, ...],
+) -> PaperOptionOrderRequest | None:
+    if not close_legs:
+        return None
+    shared_kwargs = dict(
+        trading_decision_id=trading_decision.trading_decision_id,
+        risk_decision_id=risk_decision.risk_decision_id,
+        option_strategy_decision_id=option_decision.option_strategy_decision_id,
+        ticker=trading_decision.ticker,
+        strategy_id=trading_decision.strategy_id,
+        option_strategy_type=option_decision.option_strategy_type,
+        action=trading_decision.decision,
+        trade_date=trade_date.date(),
+        quantity=quantity,
+        limit_price=option_decision.net_debit_or_credit,
+        max_loss=option_decision.max_loss,
+        margin_requirement=option_decision.margin_requirement,
+        buying_power_effect=option_decision.buying_power_effect,
+        trade_identity=trading_decision.trade_identity,
+    )
+    if len(close_legs) == 1:
+        leg = close_legs[0]
+        return PaperOptionOrderRequest(
+            **shared_kwargs,
+            contract_symbol=leg.contract_symbol,
+            position_intent=leg.position_intent,
+        )
+    return PaperOptionOrderRequest(
+        **shared_kwargs,
+        order_class="mleg",
+        legs=close_legs,
+    )
+
+
+def _paper_option_order_legs_from_decision(
+    option_decision: OptionStrategyDecisionRecord,
+    *,
+    action: str,
+) -> tuple[PaperOptionOrderLeg, ...]:
+    position_intent_map = {
+        "buy": "buy_to_open",
+        "sell": "sell_to_open",
+    }
+    legs: list[PaperOptionOrderLeg] = []
+    for payload in option_decision.metadata_json.get("legs", []):
+        if not isinstance(payload, dict):
+            continue
+        side = str(payload.get("side") or "")
+        position_intent = position_intent_map.get(side)
+        if position_intent is None:
+            continue
+        legs.append(
+            PaperOptionOrderLeg(
+                contract_symbol=_option_contract_symbol_from_payload(option_decision.ticker, payload),
+                ratio_qty=int(payload.get("ratio_qty") or payload.get("quantity") or 1),
+                position_intent=position_intent,
+            )
+        )
+    return tuple(legs)
+
+
+def _paper_option_close_legs_from_position(
+    *,
+    existing_position: PaperOptionPosition | None,
+    option_decision: OptionStrategyDecisionRecord,
+) -> tuple[PaperOptionOrderLeg, ...]:
+    if existing_position is not None:
+        broker_leg_refs = existing_position.metadata_json.get("broker_leg_refs")
+        if isinstance(broker_leg_refs, list):
+            refs = _paper_option_legs_from_broker_refs(broker_leg_refs, close_existing=True)
+            if refs:
+                return refs
+    fallback_payloads = option_decision.metadata_json.get("legs", [])
+    refs: list[PaperOptionOrderLeg] = []
+    for payload in fallback_payloads:
+        if not isinstance(payload, dict):
+            continue
+        side = str(payload.get("side") or "")
+        if side not in {"buy", "sell"}:
+            continue
+        refs.append(
+            PaperOptionOrderLeg(
+                contract_symbol=_option_contract_symbol_from_payload(option_decision.ticker, payload),
+                ratio_qty=int(payload.get("ratio_qty") or payload.get("quantity") or 1),
+                position_intent="sell_to_close" if side == "buy" else "buy_to_close",
+            )
+        )
+    return tuple(refs)
+
+
+def _paper_option_legs_from_broker_refs(
+    refs_payload: list[Any],
+    *,
+    close_existing: bool,
+) -> tuple[PaperOptionOrderLeg, ...]:
+    legs: list[PaperOptionOrderLeg] = []
+    for item in refs_payload:
+        if not isinstance(item, dict):
+            continue
+        contract_symbol = item.get("contract_symbol")
+        if not isinstance(contract_symbol, str) or not contract_symbol:
+            continue
+        raw_intent = str(item.get("position_intent") or "")
+        if close_existing:
+            position_intent = _closing_position_intent(raw_intent)
+        else:
+            position_intent = raw_intent or "buy_to_open"
+        legs.append(
+            PaperOptionOrderLeg(
+                contract_symbol=contract_symbol,
+                ratio_qty=int(item.get("ratio_qty") or 1),
+                position_intent=position_intent,
+            )
+        )
+    return tuple(legs)
+
+
+def _closing_position_intent(raw_intent: str) -> str:
+    return {
+        "buy_to_open": "sell_to_close",
+        "sell_to_open": "buy_to_close",
+        "buy_to_close": "buy_to_close",
+        "sell_to_close": "sell_to_close",
+    }.get(raw_intent, "sell_to_close")
+
+
+def _option_contract_symbol_from_payload(ticker: str, payload: dict[str, Any]) -> str:
+    contract_symbol = payload.get("contract_symbol")
+    if isinstance(contract_symbol, str) and contract_symbol:
+        return contract_symbol
+    expiry = datetime.fromisoformat(str(payload["expiry"])).date()
+    option_code = "C" if str(payload.get("option_type")) == "call" else "P"
+    strike_component = f"{int(round(float(payload['strike']) * 1000)):08d}"
+    return f"{ticker.upper()}{expiry.strftime('%y%m%d')}{option_code}{strike_component}"
+
+
+def _broker_leg_refs_from_request(request: PaperOptionOrderRequest) -> list[dict[str, Any]]:
+    if request.order_class == "mleg":
+        return [
+            {
+                "contract_symbol": leg.contract_symbol,
+                "ratio_qty": leg.ratio_qty,
+                "position_intent": leg.position_intent,
+            }
+            for leg in request.legs
+        ]
+    if request.contract_symbol is None:
+        return []
+    return [
+        {
+            "contract_symbol": request.contract_symbol,
+            "ratio_qty": 1,
+            "position_intent": request.position_intent,
+        }
+    ]
+
+
+def _opening_broker_leg_refs_from_request(request: PaperOptionOrderRequest) -> list[dict[str, Any]]:
+    refs = _broker_leg_refs_from_request(request)
+    open_refs = [item for item in refs if str(item.get("position_intent") or "").endswith("_open")]
+    return open_refs or refs
+
+
 def _risk_hedge_option_strategy_type(
     *,
     trading_decision: TradingDecisionRecord,
@@ -927,6 +1204,7 @@ def _materialized_option_positions(
     *,
     trading_decision: TradingDecisionRecord,
     option_decision: OptionStrategyDecisionRecord,
+    order_request: PaperOptionOrderRequest,
     order: PaperOptionOrderRequest | Any,
     execution: Any,
     existing_position: PaperOptionPosition | None,
@@ -956,6 +1234,7 @@ def _materialized_option_positions(
                     **dict(existing_position.metadata_json),
                     "lifecycle_action": action,
                     "closing_order_id": order.paper_option_order_id,
+                    "closing_broker_order_id": order.broker_order_id,
                 },
             ),
         )
@@ -983,6 +1262,7 @@ def _materialized_option_positions(
                         **dict(existing_position.metadata_json),
                         "lifecycle_action": action,
                         "replacement_order_id": order.paper_option_order_id,
+                        "closing_broker_order_id": order.broker_order_id,
                     },
                 )
             )
@@ -1006,6 +1286,8 @@ def _materialized_option_positions(
                 metadata_json={
                     **dict(option_decision.metadata_json),
                     "lifecycle_action": action,
+                        "broker_leg_refs": _opening_broker_leg_refs_from_request(order_request),
+                    "opening_broker_order_id": order.broker_order_id,
                     **(
                         {"supersedes_option_position_id": existing_position.paper_option_position_id}
                         if existing_position is not None
@@ -1037,6 +1319,8 @@ def _materialized_option_positions(
                     **dict(existing_position.metadata_json),
                     **dict(option_decision.metadata_json),
                     "lifecycle_action": action,
+                    "broker_leg_refs": _opening_broker_leg_refs_from_request(order_request),
+                    "opening_broker_order_id": order.broker_order_id,
                 },
             ),
         )
@@ -1057,7 +1341,11 @@ def _materialized_option_positions(
             margin_requirement=option_decision.margin_requirement,
             buying_power_effect=option_decision.buying_power_effect,
             assignment_notional=option_decision.assignment_notional,
-            metadata_json=option_decision.metadata_json,
+            metadata_json={
+                **dict(option_decision.metadata_json),
+                "broker_leg_refs": _opening_broker_leg_refs_from_request(order_request),
+                "opening_broker_order_id": order.broker_order_id,
+            },
         ),
     )
 

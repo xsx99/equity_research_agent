@@ -159,6 +159,43 @@ python scripts/run_trading_live_preopen_order_smoke.py --ticker QQQ --instrument
 
 This uses the same live preopen runtime but forces the smoke override onto the option expression path. A passing run should return `runtime.execution.option_orders_submitted >= 1` plus populated `option_order` and `option_execution` payloads.
 
+The returned `option_order` JSON should now include:
+- `client_order_id`
+- `broker_order_id`
+
+The returned `option_execution` JSON should now include:
+- `broker_order_id`
+
+When this live smoke path passes, verify the same identifiers are mirrored into the local DB rows:
+- `paper_option_orders.client_order_id`
+- `paper_option_orders.broker_order_id`
+- `paper_option_executions.broker_order_id`
+
+Standalone Alpaca option broker smoke:
+
+```bash
+source ~/.venv/bin/activate
+python scripts/run_trading_option_paper_execution.py --ticker QQQ --contract-symbol <CURRENT_TRADABLE_CONTRACT_SYMBOL> --strategy-type long_call --limit-price 5 --strategy-id manual_option_execution_v1_smoke_$(date +%H%M%S) --json
+```
+
+Use this when you want a minimal broker-path check without running the full live preopen chain. Current assumptions:
+- `ALPACA_API_KEY` plus `ALPACA_SECRET_KEY` or `ALPACA_API_SECRET` must be present
+- `ALPACA_TRADING_BASE_URL` may be overridden, but the script defaults to Alpaca paper
+- the target Alpaca paper account is already options-enabled; the repo does not manage approval flows
+- use a currently tradable option contract symbol, not a stale historical example
+- when rerunning the same smoke on the same trade date, pass a fresh `--strategy-id` so the deterministic `client_order_id` does not collide with the previous run
+- for immediate fill verification, prefer a marketable `--limit-price` instead of the low default
+
+A passing standalone run should return:
+- `order.broker_order_id`
+- `order.client_order_id`
+- `execution.broker_order_id`
+- `positions[0].metadata.broker_leg_refs`
+
+This standalone script mirrors the option order, execution, and position artifacts inside the workflow result so you can inspect the same contract without waiting for the full scheduler-facing runtime. Use the live preopen option smoke above when you also need persisted Postgres rows for `paper_option_orders` and `paper_option_executions`.
+
+After either smoke path, remember that option-event activities such as assignment, exercise, or expiry can reconcile later than the immediate order/position state. If a broker-side option position disappears before the local mirror closes, the next live portfolio sync is expected to reconcile it from broker state and then backfill the close reason when the relevant option activity becomes visible.
+
 Preopen option approval smoke:
 
 ```bash

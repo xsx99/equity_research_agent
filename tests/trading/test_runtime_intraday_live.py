@@ -979,7 +979,8 @@ def test_build_live_intraday_refresh_dependencies_injects_option_broker_into_reb
         pass
 
     class _OptionBroker:
-        pass
+        def __init__(self, **kwargs):
+            captured["option_broker_kwargs"] = kwargs
 
     class _PromptRegistry:
         @staticmethod
@@ -997,7 +998,7 @@ def test_build_live_intraday_refresh_dependencies_injects_option_broker_into_reb
     monkeypatch.setattr("src.agents.prompt_registry.PromptRegistry", _PromptRegistry)
     monkeypatch.setattr("src.agents.trading._default_agent_runner", "runner")
     monkeypatch.setattr("src.trading.brokers.paper_stock.PaperStockBroker", lambda: _Broker())
-    monkeypatch.setattr("src.trading.brokers.paper_option.PaperOptionBroker", lambda: _OptionBroker())
+    monkeypatch.setattr("src.trading.brokers.paper_option.PaperOptionBroker", _OptionBroker)
     monkeypatch.setattr("src.trading.repositories.source_sqlalchemy.SQLAlchemySignalSourceRepository", lambda session: _SourceRepo())
     monkeypatch.setattr("src.trading.repositories.sqlalchemy.SqlAlchemyTradingRepository", lambda session: _Repo())
     monkeypatch.setattr("src.trading.runtime.lookahead_risk.LookaheadRiskWorkflowHelper", lambda **kwargs: "lookahead-helper")
@@ -1011,3 +1012,4 @@ def test_build_live_intraday_refresh_dependencies_injects_option_broker_into_reb
     assert captured["portfolio_sync_kwargs"]["broker"].__class__ is _Broker
     assert captured["rebalance_kwargs"]["broker"].__class__ is _Broker
     assert captured["rebalance_kwargs"]["option_broker"].__class__ is _OptionBroker
+    assert captured["option_broker_kwargs"]["trading_base_url"] == "https://paper-api.alpaca.markets"

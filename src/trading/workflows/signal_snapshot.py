@@ -25,6 +25,7 @@ class SourceIngestionServiceProtocol(Protocol):
         *,
         as_of: datetime,
         run_type: str,
+        source_families: tuple[str, ...] | None = None,
     ) -> object:
         """Refresh source rows for the requested tickers."""
 
@@ -69,6 +70,7 @@ class SignalPipeline:
                 tuple(tickers),
                 as_of=decision_time,
                 run_type="pre_open",
+                source_families=("technical", "fundamental", "events_news", "option_chain"),
             )
         snapshots: list[SignalSnapshotResult] = []
         for ticker in tickers:

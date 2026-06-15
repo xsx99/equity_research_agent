@@ -4,7 +4,12 @@ from datetime import datetime, timezone
 from typing import Any
 
 from src.trading.manual_review.requests import ManualTickerRequestService
-from src.trading.brokers.paper_option import PaperOptionBroker, PaperOptionPosition
+from src.trading.brokers.paper_option import (
+    LocalPaperOptionBroker,
+    PaperOptionBroker,
+    PaperOptionPosition,
+    PaperOptionOrderRequest,
+)
 from src.trading.brokers.paper_stock import PaperOrderRequest, PaperStockBroker
 from src.trading.repositories.in_memory import InMemoryTradingRepository
 from src.trading.risk import OptionRiskAssessment, RiskDecisionRecord
@@ -91,6 +96,164 @@ class _CapturingClient:
                 ]
             )
         raise AssertionError(f"unexpected_get:{url}")
+
+
+class _RecordingOptionBroker:
+    def __init__(self, *, now: datetime) -> None:
+        self._delegate = LocalPaperOptionBroker(now=lambda: now)
+        self.submitted_requests: list[PaperOptionOrderRequest] = []
+
+    def submit_order(self, request: PaperOptionOrderRequest):
+        self.submitted_requests.append(request)
+        return self._delegate.submit_order(request)
+
+    def find_execution_by_order_id(self, paper_option_order_id: str):
+        return self._delegate.find_execution_by_order_id(paper_option_order_id)
+
+
+def _option_strategy_legs(
+    *,
+    ticker: str,
+    option_strategy_type: str,
+    quantity: int,
+    expiry: str,
+) -> list[dict[str, Any]]:
+    if option_strategy_type == "put_credit_spread":
+        return [
+            {
+                "contract_symbol": f"{ticker}260717P00105000",
+                "option_type": "put",
+                "side": "buy",
+                "quantity": quantity,
+                "ratio_qty": quantity,
+                "strike": 105.0,
+                "expiry": expiry,
+                "dte": 10,
+                "delta": -0.18,
+                "gamma": 0.03,
+                "theta": -0.01,
+                "vega": 0.08,
+                "iv_rank": 0.62,
+                "bid": 0.7,
+                "ask": 0.9,
+                "mid": 0.8,
+                "chosen_price": 0.8,
+            },
+            {
+                "contract_symbol": f"{ticker}260717P00110000",
+                "option_type": "put",
+                "side": "sell",
+                "quantity": quantity,
+                "ratio_qty": quantity,
+                "strike": 110.0,
+                "expiry": expiry,
+                "dte": 10,
+                "delta": -0.28,
+                "gamma": 0.02,
+                "theta": 0.01,
+                "vega": -0.07,
+                "iv_rank": 0.62,
+                "bid": 1.4,
+                "ask": 1.6,
+                "mid": 1.5,
+                "chosen_price": 1.5,
+            },
+        ]
+    if option_strategy_type == "long_strangle":
+        return [
+            {
+                "contract_symbol": f"{ticker}260612C00122000",
+                "option_type": "call",
+                "side": "buy",
+                "quantity": quantity,
+                "ratio_qty": quantity,
+                "strike": 122.0,
+                "expiry": expiry,
+                "dte": 10,
+                "delta": 0.26,
+                "gamma": 0.03,
+                "theta": -0.01,
+                "vega": 0.11,
+                "iv_rank": 0.62,
+                "bid": 1.4,
+                "ask": 1.6,
+                "mid": 1.5,
+                "chosen_price": 1.5,
+            },
+            {
+                "contract_symbol": f"{ticker}260612P00114000",
+                "option_type": "put",
+                "side": "buy",
+                "quantity": quantity,
+                "ratio_qty": quantity,
+                "strike": 114.0,
+                "expiry": expiry,
+                "dte": 10,
+                "delta": -0.14,
+                "gamma": 0.02,
+                "theta": -0.01,
+                "vega": 0.1,
+                "iv_rank": 0.62,
+                "bid": 1.4,
+                "ask": 1.6,
+                "mid": 1.5,
+                "chosen_price": 1.5,
+            },
+        ]
+    option_type = "put" if option_strategy_type == "long_put" else "call"
+    strike = 114.0 if option_type == "put" else 120.0
+    strike_component = "00114000" if option_type == "put" else "00120000"
+    return [
+        {
+            "contract_symbol": f"{ticker}260612{'P' if option_type == 'put' else 'C'}{strike_component}",
+            "option_type": option_type,
+            "side": "buy",
+            "quantity": quantity,
+            "ratio_qty": quantity,
+            "strike": strike,
+            "expiry": expiry,
+            "dte": 10,
+            "delta": -0.32 if option_type == "put" else 0.32,
+            "gamma": 0.04,
+            "theta": -0.03,
+            "vega": 0.12,
+            "iv_rank": 0.62,
+            "bid": 2.1,
+            "ask": 2.3,
+            "mid": 2.2,
+            "chosen_price": 2.2,
+        }
+    ]
+
+
+def _broker_leg_refs(
+    *,
+    ticker: str,
+    option_strategy_type: str,
+    quantity: int,
+    expiry: str,
+    action: str = "open_option_strategy",
+) -> list[dict[str, Any]]:
+    refs: list[dict[str, Any]] = []
+    for payload in _option_strategy_legs(
+        ticker=ticker,
+        option_strategy_type=option_strategy_type,
+        quantity=quantity,
+        expiry=expiry,
+    ):
+        side = str(payload["side"])
+        if action == "open_option_strategy":
+            position_intent = "buy_to_open" if side == "buy" else "sell_to_open"
+        else:
+            position_intent = "sell_to_close" if side == "buy" else "buy_to_close"
+        refs.append(
+            {
+                "contract_symbol": payload["contract_symbol"],
+                "ratio_qty": payload["ratio_qty"],
+                "position_intent": position_intent,
+            }
+        )
+    return refs
 
 
 def _trading_decision(*, decision: str = "enter_long", manual_request_id: str | None = None) -> TradingDecisionRecord:
@@ -211,25 +374,12 @@ def _option_trading_decision(
                 "strategy_pairing_method": "single_leg",
                 "assignment_plan": None,
                 "metadata_json": {
-                    "legs": [
-                        {
-                            "option_type": "call",
-                            "side": "buy",
-                            "quantity": quantity,
-                            "strike": 120.0,
-                            "expiry": expiry,
-                            "dte": 10,
-                            "delta": 0.32,
-                            "gamma": 0.04,
-                            "theta": -0.03,
-                            "vega": 0.12,
-                            "iv_rank": 0.62,
-                            "bid": 2.1,
-                            "ask": 2.3,
-                            "mid": 2.2,
-                            "chosen_price": 2.2,
-                        }
-                    ]
+                    "legs": _option_strategy_legs(
+                        ticker=ticker,
+                        option_strategy_type=option_strategy_type,
+                        quantity=quantity,
+                        expiry=expiry,
+                    )
                 },
             },
         },
@@ -280,7 +430,15 @@ def _seed_open_option_position(
         margin_requirement=220.0,
         buying_power_effect=220.0,
         assignment_notional=0.0,
-        metadata_json={},
+        metadata_json={
+            "broker_leg_refs": _broker_leg_refs(
+                ticker=ticker,
+                option_strategy_type=option_strategy_type,
+                quantity=quantity,
+                expiry=now.date().isoformat(),
+            ),
+            "opening_broker_order_id": f"{ticker.lower()}-opening-order",
+        },
     )
     repository.save_paper_option_position(position)
     return position
@@ -417,7 +575,15 @@ def test_paper_execution_workflow_closes_existing_generated_risk_hedge_overlay_w
             margin_requirement=1000.0,
             buying_power_effect=1000.0,
             assignment_notional=0.0,
-            metadata_json={"generated_hedge_action": {"option_strategy_type": "long_call"}},
+            metadata_json={
+                "generated_hedge_action": {"option_strategy_type": "long_call"},
+                "broker_leg_refs": _broker_leg_refs(
+                    ticker="QQQ",
+                    option_strategy_type="long_call",
+                    quantity=1,
+                    expiry=now.date().isoformat(),
+                ),
+            },
         )
     )
     workflow = PaperExecutionWorkflow(
@@ -488,7 +654,15 @@ def test_paper_execution_workflow_adjusts_existing_generated_risk_hedge_overlay_
             margin_requirement=1000.0,
             buying_power_effect=1000.0,
             assignment_notional=0.0,
-            metadata_json={"generated_hedge_action": {"option_strategy_type": "long_call"}},
+            metadata_json={
+                "generated_hedge_action": {"option_strategy_type": "long_call"},
+                "broker_leg_refs": _broker_leg_refs(
+                    ticker="QQQ",
+                    option_strategy_type="long_call",
+                    quantity=1,
+                    expiry=now.date().isoformat(),
+                ),
+            },
         )
     )
     workflow = PaperExecutionWorkflow(
@@ -640,6 +814,14 @@ def test_paper_execution_workflow_persists_option_artifacts_and_overlay():
                 "event_through_expiry": True,
                 "strategy_pairing_method": "vertical_by_expiry_and_width",
                 "assignment_plan": "close_or_roll_before_expiry_if_itm",
+                "metadata_json": {
+                    "legs": _option_strategy_legs(
+                        ticker="NVDA",
+                        option_strategy_type="put_credit_spread",
+                        quantity=1,
+                        expiry="2026-07-17",
+                    )
+                },
             },
         },
     )
@@ -656,6 +838,118 @@ def test_paper_execution_workflow_persists_option_artifacts_and_overlay():
     assert len(repository.paper_option_orders) == 1
     assert len(repository.paper_option_positions) == 1
     assert len(repository.option_risk_snapshots) == 1
+
+
+def test_paper_execution_workflow_submits_mleg_open_request_for_credit_spread():
+    now = datetime(2026, 6, 2, 16, 31, tzinfo=timezone.utc)
+    repository = InMemoryTradingRepository()
+    option_broker = _RecordingOptionBroker(now=now)
+    workflow = PaperExecutionWorkflow(
+        repository=repository,
+        broker=PaperStockBroker(api_key="key", secret_key="secret", client=_CapturingClient()),
+        option_broker=option_broker,
+        manual_request_service=ManualTickerRequestService(now=lambda: now),
+    )
+
+    workflow.run(
+        trading_decisions=(
+            _option_trading_decision(
+                now=now,
+                decision="open_option_strategy",
+                ticker="NVDA",
+                option_strategy_type="put_credit_spread",
+                expiry="2026-07-17",
+                net_debit_or_credit=-1.5,
+                max_loss=500.0,
+                margin_requirement=500.0,
+                buying_power_effect=500.0,
+                assignment_notional=11000.0,
+            ),
+        ),
+        risk_decisions=(_option_risk_decision(now=now, ticker="NVDA"),),
+        trade_date=now,
+    )
+
+    request = option_broker.submitted_requests[0]
+
+    assert request.order_class == "mleg"
+    assert [leg.position_intent for leg in request.legs] == ["buy_to_open", "sell_to_open"]
+    assert [leg.contract_symbol for leg in request.legs] == [
+        "NVDA260717P00105000",
+        "NVDA260717P00110000",
+    ]
+    assert repository.paper_option_positions[0].metadata_json["broker_leg_refs"][0]["contract_symbol"] == "NVDA260717P00105000"
+
+
+def test_paper_execution_workflow_submits_simple_close_request_from_existing_broker_leg_refs():
+    now = datetime(2026, 6, 2, 16, 31, tzinfo=timezone.utc)
+    repository = InMemoryTradingRepository()
+    existing = _seed_open_option_position(repository, now=now)
+    option_broker = _RecordingOptionBroker(now=now)
+    workflow = PaperExecutionWorkflow(
+        repository=repository,
+        broker=PaperStockBroker(api_key="key", secret_key="secret", client=_CapturingClient()),
+        option_broker=option_broker,
+        manual_request_service=ManualTickerRequestService(now=lambda: now),
+    )
+
+    workflow.run(
+        trading_decisions=(
+            _option_trading_decision(
+                now=now,
+                decision="close_option_strategy",
+                ticker=existing.ticker,
+                option_strategy_type=existing.option_strategy_type,
+            ),
+        ),
+        risk_decisions=(_option_risk_decision(now=now, ticker=existing.ticker),),
+        trade_date=now,
+    )
+
+    request = option_broker.submitted_requests[0]
+
+    assert request.order_class == "simple"
+    assert request.contract_symbol == "NVDA260612C00120000"
+    assert request.position_intent == "sell_to_close"
+
+
+def test_paper_execution_workflow_rolls_option_strategy_with_close_and_open_legs():
+    now = datetime(2026, 6, 2, 16, 31, tzinfo=timezone.utc)
+    repository = InMemoryTradingRepository()
+    existing = _seed_open_option_position(repository, now=now)
+    option_broker = _RecordingOptionBroker(now=now)
+    workflow = PaperExecutionWorkflow(
+        repository=repository,
+        broker=PaperStockBroker(api_key="key", secret_key="secret", client=_CapturingClient()),
+        option_broker=option_broker,
+        manual_request_service=ManualTickerRequestService(now=lambda: now),
+    )
+
+    workflow.run(
+        trading_decisions=(
+            _option_trading_decision(
+                now=now,
+                decision="roll_option_strategy",
+                ticker=existing.ticker,
+                option_strategy_type=existing.option_strategy_type,
+                expiry="2026-07-17",
+                max_loss=280.0,
+                margin_requirement=280.0,
+                buying_power_effect=280.0,
+            ),
+        ),
+        risk_decisions=(_option_risk_decision(now=now, ticker=existing.ticker),),
+        trade_date=now,
+    )
+
+    request = option_broker.submitted_requests[0]
+    replacement = next(
+        position for position in repository.paper_option_positions if position.paper_option_position_id != existing.paper_option_position_id
+    )
+
+    assert request.order_class == "mleg"
+    assert [leg.position_intent for leg in request.legs] == ["sell_to_close", "buy_to_open"]
+    assert replacement.metadata_json["broker_leg_refs"][0]["position_intent"] == "buy_to_open"
 
 
 def test_paper_execution_workflow_closes_existing_option_position():

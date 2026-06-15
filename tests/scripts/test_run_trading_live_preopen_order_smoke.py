@@ -272,3 +272,55 @@ def test_resolve_smoke_status_treats_option_execution_as_passed():
     )
 
     assert status == "passed"
+
+
+def test_paper_option_json_includes_broker_identifiers():
+    order_payload = run_trading_live_preopen_order_smoke._paper_option_order_json(
+        SimpleNamespace(
+            paper_option_order_id="option-order-1",
+            broker_order_id="alpaca-option-order-1",
+            client_order_id="client-option-order-1",
+            ticker="QQQ",
+            status="filled",
+            quantity=1,
+            option_strategy_type="long_call",
+            rejection_reason=None,
+        )
+    )
+    execution_payload = run_trading_live_preopen_order_smoke._paper_option_execution_json(
+        SimpleNamespace(
+            paper_option_execution_id="option-exec-1",
+            broker_order_id="alpaca-option-order-1",
+            ticker="QQQ",
+            quantity=1,
+            fill_price=2.15,
+            executed_at=datetime(2026, 6, 3, 12, 45, tzinfo=timezone.utc),
+        )
+    )
+
+    assert order_payload["broker_order_id"] == "alpaca-option-order-1"
+    assert order_payload["client_order_id"] == "client-option-order-1"
+    assert execution_payload["broker_order_id"] == "alpaca-option-order-1"
+
+
+def test_build_smoke_trading_decision_pipeline_preserves_source_repository(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class _Pipeline:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(run_trading_live_preopen_order_smoke, "TradingDecisionPipeline", _Pipeline)
+    monkeypatch.setattr(run_trading_live_preopen_order_smoke.PromptRegistry, "get_default", staticmethod(lambda: "prompt-registry"))
+    monkeypatch.setattr(run_trading_live_preopen_order_smoke.app_config, "TRADING_MODEL_NAME", "gpt-5-mini")
+
+    pipeline = run_trading_live_preopen_order_smoke._build_smoke_trading_decision_pipeline(
+        repository="trading-repo",
+        source_repository="source-repo",
+        manual_request_service="manual-service",
+    )
+
+    assert pipeline.__class__ is _Pipeline
+    assert captured["repository"] == "trading-repo"
+    assert captured["source_repository"] == "source-repo"
+    assert captured["manual_request_service"] == "manual-service"

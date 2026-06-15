@@ -300,7 +300,8 @@ def test_build_live_preopen_dependencies_wires_fallback_reapproval_into_paper_ex
         pass
 
     class _OptionBroker:
-        pass
+        def __init__(self, **kwargs):
+            captured["option_broker_kwargs"] = kwargs
 
     class _ConfigResolver:
         pass
@@ -346,7 +347,7 @@ def test_build_live_preopen_dependencies_wires_fallback_reapproval_into_paper_ex
     monkeypatch.setattr("src.agents.trading._default_agent_runner", "runner")
     monkeypatch.setattr("src.providers.market_data.AlpacaMarketDataProvider", lambda: "market-provider")
     monkeypatch.setattr("src.trading.brokers.paper_stock.PaperStockBroker", lambda: _Broker())
-    monkeypatch.setattr("src.trading.brokers.paper_option.PaperOptionBroker", lambda: _OptionBroker())
+    monkeypatch.setattr("src.trading.brokers.paper_option.PaperOptionBroker", _OptionBroker)
     monkeypatch.setattr("src.trading.data_sources.live_universe.LiveUniverseProvider", lambda **kwargs: ("live-universe-provider", kwargs))
     monkeypatch.setattr("src.trading.manual_review.sqlalchemy.SQLAlchemyManualTickerRequestService", lambda session: _ManualService())
     monkeypatch.setattr("src.trading.repositories.source_sqlalchemy.SQLAlchemySignalSourceRepository", lambda session: _SourceRepo())
@@ -372,6 +373,7 @@ def test_build_live_preopen_dependencies_wires_fallback_reapproval_into_paper_ex
     assert captured["paper_execution_kwargs"]["risk_manager"].__class__ is _RiskManager
     assert captured["paper_execution_kwargs"]["option_risk_manager"].__class__ is _OptionRiskManager
     assert captured["paper_execution_kwargs"]["option_broker"].__class__ is _OptionBroker
+    assert captured["option_broker_kwargs"]["trading_base_url"] == "https://paper-api.alpaca.markets"
 
 
 def test_configured_live_universe_scan_pipeline_prefers_targeted_symbols_for_manual_scope():

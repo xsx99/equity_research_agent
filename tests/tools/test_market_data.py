@@ -152,6 +152,7 @@ def test_fetch_option_chain_requests_alpaca_chain_endpoint_and_normalizes_contra
         {
             "snapshots": {
                 "AAPL260619C00200000": {
+                    "dailyBar": {"v": 13},
                     "latestQuote": {"bp": 3.1, "ap": 3.3},
                     "greeks": {"delta": 0.41, "gamma": 0.05, "theta": -0.04, "vega": 0.15},
                     "impliedVolatility": 0.28,
@@ -182,6 +183,7 @@ def test_fetch_option_chain_requests_alpaca_chain_endpoint_and_normalizes_contra
             "bid": 3.1,
             "ask": 3.3,
             "mid": 3.2,
+            "volume": 13,
         }
     ]
     call = client.calls[0]

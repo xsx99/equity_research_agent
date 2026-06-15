@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timezone
+import re
 from typing import Any
 
 from src.trading.risk import PortfolioContext, PortfolioPosition
@@ -201,6 +202,8 @@ def build_portfolio_snapshot_from_account(account_payload: dict[str, Any], *, as
     maintenance_margin = _to_float(account_payload.get("maintenance_margin")) or 0.0
     stock_market_value = _to_float(account_payload.get("long_market_value")) or 0.0
     option_market_value = _to_float(account_payload.get("options_market_value")) or 0.0
+    option_margin_requirement = min(abs(option_market_value), initial_margin) if option_market_value else 0.0
+    stock_margin_requirement = max(initial_margin - option_margin_requirement, 0.0)
     return PortfolioSnapshot(
         as_of=as_of,
         cash_balance=_to_float(account_payload.get("cash")) or 0.0,
@@ -210,8 +213,8 @@ def build_portfolio_snapshot_from_account(account_payload: dict[str, Any], *, as
         excess_liquidity=max(0.0, account_equity - maintenance_margin),
         stock_market_value=stock_market_value,
         option_market_value=option_market_value,
-        stock_margin_requirement=initial_margin,
-        option_margin_requirement=0.0,
+        stock_margin_requirement=stock_margin_requirement,
+        option_margin_requirement=option_margin_requirement,
         total_margin_requirement=initial_margin,
         initial_margin_requirement=initial_margin,
         maintenance_margin_requirement=maintenance_margin,
@@ -275,6 +278,8 @@ def build_positions_from_broker(
     metadata = {ticker.upper(): values for ticker, values in (local_position_metadata or {}).items()}
     positions: list[StockPosition] = []
     for payload in broker_positions:
+        if is_option_position_payload(payload):
+            continue
         ticker = str(payload.get("symbol", "")).upper()
         if not ticker:
             continue
@@ -294,6 +299,54 @@ def build_positions_from_broker(
             )
         )
     return tuple(sorted(positions, key=lambda item: item.ticker))
+
+
+def build_option_positions_from_broker(
+    *,
+    broker_positions: list[dict[str, Any]],
+    as_of: datetime,
+    local_option_position_metadata: dict[str, dict[str, Any]] | None = None,
+) -> tuple[OptionPosition, ...]:
+    metadata = {
+        contract_symbol.upper(): values
+        for contract_symbol, values in (local_option_position_metadata or {}).items()
+    }
+    positions: list[OptionPosition] = []
+    for payload in broker_positions:
+        if not is_option_position_payload(payload):
+            continue
+        contract_symbol = str(payload.get("symbol", "")).upper()
+        if not contract_symbol:
+            continue
+        position_metadata = metadata.get(contract_symbol, {})
+        underlying_ticker = _underlying_ticker_from_option_symbol(contract_symbol) or contract_symbol
+        positions.append(
+            OptionPosition(
+                ticker=str(position_metadata.get("ticker") or underlying_ticker),
+                quantity=int(round(_to_float(payload.get("qty")) or 0.0)),
+                market_value=abs(_to_float(payload.get("market_value")) or 0.0),
+                trade_identity=str(position_metadata.get("trade_identity") or "tactical_option_trade"),
+                strategy_id=_string_or_none(position_metadata.get("strategy_id")),
+                option_strategy_type=str(position_metadata.get("option_strategy_type") or "broker_option_position"),
+                opened_at=position_metadata.get("opened_at") or as_of,
+                updated_at=as_of,
+                expiry=position_metadata.get("expiry") or _expiry_from_option_symbol(contract_symbol) or as_of.date(),
+                max_loss=float(position_metadata.get("max_loss") or abs(_to_float(payload.get("market_value")) or 0.0)),
+                margin_requirement=float(
+                    position_metadata.get("margin_requirement")
+                    or position_metadata.get("buying_power_effect")
+                    or abs(_to_float(payload.get("market_value")) or 0.0)
+                ),
+                buying_power_effect=float(
+                    position_metadata.get("buying_power_effect")
+                    or position_metadata.get("margin_requirement")
+                    or abs(_to_float(payload.get("market_value")) or 0.0)
+                ),
+                assignment_notional=float(position_metadata.get("assignment_notional") or 0.0),
+                direction="short" if str(payload.get("side", "long")).lower() == "short" else "long",
+            )
+        )
+    return tuple(sorted(positions, key=lambda item: (item.ticker, item.option_strategy_type)))
 
 
 def build_portfolio_context(
@@ -398,3 +451,29 @@ def _string_or_none(value: Any) -> str | None:
     if isinstance(value, str):
         return value
     return str(value)
+
+
+_OPTION_SYMBOL_PATTERN = re.compile(r"^(?P<ticker>[A-Z]+)(?P<expiry>\d{6})(?P<cp>[CP])(?P<strike>\d{8})$")
+
+
+def is_option_position_payload(payload: dict[str, Any]) -> bool:
+    asset_class = str(payload.get("asset_class") or "").lower()
+    if asset_class == "option":
+        return True
+    symbol = str(payload.get("symbol") or "").upper()
+    return _OPTION_SYMBOL_PATTERN.match(symbol) is not None
+
+
+def _underlying_ticker_from_option_symbol(symbol: str) -> str | None:
+    match = _OPTION_SYMBOL_PATTERN.match(symbol.upper())
+    if match is None:
+        return None
+    return str(match.group("ticker"))
+
+
+def _expiry_from_option_symbol(symbol: str) -> date | None:
+    match = _OPTION_SYMBOL_PATTERN.match(symbol.upper())
+    if match is None:
+        return None
+    expiry = str(match.group("expiry"))
+    return datetime.strptime(expiry, "%y%m%d").date()

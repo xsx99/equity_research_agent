@@ -170,6 +170,48 @@ def test_signal_pipeline_can_refresh_source_records_before_building_snapshots():
     assert artifact_repository.source_ingestion_runs[0].run_type == "pre_open"
 
 
+def test_signal_pipeline_requests_option_chain_during_preopen_refresh():
+    now = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+    universe = UniverseScanPipeline(
+        provider=_FakeUniverseProvider(),
+        config=UniverseFilterConfig(manual_exclude=("MSFT",)),
+        now=lambda: now,
+    ).run()
+    source_repository = InMemorySignalSourceRepository()
+
+    class _CapturingIngestionService:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        def refresh_tickers(self, tickers, *, as_of, run_type, source_families=None):
+            self.calls.append(
+                {
+                    "tickers": tickers,
+                    "as_of": as_of,
+                    "run_type": run_type,
+                    "source_families": source_families,
+                }
+            )
+
+    ingestion_service = _CapturingIngestionService()
+
+    SignalPipeline(
+        source_repository=source_repository,
+        manual_request_service=ManualTickerRequestService(now=lambda: now),
+        source_ingestion_service=ingestion_service,
+    ).build_pre_open_snapshots(
+        universe_result=universe,
+        decision_time=now,
+    )
+
+    assert ingestion_service.calls[0]["source_families"] == (
+        "technical",
+        "fundamental",
+        "events_news",
+        "option_chain",
+    )
+
+
 def test_strategy_pipeline_records_manual_request_results_without_in_memory_repository_state():
     now = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
     manual_service = ManualTickerRequestService(now=lambda: now)

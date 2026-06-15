@@ -101,7 +101,10 @@ def build_live_preopen_dependencies(session: Any | None = None) -> LivePreopenDe
     from src.agents.prompt_registry import PromptRegistry
     from src.agents.trading import _default_agent_runner
     from src.providers.market_data import AlpacaMarketDataProvider
-    from src.trading.brokers.paper_option import PaperOptionBroker
+    from src.trading.brokers.paper_option import (
+        DEFAULT_ALPACA_PAPER_TRADING_BASE_URL,
+        PaperOptionBroker,
+    )
     from src.trading.brokers.paper_stock import PaperStockBroker
     from src.trading.data_sources.live_universe import LiveUniverseProvider
     from src.trading.manual_review.sqlalchemy import SQLAlchemyManualTickerRequestService
@@ -126,7 +129,9 @@ def build_live_preopen_dependencies(session: Any | None = None) -> LivePreopenDe
     market_provider = AlpacaMarketDataProvider()
     news_provider = build_default_news_provider()
     broker = PaperStockBroker()
-    option_broker = PaperOptionBroker()
+    option_broker = PaperOptionBroker(
+        trading_base_url=DEFAULT_ALPACA_PAPER_TRADING_BASE_URL,
+    )
     signal_ingestion = SourceIngestionService(
         market_provider=market_provider,
         news_provider=news_provider,
