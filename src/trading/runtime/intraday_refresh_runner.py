@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Any, Callable
 
 from src.trading.intraday.signals import IntradaySignalScanRecord, build_intraday_signal_snapshot
@@ -15,6 +16,9 @@ from src.trading.runtime.intraday_refresh_helpers import (
     _load_social_macro_items,
     _load_event_items,
     _position_by_ticker,
+    build_intraday_calendar_events,
+    build_intraday_event_assessments,
+    mark_material_event_assessment_changes,
 )
 from src.trading.runtime.support import build_execution_report, build_runtime_report
 
@@ -74,6 +78,11 @@ class LiveIntradayRefreshRuntime:
         portfolio_result = self.dependencies.portfolio_sync_workflow.run(as_of=decision_time)
         portfolio_context = getattr(portfolio_result, "portfolio_context", portfolio_result)
         positions = _intraday_positions(portfolio_result=portfolio_result, portfolio_context=portfolio_context)
+        risk_portfolio_context = _portfolio_context_with_positions(
+            portfolio_context=portfolio_context,
+            positions=positions,
+        )
+        macro_snapshot = _load_intraday_macro_snapshot(self.dependencies, decision_time=decision_time)
 
         scan = IntradaySignalScanRecord(
             intraday_signal_scan_id=str(uuid.uuid4()),
@@ -89,6 +98,7 @@ class LiveIntradayRefreshRuntime:
 
         snapshots = []
         alert_source_items = []
+        source_items_by_ticker: dict[str, list[object]] = {}
         positions_by_ticker = _position_by_ticker(positions)
         for ticker in tickers:
             baseline = baselines.get(ticker)
@@ -142,8 +152,38 @@ class LiveIntradayRefreshRuntime:
             )
             self.dependencies.trading_repository.save_intraday_signal_snapshot(snapshot)
             snapshots.append(snapshot)
-            alert_source_items.extend(_load_event_items(ticker=ticker, event_news_rows=event_news_rows))
-            alert_source_items.extend(_load_social_macro_items(ticker=ticker, social_macro_rows=social_macro_rows))
+            event_items = _load_event_items(ticker=ticker, event_news_rows=event_news_rows)
+            social_items = _load_social_macro_items(ticker=ticker, social_macro_rows=social_macro_rows)
+            alert_source_items.extend(event_items)
+            alert_source_items.extend(social_items)
+            source_items_by_ticker.setdefault(ticker, []).extend(event_items)
+            source_items_by_ticker.setdefault(ticker, []).extend(social_items)
+
+        calendar_events = build_intraday_calendar_events(
+            calendar_event_pipeline=self.dependencies.calendar_event_pipeline,
+            source_items_by_ticker={ticker: tuple(items) for ticker, items in source_items_by_ticker.items()},
+            decision_time=decision_time,
+        )
+        if calendar_events and hasattr(self.dependencies.trading_repository, "save_calendar_events"):
+            self.dependencies.trading_repository.save_calendar_events(calendar_events)
+        previous_assessments = ()
+        if hasattr(self.dependencies.trading_repository, "load_portfolio_event_risk_assessments"):
+            previous_assessments = self.dependencies.trading_repository.load_portfolio_event_risk_assessments(
+                decision_time=decision_time,
+            )
+        event_assessments = build_intraday_event_assessments(
+            event_risk_pipeline=self.dependencies.event_risk_pipeline,
+            calendar_events=calendar_events,
+            request_contexts=request_contexts,
+            portfolio_context=risk_portfolio_context,
+            decision_time=decision_time,
+        )
+        event_assessments = mark_material_event_assessment_changes(
+            assessments=event_assessments,
+            previous_assessments=previous_assessments,
+        )
+        if event_assessments and hasattr(self.dependencies.trading_repository, "save_portfolio_event_risk_assessments"):
+            self.dependencies.trading_repository.save_portfolio_event_risk_assessments(event_assessments)
 
         existing_dedupe_keys = self.dependencies.existing_news_dedupe_key_loader(tickers, decision_time)
         affected_positions_by_ticker = self.dependencies.position_context_loader(tickers, positions)
@@ -174,18 +214,25 @@ class LiveIntradayRefreshRuntime:
         portfolio_context = getattr(portfolio_result, "portfolio_context", portfolio_result)
         portfolio_risk_intent = None
         if self.dependencies.lookahead_helper is not None:
-            macro_risk_state = self.dependencies.macro_state_loader(decision_time)
+            macro_risk_state = _intraday_macro_risk_state(
+                macro_snapshot=macro_snapshot,
+                fallback_loader=self.dependencies.macro_state_loader,
+                decision_time=decision_time,
+            )
             config = RiskConfigResolver().resolve(
                 risk_appetite="balanced",
-                portfolio_context=portfolio_context,
-                macro_risk_budget_multiplier=1.0,
+                portfolio_context=risk_portfolio_context,
+                macro_risk_budget_multiplier=float(getattr(macro_snapshot, "risk_budget_multiplier", 1.0) or 1.0),
             )
-            portfolio_risk_intent = self.dependencies.lookahead_helper.build_intraday_portfolio_risk_intent(
+            portfolio_risk_intent = _build_intraday_intent_with_optional_context(
+                self.dependencies.lookahead_helper,
                 rebalance_requests=rebalance_requests,
-                portfolio_context=portfolio_context,
+                portfolio_context=risk_portfolio_context,
                 config=config,
                 decision_time=decision_time,
                 macro_risk_state=macro_risk_state,
+                macro_snapshot=macro_snapshot,
+                event_assessments=event_assessments,
             )
         rebalance_result = self.dependencies.rebalance_pipeline.run(
             rebalance_requests=rebalance_requests,
@@ -250,3 +297,93 @@ def _intraday_instrument_type(
     if trade_identity in {"tactical_option_trade", "risk_hedge_overlay"}:
         return "option"
     return instrument_type
+
+
+def _portfolio_context_with_positions(
+    *,
+    portfolio_context: object,
+    positions: tuple[object, ...],
+) -> object:
+    if hasattr(portfolio_context, "positions"):
+        return portfolio_context
+    if isinstance(portfolio_context, SimpleNamespace):
+        values = dict(vars(portfolio_context))
+        values["positions"] = positions
+        return SimpleNamespace(**values)
+    values = dict(getattr(portfolio_context, "__dict__", {}) or {})
+    values["positions"] = positions
+    return SimpleNamespace(**values)
+
+
+def _load_intraday_macro_snapshot(
+    dependencies: LiveIntradayRefreshDependencies,
+    *,
+    decision_time: datetime,
+) -> object | None:
+    loader = getattr(dependencies, "macro_snapshot_loader", None)
+    snapshot = loader(decision_time) if callable(loader) else None
+    if not _should_refresh_intraday_macro_snapshot(snapshot):
+        return snapshot
+    pipeline = getattr(dependencies, "macro_snapshot_pipeline", None)
+    if pipeline is None:
+        return snapshot
+    refreshed = pipeline.build_snapshot(as_of=decision_time)
+    if hasattr(dependencies.trading_repository, "save_macro_snapshot"):
+        dependencies.trading_repository.save_macro_snapshot(refreshed)
+    return refreshed
+
+
+def _should_refresh_intraday_macro_snapshot(snapshot: object | None) -> bool:
+    if snapshot is None:
+        return True
+    freshness = dict(getattr(snapshot, "source_freshness", {}) or {}).get("global_context", {})
+    status = str(dict(freshness or {}).get("status") or "").lower()
+    return status in {"failed", "missing", "stale"}
+
+
+def _intraday_macro_risk_state(
+    *,
+    macro_snapshot: object | None,
+    fallback_loader: Callable[[datetime], str | None],
+    decision_time: datetime,
+) -> str | None:
+    regime = str(getattr(macro_snapshot, "regime", "") or "").lower()
+    if regime == "risk_off":
+        return "high"
+    if regime == "unavailable":
+        return "watch"
+    return fallback_loader(decision_time)
+
+
+def _build_intraday_intent_with_optional_context(
+    lookahead_helper: Any,
+    *,
+    rebalance_requests: tuple[object, ...],
+    portfolio_context: object,
+    config: object,
+    decision_time: datetime,
+    macro_risk_state: str | None,
+    macro_snapshot: object | None,
+    event_assessments: tuple[object, ...],
+) -> object:
+    try:
+        return lookahead_helper.build_intraday_portfolio_risk_intent(
+            rebalance_requests=rebalance_requests,
+            portfolio_context=portfolio_context,
+            config=config,
+            decision_time=decision_time,
+            macro_risk_state=macro_risk_state,
+            macro_snapshot=macro_snapshot,
+            event_assessments=event_assessments,
+        )
+    except TypeError as exc:
+        message = str(exc)
+        if "macro_snapshot" not in message and "event_assessments" not in message:
+            raise
+        return lookahead_helper.build_intraday_portfolio_risk_intent(
+            rebalance_requests=rebalance_requests,
+            portfolio_context=portfolio_context,
+            config=config,
+            decision_time=decision_time,
+            macro_risk_state=macro_risk_state,
+        )

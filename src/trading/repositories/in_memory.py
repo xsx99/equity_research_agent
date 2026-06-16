@@ -4,6 +4,8 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import TYPE_CHECKING
 
+from src.trading.events import CalendarEventRecord, PortfolioEventRiskAssessmentRecord
+from src.trading.macro import MacroReadthroughEventRecord, MacroSnapshotRecord
 from src.trading.replay.historical import HistoricalReplayRunRecord
 from src.trading.replay.outcomes import CandidateOutcomeEvaluationRecord
 from src.trading.data_sources.provider_resilience import ProviderRequestRunRecord
@@ -59,6 +61,10 @@ class InMemoryTradingRepository:
         self.fundamental_snapshots: list[FundamentalSnapshotRecord] = []
         self.event_news_items: list[EventNewsItemRecord] = []
         self.social_macro_items: list[SocialMacroItemRecord] = []
+        self.macro_snapshots: list[MacroSnapshotRecord] = []
+        self.macro_readthrough_events: list[MacroReadthroughEventRecord] = []
+        self.calendar_events: list[CalendarEventRecord] = []
+        self.portfolio_event_risk_assessments: list[PortfolioEventRiskAssessmentRecord] = []
         self.strategy_definitions: list[StrategyDefinitionRecord] = []
         self.strategy_runs: list[StrategyRunRecord] = []
         self.candidate_scores: list[CandidateScoreRecord] = []
@@ -159,6 +165,114 @@ class InMemoryTradingRepository:
 
     def save_social_macro_item(self, item: SocialMacroItemRecord) -> None:
         self.social_macro_items.append(item)
+
+    def save_macro_snapshot(self, snapshot: MacroSnapshotRecord) -> None:
+        self.macro_snapshots = [
+            item
+            for item in self.macro_snapshots
+            if not (
+                item.trade_date == snapshot.trade_date
+                and item.snapshot_time == snapshot.snapshot_time
+                and item.source_set_key == snapshot.source_set_key
+            )
+        ]
+        self.macro_snapshots.append(snapshot)
+
+    def load_latest_macro_snapshot(
+        self,
+        *,
+        trade_date: date,
+        decision_time: datetime | None = None,
+    ) -> MacroSnapshotRecord | None:
+        candidates = [
+            item
+            for item in self.macro_snapshots
+            if item.trade_date == trade_date
+            and (decision_time is None or item.snapshot_time <= decision_time)
+        ]
+        if not candidates:
+            return None
+        return max(candidates, key=lambda item: item.snapshot_time)
+
+    def save_calendar_events(
+        self,
+        events: list[CalendarEventRecord] | tuple[CalendarEventRecord, ...],
+    ) -> None:
+        for event in events:
+            self.calendar_events = [item for item in self.calendar_events if item.event_key != event.event_key]
+            self.calendar_events.append(event)
+
+    def load_calendar_events(
+        self,
+        *,
+        decision_time: datetime,
+        ticker: str | None = None,
+    ) -> tuple[CalendarEventRecord, ...]:
+        symbol = ticker.strip().upper() if isinstance(ticker, str) else None
+        events = [
+            item
+            for item in self.calendar_events
+            if item.available_for_decision_at <= decision_time
+            and (symbol is None or item.ticker in {None, symbol})
+        ]
+        events.sort(key=lambda item: (item.event_time, item.event_key))
+        return tuple(events)
+
+    def save_portfolio_event_risk_assessments(
+        self,
+        assessments: list[PortfolioEventRiskAssessmentRecord] | tuple[PortfolioEventRiskAssessmentRecord, ...],
+    ) -> None:
+        for assessment in assessments:
+            key = _portfolio_event_risk_assessment_key(assessment)
+            self.portfolio_event_risk_assessments = [
+                item
+                for item in self.portfolio_event_risk_assessments
+                if _portfolio_event_risk_assessment_key(item) != key
+            ]
+            self.portfolio_event_risk_assessments.append(assessment)
+
+    def load_portfolio_event_risk_assessments(
+        self,
+        *,
+        decision_time: datetime,
+        ticker: str | None = None,
+    ) -> tuple[PortfolioEventRiskAssessmentRecord, ...]:
+        symbol = ticker.strip().upper() if isinstance(ticker, str) else None
+        assessments = [
+            item
+            for item in self.portfolio_event_risk_assessments
+            if (item.available_for_decision_at is None or item.available_for_decision_at <= decision_time)
+            and (symbol is None or item.ticker == symbol)
+        ]
+        assessments.sort(
+            key=lambda item: (
+                item.available_for_decision_at or datetime.min,
+                item.portfolio_event_risk_assessment_id or "",
+            )
+        )
+        return tuple(assessments)
+
+    def load_decision_available_risk_macro_context(
+        self,
+        *,
+        trade_date: date,
+        decision_time: datetime,
+        ticker: str | None = None,
+    ) -> dict[str, object]:
+        return {
+            "macro_snapshot": self.load_latest_macro_snapshot(
+                trade_date=trade_date,
+                decision_time=decision_time,
+            ),
+            "calendar_events": self.load_calendar_events(
+                decision_time=decision_time,
+                ticker=ticker,
+            ),
+            "portfolio_event_risk_assessments": self.load_portfolio_event_risk_assessments(
+                decision_time=decision_time,
+                ticker=ticker,
+            ),
+        }
 
     def load_event_news_items(
         self,
@@ -262,6 +376,20 @@ class InMemoryTradingRepository:
         }
         if versioned not in existing:
             self.llm_prompt_templates.append(template)
+
+
+def _portfolio_event_risk_assessment_key(assessment: PortfolioEventRiskAssessmentRecord) -> str:
+    if assessment.portfolio_event_risk_assessment_id:
+        return assessment.portfolio_event_risk_assessment_id
+    return "|".join(
+        (
+            assessment.calendar_event_id or "synthetic",
+            assessment.portfolio_risk_snapshot_id or "no_snapshot",
+            assessment.ticker,
+            assessment.risk_source,
+            assessment.available_for_decision_at.isoformat() if assessment.available_for_decision_at else "na",
+        )
+    )
 
     def save_prompt_run(self, prompt_run: object) -> None:
         self.llm_prompt_runs.append(prompt_run)

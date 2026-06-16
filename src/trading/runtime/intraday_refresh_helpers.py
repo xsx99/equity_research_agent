@@ -1,11 +1,14 @@
 """Payload and request assembly helpers for the live intraday runtime."""
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime
 from types import SimpleNamespace
 from typing import Any
 
-from src.trading.intraday.news_alerts import AlertSourceItem
+from src.trading.events import CalendarEventPipeline, PortfolioEventRiskAssessmentPipeline
+from src.trading.intraday.news_alerts import AlertSourceItem, classify_source_item_severity
+from src.trading.macro import MacroReadthroughEventRecord
 from src.trading.intraday.rebalance import IntradayRebalanceRequest
 from src.trading.signals.event_news import build_event_news_signals
 from src.trading.signals.insider import build_insider_signals
@@ -339,3 +342,154 @@ def _float_or_none(value: object) -> float | None:
     if isinstance(value, (int, float)):
         return float(value)
     return None
+
+
+def build_intraday_calendar_events(
+    *,
+    calendar_event_pipeline: CalendarEventPipeline | None,
+    source_items_by_ticker: dict[str, tuple[AlertSourceItem, ...]],
+    decision_time: datetime,
+) -> tuple[object, ...]:
+    if calendar_event_pipeline is None:
+        return ()
+    events: list[object] = []
+    for ticker, source_items in sorted(source_items_by_ticker.items()):
+        company_event_payloads: list[dict[str, Any]] = []
+        macro_events: list[dict[str, Any]] = []
+        readthrough_events: list[MacroReadthroughEventRecord] = []
+        earnings_in_days: int | None = None
+        for item in source_items:
+            if _is_readthrough_item(item):
+                readthrough_events.append(
+                    MacroReadthroughEventRecord(
+                        macro_readthrough_event_id=item.alert_item_id,
+                        event_key=(
+                            f"readthrough:{str(item.source_ticker or '').upper()}:{ticker}:"
+                            f"{item.alert_type}:{item.available_for_decision_at.isoformat()}"
+                        ),
+                        source_ticker=str(item.source_ticker or "").upper(),
+                        affected_ticker=ticker,
+                        scope="ticker",
+                        mechanism=str(item.alert_type),
+                        direction=item.direction,
+                        title=str(item.headline or item.summary or item.alert_type),
+                        source=item.provider,
+                        event_time=item.published_at,
+                        published_at=item.published_at,
+                        available_for_decision_at=item.available_for_decision_at,
+                        valid_until=None,
+                        metadata_json={"source_family": item.source_family, **dict(item.metadata_json or {})},
+                    )
+                )
+                continue
+            if _is_intraday_own_event_item(item):
+                earnings_in_days = 0
+                continue
+            if item.source_family == "social_macro" and not bool(item.metadata_json.get("explicit_ticker_mention_flag")):
+                macro_events.append(
+                    {
+                        "event_code": item.alert_type,
+                        "event_time": item.published_at,
+                        "title": str(item.headline or item.summary or item.alert_type),
+                        "severity_hint": classify_source_item_severity(item),
+                        "source": item.provider,
+                    }
+                )
+                continue
+            company_event_payloads.append(
+                {
+                    "event_type": item.alert_type,
+                    "published_at": item.available_for_decision_at,
+                    "title": str(item.headline or item.summary or item.alert_type),
+                    "severity_hint": classify_source_item_severity(item),
+                    "source": item.provider,
+                }
+            )
+        events.extend(
+            calendar_event_pipeline.build_events(
+                ticker=ticker,
+                decision_time=decision_time,
+                earnings_in_days=earnings_in_days,
+                macro_events=tuple(macro_events),
+                company_event_payloads=tuple(company_event_payloads),
+                readthrough_events=tuple(readthrough_events),
+            )
+        )
+    return tuple(events)
+
+
+def build_intraday_event_assessments(
+    *,
+    event_risk_pipeline: PortfolioEventRiskAssessmentPipeline | None,
+    calendar_events: tuple[object, ...],
+    request_contexts: dict[str, object],
+    portfolio_context: object,
+    decision_time: datetime,
+) -> tuple[object, ...]:
+    if event_risk_pipeline is None or not calendar_events:
+        return ()
+    pending_candidates = tuple(
+        {
+            "ticker": ticker,
+            "candidate_score_id": getattr(context, "candidate_score_id", None)
+            or getattr(context, "manual_request_id", None),
+        }
+        for ticker, context in sorted(request_contexts.items())
+        if bool(getattr(context, "allow_open_new", False))
+    )
+    return event_risk_pipeline.build_assessments(
+        calendar_events=calendar_events,
+        portfolio_context=portfolio_context,
+        pending_candidates=pending_candidates,
+        decision_time=decision_time,
+        portfolio_risk_snapshot_id=None,
+    )
+
+
+def mark_material_event_assessment_changes(
+    *,
+    assessments: tuple[object, ...],
+    previous_assessments: tuple[object, ...],
+) -> tuple[object, ...]:
+    previous_by_key = {_material_change_key(item): item for item in previous_assessments}
+    marked: list[object] = []
+    for assessment in assessments:
+        previous = previous_by_key.get(_material_change_key(assessment))
+        changed_fields: list[str] = []
+        if previous is None:
+            changed_fields.append("new_event")
+        else:
+            for field_name in (
+                "severity",
+                "recommended_action",
+                "affects_existing_position",
+                "affects_pending_trade",
+            ):
+                if getattr(previous, field_name, None) != getattr(assessment, field_name, None):
+                    changed_fields.append(field_name)
+        metadata_json = {
+            **dict(getattr(assessment, "metadata_json", {}) or {}),
+            "material_change": bool(changed_fields),
+            "material_change_fields": changed_fields,
+        }
+        marked.append(replace(assessment, metadata_json=metadata_json))
+    return tuple(marked)
+
+
+def _material_change_key(assessment: object) -> tuple[object, ...]:
+    return (
+        getattr(assessment, "calendar_event_id", None),
+        getattr(assessment, "ticker", None),
+        getattr(assessment, "risk_source", None),
+    )
+
+
+def _is_readthrough_item(item: AlertSourceItem) -> bool:
+    source_ticker = str(item.source_ticker or "").strip().upper()
+    ticker = str(item.ticker or "").strip().upper()
+    return bool(source_ticker) and source_ticker != ticker
+
+
+def _is_intraday_own_event_item(item: AlertSourceItem) -> bool:
+    alert_type = str(item.alert_type or "").lower()
+    return any(keyword in alert_type for keyword in ("earnings", "guidance", "fda", "litigation", "approval", "trial"))

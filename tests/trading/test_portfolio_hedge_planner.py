@@ -190,3 +190,50 @@ def test_planner_applies_single_name_rules_before_macro_hedge_for_mixed_risk():
     assert intent.hedge_actions[0].action == "open_hedge"
     assert intent.hedge_actions[0].target_underlier == "QQQ"
     assert intent.hedge_actions[0].coverage_ratio == 0.5
+
+
+def test_planner_surfaces_canonical_macro_and_risk_source_metadata():
+    portfolio_context = _portfolio_context()
+    request = PortfolioHedgePlannerRequest(
+        decision_time=portfolio_context.as_of,
+        risk_window="1-5d",
+        portfolio_context=portfolio_context,
+        risk_limit_config=_risk_config(portfolio_context),
+        event_assessments=(
+            PortfolioEventRiskAssessmentRecord(
+                ticker="ASAN",
+                risk_source="own_event",
+                severity="high",
+                event_type="earnings",
+                days_until_event=1,
+                affects_existing_position=False,
+                affects_pending_trade=True,
+                metadata_json={},
+            ),
+        ),
+        pending_trades=(
+            PendingTradeRiskRecord(
+                ticker="ASAN",
+                trade_identity="tactical_stock_trade",
+                sector="Technology",
+                event_type="earnings",
+                macro_sensitivity="rates_sensitive",
+            ),
+        ),
+        macro_snapshot=type(
+            "_MacroSnapshot",
+            (),
+            {
+                "macro_snapshot_id": "macro-1",
+                "regime": "risk_off",
+                "metadata_json": {"availability_issues": ["global_context_stale"]},
+            },
+        )(),
+    )
+
+    intent = PortfolioHedgePlanner().plan(request)
+
+    assert intent.metadata_json["macro_snapshot_id"] == "macro-1"
+    assert intent.metadata_json["top_risk_sources"] == ("own_event", "macro")
+    assert intent.metadata_json["hedge_posture"]["target_underlier"] == "QQQ"
+    assert intent.metadata_json["data_availability_issues"] == ("global_context_stale",)

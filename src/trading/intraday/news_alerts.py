@@ -79,7 +79,7 @@ class NewsAlertService:
                 affected_themes_by_ticker.get(ticker, ()),
                 item.metadata_json.get("theme_tags", ()),
             )
-            severity = _classify_severity(item)
+            severity = classify_source_item_severity(item)
             metadata_json = {
                 **dict(item.metadata_json),
                 "source_family": item.source_family,
@@ -114,7 +114,7 @@ class NewsAlertService:
         return tuple(alerts)
 
 
-def _classify_severity(item: AlertSourceItem) -> str:
+def classify_source_item_severity(item: AlertSourceItem) -> str:
     importance = str(item.importance or "").lower()
     alert_type = str(item.alert_type or "").lower()
     if importance == "critical" or "bankruptcy" in alert_type:

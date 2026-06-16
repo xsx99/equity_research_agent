@@ -1441,9 +1441,14 @@ def test_live_risk_workflow_persists_richer_option_risk_reason_codes():
 
 def test_live_risk_workflow_persists_portfolio_risk_intent_and_materializes_generated_hedge():
     decision_time = datetime(2026, 6, 3, 12, 45, tzinfo=timezone.utc)
+    saved_macro_snapshots: list[object] = []
+    saved_calendar_events: list[object] = []
+    saved_event_assessments: list[object] = []
     saved_intents: list[PortfolioRiskIntentRecord] = []
     saved_decisions: list[RiskDecisionRecord] = []
     captured_intents: list[PortfolioRiskIntentRecord | None] = []
+    captured_macro_multipliers: list[float] = []
+    captured_helper_kwargs: list[dict[str, object]] = []
 
     class _Repository:
         def load_signal_snapshots_for_decision(self, *, decision_time, snapshot_type):
@@ -1462,6 +1467,15 @@ def test_live_risk_workflow_persists_portfolio_risk_intent_and_materializes_gene
         def save_risk_factor_exposures(self, exposures):
             del exposures
 
+        def save_macro_snapshot(self, snapshot):
+            saved_macro_snapshots.append(snapshot)
+
+        def save_calendar_events(self, events):
+            saved_calendar_events.extend(events)
+
+        def save_portfolio_event_risk_assessments(self, assessments):
+            saved_event_assessments.extend(assessments)
+
         def save_portfolio_risk_intent(self, intent):
             saved_intents.append(intent)
 
@@ -1478,7 +1492,7 @@ def test_live_risk_workflow_persists_portfolio_risk_intent_and_materializes_gene
 
     class _ConfigResolver:
         def resolve(self, **kwargs):
-            del kwargs
+            captured_macro_multipliers.append(kwargs["macro_risk_budget_multiplier"])
             return SimpleNamespace(
                 risk_appetite="balanced",
                 resolver_version="v1",
@@ -1561,7 +1575,7 @@ def test_live_risk_workflow_persists_portfolio_risk_intent_and_materializes_gene
 
     class _LookaheadHelper:
         def build_preopen_portfolio_risk_intent(self, **kwargs):
-            del kwargs
+            captured_helper_kwargs.append(kwargs)
             return PortfolioRiskIntentRecord.create(
                 portfolio_risk_snapshot_id="snapshot-portfolio-1",
                 decision_time=decision_time,
@@ -1597,6 +1611,57 @@ def test_live_risk_workflow_persists_portfolio_risk_intent_and_materializes_gene
             }
             return (replace(risk_decisions[0], generated_hedge_action=payload),)
 
+    class _MacroSnapshotPipeline:
+        def build_snapshot(self, *, as_of):
+            assert as_of == decision_time
+            return SimpleNamespace(
+                macro_snapshot_id="macro-1",
+                regime="risk_off",
+                risk_budget_multiplier=0.6,
+                blocked_strategy_tags=("gap_and_go_v1",),
+                invalidators=("macro_risk_off",),
+                metadata_json={"basis_note": "risk_off"},
+            )
+
+    class _CalendarEventPipeline:
+        def build_events(self, **kwargs):
+            assert kwargs["ticker"] == "AAPL"
+            assert kwargs["earnings_in_days"] == 2
+            return (
+                SimpleNamespace(
+                    calendar_event_id="calendar-1",
+                    event_key="earnings:AAPL:2026-06-05",
+                    event_type="earnings",
+                    ticker="AAPL",
+                    event_time=datetime(2026, 6, 5, 20, 0, tzinfo=timezone.utc),
+                    available_for_decision_at=decision_time,
+                    title="AAPL earnings",
+                    severity_hint="high",
+                    metadata_json={},
+                ),
+            )
+
+    class _EventRiskPipeline:
+        def build_assessments(self, **kwargs):
+            assert kwargs["portfolio_risk_snapshot_id"] == "snapshot-portfolio-1"
+            return (
+                SimpleNamespace(
+                    portfolio_event_risk_assessment_id="assessment-1",
+                    calendar_event_id="calendar-1",
+                    portfolio_risk_snapshot_id="snapshot-portfolio-1",
+                    ticker="AAPL",
+                    risk_source="own_event",
+                    severity="high",
+                    event_type="earnings",
+                    days_until_event=2,
+                    affects_existing_position=False,
+                    affects_pending_trade=True,
+                    recommended_action="block_open",
+                    rationale="AAPL earnings within 2 day(s).",
+                    metadata_json={"candidate_score_id": "candidate-1"},
+                ),
+            )
+
     workflow = _LiveRiskWorkflow(
         repository=_Repository(),
         source_repository=_SourceRepository(),
@@ -1604,6 +1669,9 @@ def test_live_risk_workflow_persists_portfolio_risk_intent_and_materializes_gene
         position_sizer=_PositionSizer(),
         risk_manager=_RiskManager(),
         lookahead_helper=_LookaheadHelper(),
+        macro_snapshot_pipeline=_MacroSnapshotPipeline(),
+        calendar_event_pipeline=_CalendarEventPipeline(),
+        event_risk_pipeline=_EventRiskPipeline(),
     )
 
     result = workflow.run(
@@ -1627,8 +1695,20 @@ def test_live_risk_workflow_persists_portfolio_risk_intent_and_materializes_gene
         decision_time=decision_time,
     )
 
+    assert captured_macro_multipliers == [0.6]
+    assert len(saved_macro_snapshots) == 1
+    assert len(saved_calendar_events) == 1
+    assert len(saved_event_assessments) == 1
     assert len(saved_intents) == 1
     assert captured_intents == [saved_intents[0]]
+    assert captured_helper_kwargs[0]["macro_snapshot"].macro_snapshot_id == "macro-1"
+    assert captured_helper_kwargs[0]["event_assessments"][0].portfolio_event_risk_assessment_id == "assessment-1"
+    assert saved_intents[0].metadata_json["macro_snapshot_id"] == "macro-1"
+    assert saved_intents[0].metadata_json["calendar_event_ids"] == ["calendar-1"]
+    assert saved_intents[0].metadata_json["portfolio_event_risk_assessment_ids"] == ["assessment-1"]
     assert result.risk_decisions[0].generated_hedge_action is not None
     assert result.risk_decisions[0].generated_hedge_action["target_underlier"] == "QQQ"
+    assert saved_decisions[-1].metadata_json["risk_context"]["macro_snapshot_id"] == "macro-1"
+    assert saved_decisions[-1].metadata_json["risk_context"]["calendar_event_ids"] == ["calendar-1"]
+    assert saved_decisions[-1].metadata_json["risk_context"]["portfolio_event_risk_assessment_ids"] == ["assessment-1"]
     assert saved_decisions[-1].generated_hedge_action["target_underlier"] == "QQQ"

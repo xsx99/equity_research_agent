@@ -38,6 +38,7 @@ class PortfolioHedgePlannerRequest:
     event_assessments: tuple[PortfolioEventRiskAssessmentRecord, ...]
     pending_trades: tuple[PendingTradeRiskRecord, ...]
     macro_risk_state: str | None = None
+    macro_snapshot: object | None = None
 
 
 class PortfolioHedgePlanner:
@@ -54,8 +55,10 @@ class PortfolioHedgePlanner:
         for assessment in request.event_assessments:
             self._apply_cluster_rules(assessment, request, position_actions, hedge_actions, binding_constraints)
 
-        if request.macro_risk_state in {"watch", "high", "critical"}:
-            severity = request.macro_risk_state
+        macro_risk_state = request.macro_risk_state or _macro_risk_state_from_snapshot(request.macro_snapshot)
+
+        if macro_risk_state in {"watch", "high", "critical"}:
+            severity = macro_risk_state
             underlier = _broad_underlier(request)
             hedge_actions.append(
                 HedgeActionRecord(
@@ -90,7 +93,7 @@ class PortfolioHedgePlanner:
         aggregate_risk_state = _aggregate_risk_state(
             position_actions=position_actions,
             hedge_actions=hedge_actions,
-            macro_risk_state=request.macro_risk_state,
+            macro_risk_state=macro_risk_state,
         )
         return PortfolioRiskIntentRecord.create(
             portfolio_risk_snapshot_id=None,
@@ -100,7 +103,16 @@ class PortfolioHedgePlanner:
             position_actions=tuple(position_actions),
             hedge_actions=tuple(hedge_actions),
             binding_constraints=tuple(binding_constraints),
-            metadata_json={},
+            metadata_json={
+                "macro_snapshot_id": getattr(request.macro_snapshot, "macro_snapshot_id", None),
+                "top_risk_sources": _top_risk_sources(
+                    event_assessments=request.event_assessments,
+                    hedge_actions=hedge_actions,
+                    macro_risk_state=macro_risk_state,
+                ),
+                "hedge_posture": _hedge_posture(hedge_actions),
+                "data_availability_issues": _data_availability_issues(request.macro_snapshot),
+            },
         )
 
     def _apply_own_event_rules(
@@ -261,6 +273,56 @@ def _sector_values(request: PortfolioHedgePlannerRequest) -> Iterable[str]:
     for pending_trade in request.pending_trades:
         if pending_trade.sector:
             yield pending_trade.sector
+
+
+def _macro_risk_state_from_snapshot(macro_snapshot: object | None) -> str | None:
+    regime = str(getattr(macro_snapshot, "regime", "") or "").lower()
+    if regime == "risk_off":
+        return "high"
+    if regime == "unavailable":
+        return "watch"
+    return None
+
+
+def _top_risk_sources(
+    *,
+    event_assessments: tuple[PortfolioEventRiskAssessmentRecord, ...],
+    hedge_actions: list[HedgeActionRecord],
+    macro_risk_state: str | None,
+) -> tuple[str, ...]:
+    values: list[str] = []
+    for assessment in event_assessments:
+        if assessment.risk_source not in values:
+            values.append(assessment.risk_source)
+    for action in hedge_actions:
+        if action.risk_source not in values:
+            values.append(action.risk_source)
+    if macro_risk_state in {"watch", "high", "critical"} and "macro" not in values:
+        values.append("macro")
+    return tuple(values)
+
+
+def _hedge_posture(hedge_actions: list[HedgeActionRecord]) -> dict[str, object] | None:
+    if not hedge_actions:
+        return None
+    action = hedge_actions[0]
+    return {
+        "action": action.action,
+        "risk_source": action.risk_source,
+        "target_underlier": action.target_underlier,
+        "coverage_ratio": action.coverage_ratio,
+        "severity": action.severity,
+    }
+
+
+def _data_availability_issues(macro_snapshot: object | None) -> tuple[str, ...]:
+    if macro_snapshot is None:
+        return ()
+    metadata_json = dict(getattr(macro_snapshot, "metadata_json", {}) or {})
+    values = metadata_json.get("availability_issues", ())
+    if not isinstance(values, (list, tuple)):
+        return ()
+    return tuple(str(value) for value in values if str(value))
 
 
 def _hedge_overlay_action(

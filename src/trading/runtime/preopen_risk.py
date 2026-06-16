@@ -5,6 +5,8 @@ from dataclasses import replace
 from datetime import datetime
 from typing import Any
 
+from src.trading.events import CalendarEventPipeline, PortfolioEventRiskAssessmentPipeline
+from src.trading.macro import MacroSnapshotPipeline
 from src.trading.runtime.lookahead_risk import LookaheadRiskWorkflowHelper
 
 
@@ -19,6 +21,9 @@ class _LiveRiskWorkflow:
         risk_manager: Any,
         option_risk_manager: Any | None = None,
         lookahead_helper: Any | None = None,
+        macro_snapshot_pipeline: MacroSnapshotPipeline | None = None,
+        calendar_event_pipeline: CalendarEventPipeline | None = None,
+        event_risk_pipeline: PortfolioEventRiskAssessmentPipeline | None = None,
     ) -> None:
         self.repository = repository
         self.source_repository = source_repository
@@ -27,6 +32,9 @@ class _LiveRiskWorkflow:
         self.risk_manager = risk_manager
         self.option_risk_manager = option_risk_manager
         self.lookahead_helper = lookahead_helper or LookaheadRiskWorkflowHelper()
+        self.macro_snapshot_pipeline = macro_snapshot_pipeline
+        self.calendar_event_pipeline = calendar_event_pipeline
+        self.event_risk_pipeline = event_risk_pipeline
 
     def run(
         self,
@@ -51,15 +59,38 @@ class _LiveRiskWorkflow:
             if getattr(definition, "strategy_layer", None) == "expression_bucket"
             and bool(getattr(definition, "is_active", False))
         }
+        macro_snapshot = None
+        if self.macro_snapshot_pipeline is not None:
+            macro_snapshot = self.macro_snapshot_pipeline.build_snapshot(as_of=decision_time)
+            if hasattr(self.repository, "save_macro_snapshot"):
+                self.repository.save_macro_snapshot(macro_snapshot)
         config = self.config_resolver.resolve(
             risk_appetite="balanced",
             portfolio_context=portfolio_context,
-            macro_risk_budget_multiplier=1.0,
+            macro_risk_budget_multiplier=float(getattr(macro_snapshot, "risk_budget_multiplier", 1.0) or 1.0),
         )
         portfolio_snapshot = self.risk_manager.build_portfolio_risk_snapshot(portfolio_context, config)
         exposures = self.risk_manager.compute_factor_exposures(portfolio_context)
         self.repository.save_portfolio_risk_snapshot(portfolio_snapshot)
         self.repository.save_risk_factor_exposures(exposures)
+        calendar_events = _build_preopen_calendar_events(
+            calendar_event_pipeline=self.calendar_event_pipeline,
+            candidates=candidates,
+            signal_by_id=signal_by_id,
+            decision_time=decision_time,
+        )
+        if calendar_events and hasattr(self.repository, "save_calendar_events"):
+            self.repository.save_calendar_events(calendar_events)
+        event_assessments = _build_preopen_event_assessments(
+            event_risk_pipeline=self.event_risk_pipeline,
+            calendar_events=calendar_events,
+            candidates=candidates,
+            portfolio_context=portfolio_context,
+            portfolio_risk_snapshot_id=portfolio_snapshot.portfolio_risk_snapshot_id,
+            decision_time=decision_time,
+        )
+        if event_assessments and hasattr(self.repository, "save_portfolio_event_risk_assessments"):
+            self.repository.save_portfolio_event_risk_assessments(event_assessments)
         portfolio_risk_intent = self.lookahead_helper.build_preopen_portfolio_risk_intent(
             candidates=candidates,
             classifications=classifications,
@@ -68,14 +99,26 @@ class _LiveRiskWorkflow:
             config=config,
             decision_time=decision_time,
             portfolio_risk_snapshot_id=portfolio_snapshot.portfolio_risk_snapshot_id,
+            macro_snapshot=macro_snapshot,
+            event_assessments=event_assessments,
+        )
+        risk_context_linkage = {
+            "macro_snapshot_id": getattr(macro_snapshot, "macro_snapshot_id", None),
+            "calendar_event_ids": [str(getattr(event, "calendar_event_id")) for event in calendar_events],
+            "portfolio_event_risk_assessment_ids": [
+                str(getattr(assessment, "portfolio_event_risk_assessment_id")) for assessment in event_assessments
+            ],
+        }
+        portfolio_risk_intent = replace(
+            portfolio_risk_intent,
+            portfolio_risk_snapshot_id=portfolio_snapshot.portfolio_risk_snapshot_id,
+            metadata_json={
+                **dict(getattr(portfolio_risk_intent, "metadata_json", {}) or {}),
+                **risk_context_linkage,
+            },
         )
         if hasattr(self.repository, "save_portfolio_risk_intent"):
-            self.repository.save_portfolio_risk_intent(
-                replace(
-                    portfolio_risk_intent,
-                    portfolio_risk_snapshot_id=portfolio_snapshot.portfolio_risk_snapshot_id,
-                )
-            )
+            self.repository.save_portfolio_risk_intent(portfolio_risk_intent)
         candidate_by_id = {candidate.candidate_score_id: candidate for candidate in candidates}
         decisions: list[object] = []
         for classification in classifications:
@@ -103,6 +146,10 @@ class _LiveRiskWorkflow:
             decision = replace(
                 decision,
                 portfolio_risk_snapshot_id=portfolio_snapshot.portfolio_risk_snapshot_id,
+                metadata_json={
+                    **dict(getattr(decision, "metadata_json", {}) or {}),
+                    "risk_context": risk_context_linkage,
+                },
             )
             decision = self._apply_option_assignment_risk(
                 candidate=candidate,
@@ -218,6 +265,7 @@ class _LiveRiskWorkflow:
             applied_rules=[*list(getattr(decision, "applied_rules", ())), "option_assignment_risk_check"],
             decision_time=getattr(decision, "decision_time"),
             metadata_json={
+                **dict(getattr(decision, "metadata_json", {}) or {}),
                 "superseded_risk_decision_id": getattr(decision, "risk_decision_id", None),
                 "option_risk_reason_code": assessment.reason_code,
                 "option_risk_status": assessment.status,
@@ -225,6 +273,68 @@ class _LiveRiskWorkflow:
                 "option_risk_checks": dict(getattr(assessment, "metadata_json", {}) or {}),
             },
         )
+
+
+def _build_preopen_calendar_events(
+    *,
+    calendar_event_pipeline: CalendarEventPipeline | None,
+    candidates: tuple[object, ...],
+    signal_by_id: dict[str, object],
+    decision_time: datetime,
+) -> tuple[object, ...]:
+    if calendar_event_pipeline is None:
+        return ()
+    events: list[object] = []
+    for candidate in candidates:
+        snapshot = signal_by_id.get(getattr(candidate, "signal_snapshot_id", ""))
+        events.extend(
+            calendar_event_pipeline.build_events(
+                ticker=str(getattr(candidate, "ticker", "")),
+                decision_time=decision_time,
+                earnings_in_days=_earnings_in_days(snapshot),
+            )
+        )
+    return tuple(events)
+
+
+def _build_preopen_event_assessments(
+    *,
+    event_risk_pipeline: PortfolioEventRiskAssessmentPipeline | None,
+    calendar_events: tuple[object, ...],
+    candidates: tuple[object, ...],
+    portfolio_context: object,
+    portfolio_risk_snapshot_id: str | None,
+    decision_time: datetime,
+) -> tuple[object, ...]:
+    if event_risk_pipeline is None or not calendar_events:
+        return ()
+    pending_candidates = tuple(
+        {
+            "ticker": str(getattr(candidate, "ticker", "")),
+            "candidate_score_id": getattr(candidate, "candidate_score_id", None),
+        }
+        for candidate in candidates
+    )
+    return event_risk_pipeline.build_assessments(
+        calendar_events=calendar_events,
+        portfolio_context=portfolio_context,
+        pending_candidates=pending_candidates,
+        decision_time=decision_time,
+        portfolio_risk_snapshot_id=portfolio_risk_snapshot_id,
+    )
+
+
+def _earnings_in_days(snapshot: object | None) -> int | None:
+    if snapshot is None:
+        return None
+    signal_json = dict(getattr(snapshot, "signal_json", {}) or {})
+    event_news = dict(signal_json.get("events_news", {}) or {})
+    value = event_news.get("earnings_in_days")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    return None
 
 
 def _build_trade_risk_request(

@@ -6,8 +6,10 @@ from datetime import datetime
 from typing import Any, Callable
 
 from src.core import config as app_config
+from src.trading.events import CalendarEventPipeline, PortfolioEventRiskAssessmentPipeline
 from src.trading.intraday.news_alerts import NewsAlertService
 from src.trading.intraday.rebalance import IntradayRebalancePipeline
+from src.trading.macro import MacroSnapshotPipeline
 
 
 @dataclass(frozen=True)
@@ -28,6 +30,10 @@ class LiveIntradayRefreshDependencies:
     macro_state_loader: Callable[[datetime], str | None]
     source_ingestion_service: Any | None = None
     lookahead_helper: Any | None = None
+    macro_snapshot_loader: Callable[[datetime], object | None] | None = None
+    macro_snapshot_pipeline: Any | None = None
+    calendar_event_pipeline: Any | None = None
+    event_risk_pipeline: Any | None = None
 
 
 def build_live_intraday_refresh_dependencies(session: Any | None = None) -> LiveIntradayRefreshDependencies:
@@ -101,6 +107,15 @@ def build_live_intraday_refresh_dependencies(session: Any | None = None) -> Live
         theme_context_loader=lambda tickers, decision_time: {},
         macro_state_loader=lambda decision_time: None,
         lookahead_helper=LookaheadRiskWorkflowHelper(hedge_planner=PortfolioHedgePlanner()),
+        macro_snapshot_loader=lambda decision_time: trading_repository.load_latest_macro_snapshot(
+            trade_date=decision_time.date(),
+            decision_time=decision_time,
+        ),
+        macro_snapshot_pipeline=MacroSnapshotPipeline(
+            global_context_fetcher=lambda as_of: get_global_context(as_of=as_of, limit=5),
+        ),
+        calendar_event_pipeline=CalendarEventPipeline(),
+        event_risk_pipeline=PortfolioEventRiskAssessmentPipeline(),
     )
 
 

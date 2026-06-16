@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+from src.trading.events.risk import PortfolioEventRiskAssessmentRecord
+
 
 @dataclass(frozen=True)
 class PositionRiskActionRecord:
@@ -32,20 +34,6 @@ class HedgeActionRecord:
     target_exposure_type: str
     coverage_ratio: float
     reason_code: str
-    metadata_json: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class PortfolioEventRiskAssessmentRecord:
-    """Lookahead event assessment attached to portfolio names or pending trades."""
-
-    ticker: str
-    risk_source: str
-    severity: str
-    event_type: str | None
-    days_until_event: int | None
-    affects_existing_position: bool
-    affects_pending_trade: bool
     metadata_json: dict[str, Any] = field(default_factory=dict)
 
 

@@ -182,7 +182,26 @@ def _planner_intent(
             [action.reason_code for action in position_actions]
             + [action.reason_code for action in hedge_actions]
         ),
-        metadata_json={},
+        metadata_json={
+            "top_risk_sources": tuple(
+                dict.fromkeys(
+                    [action.risk_source for action in position_actions]
+                    + [action.risk_source for action in hedge_actions]
+                )
+            ),
+            "hedge_posture": (
+                {
+                    "action": hedge_actions[0].action,
+                    "risk_source": hedge_actions[0].risk_source,
+                    "target_underlier": hedge_actions[0].target_underlier,
+                    "coverage_ratio": hedge_actions[0].coverage_ratio,
+                    "severity": hedge_actions[0].severity,
+                }
+                if hedge_actions
+                else None
+            ),
+            "data_availability_issues": ("global_context_stale",) if hedge_actions else (),
+        },
     )
 
 
@@ -270,6 +289,8 @@ def test_risk_manager_blocks_tactical_trade_when_planner_marks_block_open():
     assert decision.status == "rejected"
     assert decision.reason_code == "own_event_block"
     assert decision.approved_weight == 0.0
+    assert decision.metadata_json["binding_constraints"] == ["own_event_block"]
+    assert decision.metadata_json["top_risk_sources"] == ["own_event"]
 
 
 def test_risk_manager_reduces_trade_to_planner_override_weight():
@@ -334,6 +355,9 @@ def test_risk_manager_emits_generated_hedge_payload_when_trade_stays_open():
     assert decision.status == "approved"
     assert decision.generated_hedge_action is not None
     assert decision.generated_hedge_action["target_underlier"] == "QQQ"
+    assert decision.metadata_json["top_risk_sources"] == ["macro"]
+    assert decision.metadata_json["hedge_posture"]["target_underlier"] == "QQQ"
+    assert decision.metadata_json["data_availability_issues"] == ["global_context_stale"]
     assert decision.generated_hedge_action["coverage_ratio"] == 0.5
 
 

@@ -31,6 +31,8 @@ class LookaheadRiskWorkflowHelper:
         config: object,
         decision_time: datetime,
         portfolio_risk_snapshot_id: str | None,
+        macro_snapshot: object | None = None,
+        event_assessments: tuple[PortfolioEventRiskAssessmentRecord, ...] | None = None,
     ) -> PortfolioRiskIntentRecord:
         if not hasattr(portfolio_context, "positions"):
             return PortfolioRiskIntentRecord.create(
@@ -42,7 +44,7 @@ class LookaheadRiskWorkflowHelper:
 
         candidate_by_id = {getattr(candidate, "candidate_score_id", None): candidate for candidate in candidates}
         pending_trades: list[PendingTradeRiskRecord] = []
-        event_assessments: list[PortfolioEventRiskAssessmentRecord] = []
+        planner_event_assessments = list(event_assessments or ())
         for classification in classifications:
             candidate = candidate_by_id.get(getattr(classification, "candidate_score_id", None))
             if candidate is None:
@@ -59,8 +61,8 @@ class LookaheadRiskWorkflowHelper:
                     macro_sensitivity=None,
                 )
             )
-            if earnings_in_days is not None and 0 <= earnings_in_days <= 5:
-                event_assessments.append(
+            if event_assessments is None and earnings_in_days is not None and 0 <= earnings_in_days <= 5:
+                planner_event_assessments.append(
                     PortfolioEventRiskAssessmentRecord(
                         ticker=str(candidate.ticker),
                         risk_source="own_event",
@@ -78,8 +80,10 @@ class LookaheadRiskWorkflowHelper:
                 risk_window="1-5d",
                 portfolio_context=portfolio_context,
                 risk_limit_config=config,
-                event_assessments=tuple(event_assessments),
+                event_assessments=tuple(planner_event_assessments),
                 pending_trades=tuple(pending_trades),
+                macro_risk_state=_planner_macro_risk_state(macro_snapshot),
+                macro_snapshot=macro_snapshot,
             )
         )
 
@@ -91,6 +95,8 @@ class LookaheadRiskWorkflowHelper:
         config: object,
         decision_time: datetime,
         macro_risk_state: str | None,
+        macro_snapshot: object | None = None,
+        event_assessments: tuple[PortfolioEventRiskAssessmentRecord, ...] | None = None,
     ) -> PortfolioRiskIntentRecord:
         if not hasattr(portfolio_context, "positions"):
             return PortfolioRiskIntentRecord.create(
@@ -101,7 +107,7 @@ class LookaheadRiskWorkflowHelper:
             )
 
         pending_trades: list[PendingTradeRiskRecord] = []
-        event_assessments: list[PortfolioEventRiskAssessmentRecord] = []
+        planner_event_assessments = list(event_assessments or ())
         for request in rebalance_requests:
             if not getattr(request, "existing_position", False) and bool(getattr(request, "allow_open_new", False)):
                 pending_trades.append(
@@ -118,16 +124,17 @@ class LookaheadRiskWorkflowHelper:
                 if assessment is None:
                     assessment = _intraday_event_assessment(request=request, alert=alert)
                 if assessment is not None:
-                    event_assessments.append(assessment)
+                    planner_event_assessments.append(assessment)
         return self.hedge_planner.plan(
             PortfolioHedgePlannerRequest(
                 decision_time=decision_time,
                 risk_window="1-5d",
                 portfolio_context=portfolio_context,
                 risk_limit_config=config,
-                event_assessments=tuple(event_assessments),
+                event_assessments=tuple(planner_event_assessments),
                 pending_trades=tuple(pending_trades),
-                macro_risk_state=macro_risk_state,
+                macro_risk_state=macro_risk_state or _planner_macro_risk_state(macro_snapshot),
+                macro_snapshot=macro_snapshot,
             )
         )
 
@@ -218,6 +225,15 @@ def _sector_from_snapshot(snapshot: object | None) -> str | None:
 
 def _sector_from_baseline(baseline: object | None) -> str | None:
     return _sector_from_snapshot(baseline)
+
+
+def _planner_macro_risk_state(macro_snapshot: object | None) -> str | None:
+    regime = str(getattr(macro_snapshot, "regime", "") or "").lower()
+    if regime == "risk_off":
+        return "high"
+    if regime == "unavailable":
+        return "watch"
+    return None
 
 
 def _hedge_protected_exposure(

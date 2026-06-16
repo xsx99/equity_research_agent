@@ -7,18 +7,23 @@ from types import SimpleNamespace
 from typing import Any
 
 from src.db.models.trading import (
+    CalendarEvent,
     ManualTickerRequest,
+    MacroSnapshot,
     OptionStrategyLeg,
     PaperExecution,
     PaperOrder,
     PaperOptionExecution,
     PaperOptionOrder,
+    PortfolioEventRiskAssessment,
     RiskDecision,
     TradingDecision,
     UniverseFilterConfig,
     UniverseSnapshot,
     UniverseSymbol,
 )
+from src.trading.events import CalendarEventRecord, PortfolioEventRiskAssessmentRecord
+from src.trading.macro import MacroSnapshotRecord
 from src.trading.data_sources.universe import UniverseAsset, UniverseFilterConfig as UniverseFilterConfigRecord
 from src.trading.data_sources.universe import UniverseSnapshotResult, UniverseSymbolDecision
 from src.trading.brokers.paper_option import PaperOptionExecutionRecord, PaperOptionOrderRecord, PaperOptionPosition
@@ -452,6 +457,157 @@ def test_sqlalchemy_repository_round_trips_portfolio_risk_intent():
     assert loaded[0].portfolio_risk_snapshot_id == str(uuid.uuid5(uuid.NAMESPACE_URL, "risk-snapshot-1"))
     assert loaded[0].position_actions[0].action == "block_open"
     assert loaded[0].hedge_actions[0].target_underlier == "QQQ"
+
+
+def test_sqlalchemy_repository_save_and_load_latest_macro_snapshot_by_decision_time():
+    session = _FakeSession()
+    repository = SqlAlchemyTradingRepository(session)
+    earlier = datetime(2026, 6, 16, 11, 0, tzinfo=timezone.utc)
+    later = datetime(2026, 6, 16, 13, 0, tzinfo=timezone.utc)
+    repository.save_macro_snapshot(
+        MacroSnapshotRecord(
+            macro_snapshot_id="macro-1",
+            snapshot_time=earlier,
+            trade_date=earlier.date(),
+            regime="balanced",
+            risk_budget_multiplier=1.0,
+            volatility_state="normal",
+            rates_state="stable",
+            liquidity_state="ample",
+            blocked_strategy_tags=(),
+            invalidators=(),
+            source_freshness={"macro_indicator_provider": {"status": "fresh"}},
+            metadata_json={"basis_note": "early snapshot"},
+        )
+    )
+    repository.save_macro_snapshot(
+        MacroSnapshotRecord(
+            macro_snapshot_id="macro-2",
+            snapshot_time=later,
+            trade_date=later.date(),
+            regime="risk_off",
+            risk_budget_multiplier=0.5,
+            volatility_state="elevated",
+            rates_state="restrictive",
+            liquidity_state="tight",
+            blocked_strategy_tags=("gap_and_go_v1",),
+            invalidators=("fomc_same_day",),
+            source_freshness={"macro_indicator_provider": {"status": "fresh"}},
+            metadata_json={"basis_note": "later snapshot"},
+        )
+    )
+
+    loaded = repository.load_latest_macro_snapshot(
+        trade_date=earlier.date(),
+        decision_time=datetime(2026, 6, 16, 12, 0, tzinfo=timezone.utc),
+    )
+
+    assert session.query(MacroSnapshot).all()
+    assert loaded is not None
+    assert loaded.macro_snapshot_id == str(uuid.uuid5(uuid.NAMESPACE_URL, "macro-1"))
+    assert loaded.regime == "balanced"
+
+
+def test_sqlalchemy_repository_filters_calendar_events_by_decision_availability():
+    session = _FakeSession()
+    repository = SqlAlchemyTradingRepository(session)
+    earlier = datetime(2026, 6, 16, 12, 0, tzinfo=timezone.utc)
+    later = datetime(2026, 6, 16, 15, 0, tzinfo=timezone.utc)
+    repository.save_calendar_events(
+        (
+            CalendarEventRecord(
+                calendar_event_id="calendar-1",
+                event_key="earnings:NVDA:2026-06-16",
+                event_type="earnings",
+                ticker="NVDA",
+                event_time=later,
+                published_at=earlier,
+                available_for_decision_at=earlier,
+                title="NVIDIA earnings",
+                severity_hint="high",
+                source="fixture",
+                metadata_json={},
+            ),
+            CalendarEventRecord(
+                calendar_event_id="calendar-2",
+                event_key="macro:fomc:2026-06-17",
+                event_type="macro",
+                ticker=None,
+                event_time=later,
+                published_at=later,
+                available_for_decision_at=later,
+                title="FOMC",
+                severity_hint="critical",
+                source="fixture",
+                metadata_json={},
+            ),
+        )
+    )
+
+    loaded = repository.load_calendar_events(
+        decision_time=datetime(2026, 6, 16, 13, 0, tzinfo=timezone.utc),
+        ticker="NVDA",
+    )
+
+    assert len(session.query(CalendarEvent).all()) == 2
+    assert [item.calendar_event_id for item in loaded] == [
+        str(uuid.uuid5(uuid.NAMESPACE_URL, "calendar-1"))
+    ]
+
+
+def test_sqlalchemy_repository_filters_event_risk_assessments_by_decision_availability():
+    session = _FakeSession()
+    repository = SqlAlchemyTradingRepository(session)
+    earlier = datetime(2026, 6, 16, 12, 0, tzinfo=timezone.utc)
+    later = datetime(2026, 6, 16, 15, 0, tzinfo=timezone.utc)
+    repository.save_portfolio_event_risk_assessments(
+        (
+            PortfolioEventRiskAssessmentRecord(
+                portfolio_event_risk_assessment_id="assessment-1",
+                calendar_event_id="calendar-1",
+                portfolio_risk_snapshot_id=None,
+                decision_time=earlier,
+                available_for_decision_at=earlier,
+                ticker="NVDA",
+                risk_source="own_event",
+                severity="high",
+                event_type="earnings",
+                days_until_event=1,
+                affects_existing_position=True,
+                affects_pending_trade=False,
+                recommended_action="block_open",
+                rationale="Own earnings falls inside the lookahead window.",
+                metadata_json={"summary_bucket": "earnings"},
+            ),
+            PortfolioEventRiskAssessmentRecord(
+                portfolio_event_risk_assessment_id="assessment-2",
+                calendar_event_id="calendar-2",
+                portfolio_risk_snapshot_id=None,
+                decision_time=later,
+                available_for_decision_at=later,
+                ticker="NVDA",
+                risk_source="macro",
+                severity="watch",
+                event_type="macro",
+                days_until_event=2,
+                affects_existing_position=True,
+                affects_pending_trade=True,
+                recommended_action="tighten_risk",
+                rationale="Macro risk grows later in the day.",
+                metadata_json={"summary_bucket": "macro"},
+            ),
+        )
+    )
+
+    loaded = repository.load_portfolio_event_risk_assessments(
+        decision_time=datetime(2026, 6, 16, 13, 0, tzinfo=timezone.utc),
+        ticker="NVDA",
+    )
+
+    assert len(session.query(PortfolioEventRiskAssessment).all()) == 2
+    assert [item.portfolio_event_risk_assessment_id for item in loaded] == [
+        str(uuid.uuid5(uuid.NAMESPACE_URL, "assessment-1"))
+    ]
 
 
 def test_sqlalchemy_repository_persists_pr6_order_execution_snapshot_and_positions():

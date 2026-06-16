@@ -116,6 +116,8 @@ def build_live_preopen_dependencies(session: Any | None = None) -> LivePreopenDe
     from src.trading.risk.options import OptionRiskManager
     from src.trading.risk.planner import PortfolioHedgePlanner
     from src.trading.risk.sizing import PositionSizer
+    from src.trading.events import CalendarEventPipeline, PortfolioEventRiskAssessmentPipeline
+    from src.trading.macro import MacroSnapshotPipeline
     from src.trading.signals.source_ingestion import SourceIngestionService
     from src.trading.workflows.paper_execution import PaperExecutionWorkflow
     from src.trading.workflows.portfolio_sync import BrokerPortfolioSyncWorkflow
@@ -175,6 +177,11 @@ def build_live_preopen_dependencies(session: Any | None = None) -> LivePreopenDe
             lookahead_helper=LookaheadRiskWorkflowHelper(
                 hedge_planner=PortfolioHedgePlanner()
             ),
+            macro_snapshot_pipeline=MacroSnapshotPipeline(
+                global_context_fetcher=lambda as_of: get_global_context(as_of=as_of, limit=5),
+            ),
+            calendar_event_pipeline=CalendarEventPipeline(),
+            event_risk_pipeline=PortfolioEventRiskAssessmentPipeline(),
         ),
         trading_decision_pipeline=TradingDecisionPipeline(
             repository=trading_repository,

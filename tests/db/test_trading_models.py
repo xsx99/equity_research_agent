@@ -4,6 +4,7 @@ from sqlalchemy import CheckConstraint
 
 from src.db.models import trading as trading_models
 from src.db.models.trading import (
+    CalendarEvent,
     OptionStrategyLeg,
     CandidateOutcomeEvaluation,
     DailyReflection,
@@ -24,6 +25,8 @@ from src.db.models.trading import (
     ManualTickerRequest,
     ManualTickerRequestMode,
     ManualTickerRequestStatus,
+    MacroReadthroughEvent,
+    MacroSnapshot,
     PaperExecution,
     PaperOrder,
     PaperPosition,
@@ -31,6 +34,7 @@ from src.db.models.trading import (
     PortfolioIntent,
     PortfolioIntentLifecycleStatus,
     PortfolioIntentType,
+    PortfolioEventRiskAssessment,
     PortfolioRiskIntent,
     PortfolioSnapshot,
     ProviderRequestRun,
@@ -989,6 +993,93 @@ def test_portfolio_risk_intent_model_persists_position_and_hedge_actions():
     assert intent.position_actions_json[0]["action"] == "block_open"
     assert intent.hedge_actions_json[0]["target_underlier"] == "QQQ"
     assert intent.binding_constraints_json == ["own_event_block", "macro_watch_overlay"]
+
+
+def test_risk_macro_event_models_can_be_instantiated():
+    now = datetime(2026, 6, 16, 12, 0, tzinfo=timezone.utc)
+    macro_snapshot = MacroSnapshot(
+        trade_date=date(2026, 6, 16),
+        snapshot_time=now,
+        regime="risk_off",
+        risk_budget_multiplier=0.6,
+        volatility_state="elevated",
+        rates_state="restrictive",
+        liquidity_state="tight",
+        source_set_key="macro_indicator_provider|vol_surface",
+        blocked_strategy_tags_json=["gap_and_go_v1"],
+        invalidators_json=["fomc_same_day"],
+        source_freshness_json={"macro_indicator_provider": {"status": "fresh"}},
+        metadata_json={"basis_note": "macro and rates both restrictive"},
+    )
+    readthrough_event = MacroReadthroughEvent(
+        event_key="readthrough:NVDA:AVGO:2026-06-16",
+        source_ticker="NVDA",
+        affected_ticker="AVGO",
+        scope="peer",
+        mechanism="earnings_readthrough",
+        direction="negative",
+        title="NVDA guidance pressures peer basket",
+        source="fixture",
+        event_time=now,
+        published_at=now,
+        available_for_decision_at=now,
+        valid_until=now,
+        metadata_json={"relationship_context": "semiconductor_peer"},
+    )
+    calendar_event = CalendarEvent(
+        event_key="macro:fomc:2026-06-17",
+        event_type="macro",
+        ticker=None,
+        event_time=now,
+        published_at=now,
+        available_for_decision_at=now,
+        title="FOMC rate decision",
+        severity_hint="critical",
+        source="fed_calendar",
+        metadata_json={"category": "fomc"},
+    )
+    event_risk = PortfolioEventRiskAssessment(
+        calendar_event=calendar_event,
+        portfolio_risk_snapshot=None,
+        decision_time=now,
+        available_for_decision_at=now,
+        ticker="QQQ",
+        risk_source="macro",
+        severity="high",
+        event_type="macro",
+        days_until_event=1,
+        affects_existing_position=True,
+        affects_pending_trade=True,
+        recommended_action="tighten_risk",
+        rationale="High-impact macro event sits inside the lookahead window.",
+        assessment_key="macro:fomc:2026-06-17|QQQ|macro",
+        metadata_json={"summary_bucket": "macro_event"},
+    )
+
+    assert macro_snapshot.source_set_key == "macro_indicator_provider|vol_surface"
+    assert readthrough_event.affected_ticker == "AVGO"
+    assert calendar_event.event_key == "macro:fomc:2026-06-17"
+    assert event_risk.assessment_key == "macro:fomc:2026-06-17|QQQ|macro"
+
+
+def test_risk_macro_event_models_expose_expected_uniqueness_and_indexes():
+    macro_constraints = {constraint.name for constraint in MacroSnapshot.__table__.constraints}
+    calendar_constraints = {constraint.name for constraint in CalendarEvent.__table__.constraints}
+    event_risk_constraints = {
+        constraint.name for constraint in PortfolioEventRiskAssessment.__table__.constraints
+    }
+    macro_indexes = {index.name for index in MacroSnapshot.__table__.indexes}
+    calendar_indexes = {index.name for index in CalendarEvent.__table__.indexes}
+    event_risk_indexes = {
+        index.name for index in PortfolioEventRiskAssessment.__table__.indexes
+    }
+
+    assert "uq_macro_snapshots_trade_date_snapshot_time_source_set_key" in macro_constraints
+    assert "uq_calendar_events_event_key" in calendar_constraints
+    assert "uq_portfolio_event_risk_assessments_assessment_key" in event_risk_constraints
+    assert "ix_macro_snapshots_trade_date_snapshot_time" in macro_indexes
+    assert "ix_calendar_events_ticker_event_time" in calendar_indexes
+    assert "ix_portfolio_event_risk_assessments_ticker_available" in event_risk_indexes
 
 
 def test_pr_5_models_can_be_instantiated():

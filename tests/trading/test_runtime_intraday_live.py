@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from src.trading.intraday.signals import IntradaySignalScanRecord, IntradaySignalSnapshotRecord
+from src.trading.events import CalendarEventPipeline, PortfolioEventRiskAssessmentPipeline
 from src.trading.risk import HedgeActionRecord, PortfolioRiskIntentRecord, RiskConfigResolver
 from src.trading.runtime.dispatch import get_job_phase_handler
 from src.trading.runtime.intraday_refresh import (
@@ -213,6 +214,9 @@ class _TradingRepository:
         self.saved_scan = None
         self.saved_snapshots: list[IntradaySignalSnapshotRecord] = []
         self.saved_alerts: list[object] = []
+        self.saved_macro_snapshots: list[object] = []
+        self.saved_calendar_events: list[object] = []
+        self.saved_event_assessments: list[object] = []
 
     def save_intraday_signal_scan(self, scan: IntradaySignalScanRecord) -> None:
         self.recorder.record("save_scan")
@@ -225,6 +229,19 @@ class _TradingRepository:
     def save_news_alert(self, alert: object) -> None:
         self.recorder.record(f"save_alert:{alert.ticker}")
         self.saved_alerts.append(alert)
+
+    def save_macro_snapshot(self, snapshot: object) -> None:
+        self.saved_macro_snapshots.append(snapshot)
+
+    def save_calendar_events(self, events: tuple[object, ...]) -> None:
+        self.saved_calendar_events.extend(events)
+
+    def save_portfolio_event_risk_assessments(self, assessments: tuple[object, ...]) -> None:
+        self.saved_event_assessments.extend(assessments)
+
+    def load_portfolio_event_risk_assessments(self, *, decision_time: datetime, ticker: str | None = None):
+        del decision_time, ticker
+        return ()
 
 
 @dataclass(frozen=True)
@@ -623,6 +640,46 @@ def test_live_intraday_refresh_runtime_passes_macro_risk_state_into_intraday_loo
     assert runtime.dependencies.lookahead_helper.received_macro_risk_state == "high"
     assert rebalance_pipeline.last_portfolio_risk_intent.aggregate_risk_state == "macro_high_risk"
     assert rebalance_pipeline.last_portfolio_risk_intent.hedge_actions[0].risk_source == "macro"
+
+
+def test_live_intraday_refresh_runtime_persists_calendar_and_event_risk_context_from_new_intraday_events():
+    runtime, _recorder, rebalance_pipeline, repository, _refresh_service = _build_runtime()
+    captured_kwargs: list[dict[str, object]] = []
+    macro_snapshot = SimpleNamespace(
+        macro_snapshot_id="macro-preopen-1",
+        regime="risk_off",
+        risk_budget_multiplier=0.6,
+        source_freshness={"global_context": {"status": "fresh"}},
+    )
+    runtime.dependencies = LiveIntradayRefreshDependencies(
+        **{
+            **runtime.dependencies.__dict__,
+            "macro_snapshot_loader": lambda decision_time: macro_snapshot,
+            "calendar_event_pipeline": CalendarEventPipeline(),
+            "event_risk_pipeline": PortfolioEventRiskAssessmentPipeline(),
+            "lookahead_helper": SimpleNamespace(
+                build_intraday_portfolio_risk_intent=lambda **kwargs: (
+                    captured_kwargs.append(kwargs)
+                    or PortfolioRiskIntentRecord.create(
+                        decision_time=kwargs["decision_time"],
+                        risk_window="1-5d",
+                        aggregate_risk_state="macro_high_risk",
+                    )
+                )
+            ),
+        }
+    )
+
+    runtime.run()
+
+    assert repository.saved_macro_snapshots == []
+    assert len(repository.saved_calendar_events) >= 1
+    assert len(repository.saved_event_assessments) >= 1
+    assert captured_kwargs[0]["macro_snapshot"].macro_snapshot_id == "macro-preopen-1"
+    assert captured_kwargs[0]["macro_risk_state"] == "high"
+    assert captured_kwargs[0]["event_assessments"][0].metadata_json["material_change"] is True
+    assert "new_event" in captured_kwargs[0]["event_assessments"][0].metadata_json["material_change_fields"]
+    assert rebalance_pipeline.last_portfolio_risk_intent.aggregate_risk_state == "macro_high_risk"
 
 
 def test_intraday_helper_derives_sector_cluster_assessment_from_readthrough_alert():

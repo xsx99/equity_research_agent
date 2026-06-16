@@ -125,6 +125,9 @@ class RiskManager:
                 return self._decision(
                     request,
                     sizing,
+                    portfolio_context=portfolio_context,
+                    config=config,
+                    portfolio_risk_intent=portfolio_risk_intent,
                     snapshot_id=snapshot.portfolio_risk_snapshot_id,
                     status="rejected",
                     reason_code=planner_position_action.reason_code,
@@ -143,6 +146,9 @@ class RiskManager:
             return self._decision(
                 request,
                 sizing,
+                portfolio_context=portfolio_context,
+                config=config,
+                portfolio_risk_intent=portfolio_risk_intent,
                 snapshot_id=snapshot.portfolio_risk_snapshot_id,
                 status="rejected",
                 reason_code="core_holding_requires_portfolio_intent",
@@ -155,6 +161,9 @@ class RiskManager:
             return self._decision(
                 request,
                 sizing,
+                portfolio_context=portfolio_context,
+                config=config,
+                portfolio_risk_intent=portfolio_risk_intent,
                 snapshot_id=snapshot.portfolio_risk_snapshot_id,
                 status="rejected",
                 reason_code="missing_or_stale_signals",
@@ -167,6 +176,9 @@ class RiskManager:
             return self._decision(
                 request,
                 sizing,
+                portfolio_context=portfolio_context,
+                config=config,
+                portfolio_risk_intent=portfolio_risk_intent,
                 snapshot_id=snapshot.portfolio_risk_snapshot_id,
                 status="rejected",
                 reason_code="macro_only_bearish_single_name_blocked",
@@ -179,6 +191,9 @@ class RiskManager:
             return self._decision(
                 request,
                 sizing,
+                portfolio_context=portfolio_context,
+                config=config,
+                portfolio_risk_intent=portfolio_risk_intent,
                 snapshot_id=snapshot.portfolio_risk_snapshot_id,
                 status="rejected",
                 reason_code="unestimable_margin_requirement",
@@ -191,6 +206,9 @@ class RiskManager:
             return self._decision(
                 request,
                 sizing,
+                portfolio_context=portfolio_context,
+                config=config,
+                portfolio_risk_intent=portfolio_risk_intent,
                 snapshot_id=snapshot.portfolio_risk_snapshot_id,
                 status="rejected",
                 reason_code="missing_option_risk_metadata",
@@ -207,6 +225,9 @@ class RiskManager:
             return self._decision(
                 request,
                 sizing,
+                portfolio_context=portfolio_context,
+                config=config,
+                portfolio_risk_intent=portfolio_risk_intent,
                 snapshot_id=snapshot.portfolio_risk_snapshot_id,
                 status="reduced" if approved_weight > 0 else "rejected",
                 reason_code="sector_concentration_cap",
@@ -229,6 +250,9 @@ class RiskManager:
         return self._decision(
             request,
             sizing,
+            portfolio_context=portfolio_context,
+            config=config,
+            portfolio_risk_intent=portfolio_risk_intent,
             snapshot_id=snapshot.portfolio_risk_snapshot_id,
             status=status,
             reason_code=reason_code,
@@ -273,6 +297,9 @@ class RiskManager:
         request: TradeRiskRequest,
         sizing: PositionSizingDecisionRecord,
         *,
+        portfolio_context: PortfolioContext,
+        config: RiskLimitConfig,
+        portfolio_risk_intent: PortfolioRiskIntentRecord | None,
         snapshot_id: str | None,
         status: str,
         reason_code: str,
@@ -307,6 +334,11 @@ class RiskManager:
                 approved_quantity=approved_quantity,
                 quantity_basis=quantity_basis,
                 quantity_unit_cost=quantity_denominator,
+                portfolio_context=portfolio_context,
+                config=config,
+                portfolio_risk_intent=portfolio_risk_intent,
+                binding_constraint=binding_constraint,
+                lookahead_risk_source=lookahead_risk_source,
             ),
         )
 
@@ -335,12 +367,37 @@ def _risk_decision_metadata(
     approved_quantity: float,
     quantity_basis: str,
     quantity_unit_cost: float,
+    portfolio_context: PortfolioContext,
+    config: RiskLimitConfig,
+    portfolio_risk_intent: PortfolioRiskIntentRecord | None,
+    binding_constraint: str | None,
+    lookahead_risk_source: str | None,
 ) -> dict[str, object]:
+    sector_weight_before = _sector_weight_for_request(request=request, portfolio_context=portfolio_context)
+    sector_cap = _effective_sector_cap(request, config)
     metadata: dict[str, object] = {
         "approved_capital_notional": approved_notional,
         "approved_quantity_basis": quantity_basis,
         "approved_quantity_unit_cost": quantity_unit_cost,
+        "macro_risk_budget_multiplier": config.macro_risk_budget_multiplier,
+        "binding_constraints": list(getattr(portfolio_risk_intent, "binding_constraints", ()) or ()),
+        "top_risk_sources": _top_risk_sources_for_decision(
+            portfolio_risk_intent=portfolio_risk_intent,
+            lookahead_risk_source=lookahead_risk_source,
+        ),
+        "hedge_posture": _hedge_posture_metadata(portfolio_risk_intent),
+        "data_availability_issues": list(_data_availability_issues(portfolio_risk_intent)),
+        "exposure_usage": {
+            "sector_weight_before": sector_weight_before,
+            "sector_weight_after": sector_weight_before + approved_notional / portfolio_context.account_equity
+            if request.sector and portfolio_context.account_equity > 0
+            else sector_weight_before,
+            "sector_cap": sector_cap,
+            "account_equity": portfolio_context.account_equity,
+        },
     }
+    if binding_constraint is not None:
+        metadata["binding_constraint"] = binding_constraint
     if request.instrument_type != "option":
         return metadata
     metadata["approved_strategy_units"] = approved_quantity
@@ -372,6 +429,17 @@ def _effective_sector_cap(request: TradeRiskRequest, config: RiskLimitConfig) ->
     if request.liquidity_bucket == "thin":
         cap -= 0.01
     return max(0.05, cap)
+
+
+def _sector_weight_for_request(*, request: TradeRiskRequest, portfolio_context: PortfolioContext) -> float:
+    if not request.sector or portfolio_context.account_equity <= 0:
+        return 0.0
+    sector_notional = sum(
+        abs(position.notional_exposure)
+        for position in portfolio_context.positions
+        if position.sector == request.sector
+    )
+    return sector_notional / portfolio_context.account_equity
 
 
 def _matching_planner_position_action(
@@ -416,3 +484,30 @@ def _hedge_action_payload(action: HedgeActionRecord) -> dict[str, object]:
         "reason_code": action.reason_code,
         "metadata_json": dict(action.metadata_json),
     }
+
+
+def _top_risk_sources_for_decision(
+    *,
+    portfolio_risk_intent: PortfolioRiskIntentRecord | None,
+    lookahead_risk_source: str | None,
+) -> list[str]:
+    values = list(dict(getattr(portfolio_risk_intent, "metadata_json", {}) or {}).get("top_risk_sources", ()) or ())
+    if lookahead_risk_source and lookahead_risk_source not in values:
+        values.append(lookahead_risk_source)
+    return [str(value) for value in values if str(value)]
+
+
+def _hedge_posture_metadata(portfolio_risk_intent: PortfolioRiskIntentRecord | None) -> dict[str, object] | None:
+    metadata_json = dict(getattr(portfolio_risk_intent, "metadata_json", {}) or {})
+    posture = metadata_json.get("hedge_posture")
+    if isinstance(posture, dict):
+        return dict(posture)
+    return None
+
+
+def _data_availability_issues(portfolio_risk_intent: PortfolioRiskIntentRecord | None) -> tuple[str, ...]:
+    metadata_json = dict(getattr(portfolio_risk_intent, "metadata_json", {}) or {})
+    values = metadata_json.get("data_availability_issues", ())
+    if not isinstance(values, (list, tuple)):
+        return ()
+    return tuple(str(value) for value in values if str(value))
