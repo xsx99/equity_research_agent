@@ -31,3 +31,20 @@ def test_manual_request_service_supports_paper_trade_eligible_and_cancel():
     assert request.mode == "paper_trade_eligible"
     service.cancel(request.request_id)
     assert service.load_active() == ()
+
+
+def test_manual_request_service_replaces_existing_active_request_for_same_ticker():
+    now = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+    service = ManualTickerRequestService(now=lambda: now)
+
+    original = service.create("aapl", reason="first review", mode="review_only")
+    replacement = service.create(" AAPL ", reason="updated review", mode="paper_trade_eligible")
+
+    active = service.load_active()
+
+    assert replacement.request_id != original.request_id
+    assert [item.request_id for item in active] == [replacement.request_id]
+    assert active[0].reason == "updated review"
+    assert active[0].mode == "paper_trade_eligible"
+    assert service._requests[original.request_id].status == "cancelled"
+    assert service._requests[original.request_id].cancelled_at == now

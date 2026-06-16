@@ -7,10 +7,14 @@ from types import SimpleNamespace
 from typing import Any
 
 from src.db.models.trading import (
+    ManualTickerRequest,
     OptionStrategyLeg,
+    PaperExecution,
+    PaperOrder,
     PaperOptionExecution,
     PaperOptionOrder,
     RiskDecision,
+    TradingDecision,
     UniverseFilterConfig,
     UniverseSnapshot,
     UniverseSymbol,
@@ -167,6 +171,100 @@ def test_trading_decision_payload_includes_rationale_fields_for_reflection_consu
     assert payload["key_drivers"] == ["sector_relative_strength", "relative_volume"]
     assert payload["counterarguments"] == ["valuation is elevated versus peers"]
     assert payload["invalidators"] == ["QQQ closes below prior close"]
+
+
+def test_sqlalchemy_repository_loads_manual_review_audit_rows_with_explicit_linkage_and_execution_states():
+    now = datetime(2026, 6, 5, 15, 30, tzinfo=timezone.utc)
+    request_id = uuid.uuid4()
+    pending_request_id = uuid.uuid4()
+    signal_snapshot_id = uuid.uuid4()
+    trading_decision_id = uuid.uuid4()
+    risk_decision_id = uuid.uuid4()
+    paper_order_id = uuid.uuid4()
+    paper_execution_id = uuid.uuid4()
+    session = _FakeSession()
+    repository = SqlAlchemyTradingRepository(session)
+    session.rows_by_type[ManualTickerRequest] = [
+        SimpleNamespace(
+            manual_ticker_request_id=request_id,
+            ticker="AAPL",
+            reason="breakout retest",
+            mode="paper_trade_eligible",
+            status="active",
+            created_at=now,
+            last_evaluated_at=now,
+            latest_result_status="actionable_trade",
+            latest_signal_snapshot_id=signal_snapshot_id,
+        ),
+        SimpleNamespace(
+            manual_ticker_request_id=pending_request_id,
+            ticker="MSFT",
+            reason="still waiting",
+            mode="review_only",
+            status="active",
+            created_at=now,
+            last_evaluated_at=None,
+            latest_result_status=None,
+            latest_signal_snapshot_id=None,
+        ),
+    ]
+    session.rows_by_type[TradingDecision] = [
+        SimpleNamespace(
+            trading_decision_id=trading_decision_id,
+            manual_request_id=request_id,
+            risk_decision_id=risk_decision_id,
+            ticker="AAPL",
+            decision="enter_long",
+            metadata_json={"paper_trade_authorized": True},
+            decision_time=now,
+            created_at=now,
+        ),
+    ]
+    session.rows_by_type[RiskDecision] = [
+        SimpleNamespace(
+            risk_decision_id=risk_decision_id,
+            ticker="AAPL",
+            status="approved",
+            reason_code="within_limits",
+            decision_time=now,
+            created_at=now,
+        ),
+    ]
+    session.rows_by_type[PaperOrder] = [
+        SimpleNamespace(
+            paper_order_id=paper_order_id,
+            trading_decision_id=trading_decision_id,
+            ticker="AAPL",
+            status="filled",
+            rejection_reason=None,
+            created_at=now,
+        ),
+    ]
+    session.rows_by_type[PaperExecution] = [
+        SimpleNamespace(
+            paper_execution_id=paper_execution_id,
+            paper_order_id=paper_order_id,
+            ticker="AAPL",
+            executed_at=now,
+            created_at=now,
+        ),
+    ]
+
+    rows = repository.load_manual_review_audit_rows()
+
+    assert [row.ticker for row in rows] == ["AAPL", "MSFT"]
+    assert rows[0].manual_ticker_request_id == str(request_id)
+    assert rows[0].latest_signal_snapshot_id == str(signal_snapshot_id)
+    assert rows[0].latest_trading_decision_id == str(trading_decision_id)
+    assert rows[0].latest_decision_action == "enter_long"
+    assert rows[0].latest_risk_outcome == "approved"
+    assert rows[0].latest_order_status == "filled"
+    assert rows[0].latest_execution_status == "filled"
+    assert rows[0].execution_path_state == "filled"
+    assert rows[0].linkage_state == "execution_linked"
+    assert rows[1].manual_ticker_request_id == str(pending_request_id)
+    assert rows[1].execution_path_state == "pending_evaluation"
+    assert rows[1].linkage_state == "pending_evaluation"
 
 
 def test_sqlalchemy_repository_persists_pr4_risk_artifacts():

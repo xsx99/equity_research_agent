@@ -23,6 +23,12 @@ class LiveManualReviewDependencies:
     trading_repository: Any | None = None
 
 
+@dataclass(frozen=True)
+class ManualReviewExecutionResult:
+    report: dict[str, Any]
+    submitted_order_tickers: frozenset[str]
+
+
 class LiveManualReviewRuntime:
     """Run the live trading chain for active manual-review requests only."""
 
@@ -92,6 +98,14 @@ class LiveManualReviewRuntime:
             risk_decisions=tuple(getattr(risk_result, "risk_decisions", ())),
             as_of=decision_time,
         )
+        decision_rows = tuple(getattr(decision_result, "decisions", ()))
+        risk_rows = tuple(getattr(risk_result, "risk_decisions", ()))
+        operational_counts = _manual_review_operational_counts(
+            manual_requests=manual_requests,
+            decisions=decision_rows,
+            risk_decisions=risk_rows,
+            submitted_order_tickers=execution.submitted_order_tickers,
+        )
         return build_runtime_report(
             phase="manual_review",
             as_of=decision_time,
@@ -104,10 +118,11 @@ class LiveManualReviewRuntime:
                 "signal_snapshot_count": len(snapshots),
                 "candidate_count": len(tuple(getattr(strategy_result, "candidates", ()))),
                 "classification_count": len(tuple(getattr(strategy_result, "classifications", ()))),
-                "risk_decision_count": len(tuple(getattr(risk_result, "risk_decisions", ()))),
-                "trading_decision_count": len(tuple(getattr(decision_result, "decisions", ()))),
+                "risk_decision_count": len(risk_rows),
+                "trading_decision_count": len(decision_rows),
+                **operational_counts,
             },
-            execution=execution,
+            execution=execution.report,
         )
 
     def _scope_config(self, config: Any) -> Any:
@@ -121,9 +136,12 @@ class LiveManualReviewRuntime:
         decisions: tuple[object, ...],
         risk_decisions: tuple[object, ...],
         as_of: datetime,
-    ) -> dict[str, Any]:
+    ) -> ManualReviewExecutionResult:
         if not self.execute_paper_orders:
-            return build_execution_report(mode="dry_run", orders_submitted=0)
+            return ManualReviewExecutionResult(
+                report=build_execution_report(mode="dry_run", orders_submitted=0, option_orders_submitted=0),
+                submitted_order_tickers=frozenset(),
+            )
         workflow = self.dependencies.paper_execution_workflow
         if workflow is None:
             raise RuntimeError("paper_execution_workflow_not_configured")
@@ -133,7 +151,19 @@ class LiveManualReviewRuntime:
             trade_date=as_of,
         )
         submitted_orders = tuple(getattr(result, "paper_orders", ()))
-        return build_execution_report(mode="execute", orders_submitted=len(submitted_orders))
+        submitted_option_orders = tuple(getattr(result, "paper_option_orders", ()))
+        return ManualReviewExecutionResult(
+            report=build_execution_report(
+                mode="execute",
+                orders_submitted=len(submitted_orders),
+                option_orders_submitted=len(submitted_option_orders),
+            ),
+            submitted_order_tickers=frozenset(
+                str(getattr(order, "ticker", "") or "").strip().upper()
+                for order in submitted_orders
+                if str(getattr(order, "ticker", "") or "").strip()
+            ),
+        )
 
 
 def build_live_manual_review_dependencies(session: Any | None = None) -> LiveManualReviewDependencies:
@@ -193,3 +223,52 @@ def run_manual_review_once(
             execute_paper_orders=execute_paper_orders,
         )
         return runtime.run()
+
+
+def _manual_review_operational_counts(
+    *,
+    manual_requests: tuple[object, ...],
+    decisions: tuple[object, ...],
+    risk_decisions: tuple[object, ...],
+    submitted_order_tickers: frozenset[str],
+) -> dict[str, int]:
+    risk_by_ticker = {
+        str(getattr(risk, "ticker", "") or "").strip().upper(): risk
+        for risk in risk_decisions
+        if str(getattr(risk, "ticker", "") or "").strip()
+    }
+    decision_by_request_id: dict[str, object] = {}
+    for decision in decisions:
+        request_id = str(getattr(decision, "manual_request_id", "") or "").strip()
+        if not request_id:
+            continue
+        decision_by_request_id[request_id] = decision
+
+    risk_blocked_request_count = 0
+    eligible_no_order_request_count = 0
+    actionable_request_count = 0
+    for request in manual_requests:
+        request_id = str(getattr(request, "request_id", "") or "").strip()
+        ticker = str(getattr(request, "ticker", "") or "").strip().upper()
+        mode = str(getattr(request, "mode", "") or "").strip()
+        decision = decision_by_request_id.get(request_id)
+        risk = risk_by_ticker.get(ticker)
+        if risk is not None and str(getattr(risk, "status", "") or "") == "rejected":
+            risk_blocked_request_count += 1
+            continue
+        if decision is None:
+            continue
+        metadata_json = dict(getattr(decision, "metadata_json", {}) or {})
+        action = str(
+            getattr(decision, "decision", getattr(decision, "action", "")) or ""
+        ).strip()
+        is_actionable = bool(metadata_json.get("paper_trade_authorized", False)) and action not in {"", "hold", "no_trade"}
+        if is_actionable:
+            actionable_request_count += 1
+        if mode == "paper_trade_eligible" and is_actionable and ticker not in submitted_order_tickers:
+            eligible_no_order_request_count += 1
+    return {
+        "risk_blocked_request_count": risk_blocked_request_count,
+        "eligible_no_order_request_count": eligible_no_order_request_count,
+        "actionable_request_count": actionable_request_count,
+    }

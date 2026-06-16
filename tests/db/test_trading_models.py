@@ -604,6 +604,16 @@ def test_pr_2_models_can_be_instantiated():
     assert signal.point_in_time_passed is True
 
 
+def test_manual_ticker_request_model_exposes_active_ticker_uniqueness_index():
+    index = next(
+        idx for idx in ManualTickerRequest.__table__.indexes if idx.name == "uq_manual_ticker_requests_active_ticker"
+    )
+
+    assert index.unique is True
+    assert tuple(column.name for column in index.columns) == ("ticker",)
+    assert str(index.dialect_options["postgresql"]["where"]) == "status = 'active'"
+
+
 def test_pr_3_models_can_be_instantiated():
     now = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
     run = StrategyRun(

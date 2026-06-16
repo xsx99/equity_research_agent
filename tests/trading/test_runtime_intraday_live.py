@@ -368,6 +368,8 @@ def _build_runtime() -> tuple[LiveIntradayRefreshRuntime, _CallRecorder, _Rebala
                     candidate_score=0.67,
                     target_weight=0.03,
                     allow_open_new=True,
+                    manual_request_id="msft-request",
+                    manual_request_mode="paper_trade_eligible",
                 ),
             },
         ),
@@ -409,6 +411,8 @@ def test_live_intraday_refresh_runtime_runs_live_intraday_chain_in_dry_run_mode(
     assert [request.ticker for request in rebalance_pipeline.last_requests] == ["AAPL", "MSFT"]
     assert rebalance_pipeline.last_requests[0].allow_open_new is False
     assert rebalance_pipeline.last_requests[1].allow_open_new is True
+    assert rebalance_pipeline.last_requests[1].manual_request_id == "msft-request"
+    assert rebalance_pipeline.last_requests[1].manual_request_mode == "paper_trade_eligible"
     assert result["status"] == "passed"
     assert result["phase"] == "intraday_refresh"
     assert result["summary"]["ticker_count"] == 2
@@ -743,6 +747,8 @@ def test_live_intraday_refresh_runtime_keeps_readthrough_and_theme_fields_on_reb
                         candidate_score=0.67,
                         target_weight=0.03,
                         allow_open_new=True,
+                        manual_request_id="msft-request",
+                        manual_request_mode="paper_trade_eligible",
                     ),
                     "NVDA": SimpleNamespace(
                         selection_source="manual_request",
@@ -755,6 +761,8 @@ def test_live_intraday_refresh_runtime_keeps_readthrough_and_theme_fields_on_reb
                         candidate_score=0.74,
                         target_weight=0.04,
                         allow_open_new=True,
+                        manual_request_id="nvda-request",
+                        manual_request_mode="review_only",
                     ),
                 },
             ),
@@ -785,6 +793,8 @@ def test_live_intraday_refresh_runtime_keeps_readthrough_and_theme_fields_on_reb
 
     request = next(item for item in rebalance_pipeline.last_requests if item.ticker == "NVDA")
     assert request.metadata_json["sector"] == "Semiconductors"
+    assert request.manual_request_id == "nvda-request"
+    assert request.manual_request_mode == "review_only"
     assert request.alerts[0]["affected_themes"] == ["ai_semis"]
     assert request.alerts[0]["source_ticker"] == "AVGO"
     assert request.alerts[0]["readthrough_source_ticker"] == "AVGO"

@@ -123,6 +123,8 @@ def _build_rebalance_request(
         candidate_score=0.0,
         target_weight=0.0,
         allow_open_new=False,
+        manual_request_id=None,
+        manual_request_mode=None,
     )
     position_trade_identity = str(getattr(position, "trade_identity", "") or "")
     instrument_type = str(getattr(context, "instrument_type", "stock"))
@@ -171,6 +173,8 @@ def _build_rebalance_request(
             for alert in alerts
             if alert.get("sentiment") == "negative"
         ),
+        manual_request_id=getattr(context, "manual_request_id", None),
+        manual_request_mode=getattr(context, "manual_request_mode", None),
         metadata_json={
             **dict(getattr(context, "metadata_json", {}) or {}),
             "sector": _sector_from_baseline(baseline),

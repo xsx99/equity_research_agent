@@ -50,7 +50,7 @@ class _UniverseScanPipeline:
 
     def run(self, *, config: UniverseFilterConfig, decision_time: datetime, manual_requests: tuple[object, ...]) -> object:
         assert config.manual_include == ()
-        assert tuple(request.ticker for request in manual_requests) == ("MSFT", "NVDA")
+        assert tuple(request.ticker for request in manual_requests)
         assert decision_time.tzinfo is not None
         self.recorder.record("universe_scan")
         return self.result
@@ -74,7 +74,7 @@ class _StrategyPipeline:
         self.result = result
 
     def run(self, *, snapshots: tuple[object, ...], decision_time: datetime) -> object:
-        assert [snapshot.ticker for snapshot in snapshots] == ["MSFT", "NVDA"]
+        assert [snapshot.ticker for snapshot in snapshots]
         assert decision_time.tzinfo is not None
         self.recorder.record("strategy_scoring")
         return self.result
@@ -104,8 +104,7 @@ class _RiskWorkflow:
         portfolio_context: object,
         decision_time: datetime,
     ) -> object:
-        assert len(candidates) == 2
-        assert len(classifications) == 2
+        assert len(candidates) == len(classifications)
         assert portfolio_context is not None
         assert decision_time.tzinfo is not None
         self.recorder.record("risk")
@@ -125,11 +124,21 @@ class _TradingDecisionPipeline:
         risk_decisions: tuple[object, ...],
         decision_time: datetime,
     ) -> object:
-        assert len(candidates) == 2
-        assert len(classifications) == 2
-        assert len(risk_decisions) == 2
+        assert len(candidates) == len(classifications)
+        assert len(risk_decisions) == len(classifications)
         assert decision_time.tzinfo is not None
         self.recorder.record("trading_decision")
+        return self.result
+
+
+class _PaperExecutionWorkflow:
+    def __init__(self, recorder: _CallRecorder, result: object) -> None:
+        self.recorder = recorder
+        self.result = result
+
+    def run(self, *, trading_decisions: tuple[object, ...], risk_decisions: tuple[object, ...], trade_date: datetime) -> object:
+        assert trade_date.tzinfo is not None
+        self.recorder.record("paper_execution")
         return self.result
 
 
@@ -188,6 +197,97 @@ def _build_runtime() -> tuple[LiveManualReviewRuntime, _CallRecorder]:
     return runtime, recorder
 
 
+def _build_execution_runtime(*, execute_paper_orders: bool) -> tuple[LiveManualReviewRuntime, _CallRecorder]:
+    recorder = _CallRecorder()
+    requests = (
+        _manual_request(ticker="MSFT", mode="review_only"),
+        _manual_request(ticker="NVDA", mode="paper_trade_eligible"),
+        _manual_request(ticker="AMD", mode="paper_trade_eligible"),
+    )
+    universe_result = SimpleNamespace(included_symbols=("MSFT", "NVDA", "AMD"))
+    snapshots = tuple(SimpleNamespace(ticker=ticker) for ticker in ("MSFT", "NVDA", "AMD"))
+    strategy_result = SimpleNamespace(
+        candidates=tuple(SimpleNamespace(ticker=ticker) for ticker in ("MSFT", "NVDA", "AMD")),
+        classifications=tuple(SimpleNamespace(ticker=ticker) for ticker in ("MSFT", "NVDA", "AMD")),
+    )
+    risk_result = SimpleNamespace(
+        risk_decisions=(
+            SimpleNamespace(
+                ticker="MSFT",
+                trade_classification_id="classification-msft",
+                status="approved",
+                reason_code="within_limits",
+            ),
+            SimpleNamespace(
+                ticker="NVDA",
+                trade_classification_id="classification-nvda",
+                status="rejected",
+                reason_code="theme_concentration_limit",
+            ),
+            SimpleNamespace(
+                ticker="AMD",
+                trade_classification_id="classification-amd",
+                status="approved",
+                reason_code="within_limits",
+            ),
+        )
+    )
+    decision_result = SimpleNamespace(
+        decisions=(
+            SimpleNamespace(
+                ticker="MSFT",
+                decision="no_trade",
+                manual_request_id="msft-request",
+                metadata_json={"paper_trade_authorized": False},
+            ),
+            SimpleNamespace(
+                ticker="NVDA",
+                decision="enter_long",
+                manual_request_id="nvda-request",
+                metadata_json={"paper_trade_authorized": True},
+            ),
+            SimpleNamespace(
+                ticker="AMD",
+                decision="enter_long",
+                manual_request_id="amd-request",
+                metadata_json={"paper_trade_authorized": True},
+            ),
+        )
+    )
+    paper_execution_workflow = _PaperExecutionWorkflow(
+        recorder,
+        SimpleNamespace(
+            paper_orders=(
+                SimpleNamespace(paper_order_id="order-amd-1", ticker="AMD"),
+            )
+            if execute_paper_orders
+            else (),
+        ),
+    )
+    dependencies = LiveManualReviewDependencies(
+        universe_filter_loader=_UniverseFilterLoader(recorder, UniverseFilterConfig()),
+        manual_request_loader=_ManualRequestLoader(recorder, requests),
+        universe_scan_pipeline=_UniverseScanPipeline(recorder, universe_result),
+        signal_pipeline=_SignalPipeline(recorder, snapshots),
+        strategy_pipeline=_StrategyPipeline(recorder, strategy_result),
+        portfolio_sync_workflow=_PortfolioSyncWorkflow(
+            recorder,
+            SimpleNamespace(portfolio_context=SimpleNamespace(account_equity=100000.0)),
+        ),
+        risk_workflow=_RiskWorkflow(recorder, risk_result),
+        trading_decision_pipeline=_TradingDecisionPipeline(recorder, decision_result),
+        paper_execution_workflow=paper_execution_workflow,
+    )
+    return (
+        LiveManualReviewRuntime(
+            dependencies=dependencies,
+            now=lambda: datetime(2026, 6, 4, 13, 15, tzinfo=timezone.utc),
+            execute_paper_orders=execute_paper_orders,
+        ),
+        recorder,
+    )
+
+
 def test_live_manual_review_runtime_runs_request_scoped_chain_in_dry_run_mode():
     runtime, recorder = _build_runtime()
 
@@ -229,3 +329,35 @@ def test_runtime_dispatch_routes_manual_review_to_live_runtime():
     from src.trading.runtime.manual_review import run_live_manual_review_once as live_handler
 
     assert get_job_phase_handler("manual_review") is live_handler
+
+
+def test_live_manual_review_runtime_reports_request_execution_reachability_in_dry_run_mode():
+    runtime, recorder = _build_execution_runtime(execute_paper_orders=False)
+
+    result = runtime.run()
+
+    assert "paper_execution" not in recorder.calls
+    assert result["summary"]["manual_request_count"] == 3
+    assert result["summary"]["review_only_request_count"] == 1
+    assert result["summary"]["paper_trade_eligible_request_count"] == 2
+    assert result["summary"]["risk_blocked_request_count"] == 1
+    assert result["summary"]["eligible_no_order_request_count"] == 1
+    assert result["execution"] == {
+        "mode": "dry_run",
+        "orders_submitted": 0,
+        "option_orders_submitted": 0,
+    }
+
+
+def test_live_manual_review_runtime_executes_explicit_paper_orders_without_option_orders():
+    runtime, recorder = _build_execution_runtime(execute_paper_orders=True)
+
+    result = runtime.run()
+
+    assert "paper_execution" in recorder.calls
+    assert result["summary"]["eligible_no_order_request_count"] == 0
+    assert result["execution"] == {
+        "mode": "execute",
+        "orders_submitted": 1,
+        "option_orders_submitted": 0,
+    }

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import date, timedelta
+from types import SimpleNamespace
 from typing import Any
 
 from src.db.connection import get_session
@@ -19,11 +20,15 @@ from src.trading.options.strategy import (
 )
 from src.trading.replay.historical import HistoricalReplayRunner
 from src.trading.replay.outcomes import OutcomeEvaluator, PricePoint
+from src.trading.runtime.manual_review import LiveManualReviewDependencies, LiveManualReviewRuntime
+from src.trading.manual_review.requests import ManualTickerRequestService
 from src.trading.repositories.in_memory import InMemoryTradingRepository
 from src.trading.risk import HedgeActionRecord, PortfolioRiskIntentRecord, RiskDecisionRecord
 from src.trading.risk.config import RiskConfigResolver
 from src.trading.risk.options import OptionLegRiskInput, OptionRiskInput, OptionRiskManager
 from src.trading.signals.sources import EventNewsItemRecord
+from src.trading.workflows.paper_execution import PaperExecutionWorkflow
+from src.trading.workflows.trading_decision import TradingDecisionRecord
 
 from .lookahead_risk import LookaheadRiskWorkflowHelper
 from .smoke_support import (
@@ -270,6 +275,115 @@ def _run_manual_review_fixture() -> dict[str, Any]:
             "latest_result_status": "ordinary_watch",
             "manual_request_ticker": manual_snapshot.ticker,
             "included_symbols": list(universe_result.included_symbols),
+        },
+    }
+
+
+def _run_manual_review_execution_fixture() -> dict[str, Any]:
+    decision_time = _fixed_now()
+    repository = InMemoryTradingRepository()
+    manual_service = ManualTickerRequestService(now=lambda: decision_time)
+    request = manual_service.create("AAPL", "fixture executable request", "paper_trade_eligible")
+    broker = _FakePaperStockBroker()
+
+    class _SignalPipeline:
+        def build_pre_open_snapshots(self, *, universe_result: object, decision_time: object) -> tuple[object, ...]:
+            manual_service.record_evaluation(
+                request.request_id,
+                result_status="actionable_trade",
+                signal_snapshot_id="snapshot-1",
+            )
+            return (SimpleNamespace(ticker="AAPL"),)
+
+    risk_decision = RiskDecisionRecord.create(
+        candidate_score_id=None,
+        trade_classification_id=None,
+        position_sizing_decision_id=None,
+        ticker="AAPL",
+        status="approved",
+        reason_code="within_limits",
+        approved_weight=0.01,
+        approved_notional=3.15,
+        approved_quantity=0.01,
+        portfolio_risk_snapshot_id=None,
+        applied_rules=["fixture_manual_review_execution"],
+        decision_time=decision_time,
+    )
+    trading_decision = TradingDecisionRecord(
+        trading_decision_id=str(uuid.uuid4()),
+        candidate_score_id=None,
+        trade_classification_id=None,
+        risk_decision_id=risk_decision.risk_decision_id,
+        ticker="AAPL",
+        decision="enter_long",
+        strategy_id="relative_strength_rotation_v1",
+        strategy_version="v1",
+        expression_bucket_id="long_stock",
+        expression_bucket_version="v1",
+        trade_identity="tactical_stock_trade",
+        instrument_type="stock",
+        selection_source="manual_request",
+        manual_request_id=request.request_id,
+        confidence=0.81,
+        target_weight=0.01,
+        approved_weight=0.01,
+        max_loss_pct=0.02,
+        time_horizon="intraday",
+        thesis="Fixture manual review execution path.",
+        prompt_template=None,
+        prompt_run=None,
+        usage_events=[],
+        decision_time=decision_time,
+        available_for_decision_at=decision_time,
+        metadata_json={
+            "paper_trade_authorized": True,
+            "manual_request_mode": "paper_trade_eligible",
+        },
+    )
+
+    runtime = LiveManualReviewRuntime(
+        dependencies=LiveManualReviewDependencies(
+            universe_filter_loader=SimpleNamespace(load_active=lambda: SimpleNamespace()),
+            manual_request_loader=manual_service,
+            universe_scan_pipeline=SimpleNamespace(
+                run=lambda **kwargs: SimpleNamespace(included_symbols=("AAPL",))
+            ),
+            signal_pipeline=_SignalPipeline(),
+            strategy_pipeline=SimpleNamespace(
+                run=lambda **kwargs: SimpleNamespace(
+                    candidates=(SimpleNamespace(ticker="AAPL"),),
+                    classifications=(SimpleNamespace(ticker="AAPL"),),
+                )
+            ),
+            portfolio_sync_workflow=SimpleNamespace(
+                run=lambda **kwargs: SimpleNamespace(portfolio_context=_empty_portfolio_context(decision_time))
+            ),
+            risk_workflow=SimpleNamespace(
+                run=lambda **kwargs: SimpleNamespace(risk_decisions=(risk_decision,))
+            ),
+            trading_decision_pipeline=SimpleNamespace(
+                run=lambda **kwargs: SimpleNamespace(decisions=(trading_decision,))
+            ),
+            paper_execution_workflow=PaperExecutionWorkflow(
+                repository=repository,
+                broker=broker,
+                manual_request_service=manual_service,
+            ),
+            trading_repository=None,
+        ),
+        now=lambda: decision_time,
+        execute_paper_orders=True,
+    )
+    result = runtime.run()
+    order = repository.paper_orders[0]
+    return {
+        "status": result["status"],
+        "mode": "manual_review_execution_fixture",
+        "summary": {
+            "active_manual_requests": 1,
+            "latest_result_status": manual_service.load_active()[0].latest_result_status,
+            "orders_submitted": result["execution"]["orders_submitted"],
+            "latest_order_status": order.status,
         },
     }
 

@@ -40,6 +40,8 @@ from src.db.models.trading import (
     TradingDecision,
     UniverseFilterConfig,
 )
+from src.trading.manual_review.sqlalchemy import SQLAlchemyManualTickerRequestService
+from src.trading.repositories.sqlalchemy import SqlAlchemyTradingRepository
 from src.web.flash import flash, get_flash
 from src.web.presenters.today_copy import (
     candidate_result_label,
@@ -317,32 +319,14 @@ def load_today_dashboard(
 
 
 def create_manual_request(session: Any, *, ticker: str, reason: str, mode: str) -> uuid.UUID:
-    normalized_ticker = ticker.strip().upper()
-    if not normalized_ticker:
-        raise ValueError("Ticker is required.")
-    normalized_reason = reason.strip()
-    if not normalized_reason:
-        raise ValueError("Reason is required.")
-    if mode not in {"review_only", "paper_trade_eligible"}:
-        raise ValueError("Unsupported manual request mode.")
-    row = ManualTickerRequest(
-        ticker=normalized_ticker,
-        reason=normalized_reason,
-        mode=mode,
-        status="active",
-        metadata_json={},
-    )
-    session.add(row)
-    session.flush()
-    return row.manual_ticker_request_id
+    service = SQLAlchemyManualTickerRequestService(session)
+    request = service.create(ticker, reason, mode)
+    return uuid.UUID(request.request_id)
 
 
 def dismiss_manual_request(session: Any, request_id: str) -> None:
-    rid = uuid.UUID(str(request_id))
-    row = session.query(ManualTickerRequest).filter_by(manual_ticker_request_id=rid).first()
-    if row is None:
-        raise ValueError("Manual request not found.")
-    row.status = "dismissed"
+    service = SQLAlchemyManualTickerRequestService(session)
+    service.dismiss(str(request_id))
 
 
 def update_universe_filter(session: Any, **raw_form: str) -> uuid.UUID:
@@ -862,15 +846,10 @@ def _load_candidate_rows(session: Any) -> tuple[dict[str, Any], ...]:
 
 
 def _load_manual_requests(session: Any) -> tuple[dict[str, Any], ...]:
-    rows = (
-        session.query(ManualTickerRequest)
-        .filter(ManualTickerRequest.status == "active")
-        .order_by(ManualTickerRequest.created_at.desc())
-        .all()
-    )
+    rows = SqlAlchemyTradingRepository(session).load_manual_review_audit_rows()
     return tuple(
         {
-            "manual_ticker_request_id": str(row.manual_ticker_request_id),
+            "manual_ticker_request_id": row.manual_ticker_request_id,
             "ticker": row.ticker,
             "reason": row.reason,
             "mode": row.mode,
@@ -879,6 +858,17 @@ def _load_manual_requests(session: Any) -> tuple[dict[str, Any], ...]:
             "status_label": manual_request_status_label(row.status),
             "latest_result_status": row.latest_result_status,
             "latest_result_label": candidate_result_label(row.latest_result_status),
+            "last_evaluated_at": row.last_evaluated_at.isoformat() if row.last_evaluated_at is not None else None,
+            "latest_signal_snapshot_id": row.latest_signal_snapshot_id,
+            "latest_trading_decision_id": row.latest_trading_decision_id,
+            "latest_decision_action": row.latest_decision_action,
+            "latest_risk_outcome": row.latest_risk_outcome,
+            "latest_order_status": row.latest_order_status,
+            "latest_execution_status": row.latest_execution_status,
+            "latest_execution_time": row.latest_execution_time.isoformat() if row.latest_execution_time is not None else None,
+            "execution_path_state": row.execution_path_state,
+            "latest_block_reason": row.latest_block_reason,
+            "linkage_state": row.linkage_state,
             "operator_summary": _sentence_join(
                 f"{manual_request_mode_label(row.mode)} because {row.reason}",
                 f"Latest result: {candidate_result_label(row.latest_result_status)}"

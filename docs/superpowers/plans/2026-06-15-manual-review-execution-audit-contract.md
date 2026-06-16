@@ -141,12 +141,12 @@ Rules:
 - Test: `tests/db/test_trading_models.py`
 - Test: `tests/web/test_today.py`
 
-- [ ] Step 1: Write failing tests for duplicate active requests on the same ticker and for the current signal pipeline dropping one request silently.
-- [ ] Step 2: Choose and codify one replacement rule: when the user re-pins the same ticker, cancel the previous active request and create a fresh active request with the new reason/mode.
-- [ ] Step 3: If the DB contract changes, add a migration path that cancels older duplicate active rows before adding a one-active-request-per-ticker constraint or partial unique index.
-- [ ] Step 4: Move DB-backed create/replace and dismiss semantics behind `SQLAlchemyManualTickerRequestService` so the route is not hand-rolling lifecycle transitions.
-- [ ] Step 5: Update `SignalPipeline` so manual-request identity remains deterministic and no active request is silently ignored.
-- [ ] Step 6: Run `source ~/.venv/bin/activate && pytest tests/trading/test_manual_requests.py tests/trading/test_manual_request_sqlalchemy.py tests/db/test_trading_models.py tests/web/test_today.py -q`.
+- [x] Step 1: Write failing tests for duplicate active requests on the same ticker and for the current signal pipeline dropping one request silently.
+- [x] Step 2: Choose and codify one replacement rule: when the user re-pins the same ticker, cancel the previous active request and create a fresh active request with the new reason/mode.
+- [x] Step 3: If the DB contract changes, add a migration path that cancels older duplicate active rows before adding a one-active-request-per-ticker constraint or partial unique index.
+- [x] Step 4: Move DB-backed create/replace and dismiss semantics behind `SQLAlchemyManualTickerRequestService` so the route is not hand-rolling lifecycle transitions.
+- [x] Step 5: Update `SignalPipeline` so manual-request identity remains deterministic and no active request is silently ignored.
+- [x] Step 6: Run `source ~/.venv/bin/activate && pytest tests/trading/test_manual_requests.py tests/trading/test_manual_request_sqlalchemy.py tests/db/test_trading_models.py tests/web/test_today.py -q`.
 
 Expected result: each ticker has at most one active request, and every active request receives deterministic evaluation updates.
 
@@ -160,11 +160,11 @@ Expected result: each ticker has at most one active request, and every active re
 - Test: `tests/trading/test_runtime_manual_review_live.py`
 - Test: `tests/scripts/test_run_trading_once.py`
 
-- [ ] Step 1: Write failing tests for a dedicated manual-review live mode that can run in dry-run or `--execute-paper-orders` mode without changing scheduler defaults.
-- [ ] Step 2: Keep `run_job_phase("manual_review")` dry-run by default, but expose an explicit operator path such as `--mode live-manual-review --phase manual_review`.
-- [ ] Step 3: Extend the runtime report so manual-review execution shows counts that matter operationally, such as request counts, risk-blocked requests, eligible-no-order requests, orders submitted, and request-mode breakdown.
-- [ ] Step 4: Keep manual-review option execution out of scope and report zero option-order submissions explicitly if a unified execution report shape is needed.
-- [ ] Step 5: Run `source ~/.venv/bin/activate && pytest tests/trading/test_runtime_manual_review_live.py tests/scripts/test_run_trading_once.py -q`.
+- [x] Step 1: Write failing tests for a dedicated manual-review live mode that can run in dry-run or `--execute-paper-orders` mode without changing scheduler defaults.
+- [x] Step 2: Keep `run_job_phase("manual_review")` dry-run by default, but expose an explicit operator path such as `--mode live-manual-review --phase manual_review`.
+- [x] Step 3: Extend the runtime report so manual-review execution shows counts that matter operationally, such as request counts, risk-blocked requests, eligible-no-order requests, orders submitted, and request-mode breakdown.
+- [x] Step 4: Keep manual-review option execution out of scope and report zero option-order submissions explicitly if a unified execution report shape is needed.
+- [x] Step 5: Run `source ~/.venv/bin/activate && pytest tests/trading/test_runtime_manual_review_live.py tests/scripts/test_run_trading_once.py -q`.
 
 Expected result: operators can explicitly execute `paper_trade_eligible` manual-review requests without changing the default scheduler behavior.
 
@@ -178,11 +178,11 @@ Expected result: operators can explicitly execute `paper_trade_eligible` manual-
 - Test: `tests/trading/test_runtime_intraday_live.py`
 - Test: `tests/trading/test_intraday_rebalance.py`
 
-- [ ] Step 1: Write failing tests showing that active manual-review tickers in intraday scope currently lose `manual_request_id` and `manual_request_mode`.
-- [ ] Step 2: Extend intraday request contexts to carry the active request ID, mode, and any latest snapshot/decision linkage needed for auditability.
-- [ ] Step 3: Make intraday-created `TradingDecisionRecord`s preserve `manual_request_id` when the ticker is being followed because of an active manual request.
-- [ ] Step 4: Apply the same execution policy intraday: `review_only` stays non-executable, `paper_trade_eligible` may execute only if the normal intraday gates pass.
-- [ ] Step 5: Run `source ~/.venv/bin/activate && pytest tests/trading/test_runtime_intraday_live.py tests/trading/test_intraday_rebalance.py -q`.
+- [x] Step 1: Write failing tests showing that active manual-review tickers in intraday scope currently lose `manual_request_id` and `manual_request_mode`.
+- [x] Step 2: Extend intraday request contexts to carry the active request ID, mode, and any latest snapshot/decision linkage needed for auditability.
+- [x] Step 3: Make intraday-created `TradingDecisionRecord`s preserve `manual_request_id` when the ticker is being followed because of an active manual request.
+- [x] Step 4: Apply the same execution policy intraday: `review_only` stays non-executable, `paper_trade_eligible` may execute only if the normal intraday gates pass.
+- [x] Step 5: Run `source ~/.venv/bin/activate && pytest tests/trading/test_runtime_intraday_live.py tests/trading/test_intraday_rebalance.py -q`.
 
 Expected result: intraday refresh no longer severs manual-review lineage or accidentally bypasses request-mode execution rules.
 
@@ -197,11 +197,11 @@ Expected result: intraday refresh no longer severs manual-review lineage or acci
 - Test: `tests/trading/test_sqlalchemy_repository.py`
 - Test: `tests/web/test_today.py`
 
-- [ ] Step 1: Write failing tests for a backend audit row that exposes `last_evaluated_at`, `latest_signal_snapshot_id`, latest linked trading decision ID, `latest_decision_action`, `latest_risk_outcome`, and latest order/execution state.
-- [ ] Step 2: Implement a repository/service loader that joins manual requests to their latest decision, risk, and order artifacts by `manual_request_id` instead of asking the template to infer linkage.
-- [ ] Step 3: Return explicit `linkage_state` and `execution_path_state` values such as `pending_evaluation`, `snapshot_only`, `risk_blocked`, `eligible_no_order`, `order_submitted`, or `filled` when the chain is incomplete or stopped.
-- [ ] Step 4: Wire `/today` to consume that backend loader while keeping template redesign in the UI plan.
-- [ ] Step 5: Run `source ~/.venv/bin/activate && pytest tests/trading/test_manual_request_sqlalchemy.py tests/trading/test_sqlalchemy_repository.py tests/web/test_today.py -q`.
+- [x] Step 1: Write failing tests for a backend audit row that exposes `last_evaluated_at`, `latest_signal_snapshot_id`, latest linked trading decision ID, `latest_decision_action`, `latest_risk_outcome`, and latest order/execution state.
+- [x] Step 2: Implement a repository/service loader that joins manual requests to their latest decision, risk, and order artifacts by `manual_request_id` instead of asking the template to infer linkage.
+- [x] Step 3: Return explicit `linkage_state` and `execution_path_state` values such as `pending_evaluation`, `snapshot_only`, `risk_blocked`, `eligible_no_order`, `order_submitted`, or `filled` when the chain is incomplete or stopped.
+- [x] Step 4: Wire `/today` to consume that backend loader while keeping template redesign in the UI plan.
+- [x] Step 5: Run `source ~/.venv/bin/activate && pytest tests/trading/test_manual_request_sqlalchemy.py tests/trading/test_sqlalchemy_repository.py tests/web/test_today.py -q`.
 
 Expected result: the UI plan gets one stable backend audit contract for manual-review cards and drill-down links, including a clear model-intent-vs-execution-path summary.
 
@@ -215,11 +215,11 @@ Expected result: the UI plan gets one stable backend audit contract for manual-r
 - Modify: `documents/research_app/runbook.md`
 - Modify: `plan/research_app/trading_agent_refactor/progress_tracker.md`
 
-- [ ] Step 1: Write a failing smoke test for a fixture-backed `paper_trade_eligible` manual-review path that submits one paper stock order.
-- [ ] Step 2: Add a standalone smoke mode such as `manual_review_execution_fixture` so the executable path can be verified without live providers.
-- [ ] Step 3: Document the operator commands for dry-run and explicit execution, plus what to inspect in `/today` after the run.
-- [ ] Step 4: Update the progress tracker with implementation status and verification evidence after each completed task.
-- [ ] Step 5: Run `source ~/.venv/bin/activate && pytest tests/scripts/test_run_trading_smoke_test.py tests/trading/test_runtime_manual_review_live.py tests/scripts/test_run_trading_once.py -q`.
-- [ ] Step 6: Run `git diff --check`.
+- [x] Step 1: Write a failing smoke test for a fixture-backed `paper_trade_eligible` manual-review path that submits one paper stock order.
+- [x] Step 2: Add a standalone smoke mode such as `manual_review_execution_fixture` so the executable path can be verified without live providers.
+- [x] Step 3: Document the operator commands for dry-run and explicit execution, plus what to inspect in `/today` after the run.
+- [x] Step 4: Update the progress tracker with implementation status and verification evidence after each completed task.
+- [x] Step 5: Run `source ~/.venv/bin/activate && pytest tests/scripts/test_run_trading_smoke_test.py tests/trading/test_runtime_manual_review_live.py tests/scripts/test_run_trading_once.py -q`.
+- [x] Step 6: Run `git diff --check`.
 
 Expected result: manual-review execution is verifiable through a tiny standalone smoke path and documented operator workflow.

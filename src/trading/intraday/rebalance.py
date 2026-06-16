@@ -56,6 +56,8 @@ class IntradayRebalanceRequest:
     allow_open_new: bool
     direct_company_negative_evidence: bool
     bearish_signal_sources: tuple[str, ...]
+    manual_request_id: str | None = None
+    manual_request_mode: str | None = None
     metadata_json: dict[str, Any] = field(default_factory=dict)
 
 
@@ -150,15 +152,25 @@ class IntradayRebalancePipeline:
             approved_quantity = 0.0
             if self._requires_execution_risk_decision(request=request, action=str(final_output["action"])):
                 approved_quantity = self._approved_execution_quantity(request=request)
+                risk_reason_code = (
+                    "intraday_rebalance_open_new"
+                    if str(final_output["action"]) == "open_new"
+                    else "intraday_rebalance_existing_position"
+                )
+                approved_notional = (
+                    request.current_price * approved_quantity
+                    if str(final_output["action"]) == "open_new"
+                    else request.current_position_market_value
+                )
                 risk_decision = RiskDecisionRecord.create(
                     candidate_score_id=None,
                     trade_classification_id=None,
                     position_sizing_decision_id=None,
                     ticker=request.ticker,
                     status="approved",
-                    reason_code="intraday_rebalance_existing_position",
+                    reason_code=risk_reason_code,
                     approved_weight=0.0,
-                    approved_notional=request.current_position_market_value,
+                    approved_notional=approved_notional,
                     approved_quantity=approved_quantity,
                     portfolio_risk_snapshot_id=None,
                     applied_rules=["intraday_existing_position"],
@@ -213,7 +225,15 @@ class IntradayRebalancePipeline:
                 risk_decision=risk_decision,
                 execute_approved=execute_approved,
             ):
-                execution_decisions.append(self._to_trading_decision(request, decision, prompt_template, prompt_run, usage_events))
+                execution_decision = self._to_trading_decision(
+                    request,
+                    decision,
+                    prompt_template,
+                    prompt_run,
+                    usage_events,
+                )
+                self.repository.save_trading_decision(execution_decision)
+                execution_decisions.append(execution_decision)
                 execution_risk_decisions.append(risk_decision)
 
         execution_summary = {"orders_submitted": 0, "option_orders_submitted": 0}
@@ -336,6 +356,16 @@ class IntradayRebalancePipeline:
         reason_code: str,
     ) -> tuple[dict[str, Any], str, str]:
         action = str(output["action"])
+        if request.manual_request_mode == "review_only" and action in {
+            "open_new",
+            "reduce",
+            "exit",
+            "close_option_strategy",
+            "roll_option_strategy",
+            "adjust_option_strategy",
+        }:
+            output["action"] = "hold"
+            return output, "blocked", "manual_request_review_only"
         if request.instrument_type == "option":
             option_freshness = str(request.signal_freshness.get("option_chain") or "").lower()
             if action in {"roll_option_strategy", "adjust_option_strategy"} and option_freshness in {"missing", "stale", "failed"}:
@@ -385,10 +415,17 @@ class IntradayRebalancePipeline:
         prompt_run: PromptRunRecord,
         usage_events: list[UsageEventRecord],
     ) -> TradingDecisionRecord:
+        resolved_decision_action = (
+            "enter_long"
+            if request.instrument_type == "stock" and decision.action == "open_new"
+            else decision.action
+        )
         metadata_json = {
             **dict(request.metadata_json),
             "paper_trade_authorized": True,
             "intraday_rebalance": True,
+            "manual_request_mode": request.manual_request_mode,
+            "intraday_requested_action": decision.action,
         }
         return TradingDecisionRecord(
             trading_decision_id=str(uuid.uuid4()),
@@ -396,7 +433,7 @@ class IntradayRebalancePipeline:
             trade_classification_id=None,
             risk_decision_id=decision.risk_decision_id,
             ticker=request.ticker,
-            decision=decision.action,
+            decision=resolved_decision_action,
             strategy_id=request.strategy_id,
             strategy_version=request.strategy_version,
             expression_bucket_id=request.expression_bucket_id,
@@ -404,7 +441,7 @@ class IntradayRebalancePipeline:
             trade_identity=request.trade_identity,
             instrument_type=request.instrument_type,
             selection_source=request.selection_source,
-            manual_request_id=None,
+            manual_request_id=request.manual_request_id,
             confidence=decision.confidence,
             target_weight=decision.target_weight,
             approved_weight=0.0,
@@ -421,6 +458,8 @@ class IntradayRebalancePipeline:
         )
 
     def _requires_execution_risk_decision(self, *, request: IntradayRebalanceRequest, action: str) -> bool:
+        if action == "open_new":
+            return bool(request.allow_open_new and request.instrument_type == "stock")
         if not request.existing_position:
             return False
         if request.instrument_type == "option":
@@ -429,6 +468,8 @@ class IntradayRebalancePipeline:
 
     def _approved_execution_quantity(self, *, request: IntradayRebalanceRequest) -> float:
         quantity = float(request.current_position_quantity or 0.0)
+        if not request.existing_position:
+            return 1.0
         if request.instrument_type == "option":
             return quantity if quantity > 0 else 1.0
         return quantity

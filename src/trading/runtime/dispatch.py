@@ -11,6 +11,7 @@ from .reflection import run_live_reflection_once
 from .smoke import (
     _run_historical_replay_fixture,
     _run_intraday_refresh_fixture,
+    _run_manual_review_execution_fixture,
     _run_manual_review_fixture,
     _run_paper_option_lifecycle_fixture,
     _run_paper_option_fixture,
@@ -38,6 +39,7 @@ SMOKE_MODE_HANDLERS: dict[str, RuntimeHandler] = {
     "historical_replay_fixture": _run_historical_replay_fixture,
     "paper_trade_dry_run": _run_paper_trade_dry_run,
     "manual_review_fixture": _run_manual_review_fixture,
+    "manual_review_execution_fixture": _run_manual_review_execution_fixture,
     "paper_option_fixture": _run_paper_option_fixture,
     "paper_option_lifecycle_fixture": _run_paper_option_lifecycle_fixture,
     "intraday_refresh_fixture": _run_intraday_refresh_fixture,

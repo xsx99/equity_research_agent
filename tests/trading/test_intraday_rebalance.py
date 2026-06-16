@@ -113,6 +113,8 @@ def _request(
     signal_freshness: dict[str, Any] | None = None,
     alerts: tuple[dict[str, Any], ...] = (),
     metadata_json: dict[str, Any] | None = None,
+    manual_request_id: str | None = None,
+    manual_request_mode: str | None = None,
 ) -> IntradayRebalanceRequest:
     now = datetime(2026, 6, 2, 15, 30, tzinfo=timezone.utc)
     return IntradayRebalanceRequest(
@@ -144,6 +146,8 @@ def _request(
         allow_open_new=allow_open_new,
         direct_company_negative_evidence=(action == "exit"),
         bearish_signal_sources=("events_news",) if action == "exit" else (),
+        manual_request_id=manual_request_id,
+        manual_request_mode=manual_request_mode,
         metadata_json=metadata_json or {},
     )
 
@@ -257,6 +261,105 @@ def test_intraday_rebalance_pipeline_executes_exit_for_existing_position(tmp_pat
     assert result.decisions[0].status == "approved"
     assert len(repository.paper_orders) == 1
     assert repository.paper_orders[0].action == "exit"
+
+
+def test_intraday_rebalance_pipeline_preserves_manual_request_identity_on_executed_decision(tmp_path):
+    repository = InMemoryTradingRepository()
+    registry = _write_prompt(tmp_path)
+    now = datetime(2026, 6, 2, 15, 30, tzinfo=timezone.utc)
+    ledger = PortfolioLedger(starting_cash_balance=100000.0)
+    broker = PaperStockBroker(api_key="key", secret_key="secret", client=_CapturingClient(), now=lambda: now)
+    pipeline = IntradayRebalancePipeline(
+        repository=repository,
+        prompt_registry=registry,
+        model_name="gpt-5-mini",
+        agent_runner=lambda prompt, model: {
+            "content": {
+                "ticker": "AAPL",
+                "action": "open_new",
+                "thesis": "Fresh catalyst confirmed intraday.",
+                "confidence": 0.81,
+                "target_weight": 0.05,
+                "max_loss_pct": 0.02,
+                "urgency": "high",
+                "rationale": ["fresh_news"],
+                "risk_checks": ["liquidity_ok"],
+                "schema_version": "v1",
+                "generated_at": "2026-06-02T15:30:00+00:00",
+            }
+        },
+        broker=broker,
+    )
+
+    pipeline.run(
+        rebalance_requests=(
+            _request(
+                existing_position=False,
+                allow_open_new=True,
+                action="open_new",
+                manual_request_id="manual-request-1",
+                manual_request_mode="paper_trade_eligible",
+            ),
+        ),
+        portfolio_context=ledger.build_portfolio_context(as_of=now),
+        risk_appetite="balanced",
+        trade_date=now,
+        execute_approved=True,
+    )
+
+    assert len(repository.trading_decisions) == 1
+    assert repository.trading_decisions[0].manual_request_id == "manual-request-1"
+    assert repository.trading_decisions[0].metadata_json["manual_request_mode"] == "paper_trade_eligible"
+
+
+def test_intraday_rebalance_pipeline_blocks_review_only_manual_request_execution(tmp_path):
+    repository = InMemoryTradingRepository()
+    registry = _write_prompt(tmp_path)
+    now = datetime(2026, 6, 2, 15, 30, tzinfo=timezone.utc)
+    ledger = PortfolioLedger(starting_cash_balance=100000.0)
+    broker = PaperStockBroker(api_key="key", secret_key="secret", client=_CapturingClient(), now=lambda: now)
+    pipeline = IntradayRebalancePipeline(
+        repository=repository,
+        prompt_registry=registry,
+        model_name="gpt-5-mini",
+        agent_runner=lambda prompt, model: {
+            "content": {
+                "ticker": "AAPL",
+                "action": "open_new",
+                "thesis": "Fresh catalyst confirmed intraday.",
+                "confidence": 0.79,
+                "target_weight": 0.05,
+                "max_loss_pct": 0.02,
+                "urgency": "high",
+                "rationale": ["fresh_news"],
+                "risk_checks": ["liquidity_ok"],
+                "schema_version": "v1",
+                "generated_at": "2026-06-02T15:30:00+00:00",
+            }
+        },
+        broker=broker,
+    )
+
+    result = pipeline.run(
+        rebalance_requests=(
+            _request(
+                existing_position=False,
+                allow_open_new=True,
+                action="open_new",
+                manual_request_id="manual-request-2",
+                manual_request_mode="review_only",
+            ),
+        ),
+        portfolio_context=ledger.build_portfolio_context(as_of=now),
+        risk_appetite="balanced",
+        trade_date=now,
+        execute_approved=True,
+    )
+
+    assert result.decisions[0].action == "hold"
+    assert result.decisions[0].status == "blocked"
+    assert result.decisions[0].reason_code == "manual_request_review_only"
+    assert repository.paper_orders == []
 
 
 def test_intraday_rebalance_pipeline_forces_reduce_from_portfolio_risk_intent(tmp_path):

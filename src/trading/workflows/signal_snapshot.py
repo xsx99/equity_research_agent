@@ -61,7 +61,7 @@ class SignalPipeline:
     ) -> tuple[SignalSnapshotResult, ...]:
         included_symbols = list(universe_result.included_symbols)
         manual_requests = self.manual_request_service.load_active()
-        manual_by_ticker = {request.ticker: request for request in manual_requests}
+        manual_by_ticker = _manual_requests_by_ticker(manual_requests)
         tickers = included_symbols + [
             ticker for ticker in sorted(manual_by_ticker) if ticker not in included_symbols
         ]
@@ -99,3 +99,15 @@ class SignalPipeline:
                     signal_snapshot_id=snapshot.signal_snapshot_id,
                 )
         return tuple(snapshots)
+
+
+def _manual_requests_by_ticker(
+    manual_requests: tuple[object, ...],
+) -> dict[str, object]:
+    manual_by_ticker: dict[str, object] = {}
+    for request in manual_requests:
+        ticker = str(getattr(request, "ticker", "") or "").strip().upper()
+        if ticker in manual_by_ticker:
+            raise RuntimeError(f"duplicate_active_manual_requests:{ticker}")
+        manual_by_ticker[ticker] = request
+    return manual_by_ticker

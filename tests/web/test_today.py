@@ -1231,23 +1231,36 @@ class TestTodayDashboard:
 
     def test_load_manual_requests_translates_operator_queue_copy(self):
         from src.web.routers.today import _load_manual_requests
+        from src.trading.manual_review.sqlalchemy import ManualReviewAuditRow
 
         request_id = uuid.uuid4()
         session = MagicMock()
-        session.query.return_value = _ListQuery(
-            [
-                SimpleNamespace(
-                    manual_ticker_request_id=request_id,
-                    ticker="TSLA",
-                    reason="post-event review",
-                    mode="review_only",
-                    status="active",
-                    latest_result_status="ordinary_watch",
-                )
-            ]
+        repository = MagicMock()
+        repository.load_manual_review_audit_rows.return_value = (
+            ManualReviewAuditRow(
+                manual_ticker_request_id=str(request_id),
+                ticker="TSLA",
+                reason="post-event review",
+                mode="review_only",
+                status="active",
+                created_at=datetime(2026, 6, 5, 14, 30, tzinfo=timezone.utc),
+                last_evaluated_at=datetime(2026, 6, 5, 15, 0, tzinfo=timezone.utc),
+                latest_result_status="ordinary_watch",
+                latest_signal_snapshot_id=None,
+                latest_trading_decision_id=None,
+                latest_decision_action=None,
+                latest_risk_outcome=None,
+                latest_order_status=None,
+                latest_execution_status=None,
+                latest_execution_time=None,
+                execution_path_state="snapshot_only",
+                latest_block_reason=None,
+                linkage_state="snapshot_only",
+            ),
         )
 
-        rows = _load_manual_requests(session)
+        with patch("src.web.routers.today.SqlAlchemyTradingRepository", return_value=repository):
+            rows = _load_manual_requests(session)
 
         assert rows == (
             {
@@ -1260,6 +1273,17 @@ class TestTodayDashboard:
                 "status_label": "Pinned",
                 "latest_result_status": "ordinary_watch",
                 "latest_result_label": "Still on watch",
+                "last_evaluated_at": "2026-06-05T15:00:00+00:00",
+                "latest_signal_snapshot_id": None,
+                "latest_trading_decision_id": None,
+                "latest_decision_action": None,
+                "latest_risk_outcome": None,
+                "latest_order_status": None,
+                "latest_execution_status": None,
+                "latest_execution_time": None,
+                "execution_path_state": "snapshot_only",
+                "latest_block_reason": None,
+                "linkage_state": "snapshot_only",
                 "operator_summary": "Review Only because post-event review. Latest result: Still on watch.",
             },
         )
@@ -1487,6 +1511,25 @@ class TestTodayDashboardMutations:
         assert response.headers["location"] == "/today?tab=candidates"
         create_manual_request.assert_called_once()
 
+    def test_create_manual_request_uses_sqlalchemy_service(self):
+        from src.web.routers.today import create_manual_request
+
+        created_id = uuid.uuid4()
+        session = MagicMock()
+        service = MagicMock()
+        service.create.return_value = SimpleNamespace(request_id=str(created_id))
+
+        with patch("src.web.routers.today.SQLAlchemyManualTickerRequestService", return_value=service):
+            request_id = create_manual_request(
+                session,
+                ticker="tsla",
+                reason="post-event review",
+                mode="review_only",
+            )
+
+        assert request_id == created_id
+        service.create.assert_called_once_with("tsla", "post-event review", "review_only")
+
     def test_dismiss_manual_request_redirects_back_to_candidates(self, client):
         request_id = uuid.uuid4()
         with patch("src.web.routers.today.dismiss_manual_request") as dismiss_manual_request:
@@ -1498,6 +1541,18 @@ class TestTodayDashboardMutations:
         assert response.status_code == 303
         assert response.headers["location"] == "/today?tab=candidates"
         dismiss_manual_request.assert_called_once()
+
+    def test_dismiss_manual_request_uses_sqlalchemy_service(self):
+        from src.web.routers.today import dismiss_manual_request
+
+        request_id = uuid.uuid4()
+        session = MagicMock()
+        service = MagicMock()
+
+        with patch("src.web.routers.today.SQLAlchemyManualTickerRequestService", return_value=service):
+            dismiss_manual_request(session, str(request_id))
+
+        service.dismiss.assert_called_once_with(str(request_id))
 
     def test_update_universe_filter_redirects_back_to_candidates(self, client):
         with patch("src.web.routers.today.update_universe_filter") as update_universe_filter:

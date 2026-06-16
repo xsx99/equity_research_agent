@@ -1,6 +1,6 @@
 from datetime import date, datetime, timezone
 
-from src.trading.manual_review.requests import ManualTickerRequestService
+from src.trading.manual_review.requests import ManualTickerRequest, ManualTickerRequestService
 from src.trading.repositories.in_memory import InMemoryTradingRepository
 from src.trading.workflows.signal_snapshot import SignalPipeline
 from src.trading.workflows.strategy_scoring import StrategyPipeline
@@ -210,6 +210,72 @@ def test_signal_pipeline_requests_option_chain_during_preopen_refresh():
         "events_news",
         "option_chain",
     )
+
+
+def test_signal_pipeline_rejects_duplicate_active_manual_requests_for_same_ticker():
+    now = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+    universe = UniverseScanPipeline(
+        provider=_FakeUniverseProvider(),
+        config=UniverseFilterConfig(),
+        now=lambda: now,
+    ).run()
+    sources = InMemorySignalSourceRepository()
+    sources.add(
+        SourceRecord(
+            "AAPL",
+            "technical",
+            "fixture",
+            "market_bars",
+            "AAPL-bars",
+            now,
+            now,
+            now,
+            now,
+            {
+                "bars": [
+                    {"date": date(2026, 5, 29), "open": 100.0, "high": 102.0, "low": 99.0, "close": 100.0, "volume": 1_000_000},
+                    {"date": date(2026, 5, 30), "open": 100.0, "high": 104.0, "low": 99.0, "close": 103.0, "volume": 2_000_000},
+                ]
+            },
+        )
+    )
+
+    class _DuplicateManualRequestService:
+        def load_active(self):
+            return (
+                ManualTickerRequest(
+                    request_id="request-1",
+                    ticker="AAPL",
+                    reason="first",
+                    mode="review_only",
+                    status="active",
+                    created_at=now,
+                ),
+                ManualTickerRequest(
+                    request_id="request-2",
+                    ticker="AAPL",
+                    reason="second",
+                    mode="paper_trade_eligible",
+                    status="active",
+                    created_at=now,
+                ),
+            )
+
+        def record_evaluation(self, request_id, *, result_status, signal_snapshot_id):
+            raise AssertionError("duplicate request state should fail before evaluation is recorded")
+
+    try:
+        SignalPipeline(
+            source_repository=sources,
+            manual_request_service=_DuplicateManualRequestService(),
+        ).build_pre_open_snapshots(
+            universe_result=universe,
+            decision_time=now,
+        )
+    except RuntimeError as exc:
+        assert str(exc) == "duplicate_active_manual_requests:AAPL"
+    else:
+        raise AssertionError("expected duplicate active manual requests to be rejected")
 
 
 def test_strategy_pipeline_records_manual_request_results_without_in_memory_repository_state():

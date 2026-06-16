@@ -334,7 +334,10 @@ class PaperExecutionWorkflow:
             return
         if risk_decision.status not in {"approved", "reduced"}:
             return
-        manual_request_mode = self._manual_request_mode(trading_decision.manual_request_id)
+        manual_request_mode = self._manual_request_mode(
+            trading_decision.manual_request_id,
+            fallback_mode=trading_decision.metadata_json.get("manual_request_mode"),
+        )
         order = self.broker.submit_order(
             PaperOrderRequest.from_trading_decision(
                 trading_decision=trading_decision,
@@ -705,13 +708,15 @@ class PaperExecutionWorkflow:
         self.repository.save_trading_decision(updated_decision)
         return aligned
 
-    def _manual_request_mode(self, request_id: str | None) -> str | None:
-        if request_id is None or self.manual_request_service is None:
-            return None
+    def _manual_request_mode(self, request_id: str | None, *, fallback_mode: str | None = None) -> str | None:
+        if request_id is None:
+            return fallback_mode
+        if self.manual_request_service is None:
+            return fallback_mode
         for request in self.manual_request_service.load_active():
             if request.request_id == request_id:
                 return request.mode
-        return None
+        return fallback_mode
 
 
 def _hedge_trading_decision_from_generated_action(

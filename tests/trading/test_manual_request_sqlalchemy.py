@@ -145,6 +145,36 @@ def test_sqlalchemy_manual_request_service_loads_active_requests_and_records_eva
     assert str(row.latest_signal_snapshot_id) == str(snapshot_id)
 
 
+def test_sqlalchemy_manual_request_service_replaces_existing_active_request_for_same_ticker():
+    session = _FakeSession()
+    now = datetime(2026, 6, 3, 12, 45, tzinfo=timezone.utc)
+    original_id = uuid.uuid4()
+    session.add(
+        ManualTickerRequest(
+            manual_ticker_request_id=original_id,
+            ticker="NVDA",
+            reason="first request",
+            mode="review_only",
+            status="active",
+            created_at=now,
+        )
+    )
+    service = SQLAlchemyManualTickerRequestService(session, now=lambda: now)
+
+    replacement = service.create(" nvda ", reason="updated request", mode="paper_trade_eligible")
+
+    active = service.load_active()
+    original = session.query(ManualTickerRequest).filter_by(manual_ticker_request_id=original_id).one_or_none()
+
+    assert replacement.request_id != str(original_id)
+    assert [row.request_id for row in active] == [replacement.request_id]
+    assert active[0].reason == "updated request"
+    assert active[0].mode == "paper_trade_eligible"
+    assert original is not None
+    assert original.status == "cancelled"
+    assert original.cancelled_at == now
+
+
 def test_signal_pipeline_persists_manual_request_snapshot_before_db_evaluation_update():
     now = datetime(2026, 6, 3, 12, 45, tzinfo=timezone.utc)
     ticker = f"T{uuid.uuid4().hex[:4].upper()}"

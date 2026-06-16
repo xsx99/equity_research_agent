@@ -15,6 +15,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
@@ -714,6 +715,12 @@ class ManualTickerRequest(Base):
             name="ck_manual_ticker_requests_status",
         ),
         Index("ix_manual_ticker_requests_ticker_status", "ticker", "status"),
+        Index(
+            "uq_manual_ticker_requests_active_ticker",
+            "ticker",
+            unique=True,
+            postgresql_where=text("status = 'active'"),
+        ),
     )
 
 

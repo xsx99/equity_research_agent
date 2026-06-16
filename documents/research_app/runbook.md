@@ -110,6 +110,20 @@ python scripts/run_trading_once.py --phase strategy_evolution --json
 
 The trading runtime now uses a split package structure: `src/trading/runtime/__init__.py` exposes the stable scheduler/CLI facade, `src/trading/runtime/preopen.py` owns the live preopen path, `src/trading/runtime/manual_review.py` owns the live manual-review path, `src/trading/runtime/intraday_refresh.py` owns the live intraday refresh path, `src/trading/runtime/reflection.py` owns the live post-close reflection path, `src/trading/runtime/strategy_evolution.py` owns the live strategy-evolution path, and fixture-only smoke helpers live under `src/trading/runtime/smoke.py`. Scheduler jobs and `scripts/run_trading_once.py` still keep the same phase strings and public entrypoint.
 
+Manual review keeps the scheduler/default path dry-run. Use the explicit operator mode when you want the same live manual-review runtime but with an intentional execution policy:
+
+```bash
+source ~/.venv/bin/activate
+python scripts/run_trading_once.py --mode live-manual-review --phase manual_review --json
+python scripts/run_trading_once.py --mode live-manual-review --phase manual_review --execute-paper-orders --json
+```
+
+Operator notes:
+- `--mode live-manual-review` is only valid with `--phase manual_review`
+- omitting `--execute-paper-orders` keeps the run dry-run even in operator mode
+- manual-review option execution is still out of scope; `--execute-paper-option-orders` is rejected for this mode
+- after a live run, inspect `/today` manual-review rows for `last_evaluated_at`, `latest_signal_snapshot_id`, `latest_trading_decision_id`, `execution_path_state`, `latest_block_reason`, `latest_order_status`, and `latest_execution_status`
+
 ## Trading Smoke Test Modes
 
 List the available standalone trading smoke modes:
@@ -133,11 +147,25 @@ PR 12 smoke modes:
 - `historical_replay_fixture`: point-in-time replay reconstruction plus outcome evaluation
 - `paper_trade_dry_run`: workflow-driven paper-trade dry run using a fake broker
 - `manual_review_fixture`: active `review_only` manual ticker request remains active and is re-evaluated
+- `manual_review_execution_fixture`: fixture-backed `paper_trade_eligible` manual ticker request that submits one paper stock order
 - `paper_option_fixture`: whitelisted paper option decision, leg derivation, and assignment-risk evaluation
 - `paper_option_lifecycle_fixture`: end-to-end option open approval, assignment-risk rejection, and assignment-targeted hedge-overlay materialization
 - `intraday_refresh_fixture`: hourly intraday signal delta plus deduped alert generation
 - `reflection_fixture`: post-close reflection and learning-factor extraction
 - `strategy_evolution_fixture`: strategy proposal generation from reflection fixtures
+
+Executable manual-review smoke:
+
+```bash
+source ~/.venv/bin/activate
+python scripts/run_trading_smoke_test.py --mode manual_review_execution_fixture --json
+```
+
+This should return:
+- `summary.active_manual_requests=1`
+- `summary.latest_result_status="actionable_trade"`
+- `summary.orders_submitted=1`
+- `summary.latest_order_status="filled"`
 
 ## Option Operator Checks
 

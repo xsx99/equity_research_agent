@@ -14,6 +14,16 @@ def test_run_smoke_mode_returns_fixture_report():
     assert result["summary"]["latest_result_status"] == "ordinary_watch"
 
 
+def test_run_smoke_mode_covers_manual_review_execution_fixture():
+    result = run_trading_smoke_test.run_smoke_mode("manual_review_execution_fixture")
+
+    assert result["status"] == "passed"
+    assert result["mode"] == "manual_review_execution_fixture"
+    assert result["summary"]["active_manual_requests"] == 1
+    assert result["summary"]["orders_submitted"] == 1
+    assert result["summary"]["latest_order_status"] == "filled"
+
+
 def test_run_smoke_mode_supports_replay_fixture():
     result = run_trading_smoke_test.run_smoke_mode("historical_replay_fixture")
 
@@ -49,6 +59,7 @@ def test_main_lists_available_modes(capsys):
     assert exit_code == 0
     output = capsys.readouterr().out
     assert "manual_review_fixture" in output
+    assert "manual_review_execution_fixture" in output
     assert "intraday_refresh_fixture" in output
     assert "paper_option_lifecycle_fixture" in output
     assert "paper_trade_dry_run" in output

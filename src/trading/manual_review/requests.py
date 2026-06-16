@@ -37,12 +37,25 @@ class ManualTickerRequestService:
         self._requests: dict[str, ManualTickerRequest] = {}
 
     def create(self, ticker: str, reason: str, mode: str = "review_only") -> ManualTickerRequest:
+        normalized_ticker = normalize_ticker(ticker)
+        normalized_reason = str(reason or "").strip()
+        if not normalized_ticker:
+            raise ValueError("manual_request_ticker_required")
+        if not normalized_reason:
+            raise ValueError("manual_request_reason_required")
         if mode not in REQUEST_MODES:
             raise ValueError(f"unsupported_manual_request_mode:{mode}")
+        existing = self._active_request_for_ticker(normalized_ticker)
+        if existing is not None:
+            self._requests[existing.request_id] = replace(
+                existing,
+                status="cancelled",
+                cancelled_at=self.now(),
+            )
         request = ManualTickerRequest(
             request_id=str(uuid.uuid4()),
-            ticker=normalize_ticker(ticker),
-            reason=reason,
+            ticker=normalized_ticker,
+            reason=normalized_reason,
             mode=mode,
             status=ACTIVE_STATUS,
             created_at=self.now(),
@@ -92,3 +105,13 @@ class ManualTickerRequestService:
             return self._requests[request_id]
         except KeyError as exc:
             raise KeyError(f"manual_request_not_found:{request_id}") from exc
+
+    def _active_request_for_ticker(self, ticker: str) -> ManualTickerRequest | None:
+        active = [
+            request
+            for request in self._requests.values()
+            if request.status == ACTIVE_STATUS and request.ticker == ticker
+        ]
+        if not active:
+            return None
+        return sorted(active, key=lambda request: (request.created_at, request.request_id))[-1]

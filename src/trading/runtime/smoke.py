@@ -11,6 +11,7 @@ from .smoke_entrypoints import (
 from .smoke_fixture_modes import (
     _run_historical_replay_fixture,
     _run_intraday_refresh_fixture,
+    _run_manual_review_execution_fixture,
     _run_manual_review_fixture,
     _run_paper_option_lifecycle_fixture,
     _run_paper_option_fixture,
@@ -29,6 +30,7 @@ AVAILABLE_SMOKE_MODES = (
     "historical_replay_fixture",
     "paper_trade_dry_run",
     "manual_review_fixture",
+    "manual_review_execution_fixture",
     "paper_option_fixture",
     "paper_option_lifecycle_fixture",
     "intraday_refresh_fixture",
@@ -40,6 +42,7 @@ __all__ = [
     "AVAILABLE_SMOKE_MODES",
     "_run_historical_replay_fixture",
     "_run_intraday_refresh_fixture",
+    "_run_manual_review_execution_fixture",
     "_run_manual_review_fixture",
     "_run_paper_option_lifecycle_fixture",
     "_run_paper_option_fixture",

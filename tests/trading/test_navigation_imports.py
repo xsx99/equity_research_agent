@@ -90,6 +90,7 @@ def test_trading_runtime_smoke_internal_split_paths_export_navigation_units():
     )
 
     assert "manual_review_fixture" in AVAILABLE_SMOKE_MODES
+    assert "manual_review_execution_fixture" in AVAILABLE_SMOKE_MODES
     assert callable(run_trading_preopen_once)
     assert callable(run_intraday_signal_refresh_once)
     assert callable(run_strategy_evolution_once)

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any
@@ -54,6 +54,7 @@ from src.trading.brokers.paper_option import (
 )
 from src.trading.brokers.paper_stock import PaperExecutionRecord, PaperOrderRecord
 from src.trading.intraday.news_alerts import NewsAlertRecord
+from src.trading.manual_review.sqlalchemy import ManualReviewAuditRow
 from src.trading.intraday.signals import IntradaySignalScanRecord, IntradaySignalSnapshotRecord
 from src.trading.risk.hedges import RiskHedgeDecisionRecord
 from src.trading.risk.lookahead import HedgeActionRecord, PortfolioRiskIntentRecord, PositionRiskActionRecord
@@ -1335,11 +1336,16 @@ class SQLAlchemyTradingRepository:
         contexts: dict[str, Any] = {}
         stock_positions_by_ticker = {position.ticker: position for position in self.load_paper_positions()}
         option_positions_by_ticker = {position.ticker: position for position in self.load_paper_option_positions()}
-        manual_mode_by_ticker = {
-            row.ticker: row.mode
-            for row in self.session.query(ManualTickerRequest).filter_by(status="active").all()
-            if row.ticker in ticker_set
-        }
+        manual_request_by_ticker: dict[str, Any] = {}
+        for row in self.session.query(ManualTickerRequest).filter_by(status="active").all():
+            if row.ticker not in ticker_set:
+                continue
+            current = manual_request_by_ticker.get(row.ticker)
+            if current is None or (row.created_at, str(row.manual_ticker_request_id)) > (
+                current.created_at,
+                str(current.manual_ticker_request_id),
+            ):
+                manual_request_by_ticker[row.ticker] = row
         classifications_by_id = {
             str(row.trade_classification_id): row
             for row in self.session.query(TradeClassification).all()
@@ -1366,7 +1372,8 @@ class SQLAlchemyTradingRepository:
             stock_position = stock_positions_by_ticker.get(ticker)
             option_position = option_positions_by_ticker.get(ticker)
             position = option_position or stock_position
-            manual_mode = manual_mode_by_ticker.get(ticker)
+            manual_request = manual_request_by_ticker.get(ticker)
+            manual_mode = manual_request.mode if manual_request is not None else None
             classification = None
             if decision is not None and decision.trade_classification_id is not None:
                 classification = classifications_by_id.get(str(decision.trade_classification_id))
@@ -1374,6 +1381,21 @@ class SQLAlchemyTradingRepository:
                 decision=decision,
                 option_position=option_position,
             )
+            if manual_request is not None:
+                metadata_json = {
+                    **dict(metadata_json or {}),
+                    "manual_request_last_evaluated_at": (
+                        manual_request.last_evaluated_at.isoformat()
+                        if manual_request.last_evaluated_at is not None
+                        else None
+                    ),
+                    "manual_request_latest_result_status": manual_request.latest_result_status,
+                    "manual_request_latest_signal_snapshot_id": (
+                        str(manual_request.latest_signal_snapshot_id)
+                        if manual_request.latest_signal_snapshot_id is not None
+                        else None
+                    ),
+                }
             instrument_type = "option" if option_position is not None else (decision.instrument_type if decision is not None else "stock")
             contexts[ticker] = SimpleNamespace(
                 selection_source=(
@@ -1417,6 +1439,12 @@ class SQLAlchemyTradingRepository:
                     manual_mode == "paper_trade_eligible"
                     or (decision is not None and bool(decision.paper_trade_authorized))
                 ),
+                manual_request_id=(
+                    str(manual_request.manual_ticker_request_id)
+                    if manual_request is not None
+                    else None
+                ),
+                manual_request_mode=manual_mode,
                 metadata_json=metadata_json,
             )
         return contexts
@@ -1433,6 +1461,118 @@ class SQLAlchemyTradingRepository:
             for row in self.session.query(CandidateScore).all()
             if row.ticker in ticker_set and row.decision_time.date() == trade_date
         }
+
+    def load_manual_review_audit_rows(self) -> tuple[ManualReviewAuditRow, ...]:
+        active_requests = [
+            row
+            for row in self.session.query(ManualTickerRequest).all()
+            if getattr(row, "status", None) == "active"
+        ]
+        decisions_by_request_id: dict[str, Any] = {}
+        for row in self.session.query(TradingDecision).all():
+            request_id = _string_or_none(getattr(row, "manual_request_id", None))
+            if request_id is None:
+                continue
+            current = decisions_by_request_id.get(request_id)
+            if current is None or _latest_row_sort_key(row, "decision_time", "trading_decision_id") > _latest_row_sort_key(
+                current,
+                "decision_time",
+                "trading_decision_id",
+            ):
+                decisions_by_request_id[request_id] = row
+        risk_by_id = {
+            _string_or_none(getattr(row, "risk_decision_id", None)): row
+            for row in self.session.query(RiskDecision).all()
+            if _string_or_none(getattr(row, "risk_decision_id", None)) is not None
+        }
+        orders_by_decision_id: dict[str, Any] = {}
+        for row in self.session.query(PaperOrder).all():
+            decision_id = _string_or_none(getattr(row, "trading_decision_id", None))
+            if decision_id is None:
+                continue
+            current = orders_by_decision_id.get(decision_id)
+            if current is None or _latest_row_sort_key(row, "created_at", "paper_order_id") > _latest_row_sort_key(
+                current,
+                "created_at",
+                "paper_order_id",
+            ):
+                orders_by_decision_id[decision_id] = row
+        executions_by_order_id: dict[str, Any] = {}
+        for row in self.session.query(PaperExecution).all():
+            order_id = _string_or_none(getattr(row, "paper_order_id", None))
+            if order_id is None:
+                continue
+            current = executions_by_order_id.get(order_id)
+            if current is None or _latest_row_sort_key(row, "executed_at", "paper_execution_id") > _latest_row_sort_key(
+                current,
+                "executed_at",
+                "paper_execution_id",
+            ):
+                executions_by_order_id[order_id] = row
+
+        audit_rows: list[ManualReviewAuditRow] = []
+        for request in sorted(
+            active_requests,
+            key=lambda row: (
+                -(
+                    getattr(row, "created_at", None).timestamp()
+                    if getattr(row, "created_at", None) is not None
+                    else 0.0
+                ),
+                str(getattr(row, "ticker", "") or ""),
+            ),
+        ):
+            request_id = str(request.manual_ticker_request_id)
+            decision = decisions_by_request_id.get(request_id)
+            risk = risk_by_id.get(_string_or_none(getattr(decision, "risk_decision_id", None)))
+            order = orders_by_decision_id.get(_string_or_none(getattr(decision, "trading_decision_id", None)))
+            execution = executions_by_order_id.get(_string_or_none(getattr(order, "paper_order_id", None)))
+            latest_signal_snapshot_id = _string_or_none(getattr(request, "latest_signal_snapshot_id", None))
+            if latest_signal_snapshot_id is None and decision is not None:
+                latest_signal_snapshot_id = _string_or_none(
+                    dict(getattr(decision, "metadata_json", {}) or {}).get("signal_snapshot_id")
+                )
+            execution_path_state, latest_block_reason = _manual_review_execution_path_state(
+                request=request,
+                decision=decision,
+                risk=risk,
+                order=order,
+                execution=execution,
+                latest_signal_snapshot_id=latest_signal_snapshot_id,
+            )
+            audit_rows.append(
+                ManualReviewAuditRow(
+                    manual_ticker_request_id=request_id,
+                    ticker=request.ticker,
+                    reason=request.reason,
+                    mode=request.mode,
+                    status=request.status,
+                    created_at=request.created_at,
+                    last_evaluated_at=request.last_evaluated_at,
+                    latest_result_status=request.latest_result_status,
+                    latest_signal_snapshot_id=latest_signal_snapshot_id,
+                    latest_trading_decision_id=_string_or_none(getattr(decision, "trading_decision_id", None)),
+                    latest_decision_action=(getattr(decision, "decision", None) if decision is not None else None),
+                    latest_risk_outcome=(getattr(risk, "status", None) if risk is not None else None),
+                    latest_order_status=(getattr(order, "status", None) if order is not None else None),
+                    latest_execution_status=(
+                        "filled"
+                        if execution is not None
+                        else ("rejected" if getattr(order, "status", None) == "rejected" else None)
+                    ),
+                    latest_execution_time=getattr(execution, "executed_at", None),
+                    execution_path_state=execution_path_state,
+                    latest_block_reason=latest_block_reason,
+                    linkage_state=_manual_review_linkage_state(
+                        latest_signal_snapshot_id=latest_signal_snapshot_id,
+                        decision=decision,
+                        risk=risk,
+                        order=order,
+                        execution=execution,
+                    ),
+                )
+            )
+        return tuple(audit_rows)
 
     def replace_paper_positions(self, positions: tuple[StockPosition, ...] | list[StockPosition]) -> None:
         latest_by_ticker = {position.ticker: position for position in positions}
@@ -1650,6 +1790,75 @@ def _manual_request_payload(row: Any) -> dict[str, Any]:
         "created_at": row.created_at.isoformat() if row.created_at is not None else None,
         "last_evaluated_at": row.last_evaluated_at.isoformat() if row.last_evaluated_at is not None else None,
     }
+
+
+def _manual_review_execution_path_state(
+    *,
+    request: Any,
+    decision: Any | None,
+    risk: Any | None,
+    order: Any | None,
+    execution: Any | None,
+    latest_signal_snapshot_id: str | None,
+) -> tuple[str, str | None]:
+    if latest_signal_snapshot_id is None:
+        return "pending_evaluation", None
+    if decision is None:
+        return "snapshot_only", None
+    if risk is not None and getattr(risk, "status", None) == "rejected":
+        return "risk_blocked", getattr(risk, "reason_code", None)
+    if order is None:
+        if _manual_review_actionable_decision(decision):
+            if getattr(request, "mode", None) == "review_only":
+                return "eligible_no_order", "manual_request_review_only"
+            return "eligible_no_order", "paper_order_not_submitted"
+        return "decision_recorded", None
+    if getattr(order, "status", None) == "rejected":
+        return "order_rejected", getattr(order, "rejection_reason", None)
+    if execution is not None or getattr(order, "status", None) == "filled":
+        return "filled", None
+    return "order_submitted", getattr(order, "rejection_reason", None)
+
+
+def _manual_review_linkage_state(
+    *,
+    latest_signal_snapshot_id: str | None,
+    decision: Any | None,
+    risk: Any | None,
+    order: Any | None,
+    execution: Any | None,
+) -> str:
+    if latest_signal_snapshot_id is None:
+        return "pending_evaluation"
+    if decision is None:
+        return "snapshot_only"
+    if execution is not None:
+        return "execution_linked"
+    if order is not None:
+        return "order_linked"
+    if risk is not None:
+        return "risk_linked"
+    return "decision_linked"
+
+
+def _manual_review_actionable_decision(decision: Any | None) -> bool:
+    if decision is None:
+        return False
+    action = str(getattr(decision, "decision", "") or "").strip()
+    metadata_json = dict(getattr(decision, "metadata_json", {}) or {})
+    return bool(metadata_json.get("paper_trade_authorized", False)) and action not in {"", "hold", "no_trade"}
+
+
+def _latest_row_sort_key(row: Any, timestamp_field: str, id_field: str) -> tuple[datetime, str]:
+    timestamp = getattr(row, timestamp_field, None) or datetime.min.replace(tzinfo=timezone.utc)
+    return timestamp, str(getattr(row, id_field, "") or "")
+
+
+def _string_or_none(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 def _trading_decision_payload(row: Any) -> dict[str, Any]:
