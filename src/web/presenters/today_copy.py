@@ -44,6 +44,13 @@ _MANUAL_REQUEST_STATUS_LABELS = {
     "cancelled": "Cancelled",
 }
 
+_RISK_APPETITE_LABELS = {
+    "balanced": "Balanced",
+    "conservative": "Conservative",
+    "aggressive": "Aggressive",
+    "unavailable": "Unavailable",
+}
+
 
 def strategy_label(value: Any) -> str:
     return _mapped_or_humanized(value, _STRATEGY_LABELS)
@@ -75,6 +82,10 @@ def manual_request_mode_label(value: Any) -> str:
 
 def manual_request_status_label(value: Any) -> str:
     return _mapped_or_humanized(value, _MANUAL_REQUEST_STATUS_LABELS)
+
+
+def risk_appetite_label(value: Any) -> str:
+    return _mapped_or_humanized(value, _RISK_APPETITE_LABELS)
 
 
 def _mapped_or_humanized(value: Any, mapping: dict[str, str]) -> str:

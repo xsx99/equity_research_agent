@@ -258,6 +258,40 @@ source ~/.venv/bin/activate
 python scripts/run_trading_smoke_test.py --mode paper_option_fixture --json
 ```
 
+## Macro/Event Backend Contract Smoke
+
+Canonical risk-context DB smoke:
+
+```bash
+source ~/.venv/bin/activate
+python scripts/run_trading_macro_event_db_smoke.py --json
+```
+
+This smoke does not call live providers. It runs migrations, writes one `macro_snapshots` row, two `calendar_events`, two `portfolio_event_risk_assessments`, a linked `portfolio_risk_snapshot`, `portfolio_risk_intent`, and supporting `risk_factor_exposures`, then reloads the same context through `SqlAlchemyTradingRepository` and the `/today` risk/macro presenter. Minimum requirement is `DATABASE_URL` pointing at the target Postgres database.
+
+Expected success signals:
+- `status=passed`
+- `checks.macro_snapshot_reloaded=true`
+- `checks.calendar_events_reloaded=true`
+- `checks.event_assessments_reloaded=true`
+- `checks.today_payload_uses_canonical_regime=true`
+- `checks.today_payload_sees_event_risk=true`
+
+## Macro/Event Degraded Mode
+
+- If macro fetch fails during live preopen or intraday refresh, `MacroSnapshotPipeline` persists a canonical `macro_snapshots` row with `regime=unavailable`, `risk_budget_multiplier=0.0`, `invalidators=["global_context_failed"]`, and blocked tactical tags. `/today` then shows an explicit macro availability issue instead of silently falling back to `unavailable` UI heuristics.
+- If macro inputs are stale rather than fully missing, the canonical row remains persisted with `source_freshness.status=stale` and a reduced `risk_budget_multiplier`, so RiskManager and `/today` see the same degraded context.
+- If company-news providers are unavailable, the runtime still persists deterministic earnings / option-expiry / macro rows when those inputs exist; the event-risk surface becomes narrower, but the backend contract stays auditable instead of disappearing into route-local summaries.
+
+## Macro/Event Provider Environment
+
+The DB smoke above only needs `DATABASE_URL`. Live macro/event enrichment during preopen and intraday runtime reuses the existing provider stack:
+
+- `ALPACA_API_KEY` plus `ALPACA_SECRET_KEY` or `ALPACA_API_SECRET` for Alpaca market data and Alpaca news fallback.
+- `FINNHUB_API_KEY` to enable the preferred Finnhub company-news provider.
+- `FRED_API_KEY` is optional but recommended for fresher macro indicator reads; without it the global-context provider falls back to public CSV/Yahoo/GLD proxy paths where possible.
+- `ALPACA_DATA_BASE_URL` remains optional when you need to override Alpaca’s default data endpoint.
+
 This should return `decision_status="ready"` and `risk_status="approved"` for the whitelisted long-call fixture.
 
 Option lifecycle and hedge smoke:

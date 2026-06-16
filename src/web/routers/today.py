@@ -8,6 +8,7 @@ from typing import Any
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from sqlalchemy.orm import Session as SQLAlchemySession
 
 from src.db.connection import get_session
 from src.db.models.trading import (
@@ -50,6 +51,7 @@ from src.web.presenters.today_copy import (
     strategy_label,
     trade_identity_label,
 )
+from src.web.presenters.today_risk_macro import build_today_risk_macro_payload
 from src.web.presenters.today_workspace import build_ticker_workspace
 
 router = APIRouter()
@@ -253,15 +255,33 @@ def load_today_dashboard(
             detail_item_index=normalized_detail_item_index,
         ),
     }
+    latest_macro_snapshot = _load_latest_macro_snapshot_for_today(
+        session,
+        latest_portfolio=latest_portfolio,
+        latest_risk=latest_risk,
+        latest_reflection=latest_reflection,
+    )
+    header = _build_header(
+        latest_portfolio,
+        latest_risk,
+        trade_rows,
+        latest_reflection,
+        latest_macro_snapshot=latest_macro_snapshot,
+    )
+    risk_macro = _load_today_risk_macro(
+        session,
+        latest_risk=latest_risk,
+        latest_macro_snapshot=latest_macro_snapshot,
+    )
 
     return {
         "selected_tab": selected_tab,
         "tabs": tuple({"id": tab_id, "label": label} for tab_id, label in _TAB_LABELS),
-        "header": _build_header(latest_portfolio, latest_risk, trade_rows, latest_reflection),
+        "header": header,
         "job_timeline": _build_job_timeline(latest_reflection),
         "overview": {
             "command_center": _build_overview_command_center(
-                header=_build_header(latest_portfolio, latest_risk, trade_rows, latest_reflection),
+                header=header,
                 positions=positions,
                 closed_positions=closed_positions,
                 ticker_workspace=ticker_workspace,
@@ -279,18 +299,7 @@ def load_today_dashboard(
             "selected_detail": audit_detail,
         },
         "ticker_workspace": ticker_workspace,
-        "risk_macro": {
-            "risk_config_version": latest_risk.resolver_version if latest_risk else None,
-            "binding_constraints": tuple((latest_risk.concentration_flags_json or [])) if latest_risk else (),
-            "summary": _build_risk_macro_summary(
-                header=_build_header(latest_portfolio, latest_risk, trade_rows, latest_reflection),
-                ticker_workspace=ticker_workspace,
-                binding_constraints=tuple((latest_risk.concentration_flags_json or [])) if latest_risk else (),
-                exposures=_load_risk_exposures(session),
-            ),
-            "events": (),
-            "exposures": _load_risk_exposures(session),
-        },
+        "risk_macro": risk_macro,
         "candidates": {
             "active_universe_filter": _serialize_universe_filter(active_universe_filter),
             "summary": _build_candidates_summary(
@@ -367,6 +376,7 @@ def _build_header(
     latest_risk: PortfolioRiskSnapshot | None,
     trade_rows: list[dict[str, Any]],
     latest_reflection: DailyReflection | None,
+    latest_macro_snapshot: object | None = None,
 ) -> dict[str, Any]:
     trade_date = None
     if latest_portfolio:
@@ -376,13 +386,9 @@ def _build_header(
     elif latest_reflection:
         trade_date = latest_reflection.trade_date
 
-    macro_regime = None
-    if latest_risk and isinstance(latest_risk.metadata_json, dict):
-        macro_regime = latest_risk.metadata_json.get("macro_regime")
-
     return {
         "trade_date": trade_date,
-        "macro_regime": macro_regime or "unavailable",
+        "macro_regime": getattr(latest_macro_snapshot, "regime", None) or "unavailable",
         "risk_appetite": latest_risk.risk_appetite if latest_risk else "unavailable",
         "nav": latest_portfolio.net_liquidation_value if latest_portfolio else None,
         "day_pnl": latest_portfolio.day_pnl if latest_portfolio else None,
@@ -450,43 +456,74 @@ def _build_overview_command_center(
     }
 
 
-def _build_risk_macro_summary(
+def _load_latest_macro_snapshot_for_today(
+    session: Any,
     *,
-    header: dict[str, Any],
-    ticker_workspace: dict[str, Any],
-    binding_constraints: tuple[str, ...],
-    exposures: tuple[dict[str, Any], ...],
-) -> dict[str, Any]:
-    current_risk = (
-        ((ticker_workspace.get("detail") or {}).get("latest_conclusion") or {}).get("risk_summary") or {}
+    latest_portfolio: PortfolioSnapshot | None,
+    latest_risk: PortfolioRiskSnapshot | None,
+    latest_reflection: DailyReflection | None,
+) -> object | None:
+    if not isinstance(session, SQLAlchemySession):
+        return None
+    trade_date = (
+        latest_risk.decision_time.date()
+        if latest_risk is not None
+        else latest_portfolio.snapshot_time.date()
+        if latest_portfolio is not None
+        else latest_reflection.trade_date
+        if latest_reflection is not None
+        else None
     )
-    risk_status = str(current_risk.get("status_label") or "").strip()
-    if not risk_status or risk_status == "No material update":
-        risk_status = "Within Limits"
+    if trade_date is None:
+        return None
+    decision_time = (
+        latest_risk.decision_time
+        if latest_risk is not None
+        else latest_portfolio.snapshot_time
+        if latest_portfolio is not None
+        else None
+    )
+    return SqlAlchemyTradingRepository(session).load_latest_macro_snapshot(
+        trade_date=trade_date,
+        decision_time=decision_time,
+    )
 
-    top_risk_sources: list[dict[str, Any]] = []
-    if exposures:
-        first = exposures[0]
-        label = f"{first.get('factor_name') or 'Portfolio'} concentration"
-        summary = str(binding_constraints[0]).strip() if binding_constraints else "theme cap near limit"
-        top_risk_sources.append({"label": label, "summary": summary})
-    elif binding_constraints:
-        top_risk_sources.extend({"label": "Constraint pressure", "summary": item} for item in binding_constraints[:3])
 
-    availability_issues: list[dict[str, Any]] = []
-    if str(header.get("macro_regime") or "").strip().lower() == "unavailable":
-        availability_issues.append(
-            {
-                "label": "Macro regime unavailable",
-                "summary": "Global macro regime data is unavailable.",
-            }
+def _load_today_risk_macro(
+    session: Any,
+    *,
+    latest_risk: PortfolioRiskSnapshot | None,
+    latest_macro_snapshot: object | None,
+) -> dict[str, Any]:
+    exposures = _load_risk_exposures(session)
+    latest_intent = None
+    risk_macro_context: dict[str, object] = {"macro_snapshot": latest_macro_snapshot}
+    if isinstance(session, SQLAlchemySession):
+        repository = SqlAlchemyTradingRepository(session)
+        trade_date = (
+            latest_risk.decision_time.date()
+            if latest_risk is not None
+            else None
         )
-
-    return {
-        "risk_status": risk_status,
-        "top_risk_sources": tuple(top_risk_sources),
-        "availability_issues": tuple(availability_issues),
-    }
+        decision_time = latest_risk.decision_time if latest_risk is not None else None
+        if trade_date is not None and decision_time is not None:
+            intents = repository.load_portfolio_risk_intents(trade_date=trade_date)
+            latest_intent = intents[-1] if intents else None
+            risk_macro_context = repository.load_decision_available_risk_macro_context(
+                trade_date=trade_date,
+                decision_time=decision_time,
+            )
+    if latest_macro_snapshot is not None:
+        risk_macro_context = {
+            **risk_macro_context,
+            "macro_snapshot": risk_macro_context.get("macro_snapshot") or latest_macro_snapshot,
+        }
+    return build_today_risk_macro_payload(
+        latest_risk=latest_risk,
+        latest_intent=latest_intent,
+        risk_macro_context=risk_macro_context,
+        exposures=exposures,
+    )
 
 
 def _build_candidates_summary(

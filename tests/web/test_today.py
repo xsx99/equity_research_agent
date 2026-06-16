@@ -1425,6 +1425,7 @@ class TestTodayDashboard:
             patch("src.web.routers.today._load_strategy_performance", return_value=()),
             patch("src.web.routers.today._load_strategy_proposals", return_value=()),
             patch("src.web.routers.today._load_llm_usage", return_value=()),
+            patch("src.web.routers.today._load_latest_macro_snapshot_for_today", return_value=None),
         ):
             dashboard = load_today_dashboard(
                 session,
@@ -1442,6 +1443,44 @@ class TestTodayDashboard:
                 {"label": "Macro regime unavailable", "summary": "Global macro regime data is unavailable."},
             ),
         }
+
+    def test_load_today_dashboard_prefers_latest_macro_snapshot_for_header_regime(self):
+        from src.web.routers.today import load_today_dashboard
+
+        session = _query_stub_session()
+
+        with (
+            patch("src.web.routers.today._load_trade_rows", return_value=[]),
+            patch("src.web.routers.today._load_positions", return_value=()),
+            patch("src.web.routers.today._load_recent_closed_positions", return_value=()),
+            patch("src.web.routers.today._load_option_positions", return_value=()),
+            patch("src.web.routers.today._load_hedge_overlays", return_value=()),
+            patch("src.web.routers.today._load_live_alerts", return_value=()),
+            patch("src.web.routers.today._load_material_changes", return_value=()),
+            patch("src.web.routers.today._load_risk_exposures", return_value=()),
+            patch("src.web.routers.today._load_candidate_rows", return_value=()),
+            patch("src.web.routers.today._load_manual_requests", return_value=()),
+            patch("src.web.routers.today._load_portfolio_intents", return_value=()),
+            patch("src.web.routers.today._load_relationships", return_value=()),
+            patch("src.web.routers.today._load_peer_baskets", return_value=()),
+            patch("src.web.routers.today._load_themes", return_value=()),
+            patch("src.web.routers.today._load_learning_factors", return_value=()),
+            patch("src.web.routers.today._load_strategy_performance", return_value=()),
+            patch("src.web.routers.today._load_strategy_proposals", return_value=()),
+            patch("src.web.routers.today._load_llm_usage", return_value=()),
+            patch(
+                "src.web.routers.today._load_latest_macro_snapshot_for_today",
+                return_value=SimpleNamespace(regime="risk_off"),
+            ),
+        ):
+            dashboard = load_today_dashboard(
+                session,
+                selected_tab="overview",
+                decision_id=None,
+                selected_ticker=None,
+            )
+
+        assert dashboard["header"]["macro_regime"] == "risk_off"
 
     def test_load_news_and_fundamentals_by_ticker_map_real_snapshot_and_event_rows(self):
         from src.web.routers.today import _load_fundamentals_by_ticker, _load_news_by_ticker
