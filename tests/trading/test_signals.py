@@ -4,7 +4,7 @@ from src.trading.signals.sources import SourceRecord
 from src.trading.signals import build_signal_snapshot
 
 
-def test_build_signal_snapshot_combines_three_signal_families_and_pit_audit():
+def test_build_signal_snapshot_combines_five_signal_families_and_pit_audit():
     decision_time = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
     available_at = datetime(2026, 6, 1, 10, 0, tzinfo=timezone.utc)
     future_at = datetime(2026, 6, 1, 13, 0, tzinfo=timezone.utc)
@@ -50,6 +50,41 @@ def test_build_signal_snapshot_combines_three_signal_families_and_pit_audit():
         available_at,
         {"event_type": "analyst_upgrade", "sentiment": "positive", "importance": "high"},
     )
+    insider = SourceRecord(
+        "AAPL",
+        "insider",
+        "fixture",
+        "insider_trades",
+        "insider-1",
+        available_at,
+        available_at,
+        available_at,
+        available_at,
+        {
+            "transaction_type": "P",
+            "total_value": 125_000.0,
+            "is_officer": True,
+            "is_director": False,
+        },
+    )
+    social_macro = SourceRecord(
+        "AAPL",
+        "social_macro",
+        "fixture",
+        "social_macro_items",
+        "social-1",
+        available_at,
+        available_at,
+        available_at,
+        available_at,
+        {
+            "category": "trump_update",
+            "importance_score": 0.9,
+            "sentiment_direction": "negative",
+            "explicit_ticker_mention_flag": True,
+            "policy_headwind_flag": True,
+        },
+    )
     future_event = SourceRecord(
         "AAPL",
         "events_news",
@@ -66,7 +101,7 @@ def test_build_signal_snapshot_combines_three_signal_families_and_pit_audit():
     snapshot = build_signal_snapshot(
         ticker="AAPL",
         decision_time=decision_time,
-        source_records=[technical, fundamental, event, future_event],
+        source_records=[technical, fundamental, event, insider, social_macro, future_event],
         snapshot_type="pre_open",
     )
 
@@ -75,7 +110,12 @@ def test_build_signal_snapshot_combines_three_signal_families_and_pit_audit():
     assert snapshot.signal_json["technical"]["rs_vs_spy_1d"] == 0.019999999999999997
     assert snapshot.signal_json["fundamental"]["market_cap_bucket"] == "mega"
     assert snapshot.signal_json["events_news"]["high_signal_news_count_24h"] == 1
+    assert snapshot.signal_json["insider"]["purchase_count_30d"] == 1
+    assert snapshot.signal_json["social_macro"]["trump_update_count_24h"] == 1
+    assert snapshot.source_freshness_json["insider"] == "fresh"
+    assert snapshot.source_freshness_json["social_macro"] == "fresh"
     assert "option_chain_availability" in snapshot.missing_signals_json
+    assert "full_sec_insider_interpretation" not in snapshot.missing_signals_json
     assert snapshot.excluded_future_source_count == 1
     assert snapshot.point_in_time_passed is True
     assert snapshot.max_input_available_for_decision_at == available_at

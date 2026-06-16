@@ -40,16 +40,17 @@ Morning workflow semantics:
 
 1. Scan the configured universe before the open using the active liquidity and sector filter, then compute all available pre-market/daily signals.
 2. Refresh the normalized event calendar and score each upcoming event against current positions, active candidates, manual review tickers, core holdings, option expiries, strategy horizons, and factor exposures.
-3. Match each symbol against tactical strategies and strategy expression buckets. Each match carries its own strategy horizon, required evidence, eligible trade identities, and invalidators.
-4. Build benchmark and peer-basket context for each candidate so relative strength is measured against the right opportunity set, not only `SPY`.
-5. Rank candidate scores by strategy fit, catalyst quality, relative strength, signal quality, macro compatibility, liquidity, event risk, confidence calibration, and learning-factor adjustments.
-6. Select trade-path `selected_trades` and, when needed, separate `watch_candidates` for each ticker/action namespace under consideration.
-7. Classify only selected trade-path candidates plus existing positions into a portfolio-pool trade identity before any order decision.
-8. Build a tactical option plan only when the selected expression bucket and `trade_identity = "tactical_option_trade"` make an option expression eligible.
-9. Pass only the selected candidates plus current positions and paper option positions into `TradingPipeline`.
-10. `TradingPipeline` proposes an action, thesis, invalidators, suggested size, horizon, instrument expression, and trade identity.
-11. Deterministic risk constraints and portfolio budget decide whether the proposed action becomes an approved Alpaca paper stock order request, a staged tactical paper option order, is reduced, or is rejected.
-12. Separately, a pure `PortfolioHedgePlanner` may emit `portfolio_risk_intents` with deterministic `reduce`, `block_open`, `force_reduce`, and hedge proposals for the next `1-5` trading days. `RiskManager` remains the final owner of paper-only `risk_hedge_overlay` actions and only materializes them after residual post-approval exposure is known.
+3. Refresh or reconstruct the deterministic raw source families needed for trading: `technical`, `fundamental`, `events_news`, `social_macro`, and `option_chain` through provider-backed ingestion plus low-frequency `insider` rows from Postgres-backed reconstruction.
+4. Match each symbol against tactical strategies and strategy expression buckets. Each match carries its own strategy horizon, required evidence, eligible trade identities, and invalidators.
+5. Build benchmark and peer-basket context for each candidate so relative strength is measured against the right opportunity set, not only `SPY`.
+6. Rank candidate scores by strategy fit, catalyst quality, relative strength, signal quality, insider confirmation, social/policy risk context, macro compatibility, liquidity, event risk, confidence calibration, and learning-factor adjustments.
+7. Select trade-path `selected_trades` and, when needed, separate `watch_candidates` for each ticker/action namespace under consideration.
+8. Classify only selected trade-path candidates plus existing positions into a portfolio-pool trade identity before any order decision.
+9. Build a tactical option plan only when the selected expression bucket and `trade_identity = "tactical_option_trade"` make an option expression eligible.
+10. Pass only the selected candidates plus current positions and paper option positions into `TradingPipeline`.
+11. `TradingPipeline` proposes an action, thesis, invalidators, suggested size, horizon, instrument expression, and trade identity.
+12. Deterministic risk constraints and portfolio budget decide whether the proposed action becomes an approved Alpaca paper stock order request, a staged tactical paper option order, is reduced, or is rejected.
+13. Separately, a pure `PortfolioHedgePlanner` may emit `portfolio_risk_intents` with deterministic `reduce`, `block_open`, `force_reduce`, and hedge proposals for the next `1-5` trading days. `RiskManager` remains the final owner of paper-only `risk_hedge_overlay` actions and only materializes them after residual post-approval exposure is known.
 
 The final morning output is not just a ranked list. It is a trade plan: selected ticker, selected strategy, horizon, action, target exposure, risk budget used, and explicit reason if a high-scoring candidate was skipped.
 
@@ -142,7 +143,8 @@ Hourly refresh should update:
 - relative strength signals: ticker vs `SPY`, `QQQ`, sector/theme ETF, and peer basket since open and since prior close
 - option signals for open paper option positions and eligible candidates: per-leg mark, Greeks, IV move if available, DTE, breakeven distance, max loss, spread width, margin requirement, buying-power effect, and assignment-risk delta when short options are present
 - news/event signals: new company news, target-company earnings releases/transcripts/guidance, analyst revisions, filings, direct negative catalyst flags, high-impact market/sector news, and peer/sector-leader earnings read-through updates
-- low-frequency source freshness: insider/SEC/fundamentals/earnings-calendar records should be checked for newly available rows or staleness, not blindly recomputed from scratch each hour
+- social/policy context signals: new high-importance `social_macro` items, 24h count changes, ticker/theme mention changes, and policy headwind/tailwind deltas for scoped tickers
+- low-frequency source freshness: insider/SEC/fundamentals/earnings-calendar records should be checked for newly available rows or staleness, not blindly recomputed from scratch each hour. `insider` should usually be carried forward intraday unless a newer filing-backed row becomes decision-available.
 
 Each hourly run stores an `intraday_signal_snapshot` with signal deltas vs the morning snapshot and previous intraday snapshot. Rebalance should trigger from material signal changes even when no new headline exists. Intraday refresh should not recompute the full morning candidate ranking by default; it should preserve the morning score and add current state, material-change flags, and rebalance reasons.
 

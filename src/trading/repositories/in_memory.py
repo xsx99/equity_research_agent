@@ -29,6 +29,7 @@ from src.trading.risk import (
 from src.trading.signals.sources import (
     EventNewsItemRecord,
     FundamentalSnapshotRecord,
+    SocialMacroItemRecord,
     SourceIngestionRunRecord,
 )
 from src.trading.signals import SignalSnapshotResult
@@ -57,6 +58,7 @@ class InMemoryTradingRepository:
         self.provider_request_runs: list[ProviderRequestRunRecord] = []
         self.fundamental_snapshots: list[FundamentalSnapshotRecord] = []
         self.event_news_items: list[EventNewsItemRecord] = []
+        self.social_macro_items: list[SocialMacroItemRecord] = []
         self.strategy_definitions: list[StrategyDefinitionRecord] = []
         self.strategy_runs: list[StrategyRunRecord] = []
         self.candidate_scores: list[CandidateScoreRecord] = []
@@ -154,6 +156,9 @@ class InMemoryTradingRepository:
 
     def save_event_news_item(self, item: EventNewsItemRecord) -> None:
         self.event_news_items.append(item)
+
+    def save_social_macro_item(self, item: SocialMacroItemRecord) -> None:
+        self.social_macro_items.append(item)
 
     def load_event_news_items(
         self,

@@ -8,7 +8,9 @@ from typing import Any, Iterable
 
 from src.trading.signals.event_news import build_event_news_signals
 from src.trading.signals.fundamental import build_fundamental_signals
+from src.trading.signals.insider import build_insider_signals
 from src.trading.signals.point_in_time import filter_point_in_time_records
+from src.trading.signals.social_macro import build_social_macro_signals
 from src.trading.signals.sources import SourceRecord
 from src.trading.signals.technical import build_technical_signals, compute_relative_strength
 
@@ -53,18 +55,27 @@ def build_signal_snapshot(
         records_by_family.get("events_news", ()),
         decision_time=decision_time,
     )
+    insider = build_insider_signals(
+        records_by_family.get("insider", ()),
+        decision_time=decision_time,
+    )
+    social_macro = build_social_macro_signals(
+        records_by_family.get("social_macro", ()),
+        decision_time=decision_time,
+    )
     missing = [
         *_missing_with_prefix("technical", technical.missing),
         *_missing_with_prefix("fundamental", fundamental.missing),
         *_missing_with_prefix("events_news", events_news.missing),
+        *_missing_with_prefix("insider", insider.missing),
+        *_missing_with_prefix("social_macro", social_macro.missing),
         "option_chain_availability",
-        "full_sec_insider_interpretation",
         "full_transcript_interpretation",
         "macro_sector_readthrough",
     ]
     source_freshness = {
         family: ("fresh" if family in records_by_family else "missing")
-        for family in ("technical", "fundamental", "events_news")
+        for family in ("technical", "fundamental", "events_news", "insider", "social_macro")
     }
     available_for_decision_at = audit.max_input_available_for_decision_at or decision_time
     return SignalSnapshotResult(
@@ -78,6 +89,8 @@ def build_signal_snapshot(
             "technical": technical.values,
             "fundamental": fundamental.values,
             "events_news": events_news.values,
+            "insider": insider.values,
+            "social_macro": social_macro.values,
         },
         source_freshness_json=source_freshness,
         missing_signals_json=missing,

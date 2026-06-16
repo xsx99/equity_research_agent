@@ -5,14 +5,22 @@ from datetime import datetime
 from types import SimpleNamespace
 from typing import Any
 
+from src.trading.intraday.news_alerts import AlertSourceItem
 from src.trading.intraday.rebalance import IntradayRebalanceRequest
-from src.trading.signals.sources import EventNewsItemRecord, SourceRecord
+from src.trading.signals.event_news import build_event_news_signals
+from src.trading.signals.insider import build_insider_signals
+from src.trading.signals.social_macro import build_social_macro_signals
+from src.trading.signals.sources import SourceRecord
 
 
 def _build_intraday_refresh_payload(
     *,
     baseline: Any,
+    decision_time: datetime,
     technical_rows: tuple[SourceRecord, ...],
+    event_news_rows: tuple[SourceRecord, ...] = (),
+    social_macro_rows: tuple[SourceRecord, ...] = (),
+    insider_rows: tuple[SourceRecord, ...] = (),
     option_chain_rows: tuple[SourceRecord, ...] = (),
     instrument_type: str = "stock",
 ) -> tuple[dict[str, dict[str, Any]], dict[str, str]]:
@@ -28,6 +36,26 @@ def _build_intraday_refresh_payload(
         }
     }
     freshness = {"technical": "fresh" if technical_rows else "missing"}
+    if event_news_rows:
+        refreshed["events_news"] = build_event_news_signals(
+            event_news_rows,
+            decision_time=decision_time,
+        ).values
+        freshness["events_news"] = "fresh"
+    if social_macro_rows:
+        refreshed["social_macro"] = build_social_macro_signals(
+            social_macro_rows,
+            decision_time=decision_time,
+        ).values
+        freshness["social_macro"] = "fresh"
+    if _has_newer_insider_rows(baseline=baseline, insider_rows=insider_rows):
+        refreshed["insider"] = build_insider_signals(
+            insider_rows,
+            decision_time=decision_time,
+        ).values
+        freshness["insider"] = "fresh"
+    elif dict(getattr(baseline, "signal_json", {}) or {}).get("insider"):
+        freshness["insider"] = "carried_forward_from_baseline"
     option_contract = _option_contract_snapshot(option_chain_rows)
     if instrument_type == "option" or option_contract is not None:
         if option_contract is None:
@@ -49,39 +77,73 @@ def _build_intraday_refresh_payload(
 
 def _load_event_items(
     *,
-    source_repository: Any,
-    tickers: tuple[str, ...],
-    decision_time: datetime,
-) -> tuple[EventNewsItemRecord, ...]:
-    items: list[EventNewsItemRecord] = []
-    for ticker in tickers:
-        rows = source_repository.latest_available_by_family(ticker, "events_news", decision_time)
-        for row in rows:
-            items.append(_event_item_from_source_record(ticker=ticker, record=row))
+    ticker: str,
+    event_news_rows: tuple[SourceRecord, ...],
+) -> tuple[AlertSourceItem, ...]:
+    items: list[AlertSourceItem] = []
+    for row in event_news_rows:
+        items.append(_event_item_from_source_record(ticker=ticker, record=row))
     return tuple(items)
 
 
-def _event_item_from_source_record(*, ticker: str, record: SourceRecord) -> EventNewsItemRecord:
+def _load_social_macro_items(
+    *,
+    ticker: str,
+    social_macro_rows: tuple[SourceRecord, ...],
+) -> tuple[AlertSourceItem, ...]:
+    items: list[AlertSourceItem] = []
+    for row in social_macro_rows:
+        if _social_macro_alertworthy(row):
+            items.append(_social_macro_item_from_source_record(ticker=ticker, record=row))
+    return tuple(items)
+
+
+def _event_item_from_source_record(*, ticker: str, record: SourceRecord) -> AlertSourceItem:
     payload = dict(record.payload or {})
-    return EventNewsItemRecord(
-        event_news_item_id=str(payload.get("event_news_item_id") or record.source_record_id),
+    return AlertSourceItem(
+        alert_item_id=str(payload.get("event_news_item_id") or record.source_record_id),
         ticker=str(payload.get("ticker") or ticker),
         source_ticker=payload.get("source_ticker"),
-        event_type=str(payload.get("event_type") or "news"),
+        source_family="events_news",
+        alert_type=str(payload.get("event_type") or "news"),
         direction=payload.get("direction"),
         sentiment=payload.get("sentiment"),
         importance=payload.get("importance"),
+        importance_score=None,
         headline=payload.get("headline"),
         summary=payload.get("summary"),
         provider=str(payload.get("provider") or record.source),
-        source_refs_json=list(payload.get("source_refs_json") or []),
         dedupe_key=str(payload.get("dedupe_key") or record.source_record_id),
-        event_time=record.event_time,
         published_at=record.published_at,
-        ingested_at=record.ingested_at,
         available_for_decision_at=record.available_for_decision_at,
-        raw_payload_ref=None,
         metadata_json=dict(payload.get("metadata_json") or {}),
+    )
+
+
+def _social_macro_item_from_source_record(*, ticker: str, record: SourceRecord) -> AlertSourceItem:
+    payload = dict(record.payload or {})
+    return AlertSourceItem(
+        alert_item_id=str(record.source_record_id),
+        ticker=ticker,
+        source_ticker=ticker if bool(payload.get("explicit_ticker_mention_flag")) else None,
+        source_family="social_macro",
+        alert_type=str(payload.get("category") or "social_macro"),
+        direction=payload.get("direction"),
+        sentiment=payload.get("sentiment_direction"),
+        importance=str(payload.get("importance_label") or ""),
+        importance_score=_float_or_none(payload.get("importance_score")),
+        headline=payload.get("title"),
+        summary=payload.get("summary"),
+        provider=str(record.source),
+        dedupe_key=str(payload.get("dedupe_key") or record.source_record_id),
+        published_at=record.published_at,
+        available_for_decision_at=record.available_for_decision_at,
+        metadata_json={
+            **dict(payload.get("metadata_json") or {}),
+            "theme_tags": list(payload.get("theme_tags") or []),
+            "explicit_ticker_mention_flag": bool(payload.get("explicit_ticker_mention_flag")),
+            "explicit_theme_mention_flag": bool(payload.get("explicit_theme_mention_flag")),
+        },
     )
 
 
@@ -98,6 +160,7 @@ def _build_alert_map(alerts: tuple[object, ...]) -> dict[str, list[dict[str, Any
                 "source_ticker": getattr(alert, "source_ticker", None),
                 "readthrough_source_ticker": getattr(alert, "readthrough_source_ticker", None),
                 "affected_themes": list(getattr(alert, "affected_themes", ())),
+                "source_family": dict(getattr(alert, "metadata_json", {}) or {}).get("source_family", "events_news"),
             }
         )
     return alert_map
@@ -140,6 +203,16 @@ def _build_rebalance_request(
         option_mark_price = float(option_signals.get("mark_price") or 0.0)
         if option_mark_price > 0:
             current_price = option_mark_price
+    negative_event_alerts = [
+        alert
+        for alert in alerts
+        if alert.get("sentiment") == "negative" and alert.get("source_family") == "events_news"
+    ]
+    social_policy_alerts = [
+        alert
+        for alert in alerts
+        if alert.get("source_family") == "social_macro"
+    ]
     return IntradayRebalanceRequest(
         ticker=ticker,
         baseline_signal_snapshot_id=baseline.signal_snapshot_id,
@@ -167,17 +240,22 @@ def _build_rebalance_request(
         delta_vs_previous_json=dict(snapshot.delta_vs_previous_json),
         alerts=event_signals,
         allow_open_new=bool(getattr(context, "allow_open_new", False)),
-        direct_company_negative_evidence=any(alert.get("sentiment") == "negative" for alert in alerts),
-        bearish_signal_sources=tuple(
-            "events_news"
-            for alert in alerts
-            if alert.get("sentiment") == "negative"
-        ),
+        direct_company_negative_evidence=bool(negative_event_alerts),
+        bearish_signal_sources=("events_news",) if negative_event_alerts else (),
         manual_request_id=getattr(context, "manual_request_id", None),
         manual_request_mode=getattr(context, "manual_request_mode", None),
         metadata_json={
             **dict(getattr(context, "metadata_json", {}) or {}),
             "sector": _sector_from_baseline(baseline),
+            "social_policy_alert_count": len(social_policy_alerts),
+            "social_policy_risk_context": [
+                {
+                    "alert_type": alert.get("alert_type"),
+                    "severity": alert.get("severity"),
+                    "sentiment": alert.get("sentiment"),
+                }
+                for alert in social_policy_alerts
+            ],
             **(
                 {
                     "option_mark_price": float(option_signals.get("mark_price") or 0.0),
@@ -227,3 +305,37 @@ def _option_mark_price(contract: dict[str, Any]) -> float:
         if isinstance(value, (int, float)) and float(value) > 0:
             return float(value) * 100.0
     return 0.0
+
+
+def _has_newer_insider_rows(*, baseline: object, insider_rows: tuple[SourceRecord, ...]) -> bool:
+    if not insider_rows:
+        return False
+    baseline_signal = dict(getattr(baseline, "signal_json", {}) or {}).get("insider", {})
+    if not baseline_signal:
+        return True
+    baseline_available_at = _parse_iso_datetime(
+        dict(getattr(baseline, "source_available_times_json", {}) or {}).get("insider")
+    )
+    if baseline_available_at is None:
+        return True
+    latest_available_at = max(row.available_for_decision_at for row in insider_rows)
+    return latest_available_at > baseline_available_at
+
+
+def _parse_iso_datetime(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return datetime.fromisoformat(value)
+
+
+def _social_macro_alertworthy(record: SourceRecord) -> bool:
+    payload = dict(record.payload or {})
+    importance = str(payload.get("importance_label") or "").lower()
+    importance_score = _float_or_none(payload.get("importance_score"))
+    return importance in {"high", "critical"} or (importance_score is not None and importance_score >= 0.85)
+
+
+def _float_or_none(value: object) -> float | None:
+    if isinstance(value, (int, float)):
+        return float(value)
+    return None

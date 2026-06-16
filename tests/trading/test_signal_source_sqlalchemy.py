@@ -4,10 +4,13 @@ import uuid
 from datetime import date, datetime, timezone
 
 from src.db.connection import get_session
+from src.db.models import trading as trading_models
+from src.db.models.insider_trades import InsiderTrade
 from src.db.models.trading import EventNewsItem, FundamentalSnapshot, ProviderRequestRun, SourceIngestionRun
 from src.providers.market_data.types import DailyBar
 from src.trading.repositories.source_sqlalchemy import SQLAlchemySignalSourceRepository
 from src.trading.signals.source_ingestion import SourceIngestionService
+from src.trading.signals import sources as signal_sources
 from src.trading.signals.sources import (
     EventNewsItemRecord,
     FundamentalSnapshotRecord,
@@ -276,6 +279,95 @@ def test_sqlalchemy_signal_source_repository_keeps_runtime_technical_rows_availa
     assert len(rows) == 1
     assert rows[0].source_family == "technical"
     assert rows[0].payload["bars"][0]["close"] == 200.5
+
+
+def test_sqlalchemy_signal_source_repository_round_trips_social_macro_rows():
+    session = _FakeSession()
+    repository = SQLAlchemySignalSourceRepository(session)
+    now = datetime(2026, 6, 3, 12, 45, tzinfo=timezone.utc)
+    SocialMacroItemRecord = getattr(signal_sources, "SocialMacroItemRecord")
+
+    item = SocialMacroItemRecord(
+        social_macro_item_id="social-1",
+        ticker="NVDA",
+        category="trump_update",
+        source_type="global_context",
+        source_key="trump_updates",
+        provider="fixture",
+        title="Trump comments on chip exports",
+        summary="Comments may tighten export policy.",
+        direction="negative",
+        sentiment_direction="negative",
+        importance_score=0.9,
+        importance_label="high",
+        policy_headwind_flag=True,
+        policy_tailwind_flag=False,
+        explicit_ticker_mention_flag=True,
+        explicit_theme_mention_flag=False,
+        theme_tags_json=["semiconductors"],
+        company_name_mentions_json=["NVIDIA"],
+        source_refs_json=[{"source": "fixture", "source_record_id": "social-1"}],
+        dedupe_key="NVDA|trump_update|2026-06-03T12:30:00+00:00",
+        event_time=now,
+        published_at=now,
+        ingested_at=now,
+        available_for_decision_at=now,
+        raw_payload_ref=None,
+        metadata_json={"importance_reason": "policy headline"},
+    )
+
+    repository.save_social_macro_item(item)
+
+    SocialMacroItem = getattr(trading_models, "SocialMacroItem")
+    assert session.query(SocialMacroItem).one_or_none() is not None
+    rows = repository.latest_available_by_family("NVDA", "social_macro", now)
+    assert len(rows) == 1
+    assert rows[0].source_family == "social_macro"
+    assert rows[0].payload["category"] == "trump_update"
+    assert rows[0].payload["policy_headwind_flag"] is True
+
+
+def test_sqlalchemy_signal_source_repository_reconstructs_legacy_insider_trade_rows():
+    session = _FakeSession()
+    repository = SQLAlchemySignalSourceRepository(session)
+    filing_date = date(2026, 6, 3)
+    created_at = datetime(2026, 6, 3, 13, 15, tzinfo=timezone.utc)
+    decision_time = datetime(2026, 6, 4, 14, 0, tzinfo=timezone.utc)
+    session.add(
+        InsiderTrade(
+            id=101,
+            accession_number="0000000000-26-000001",
+            transaction_index=0,
+            ticker="NVDA",
+            company_name="NVIDIA Corp",
+            company_cik="0001045810",
+            insider_name="Jane Doe",
+            insider_title="Chief Executive Officer",
+            insider_cik="0000123456",
+            is_director=False,
+            is_officer=True,
+            is_ten_percent_owner=False,
+            transaction_type="P",
+            transaction_date=filing_date,
+            shares=1000,
+            price_per_share=125.0,
+            total_value=125000.0,
+            shares_owned_after=200000,
+            filing_date=filing_date,
+            filing_url="https://www.sec.gov/Archives/edgar/data/1045810/form4.xml",
+            raw_data={"footnotes": []},
+            created_at=created_at,
+        )
+    )
+
+    rows = repository.latest_available_by_family("NVDA", "insider", decision_time)
+
+    assert len(rows) == 1
+    assert rows[0].source_family == "insider"
+    assert rows[0].source_table == "insider_trades"
+    assert rows[0].payload["transaction_type"] == "P"
+    assert rows[0].payload["officer_title"] == "Chief Executive Officer"
+    assert rows[0].available_for_decision_at > created_at
 
 
 def test_source_ingestion_service_persists_provider_requests_after_ingestion_run_exists():

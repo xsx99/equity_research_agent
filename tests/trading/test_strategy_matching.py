@@ -16,6 +16,8 @@ def _snapshot(
     technical: dict | None = None,
     fundamental: dict | None = None,
     events_news: dict | None = None,
+    insider: dict | None = None,
+    social_macro: dict | None = None,
     macro: dict | None = None,
     missing: list[str] | None = None,
 ) -> SignalSnapshotResult:
@@ -31,9 +33,17 @@ def _snapshot(
             "technical": technical or {},
             "fundamental": fundamental or {},
             "events_news": events_news or {},
+            "insider": insider or {},
+            "social_macro": social_macro or {},
             "macro": macro or {},
         },
-        source_freshness_json={"technical": "fresh", "fundamental": "fresh", "events_news": "fresh"},
+        source_freshness_json={
+            "technical": "fresh",
+            "fundamental": "fresh",
+            "events_news": "fresh",
+            "insider": "fresh",
+            "social_macro": "fresh",
+        },
         missing_signals_json=missing or ["option_chain_availability", "full_transcript_interpretation"],
         stale_signals_json=[],
         source_record_refs_json=[{"source_record_id": "bars-1", "source_family": "technical"}],
@@ -227,6 +237,98 @@ def test_strategy_matcher_blocks_candidate_when_macro_regime_is_disallowed():
     assert candidates[0].macro_compatibility == "blocked"
     assert candidates[0].candidate_status == "blocked"
     assert candidates[0].is_actionable is False
+
+
+def test_strategy_matcher_scores_insider_accumulation_momentum_candidates():
+    snapshot = _snapshot(
+        technical={"relative_volume": 1.7, "rs_vs_spy_1d": 0.022, "return_20d": 0.11},
+        insider={
+            "purchase_count_30d": 2,
+            "sale_count_30d": 0,
+            "insider_net_buy_value_30d": 350000.0,
+            "insider_net_buy_value_90d": 350000.0,
+            "insider_cluster_buy_count_90d": 2,
+            "officer_buy_flag": True,
+            "director_buy_flag": True,
+            "sale_concentration_score": 0.0,
+            "recent_form4_filing_at": "2026-06-01T12:00:00+00:00",
+        },
+    )
+
+    candidates = StrategyMatcher().match_snapshot(
+        snapshot,
+        [_definition("insider_accumulation_momentum_v1")],
+        strategy_run_id="run-1",
+    )
+
+    assert len(candidates) == 1
+    assert candidates[0].strategy_id == "insider_accumulation_momentum_v1"
+    assert candidates[0].candidate_score >= 0.55
+    assert candidates[0].rejection_reason is None
+    assert candidates[0].core_signal_evidence["insider.insider_cluster_buy_count_90d"] == 2
+
+
+def test_strategy_matcher_uses_insider_confirmation_as_bounded_modifier():
+    base_snapshot = _snapshot(
+        technical={"relative_volume": 1.6, "rs_vs_spy_1d": 0.018, "rs_vs_qqq_1d": 0.011},
+        fundamental={"quality_score": 0.8},
+        events_news={"sentiment_direction": "positive", "high_signal_news_count_24h": 1, "catalyst_quality_score": 0.8},
+    )
+    insider_snapshot = _snapshot(
+        technical={"relative_volume": 1.6, "rs_vs_spy_1d": 0.018, "rs_vs_qqq_1d": 0.011},
+        fundamental={"quality_score": 0.8},
+        events_news={"sentiment_direction": "positive", "high_signal_news_count_24h": 1, "catalyst_quality_score": 0.8},
+        insider={"insider_net_buy_value_30d": 300000.0, "insider_cluster_buy_count_90d": 2, "officer_buy_flag": True},
+    )
+
+    base_candidate = StrategyMatcher().match_snapshot(
+        base_snapshot,
+        [_definition("strong_theme_catalyst_continuation_v1")],
+        strategy_run_id="run-1",
+    )[0]
+    insider_candidate = StrategyMatcher().match_snapshot(
+        insider_snapshot,
+        [_definition("strong_theme_catalyst_continuation_v1")],
+        strategy_run_id="run-1",
+    )[0]
+
+    assert insider_candidate.candidate_score > base_candidate.candidate_score
+    assert insider_candidate.candidate_score - base_candidate.candidate_score <= 0.15
+
+
+def test_social_macro_headwind_downgrades_candidate_without_creating_macro_only_short():
+    base_snapshot = _snapshot(
+        technical={"relative_volume": 1.7, "rs_vs_spy_1d": 0.02, "rs_vs_qqq_1d": 0.013},
+        fundamental={"quality_score": 0.8},
+        events_news={"sentiment_direction": "positive", "high_signal_news_count_24h": 1, "catalyst_quality_score": 0.85},
+    )
+    headwind_snapshot = _snapshot(
+        technical={"relative_volume": 1.7, "rs_vs_spy_1d": 0.02, "rs_vs_qqq_1d": 0.013},
+        fundamental={"quality_score": 0.8},
+        events_news={"sentiment_direction": "positive", "high_signal_news_count_24h": 1, "catalyst_quality_score": 0.85},
+        social_macro={
+            "policy_headwind_flag": True,
+            "policy_tailwind_flag": False,
+            "social_macro_importance_score": 0.95,
+            "social_macro_sentiment_direction": "negative",
+            "explicit_ticker_mention_flag": True,
+        },
+    )
+
+    base_candidate = StrategyMatcher().match_snapshot(
+        base_snapshot,
+        [_definition("strong_theme_catalyst_continuation_v1")],
+        strategy_run_id="run-1",
+    )[0]
+    headwind_candidate = StrategyMatcher().match_snapshot(
+        headwind_snapshot,
+        [_definition("strong_theme_catalyst_continuation_v1")],
+        strategy_run_id="run-1",
+    )[0]
+
+    assert headwind_candidate.candidate_score < base_candidate.candidate_score
+    assert headwind_candidate.direction != "bearish"
+    assert headwind_candidate.action in {"enter_long", "no_trade"}
 
 
 class _DuplicateNewsProvider:

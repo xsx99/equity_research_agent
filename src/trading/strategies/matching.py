@@ -14,9 +14,6 @@ DEFAULT_ACTIONABLE_SCORE_THRESHOLD = 0.55
 DEFERRED_SIGNAL_FAMILY_MARKERS = {
     "transcript": "full_transcript_interpretation",
     "option": "option_chain_availability",
-    "insider": "full_sec_insider_interpretation",
-    "form4": "full_sec_insider_interpretation",
-    "sec": "full_sec_insider_interpretation",
     "readthrough": "macro_sector_readthrough",
     "macro": "macro_sector_readthrough",
 }
@@ -153,6 +150,8 @@ class StrategyMatcher:
             score, evidence, missing = _score_supported_strategy(snapshot, definition)
             if score <= 0 and not evidence:
                 continue
+            score = _apply_insider_modifier(score, snapshot)
+            score = _apply_social_macro_modifier(score, snapshot)
 
             rejection_reason = None
             selection_reason = "deterministic PR02 signals matched strategy"
@@ -321,6 +320,8 @@ def _score_supported_strategy(
         return min(score, 0.68), evidence, missing
     if strategy_id in {"relative_strength_rotation_v1", "base_breakout_v1"}:
         return _score_relative_strength(snapshot)
+    if strategy_id == "insider_accumulation_momentum_v1":
+        return _score_insider_accumulation(snapshot)
     if strategy_id == "valuation_repair_quality_software_v1":
         return _score_valuation_repair(snapshot)
     if strategy_id == "oversold_bounce_v1":
@@ -451,6 +452,44 @@ def _score_earnings_drift(snapshot: SignalSnapshotResult) -> tuple[float, dict[s
     return (score if evidence else 0.0), evidence, []
 
 
+def _score_insider_accumulation(snapshot: SignalSnapshotResult) -> tuple[float, dict[str, Any], list[str]]:
+    technical = _technical(snapshot)
+    insider = _insider(snapshot)
+    cluster_buys = _as_float(insider.get("insider_cluster_buy_count_90d")) or 0.0
+    net_buy_value = _as_float(insider.get("insider_net_buy_value_30d")) or 0.0
+    officer_buy_flag = 1.0 if insider.get("officer_buy_flag") else 0.0
+    director_buy_flag = 1.0 if insider.get("director_buy_flag") else 0.0
+    rs_spy = _as_float(technical.get("rs_vs_spy_1d")) or 0.0
+    relative_volume = _as_float(technical.get("relative_volume")) or 0.0
+    score = (
+        0.30 * min(net_buy_value / 250_000.0, 1.0)
+        + 0.25 * min(cluster_buys / 2.0, 1.0)
+        + 0.15 * max(officer_buy_flag, director_buy_flag)
+        + 0.20 * min(max(rs_spy, 0.0) / 0.02, 1.0)
+        + 0.10 * min(relative_volume / 1.5, 1.0)
+    )
+    evidence = _compact_evidence(
+        {
+            "insider.insider_net_buy_value_30d": insider.get("insider_net_buy_value_30d"),
+            "insider.insider_cluster_buy_count_90d": insider.get("insider_cluster_buy_count_90d"),
+            "insider.officer_buy_flag": insider.get("officer_buy_flag"),
+            "insider.director_buy_flag": insider.get("director_buy_flag"),
+            "technical.rs_vs_spy_1d": technical.get("rs_vs_spy_1d"),
+            "technical.relative_volume": technical.get("relative_volume"),
+        }
+    )
+    missing = _missing_required(
+        evidence,
+        (
+            "insider.insider_net_buy_value_30d",
+            "insider.insider_cluster_buy_count_90d",
+            "technical.rs_vs_spy_1d",
+            "technical.relative_volume",
+        ),
+    )
+    return (score if evidence else 0.0), evidence, missing
+
+
 def _score_from_available_required_signals(
     snapshot: SignalSnapshotResult,
     definition: StrategyDefinitionRecord,
@@ -482,6 +521,14 @@ def _fundamental(snapshot: SignalSnapshotResult) -> dict[str, Any]:
 
 def _events(snapshot: SignalSnapshotResult) -> dict[str, Any]:
     return dict(snapshot.signal_json.get("events_news") or {})
+
+
+def _insider(snapshot: SignalSnapshotResult) -> dict[str, Any]:
+    return dict(snapshot.signal_json.get("insider") or {})
+
+
+def _social_macro(snapshot: SignalSnapshotResult) -> dict[str, Any]:
+    return dict(snapshot.signal_json.get("social_macro") or {})
 
 
 def _macro(snapshot: SignalSnapshotResult) -> dict[str, Any]:
@@ -578,6 +625,34 @@ def _as_float(value: object) -> float | None:
     if isinstance(value, (int, float)):
         return float(value)
     return None
+
+
+def _apply_insider_modifier(score: float, snapshot: SignalSnapshotResult) -> float:
+    insider = _insider(snapshot)
+    modifier = 0.0
+    if (_as_float(insider.get("insider_net_buy_value_30d")) or 0.0) > 0:
+        modifier += 0.05
+    if (_as_float(insider.get("insider_cluster_buy_count_90d")) or 0.0) >= 2:
+        modifier += 0.05
+    if insider.get("officer_buy_flag") or insider.get("director_buy_flag"):
+        modifier += 0.05
+    return _clamp(score + min(modifier, 0.149))
+
+
+def _apply_social_macro_modifier(score: float, snapshot: SignalSnapshotResult) -> float:
+    social_macro = _social_macro(snapshot)
+    if not social_macro:
+        return _clamp(score)
+    importance = _as_float(social_macro.get("social_macro_importance_score")) or 0.0
+    headwind = bool(social_macro.get("policy_headwind_flag"))
+    tailwind = bool(social_macro.get("policy_tailwind_flag"))
+    explicit = bool(social_macro.get("explicit_ticker_mention_flag") or social_macro.get("explicit_theme_mention_flag"))
+    modifier = 0.0
+    if headwind and explicit:
+        modifier -= min(0.15, 0.05 + importance * 0.1)
+    elif tailwind and explicit:
+        modifier += min(0.1, 0.03 + importance * 0.05)
+    return _clamp(score + modifier)
 
 
 def _clamp(value: float) -> float:

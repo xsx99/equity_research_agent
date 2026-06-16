@@ -26,6 +26,7 @@ class LiveIntradayRefreshDependencies:
     position_context_loader: Callable[[tuple[str, ...], tuple[object, ...]], dict[str, tuple[str, ...]]]
     theme_context_loader: Callable[[tuple[str, ...], datetime], dict[str, tuple[str, ...]]]
     macro_state_loader: Callable[[datetime], str | None]
+    source_ingestion_service: Any | None = None
     lookahead_helper: Any | None = None
 
 
@@ -36,6 +37,8 @@ def build_live_intraday_refresh_dependencies(session: Any | None = None) -> Live
 
     from src.agents.prompt_registry import PromptRegistry
     from src.agents.trading import _default_agent_runner
+    from src.providers.global_context import get_global_context
+    from src.providers.market_data import AlpacaMarketDataProvider
     from src.trading.brokers.paper_option import (
         DEFAULT_ALPACA_PAPER_TRADING_BASE_URL,
         PaperOptionBroker,
@@ -45,10 +48,14 @@ def build_live_intraday_refresh_dependencies(session: Any | None = None) -> Live
     from src.trading.repositories.sqlalchemy import SqlAlchemyTradingRepository
     from src.trading.risk import PortfolioHedgePlanner
     from src.trading.runtime.lookahead_risk import LookaheadRiskWorkflowHelper
+    from src.trading.runtime.support import build_default_news_provider
+    from src.trading.signals.source_ingestion import SourceIngestionService
     from src.trading.workflows.portfolio_sync import BrokerPortfolioSyncWorkflow
 
     trading_repository = SqlAlchemyTradingRepository(session)
     source_repository = SQLAlchemySignalSourceRepository(session)
+    market_provider = AlpacaMarketDataProvider()
+    news_provider = build_default_news_provider()
     broker = PaperStockBroker()
     option_broker = PaperOptionBroker(
         trading_base_url=DEFAULT_ALPACA_PAPER_TRADING_BASE_URL,
@@ -59,6 +66,14 @@ def build_live_intraday_refresh_dependencies(session: Any | None = None) -> Live
         previous_snapshot_loader=_RepositoryPreviousIntradaySnapshotLoader(trading_repository),
         request_context_loader=_RepositoryIntradayRequestContextLoader(trading_repository),
         source_repository=source_repository,
+        source_ingestion_service=SourceIngestionService(
+            market_provider=market_provider,
+            news_provider=news_provider,
+            global_context_fetcher=lambda as_of: get_global_context(as_of=as_of, limit=5),
+            source_repository=source_repository,
+            artifact_repository=source_repository,
+            provider_name="alpaca_live",
+        ),
         portfolio_sync_workflow=BrokerPortfolioSyncWorkflow(repository=trading_repository, broker=broker),
         news_alert_service=NewsAlertService(),
         rebalance_pipeline=IntradayRebalancePipeline(

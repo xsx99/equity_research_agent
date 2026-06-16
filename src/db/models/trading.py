@@ -853,6 +853,45 @@ class EventNewsItem(Base):
     )
 
 
+class SocialMacroItem(Base):
+    """Point-in-time deterministic social/policy context row normalized for trading."""
+
+    __tablename__ = "social_macro_items"
+
+    social_macro_item_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    ticker = Column(String(16), nullable=False, index=True)
+    category = Column(String(64), nullable=False, index=True)
+    source_type = Column(String(64), nullable=False)
+    source_key = Column(String(64), nullable=False, index=True)
+    provider = Column(String(64), nullable=False)
+    title = Column(Text, nullable=True)
+    summary = Column(Text, nullable=True)
+    direction = Column(String(32), nullable=True)
+    sentiment_direction = Column(String(32), nullable=True)
+    importance_score = Column(Numeric, nullable=True)
+    importance_label = Column(String(32), nullable=True, index=True)
+    policy_headwind_flag = Column(Boolean, nullable=False, default=False, server_default="false")
+    policy_tailwind_flag = Column(Boolean, nullable=False, default=False, server_default="false")
+    explicit_ticker_mention_flag = Column(Boolean, nullable=False, default=False, server_default="false")
+    explicit_theme_mention_flag = Column(Boolean, nullable=False, default=False, server_default="false")
+    theme_tags_json = Column(JSONB, nullable=False, default=list)
+    company_name_mentions_json = Column(JSONB, nullable=False, default=list)
+    source_refs_json = Column(JSONB, nullable=False, default=list)
+    dedupe_key = Column(String(255), nullable=False)
+    event_time = Column(DateTime(timezone=True), nullable=False)
+    published_at = Column(DateTime(timezone=True), nullable=False)
+    ingested_at = Column(DateTime(timezone=True), nullable=False)
+    available_for_decision_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    raw_payload_ref = Column(String(255), nullable=True)
+    metadata_json = Column(JSONB, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("dedupe_key", name="uq_social_macro_items_dedupe_key"),
+        Index("ix_social_macro_items_ticker_available", "ticker", "available_for_decision_at"),
+    )
+
+
 class SignalSnapshot(Base):
     """Per-ticker pre-open quant features and point-in-time audit metadata."""
 

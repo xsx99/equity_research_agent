@@ -110,6 +110,12 @@ python scripts/run_trading_once.py --phase strategy_evolution --json
 
 The trading runtime now uses a split package structure: `src/trading/runtime/__init__.py` exposes the stable scheduler/CLI facade, `src/trading/runtime/preopen.py` owns the live preopen path, `src/trading/runtime/manual_review.py` owns the live manual-review path, `src/trading/runtime/intraday_refresh.py` owns the live intraday refresh path, `src/trading/runtime/reflection.py` owns the live post-close reflection path, `src/trading/runtime/strategy_evolution.py` owns the live strategy-evolution path, and fixture-only smoke helpers live under `src/trading/runtime/smoke.py`. Scheduler jobs and `scripts/run_trading_once.py` still keep the same phase strings and public entrypoint.
 
+Signal-family notes for preopen and intraday:
+- preopen snapshots now emit five deterministic families: `technical`, `fundamental`, `events_news`, `insider`, and `social_macro`
+- intraday refresh targets `technical`, `events_news`, `social_macro`, and `option_chain`; `insider` is carried forward from the baseline unless a newer filing-backed source row is available
+- legacy insider/Form 4 rows use a conservative point-in-time rule: `available_for_decision_at` is the later of row ingest time and the next market open after `filing_date`
+- trading-side `social_macro` rows come from filtered global-context buckets (`trump_updates`, `official_updates`, `geopolitical_news`) and can tighten risk or trigger review, but they do not create unsupported macro-only single-name bearish trades on their own
+
 Manual review keeps the scheduler/default path dry-run. Use the explicit operator mode when you want the same live manual-review runtime but with an intentional execution policy:
 
 ```bash
@@ -166,6 +172,27 @@ This should return:
 - `summary.latest_result_status="actionable_trade"`
 - `summary.orders_submitted=1`
 - `summary.latest_order_status="filled"`
+
+Signal-family smoke:
+
+```bash
+source ~/.venv/bin/activate
+python scripts/run_trading_signal_family_smoke.py --ticker NVDA --fixture --json
+```
+
+This fixture-backed smoke seeds one ticker with deterministic `technical`, `fundamental`, `events_news`, `insider`, and `social_macro` rows, builds the resulting preopen snapshot, and prints the top candidate evidence for `insider_accumulation_momentum_v1`.
+
+Live social-macro persistence-only smoke:
+
+```bash
+source ~/.venv/bin/activate
+python scripts/run_trading_signal_family_smoke.py --ticker NVDA --live-social-macro --json
+```
+
+Use this opt-in path when you want one real global-context fetch and a persistence check for trading-side `social_macro` rows without generating any trading decisions or orders. A passing run should return:
+- `source_records_by_family.social_macro >= 1`
+- `social_macro_items_persisted >= 1`
+- `orders_created = 0`
 
 ## Option Operator Checks
 

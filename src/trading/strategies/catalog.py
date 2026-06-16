@@ -308,6 +308,23 @@ INITIAL_STRATEGY_CATALOG: tuple[StrategyCatalogItem, ...] = (
         invalidators=("relative strength rank rolls over", "rotation breadth fails", "liquidity dries up"),
     ),
     StrategyCatalogItem(
+        strategy_id="insider_accumulation_momentum_v1",
+        display_name="Insider Accumulation Momentum",
+        strategy_layer="tactical_pattern",
+        typical_horizon="2w-8w",
+        core_thesis="Clustered insider buying can strengthen an existing momentum setup.",
+        required_signals=(
+            "insider_net_buy_value_30d",
+            "insider_cluster_buy_count_90d",
+            "officer_buy_flag",
+            "relative_strength_vs_benchmark_or_peers",
+            "volume_price_confirmation",
+        ),
+        scoring_rules={"requires_positive_net_insider_buying": True, "min_cluster_buy_count": 2},
+        risk_tags=("insider_confirmation", "relative_strength"),
+        invalidators=("insider flow turns net negative", "relative strength breaks", "volume confirmation fails"),
+    ),
+    StrategyCatalogItem(
         strategy_id="pre_catalyst_runup_v1",
         display_name="Pre-Catalyst Run-up",
         strategy_layer="tactical_pattern",

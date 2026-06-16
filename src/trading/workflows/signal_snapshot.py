@@ -70,7 +70,7 @@ class SignalPipeline:
                 tuple(tickers),
                 as_of=decision_time,
                 run_type="pre_open",
-                source_families=("technical", "fundamental", "events_news", "option_chain"),
+                source_families=("technical", "fundamental", "events_news", "social_macro", "option_chain"),
             )
         snapshots: list[SignalSnapshotResult] = []
         for ticker in tickers:

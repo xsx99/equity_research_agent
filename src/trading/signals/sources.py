@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Iterable
+
+from src.db.models.insider_trades import InsiderTrade
+from src.providers.market_data.helpers import MARKET_TIMEZONE, REGULAR_MARKET_CLOSE, REGULAR_MARKET_OPEN
 
 
 @dataclass(frozen=True)
@@ -102,6 +105,41 @@ class EventNewsItemRecord:
             object.__setattr__(self, "source_ticker", self.source_ticker.strip().upper())
 
 
+@dataclass(frozen=True)
+class SocialMacroItemRecord:
+    """Repository-level shape matching the `social_macro_items` table."""
+
+    social_macro_item_id: str
+    ticker: str
+    category: str
+    source_type: str
+    source_key: str
+    provider: str
+    title: str | None
+    summary: str | None
+    direction: str | None
+    sentiment_direction: str | None
+    importance_score: float | None
+    importance_label: str | None
+    policy_headwind_flag: bool
+    policy_tailwind_flag: bool
+    explicit_ticker_mention_flag: bool
+    explicit_theme_mention_flag: bool
+    theme_tags_json: list[str]
+    company_name_mentions_json: list[str]
+    source_refs_json: list[dict[str, str]]
+    dedupe_key: str
+    event_time: datetime
+    published_at: datetime
+    ingested_at: datetime
+    available_for_decision_at: datetime
+    raw_payload_ref: str | None
+    metadata_json: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "ticker", self.ticker.strip().upper())
+
+
 def source_record_from_fundamental_snapshot(snapshot: FundamentalSnapshotRecord) -> SourceRecord:
     """Convert a normalized fundamental row into the SignalPipeline source contract."""
     return SourceRecord(
@@ -144,6 +182,113 @@ def source_record_from_event_news_item(item: EventNewsItemRecord) -> SourceRecor
         available_for_decision_at=item.available_for_decision_at,
         payload=payload,
     )
+
+
+def source_record_from_social_macro_item(item: SocialMacroItemRecord) -> SourceRecord:
+    """Convert a normalized social/policy row into the SignalPipeline source contract."""
+    payload = dict(item.metadata_json)
+    payload.update(
+        {
+            "category": item.category,
+            "source_type": item.source_type,
+            "source_key": item.source_key,
+            "title": item.title,
+            "summary": item.summary,
+            "direction": item.direction,
+            "sentiment_direction": item.sentiment_direction,
+            "importance_score": item.importance_score,
+            "importance_label": item.importance_label,
+            "policy_headwind_flag": item.policy_headwind_flag,
+            "policy_tailwind_flag": item.policy_tailwind_flag,
+            "explicit_ticker_mention_flag": item.explicit_ticker_mention_flag,
+            "explicit_theme_mention_flag": item.explicit_theme_mention_flag,
+            "theme_tags": list(item.theme_tags_json),
+            "company_name_mentions": list(item.company_name_mentions_json),
+        }
+    )
+    return SourceRecord(
+        ticker=item.ticker,
+        source_family="social_macro",
+        source=item.provider,
+        source_table="social_macro_items",
+        source_record_id=item.social_macro_item_id,
+        event_time=item.event_time,
+        published_at=item.published_at,
+        ingested_at=item.ingested_at,
+        available_for_decision_at=item.available_for_decision_at,
+        payload=payload,
+    )
+
+
+def source_record_from_insider_trade(trade: InsiderTrade) -> SourceRecord:
+    """Adapt one legacy insider trade row into a conservative trading-side PIT source row."""
+    transaction_date = trade.transaction_date or trade.filing_date
+    event_time = _market_datetime(transaction_date, REGULAR_MARKET_CLOSE)
+    published_at = _market_datetime(trade.filing_date, REGULAR_MARKET_CLOSE)
+    ingested_at = _normalize_datetime(getattr(trade, "created_at", None)) or published_at
+    available_for_decision_at = insider_trade_available_for_decision_at(trade)
+    payload = {
+        "accession_number": trade.accession_number,
+        "transaction_index": trade.transaction_index,
+        "company_name": trade.company_name,
+        "company_cik": trade.company_cik,
+        "insider_name": trade.insider_name,
+        "officer_title": trade.insider_title,
+        "insider_cik": trade.insider_cik,
+        "is_director": bool(trade.is_director),
+        "is_officer": bool(trade.is_officer),
+        "is_ten_percent_owner": bool(trade.is_ten_percent_owner),
+        "transaction_type": trade.transaction_type,
+        "transaction_date": transaction_date.isoformat() if transaction_date else None,
+        "shares": trade.shares,
+        "price_per_share": float(trade.price_per_share) if trade.price_per_share is not None else None,
+        "total_value": float(trade.total_value) if trade.total_value is not None else None,
+        "shares_owned_after": trade.shares_owned_after,
+        "filing_date": trade.filing_date.isoformat() if trade.filing_date else None,
+        "filing_url": trade.filing_url,
+        "raw_data": dict(trade.raw_data or {}),
+    }
+    return SourceRecord(
+        ticker=trade.ticker,
+        source_family="insider",
+        source="legacy_insider_trade",
+        source_table="insider_trades",
+        source_record_id=str(getattr(trade, "id", f"{trade.accession_number}:{trade.transaction_index}")),
+        event_time=event_time,
+        published_at=published_at,
+        ingested_at=ingested_at,
+        available_for_decision_at=available_for_decision_at,
+        payload=payload,
+    )
+
+
+def insider_trade_available_for_decision_at(trade: InsiderTrade) -> datetime:
+    """Conservative availability gate for legacy Form 4 rows with date-only filing fidelity."""
+    filing_open = next_market_open_after_filing_date(trade.filing_date)
+    ingested_at = _normalize_datetime(getattr(trade, "created_at", None))
+    if ingested_at is None:
+        return filing_open
+    return max(ingested_at, filing_open)
+
+
+def next_market_open_after_filing_date(filing_date: date) -> datetime:
+    """Return the next regular market open after a filing date as UTC."""
+    next_day = filing_date + timedelta(days=1)
+    while next_day.weekday() >= 5:
+        next_day += timedelta(days=1)
+    return _market_datetime(next_day, REGULAR_MARKET_OPEN)
+
+
+def _market_datetime(value: date, clock_time: time) -> datetime:
+    return datetime.combine(value, clock_time, tzinfo=MARKET_TIMEZONE).astimezone(timezone.utc)
+
+
+def _normalize_datetime(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 class InMemorySignalSourceRepository:

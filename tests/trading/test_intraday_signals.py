@@ -27,16 +27,29 @@ def _baseline_snapshot() -> SignalSnapshotResult:
             "events_news": {
                 "high_signal_news_count_24h": 0,
             },
+            "insider": {
+                "purchase_count_30d": 1,
+                "insider_net_buy_value_30d": 250000.0,
+            },
+            "social_macro": {
+                "policy_headwind_flag": False,
+                "social_macro_importance_score": 0.1,
+            },
         },
         source_freshness_json={
             "technical": "fresh",
             "fundamental": "fresh",
             "events_news": "fresh",
+            "insider": "fresh",
+            "social_macro": "fresh",
         },
         missing_signals_json=[],
         stale_signals_json=[],
         source_record_refs_json=[],
-        source_available_times_json={},
+        source_available_times_json={
+            "insider": now.isoformat(),
+            "social_macro": now.isoformat(),
+        },
         excluded_future_source_count=0,
         point_in_time_passed=True,
     )
@@ -91,8 +104,43 @@ def test_build_intraday_signal_snapshot_tracks_refresh_carry_forward_and_deltas(
     assert current.baseline_signal_snapshot_id == "baseline-1"
     assert current.previous_intraday_snapshot_id == previous.intraday_signal_snapshot_id
     assert current.refreshed_signals_json["technical"]["last_price"] == 125.0
-    assert current.carried_forward_signals_json == {"fundamental": {"market_cap_bucket": "mega"}}
+    assert current.carried_forward_signals_json["fundamental"] == {"market_cap_bucket": "mega"}
+    assert current.carried_forward_signals_json["insider"]["purchase_count_30d"] == 1
+    assert current.carried_forward_signals_json["social_macro"]["policy_headwind_flag"] is False
     assert current.delta_vs_baseline_json["technical"]["last_price"] == 5.0
     assert current.delta_vs_previous_json["technical"]["last_price"] == 2.0
     assert current.delta_vs_baseline_json["events_news"]["high_signal_news_count_24h"] == 2
     assert current.source_freshness_json["fundamental"] == "carried_forward_from_baseline"
+
+
+def test_build_intraday_signal_snapshot_carries_forward_insider_and_refreshes_social_macro():
+    baseline = _baseline_snapshot()
+
+    current = build_intraday_signal_snapshot(
+        intraday_signal_scan_id="scan-3",
+        ticker="NVDA",
+        decision_time=datetime(2026, 6, 2, 16, 30, tzinfo=timezone.utc),
+        baseline_snapshot=baseline,
+        previous_intraday_snapshot=None,
+        refreshed_signals_json={
+            "technical": {
+                "last_price": 121.0,
+            },
+            "social_macro": {
+                "policy_headwind_flag": True,
+                "social_macro_importance_score": 0.95,
+            },
+        },
+        source_freshness_json={
+            "technical": "fresh",
+            "fundamental": "carried_forward_from_baseline",
+            "insider": "carried_forward_from_baseline",
+            "social_macro": "fresh",
+        },
+    )
+
+    assert current.refreshed_signals_json["social_macro"]["policy_headwind_flag"] is True
+    assert current.carried_forward_signals_json["insider"]["purchase_count_30d"] == 1
+    assert current.carried_forward_signals_json["fundamental"]["market_cap_bucket"] == "mega"
+    assert current.delta_vs_baseline_json["social_macro"]["policy_headwind_flag"] is True
+    assert current.source_freshness_json["insider"] == "carried_forward_from_baseline"

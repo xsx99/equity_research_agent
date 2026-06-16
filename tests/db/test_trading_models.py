@@ -2,6 +2,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from sqlalchemy import CheckConstraint
 
+from src.db.models import trading as trading_models
 from src.db.models.trading import (
     OptionStrategyLeg,
     CandidateOutcomeEvaluation,
@@ -583,9 +584,21 @@ def test_pr_2_models_can_be_instantiated():
         decision_time=now,
         available_for_decision_at=now,
         max_input_available_for_decision_at=now,
-        signal_json={"technical": {}},
+        signal_json={
+            "technical": {},
+            "insider": {
+                "insider_net_buy_value_30d": 250000.0,
+                "insider_cluster_buy_count_90d": 2,
+                "recent_form4_filing_at": now.isoformat(),
+            },
+            "social_macro": {
+                "trump_update_count_24h": 1,
+                "policy_headwind_flag": True,
+                "latest_social_macro_category": "trump_update",
+            },
+        },
         source_freshness_json={"technical": "fresh"},
-        missing_signals_json=["option_chain_availability"],
+        missing_signals_json=["option_chain_availability", "full_transcript_interpretation"],
         stale_signals_json=[],
         source_record_refs_json=[{"source_record_id": "fund-1"}],
         source_available_times_json={"fund-1": now.isoformat()},
@@ -602,6 +615,45 @@ def test_pr_2_models_can_be_instantiated():
     assert fundamental.normalized_metrics_json["revenue_growth_score"] == 0.7
     assert event.dedupe_key.startswith("AAPL|")
     assert signal.point_in_time_passed is True
+    assert signal.signal_json["insider"]["insider_cluster_buy_count_90d"] == 2
+    assert signal.signal_json["social_macro"]["latest_social_macro_category"] == "trump_update"
+
+
+def test_social_macro_item_model_can_be_instantiated():
+    now = datetime(2026, 6, 3, 12, 45, tzinfo=timezone.utc)
+    SocialMacroItem = getattr(trading_models, "SocialMacroItem")
+
+    row = SocialMacroItem(
+        ticker="NVDA",
+        category="trump_update",
+        source_type="global_context",
+        source_key="trump_updates",
+        provider="fixture",
+        title="Trump comments on semiconductor export controls",
+        summary="Potential negative policy read-through for AI semis.",
+        direction="negative",
+        sentiment_direction="negative",
+        importance_score=0.95,
+        importance_label="high",
+        policy_headwind_flag=True,
+        policy_tailwind_flag=False,
+        explicit_ticker_mention_flag=True,
+        explicit_theme_mention_flag=False,
+        theme_tags_json=["semiconductors", "ai_infrastructure"],
+        company_name_mentions_json=["NVIDIA"],
+        source_refs_json=[{"source": "fixture", "source_record_id": "social-1"}],
+        dedupe_key="NVDA|trump_update|2026-06-03T12:30:00+00:00",
+        event_time=now,
+        published_at=now,
+        ingested_at=now,
+        available_for_decision_at=now,
+        raw_payload_ref="fixture://social-1",
+        metadata_json={"importance_reason": "policy headline"},
+    )
+
+    assert row.category == "trump_update"
+    assert row.policy_headwind_flag is True
+    assert row.explicit_ticker_mention_flag is True
 
 
 def test_manual_ticker_request_model_exposes_active_ticker_uniqueness_index():

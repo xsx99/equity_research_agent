@@ -40,13 +40,15 @@ Own-company earnings are different. If the snapshot ticker is the reporting comp
 | Options | option chain availability, delta, IV rank/percentile, premium, breakeven, DTE, earnings-through-expiry flag |
 | Confidence Calibration | historical win rate/alpha by strategy, expression bucket, trade identity, direction, catalyst type, sector/theme, and market regime |
 
-MVP signal surface should cover three families, not only technicals:
+MVP signal surface should cover five families, not only technicals:
 
 1. `technical`: OHLCV/quote-derived momentum, trend, mean-reversion, volume/liquidity, volatility, gap, and relative-strength signals.
 2. `fundamental`: latest point-in-time fundamental/valuation summary signals such as market-cap bucket, revenue growth, margin/profitability quality, valuation band/percentile, FCF/profitability proxy, short-interest bucket when available, and explicit stale/missing flags.
 3. `events_news`: headline/calendar/provider-event level signals such as earnings date proximity, own earnings headline result when available, analyst upgrade/downgrade or price-target revision, guidance/news flags, customer/order/regulatory/product headlines, high-signal news counts, sentiment/direction, and direct negative catalyst flags.
+4. `insider`: deterministic structured insider/Form 4 aggregates derived from normalized legacy insider rows, including net buy/sell value windows, cluster-buy counts, officer/director flags, sale concentration, and recent filing freshness.
+5. `social_macro`: deterministic social/policy context derived from normalized `trump_updates`, `official_updates`, and `geopolitical_news`, including 24h counts, policy headwind/tailwind flags, explicit ticker/theme mention flags, importance score, sentiment direction, category, and freshness.
 
-MVP does not need every future signal. It should avoid full transcript parsing, full SEC/insider interpretation, option-chain strategy signals, and full macro/sector read-through until their source families are implemented. Missing signals must be stored explicitly as `null` or `status=missing`; the prompt must not fabricate them.
+MVP does not need every future signal. It should avoid full transcript parsing, deep SEC narrative interpretation, option-chain strategy signals, and full macro/sector read-through until their source families are implemented. Missing signals must be stored explicitly as `null` or `status=missing`; the prompt must not fabricate them.
 
 Signal source rules:
 
@@ -55,6 +57,7 @@ Signal source rules:
 - Store `event_time`, `published_at`, `ingested_at`, and `available_for_decision_at` where relevant. Use `filing_date`, `as_of`, or provider observation time as source-specific supporting fields, not as substitutes for decision availability.
 - Separate raw inputs from derived scores. For example, persist raw insider transactions elsewhere, then store derived fields such as `insider_net_buy_value_90d` and `insider_cluster_buy_count_90d` in `signal_snapshots`.
 - Do not let the LLM infer missing insider/news/fundamental facts. Missing facts remain missing signals.
+- Legacy insider rows without filing timestamps must use a conservative PIT rule: `available_for_decision_at` is the later of row ingest time and the next market open after `filing_date`.
 
 ### Point-In-Time and No-Lookahead Contract
 
@@ -169,4 +172,3 @@ The signal schema should explicitly support the strategy catalog above:
 - Event timing signals: `earnings_in_days`, `known_event_date`, `pre_event_runup_score`, `event_risk_flag`.
 - Options signals: option-chain availability; candidate `option_strategy_type`; per-leg call/put, side, strike, expiry, DTE, delta/gamma/theta/vega, IV rank/percentile, bid/ask/mid, volume/open interest; strategy-level net debit/credit, max loss, max profit, breakevens, margin requirement, buying-power effect, event-through-expiry flag, and assignment exposure when short options are present.
 - Confidence calibration signals: `historical_strategy_win_rate`, `historical_strategy_alpha_vs_benchmark`, `historical_direction_win_rate`, `historical_catalyst_type_alpha`, `confidence_calibration_bucket`.
-

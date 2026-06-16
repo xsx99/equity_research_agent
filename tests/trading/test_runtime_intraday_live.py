@@ -75,6 +75,24 @@ class _RequestContextLoader:
         return dict(self.contexts)
 
 
+class _SourceRefreshService:
+    def __init__(self, recorder: _CallRecorder) -> None:
+        self.recorder = recorder
+        self.calls: list[tuple[tuple[str, ...], str, tuple[str, ...]]] = []
+
+    def refresh_tickers(
+        self,
+        tickers: tuple[str, ...],
+        *,
+        as_of: datetime,
+        run_type: str,
+        source_families: tuple[str, ...],
+    ) -> None:
+        assert as_of.tzinfo is not None
+        self.recorder.record("refresh_sources")
+        self.calls.append((tickers, run_type, source_families))
+
+
 class _IntradaySourceRepository:
     def __init__(self, recorder: _CallRecorder, source_rows: dict[tuple[str, str], tuple[SourceRecord, ...]]) -> None:
         self.recorder = recorder
@@ -144,13 +162,14 @@ class _NewsAlertService:
     def build_alerts(
         self,
         *,
-        event_items,
+        source_items,
         existing_dedupe_keys,
         affected_positions_by_ticker,
         affected_candidates_by_ticker,
         affected_themes_by_ticker,
     ):
-        assert {item.ticker for item in event_items} == {"AAPL"}
+        assert {item.ticker for item in source_items} == {"AAPL"}
+        assert {item.source_family for item in source_items} == {"events_news", "social_macro"}
         assert existing_dedupe_keys == frozenset({"seen-news"})
         assert affected_positions_by_ticker["AAPL"] == ("AAPL",)
         assert affected_candidates_by_ticker["MSFT"] == ("MSFT",)
@@ -220,6 +239,7 @@ class _NewsAlert:
     source_ticker: str | None = None
     affected_themes: tuple[str, ...] = ()
     readthrough_source_ticker: str | None = None
+    metadata_json: dict[str, object] | None = None
 
 
 def _source_record(*, ticker: str, family: str, payload: dict) -> SourceRecord:
@@ -253,12 +273,28 @@ def _baseline_snapshot(*, ticker: str, sector: str | None = None) -> SignalSnaps
         signal_json={
             "technical": {"last_price": 100.0, "atr_pct": 0.02, "dollar_volume": 50_000_000.0},
             "fundamental": fundamental_json,
+            "insider": {
+                "purchase_count_30d": 2,
+                "insider_net_buy_value_30d": 300000.0,
+            },
+            "social_macro": {
+                "policy_headwind_flag": False,
+                "social_macro_importance_score": 0.1,
+            },
         },
-        source_freshness_json={"technical": "fresh", "fundamental": "fresh"},
+        source_freshness_json={
+            "technical": "fresh",
+            "fundamental": "fresh",
+            "insider": "fresh",
+            "social_macro": "fresh",
+        },
         missing_signals_json=[],
         stale_signals_json=[],
         source_record_refs_json=[],
-        source_available_times_json={},
+        source_available_times_json={
+            "insider": now.isoformat(),
+            "social_macro": now.isoformat(),
+        },
         excluded_future_source_count=0,
         point_in_time_passed=True,
         selection_source="scanner",
@@ -285,8 +321,16 @@ def _previous_intraday(*, ticker: str) -> IntradaySignalSnapshotRecord:
     )
 
 
-def _build_runtime() -> tuple[LiveIntradayRefreshRuntime, _CallRecorder, _RebalancePipeline, _TradingRepository]:
+def _build_runtime() -> tuple[
+    LiveIntradayRefreshRuntime,
+    _CallRecorder,
+    _RebalancePipeline,
+    _TradingRepository,
+    _SourceRefreshService,
+]:
     recorder = _CallRecorder()
+    refresh_service = _SourceRefreshService(recorder)
+    baseline_time = datetime(2026, 6, 4, 16, 0, tzinfo=timezone.utc)
     source_rows = {
         ("AAPL", "technical"): (_source_record(ticker="AAPL", family="technical", payload={"bars": [{"close": 104.0}]}),),
         ("AAPL", "events_news"): (
@@ -310,8 +354,56 @@ def _build_runtime() -> tuple[LiveIntradayRefreshRuntime, _CallRecorder, _Rebala
                 },
             ),
         ),
+        ("AAPL", "social_macro"): (
+            SourceRecord(
+                ticker="AAPL",
+                source_family="social_macro",
+                source="fixture",
+                source_table="social_macro_items",
+                source_record_id="aapl-social-1",
+                event_time=baseline_time,
+                published_at=baseline_time,
+                ingested_at=baseline_time,
+                available_for_decision_at=baseline_time,
+                payload={
+                    "category": "trump_update",
+                    "title": "Trump threatens tighter AI chip export controls",
+                    "summary": "Potential AI chip export restriction headwind.",
+                    "sentiment_direction": "negative",
+                    "importance_score": 0.92,
+                    "importance_label": "high",
+                    "policy_headwind_flag": True,
+                    "policy_tailwind_flag": False,
+                    "explicit_ticker_mention_flag": True,
+                    "explicit_theme_mention_flag": True,
+                    "theme_tags": ["ai_semis"],
+                },
+            ),
+        ),
+        ("AAPL", "insider"): (
+            SourceRecord(
+                ticker="AAPL",
+                source_family="insider",
+                source="fixture",
+                source_table="insider_trades",
+                source_record_id="aapl-insider-1",
+                event_time=baseline_time,
+                published_at=baseline_time,
+                ingested_at=baseline_time,
+                available_for_decision_at=baseline_time,
+                payload={
+                    "transaction_type": "purchase",
+                    "total_value": 300000.0,
+                    "is_officer": True,
+                    "is_director": False,
+                    "filing_date": "2026-06-04",
+                },
+            ),
+        ),
         ("MSFT", "technical"): (_source_record(ticker="MSFT", family="technical", payload={"bars": [{"close": 98.0}]}),),
         ("MSFT", "events_news"): (),
+        ("MSFT", "social_macro"): (),
+        ("MSFT", "insider"): (),
     }
     portfolio_result = SimpleNamespace(
         portfolio_context=SimpleNamespace(
@@ -338,8 +430,25 @@ def _build_runtime() -> tuple[LiveIntradayRefreshRuntime, _CallRecorder, _Rebala
             {"AAPL": _previous_intraday(ticker="AAPL")},
         ),
         source_repository=_IntradaySourceRepository(recorder, source_rows),
+        source_ingestion_service=refresh_service,
         portfolio_sync_workflow=_PortfolioSyncWorkflow(recorder, portfolio_result),
-        news_alert_service=_NewsAlertService(recorder, (_NewsAlert(ticker="AAPL", dedupe_key="aapl-news-1"),)),
+        news_alert_service=_NewsAlertService(
+            recorder,
+            (
+                _NewsAlert(
+                    ticker="AAPL",
+                    dedupe_key="aapl-news-1",
+                    metadata_json={"source_family": "events_news"},
+                ),
+                _NewsAlert(
+                    ticker="AAPL",
+                    dedupe_key="aapl-social-1",
+                    alert_type="trump_update",
+                    sentiment="negative",
+                    metadata_json={"source_family": "social_macro"},
+                ),
+            ),
+        ),
         rebalance_pipeline=rebalance_pipeline,
         trading_repository=trading_repository,
         request_context_loader=_RequestContextLoader(
@@ -383,40 +492,57 @@ def _build_runtime() -> tuple[LiveIntradayRefreshRuntime, _CallRecorder, _Rebala
         dependencies=dependencies,
         now=lambda: datetime(2026, 6, 4, 16, 0, tzinfo=timezone.utc),
     )
-    return runtime, recorder, rebalance_pipeline, trading_repository
+    return runtime, recorder, rebalance_pipeline, trading_repository, refresh_service
 
 
 def test_live_intraday_refresh_runtime_runs_live_intraday_chain_in_dry_run_mode():
-    runtime, recorder, rebalance_pipeline, trading_repository = _build_runtime()
+    runtime, recorder, rebalance_pipeline, trading_repository, refresh_service = _build_runtime()
 
     result = runtime.run()
 
     assert recorder.calls == [
         "load_scope",
+        "refresh_sources",
         "load_baselines",
         "load_previous_intraday",
         "load_request_context",
         "portfolio_sync",
         "save_scan",
         "latest:AAPL:technical",
+        "latest:AAPL:events_news",
+        "latest:AAPL:social_macro",
+        "latest:AAPL:insider",
         "save_snapshot:AAPL",
         "latest:MSFT:technical",
-        "save_snapshot:MSFT",
-        "latest:AAPL:events_news",
         "latest:MSFT:events_news",
+        "latest:MSFT:social_macro",
+        "latest:MSFT:insider",
+        "save_snapshot:MSFT",
         "build_alerts",
         "save_alert:AAPL",
+        "save_alert:AAPL",
         "rebalance",
+    ]
+    assert refresh_service.calls == [
+        (
+            ("AAPL", "MSFT"),
+            "intraday_refresh",
+            ("technical", "events_news", "social_macro", "option_chain"),
+        )
     ]
     assert [request.ticker for request in rebalance_pipeline.last_requests] == ["AAPL", "MSFT"]
     assert rebalance_pipeline.last_requests[0].allow_open_new is False
     assert rebalance_pipeline.last_requests[1].allow_open_new is True
     assert rebalance_pipeline.last_requests[1].manual_request_id == "msft-request"
     assert rebalance_pipeline.last_requests[1].manual_request_mode == "paper_trade_eligible"
+    assert rebalance_pipeline.last_requests[0].direct_company_negative_evidence is False
+    assert rebalance_pipeline.last_requests[0].bearish_signal_sources == ()
+    assert rebalance_pipeline.last_requests[0].metadata_json["social_policy_alert_count"] == 1
+    assert rebalance_pipeline.last_requests[0].alerts[1]["source_family"] == "social_macro"
     assert result["status"] == "passed"
     assert result["phase"] == "intraday_refresh"
     assert result["summary"]["ticker_count"] == 2
-    assert result["summary"]["news_alert_count"] == 1
+    assert result["summary"]["news_alert_count"] == 2
     assert result["summary"]["intraday_rebalance_decision_count"] == 1
     assert result["execution"] == {
         "mode": "dry_run",
@@ -425,11 +551,14 @@ def test_live_intraday_refresh_runtime_runs_live_intraday_chain_in_dry_run_mode(
     }
     assert trading_repository.saved_scan is not None
     assert len(trading_repository.saved_snapshots) == 2
-    assert len(trading_repository.saved_alerts) == 1
+    assert len(trading_repository.saved_alerts) == 2
+    assert trading_repository.saved_snapshots[0].refreshed_signals_json["social_macro"]["policy_headwind_flag"] is True
+    assert trading_repository.saved_snapshots[0].carried_forward_signals_json["insider"]["purchase_count_30d"] == 2
+    assert trading_repository.saved_snapshots[0].source_freshness_json["insider"] == "carried_forward_from_baseline"
 
 
 def test_live_intraday_refresh_runtime_requires_paper_execution_when_option_execution_enabled():
-    runtime, _recorder, _rebalance_pipeline, _trading_repository = _build_runtime()
+    runtime, _recorder, _rebalance_pipeline, _trading_repository, _refresh_service = _build_runtime()
     runtime.execute_paper_option_orders = True
 
     try:
@@ -441,7 +570,7 @@ def test_live_intraday_refresh_runtime_requires_paper_execution_when_option_exec
 
 
 def test_live_intraday_refresh_runtime_reports_option_orders_separately_when_enabled():
-    runtime, _recorder, rebalance_pipeline, _trading_repository = _build_runtime()
+    runtime, _recorder, rebalance_pipeline, _trading_repository, _refresh_service = _build_runtime()
     runtime.execute_paper_orders = True
     runtime.execute_paper_option_orders = True
     rebalance_pipeline.result = SimpleNamespace(
@@ -459,7 +588,7 @@ def test_live_intraday_refresh_runtime_reports_option_orders_separately_when_ena
 
 
 def test_live_intraday_refresh_runtime_passes_portfolio_risk_intent_into_rebalance_pipeline():
-    runtime, _recorder, rebalance_pipeline, _trading_repository = _build_runtime()
+    runtime, _recorder, rebalance_pipeline, _trading_repository, _refresh_service = _build_runtime()
     runtime.dependencies = LiveIntradayRefreshDependencies(
         **{
             **runtime.dependencies.__dict__,
@@ -480,7 +609,7 @@ def test_live_intraday_refresh_runtime_passes_portfolio_risk_intent_into_rebalan
 
 
 def test_live_intraday_refresh_runtime_passes_macro_risk_state_into_intraday_lookahead_helper():
-    runtime, _recorder, rebalance_pipeline, _repository = _build_runtime()
+    runtime, _recorder, rebalance_pipeline, _repository, _refresh_service = _build_runtime()
     runtime.dependencies = LiveIntradayRefreshDependencies(
         **{
             **runtime.dependencies.__dict__,
@@ -638,7 +767,7 @@ def test_intraday_helper_ignores_non_dict_alert_before_cluster_path():
 
 
 def test_live_intraday_refresh_runtime_keeps_readthrough_and_theme_fields_on_rebalance_requests():
-    runtime, recorder, rebalance_pipeline, _repository = _build_runtime()
+    runtime, recorder, rebalance_pipeline, _repository, _refresh_service = _build_runtime()
 
     class _LocalLoader:
         def __init__(self, name: str, result: dict[str, object]) -> None:
@@ -657,13 +786,13 @@ def test_live_intraday_refresh_runtime_keeps_readthrough_and_theme_fields_on_reb
         def build_alerts(
             self,
             *,
-            event_items,
+            source_items,
             existing_dedupe_keys,
             affected_positions_by_ticker,
             affected_candidates_by_ticker,
             affected_themes_by_ticker,
         ):
-            assert {item.ticker for item in event_items} == {"AAPL"}
+            assert {item.ticker for item in source_items} == {"AAPL"}
             assert existing_dedupe_keys == frozenset({"seen-news"})
             assert affected_positions_by_ticker["AAPL"] == ("AAPL",)
             assert affected_candidates_by_ticker["MSFT"] == ("MSFT",)
@@ -817,7 +946,7 @@ def test_live_intraday_refresh_runtime_refreshes_open_option_position_marks_and_
         def build_alerts(
             self,
             *,
-            event_items,
+            source_items,
             existing_dedupe_keys,
             affected_positions_by_ticker,
             affected_candidates_by_ticker,
@@ -939,7 +1068,7 @@ def test_live_intraday_refresh_runtime_refreshes_open_option_position_marks_and_
 
 
 def test_run_live_intraday_refresh_once_builds_default_dependencies_when_not_injected(monkeypatch):
-    runtime, _recorder, _pipeline, _repository = _build_runtime()
+    runtime, _recorder, _pipeline, _repository, _refresh_service = _build_runtime()
 
     monkeypatch.setattr(
         "src.trading.runtime.intraday_refresh.build_live_intraday_refresh_dependencies",
@@ -953,7 +1082,7 @@ def test_run_live_intraday_refresh_once_builds_default_dependencies_when_not_inj
 
 
 def test_run_live_intraday_refresh_once_builds_default_dependencies_for_option_execution(monkeypatch):
-    runtime, _recorder, _pipeline, _repository = _build_runtime()
+    runtime, _recorder, _pipeline, _repository, _refresh_service = _build_runtime()
 
     monkeypatch.setattr(
         "src.trading.runtime.intraday_refresh.build_live_intraday_refresh_dependencies",

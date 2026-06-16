@@ -12,6 +12,7 @@ from src.trading.runtime.intraday_refresh_helpers import (
     _build_alert_map,
     _build_intraday_refresh_payload,
     _build_rebalance_request,
+    _load_social_macro_items,
     _load_event_items,
     _position_by_ticker,
 )
@@ -50,6 +51,13 @@ class LiveIntradayRefreshRuntime:
                 },
                 execution=build_execution_report(mode="dry_run", orders_submitted=0, option_orders_submitted=0),
             )
+        if self.dependencies.source_ingestion_service is not None:
+            self.dependencies.source_ingestion_service.refresh_tickers(
+                tuple(tickers),
+                as_of=decision_time,
+                run_type="intraday_refresh",
+                source_families=("technical", "events_news", "social_macro", "option_chain"),
+            )
 
         baselines = self.dependencies.baseline_loader.load_for_tickers(
             tickers=tickers,
@@ -80,6 +88,8 @@ class LiveIntradayRefreshRuntime:
         self.dependencies.trading_repository.save_intraday_signal_scan(scan)
 
         snapshots = []
+        alert_source_items = []
+        positions_by_ticker = _position_by_ticker(positions)
         for ticker in tickers:
             baseline = baselines.get(ticker)
             if baseline is None:
@@ -89,8 +99,23 @@ class LiveIntradayRefreshRuntime:
                 "technical",
                 decision_time,
             )
+            event_news_rows = self.dependencies.source_repository.latest_available_by_family(
+                ticker,
+                "events_news",
+                decision_time,
+            )
+            social_macro_rows = self.dependencies.source_repository.latest_available_by_family(
+                ticker,
+                "social_macro",
+                decision_time,
+            )
+            insider_rows = self.dependencies.source_repository.latest_available_by_family(
+                ticker,
+                "insider",
+                decision_time,
+            )
             context = request_contexts.get(ticker)
-            instrument_type = _intraday_instrument_type(context=context, position=_position_by_ticker(positions).get(ticker))
+            instrument_type = _intraday_instrument_type(context=context, position=positions_by_ticker.get(ticker))
             option_chain_rows = self.dependencies.source_repository.latest_available_by_family(
                 ticker,
                 "option_chain",
@@ -98,7 +123,11 @@ class LiveIntradayRefreshRuntime:
             ) if instrument_type == "option" else ()
             refreshed_signals_json, source_freshness = _build_intraday_refresh_payload(
                 baseline=baseline,
+                decision_time=decision_time,
                 technical_rows=technical_rows,
+                event_news_rows=event_news_rows,
+                social_macro_rows=social_macro_rows,
+                insider_rows=insider_rows,
                 option_chain_rows=option_chain_rows,
                 instrument_type=instrument_type,
             )
@@ -113,18 +142,15 @@ class LiveIntradayRefreshRuntime:
             )
             self.dependencies.trading_repository.save_intraday_signal_snapshot(snapshot)
             snapshots.append(snapshot)
+            alert_source_items.extend(_load_event_items(ticker=ticker, event_news_rows=event_news_rows))
+            alert_source_items.extend(_load_social_macro_items(ticker=ticker, social_macro_rows=social_macro_rows))
 
         existing_dedupe_keys = self.dependencies.existing_news_dedupe_key_loader(tickers, decision_time)
         affected_positions_by_ticker = self.dependencies.position_context_loader(tickers, positions)
         affected_candidates_by_ticker = self.dependencies.candidate_context_loader(tickers, decision_time)
         affected_themes_by_ticker = self.dependencies.theme_context_loader(tickers, decision_time)
-        event_items = _load_event_items(
-            source_repository=self.dependencies.source_repository,
-            tickers=tickers,
-            decision_time=decision_time,
-        )
         alerts = self.dependencies.news_alert_service.build_alerts(
-            event_items=event_items,
+            source_items=tuple(alert_source_items),
             existing_dedupe_keys=existing_dedupe_keys,
             affected_positions_by_ticker=affected_positions_by_ticker,
             affected_candidates_by_ticker=affected_candidates_by_ticker,
@@ -140,7 +166,7 @@ class LiveIntradayRefreshRuntime:
                 baseline=baselines[snapshot.ticker],
                 snapshot=snapshot,
                 context=request_contexts.get(snapshot.ticker),
-                position=_position_by_ticker(positions).get(snapshot.ticker),
+                position=positions_by_ticker.get(snapshot.ticker),
                 alerts=tuple(alert_map.get(snapshot.ticker, ())),
             )
             for snapshot in snapshots
