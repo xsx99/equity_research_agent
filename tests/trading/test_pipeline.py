@@ -41,6 +41,32 @@ class _FakeNewsProvider:
         return []
 
 
+def _fake_global_context(as_of):
+    return {
+        "as_of": as_of.isoformat(),
+        "indicators": {},
+        "official_updates": [],
+        "trump_updates": [
+            {
+                "source": "whitehouse.gov",
+                "title": "President Trump discusses AAPL and export tariffs",
+                "summary": "Direct ticker-level policy mention for AAPL.",
+                "published_at": "2026-06-01T11:30:00+00:00",
+                "url": "https://example.test/aapl-policy",
+            }
+        ],
+        "geopolitical_news": [
+            {
+                "source": "AP News",
+                "title": "Geopolitical shock lifts oil and raises growth concerns",
+                "summary": "The item is high-importance macro risk context.",
+                "published_at": "2026-06-01T11:00:00+00:00",
+                "url": "https://example.test/geopolitical-risk",
+            }
+        ],
+    }
+
+
 class _RepositoryWithoutCandidateScores:
     def __init__(self) -> None:
         self.strategy_runs: list[StrategyRunRecord] = []
@@ -148,6 +174,7 @@ def test_signal_pipeline_can_refresh_source_records_before_building_snapshots():
     ingestion_service = SourceIngestionService(
         market_provider=_FakeMarketProvider(),
         news_provider=_FakeNewsProvider(),
+        global_context_fetcher=_fake_global_context,
         source_repository=source_repository,
         artifact_repository=artifact_repository,
         provider_name="fixture",
@@ -168,6 +195,8 @@ def test_signal_pipeline_can_refresh_source_records_before_building_snapshots():
     assert snapshots[0].source_freshness_json["technical"] == "fresh"
     assert snapshots[0].signal_json["technical"]["return_1d"] == 0.03
     assert artifact_repository.source_ingestion_runs[0].run_type == "pre_open"
+    assert source_repository.latest_available_by_family("AAPL", "social_macro", now)
+    assert artifact_repository.social_macro_items[0].category == "trump_update"
 
 
 def test_signal_pipeline_requests_option_chain_during_preopen_refresh():
@@ -208,6 +237,7 @@ def test_signal_pipeline_requests_option_chain_during_preopen_refresh():
         "technical",
         "fundamental",
         "events_news",
+        "social_macro",
         "option_chain",
     )
 

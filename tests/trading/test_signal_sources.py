@@ -87,6 +87,33 @@ class _FakeNewsProvider:
         ]
 
 
+def _fake_global_context(as_of):
+    assert as_of == datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+    return {
+        "as_of": as_of.isoformat(),
+        "indicators": {},
+        "official_updates": [],
+        "trump_updates": [
+            {
+                "source": "whitehouse.gov",
+                "title": "President Trump discusses NVDA export controls",
+                "summary": "Comments directly reference NVDA and chip export policy.",
+                "published_at": "2026-06-01T11:40:00+00:00",
+                "url": "https://example.test/trump-nvda",
+            }
+        ],
+        "geopolitical_news": [
+            {
+                "source": "AP News",
+                "title": "Airstrikes and oil volatility pressure semiconductor sentiment",
+                "summary": "Rising geopolitical risk could pressure growth and semiconductor names.",
+                "published_at": "2026-06-01T11:10:00+00:00",
+                "url": "https://example.test/geopolitical-semiconductor",
+            }
+        ],
+    }
+
+
 class _DuplicateNewsProvider:
     def fetch_recent(self, ticker: str, limit: int):
         assert ticker == "AAPL"
@@ -152,6 +179,7 @@ def test_source_ingestion_service_adapts_existing_providers_and_records_metadata
         "source_records": 3,
         "fundamental_snapshots": 1,
         "event_news_items": 1,
+        "social_macro_items": 0,
     }
     assert {record.source_family for record in records} == {"technical", "fundamental", "events_news"}
     assert source_repository.latest_available_by_family("AAPL", "technical", now)[0].payload["bars"][1]["close"] == 103.0
@@ -191,6 +219,7 @@ def test_source_ingestion_service_condenses_news_and_records_run_metadata():
         "source_records": 2,
         "fundamental_snapshots": 0,
         "event_news_items": 2,
+        "social_macro_items": 0,
     }
     assert result.ingestion_run.metadata_json["news_condensation"] == {
         "raw_news_item_count": 4,
@@ -253,8 +282,40 @@ def test_source_ingestion_service_adapts_option_chain_rows_when_provider_support
         "source_records": 1,
         "fundamental_snapshots": 0,
         "event_news_items": 0,
+        "social_macro_items": 0,
     }
     assert len(rows) == 1
     assert rows[0].source_family == "option_chain"
     assert rows[0].payload["contracts"][0]["contract_symbol"] == "AAPL260629C00120000"
     assert market_provider.option_chain_calls == ["AAPL"]
+
+
+def test_source_ingestion_service_normalizes_social_macro_rows():
+    now = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+    source_repository = InMemorySignalSourceRepository()
+    artifact_repository = InMemoryTradingRepository()
+
+    result = SourceIngestionService(
+        market_provider=_FakeMarketProvider(),
+        news_provider=None,
+        global_context_fetcher=_fake_global_context,
+        source_repository=source_repository,
+        artifact_repository=artifact_repository,
+        provider_name="fixture",
+        now=lambda: now,
+        sleeper=lambda seconds: None,
+    ).refresh_tickers(("NVDA",), as_of=now, run_type="targeted", source_families=("social_macro",))
+
+    rows = source_repository.latest_available_by_family("NVDA", "social_macro", now)
+
+    assert result.ingestion_run.coverage_json == {
+        "tickers_requested": 1,
+        "source_records": 2,
+        "fundamental_snapshots": 0,
+        "event_news_items": 0,
+        "social_macro_items": 2,
+    }
+    assert len(rows) == 2
+    assert {row.payload["category"] for row in rows} == {"trump_update", "geopolitical_news"}
+    assert artifact_repository.social_macro_items[0].ticker == "NVDA"
+    assert artifact_repository.social_macro_items[0].source_key == "trump_updates"

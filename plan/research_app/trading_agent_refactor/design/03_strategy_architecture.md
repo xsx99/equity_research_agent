@@ -97,6 +97,10 @@ Examples:
 
 Each strategy has explicit inputs, thresholds, candidate scoring, risk tags, holding assumption, and invalidators.
 
+Structured insider confirmation is now part of the supported deterministic strategy surface. Strategies may require fields such as `insider_net_buy_value_30d`, `insider_cluster_buy_count_90d`, `officer_buy_flag`, or `recent_form4_filing_at`. What remains deferred is deep SEC narrative interpretation, not the entire insider family.
+
+Structured social/policy context is also supported as a deterministic signal family under `social_macro`. It includes replayable `trump_updates`, `official_updates`, and `geopolitical_news` rows when they explicitly mention the ticker/company or map through an approved theme relationship. This family can add confirmation, downgrade risk, or block adds, but it cannot create a macro-only single-name bearish trade by itself.
+
 ### Relative-Strength Catalyst Policy
 
 V2 should optimize for the pattern that evals showed actually has edge: bullish catalyst plus relative strength confirmation. A bullish stock is not actionable just because the news sounds positive. It becomes actionable when:

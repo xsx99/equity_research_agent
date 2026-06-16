@@ -11,11 +11,12 @@ def test_initial_catalog_contains_expected_strategies():
     strategy_ids = {item.strategy_id for item in INITIAL_STRATEGY_DEFINITIONS}
     strategy_layer_ids = {item.strategy_id for item in INITIAL_STRATEGY_DEFINITIONS}
     expression_bucket_ids = {item.strategy_id for item in INITIAL_EXPRESSION_DEFINITIONS}
-    assert len(strategy_ids) == 19
-    assert len(strategy_layer_ids) == 19
+    assert len(strategy_ids) == 20
+    assert len(strategy_layer_ids) == 20
     assert len(expression_bucket_ids) == 5
     assert "catalyst_breakout_v1" in strategy_ids
     assert "gap_and_go_v1" in strategy_ids
+    assert "insider_accumulation_momentum_v1" in strategy_ids
     assert "short_squeeze_breakout_v1" in strategy_ids
     assert "strong_theme_catalyst_continuation_v1" in strategy_layer_ids
     assert "strong_theme_no_clear_near_term_entry_v1" in strategy_layer_ids
@@ -90,6 +91,6 @@ def test_option_expression_seeds_publish_explicit_iv_and_rank_leg_fields():
 def test_combined_definition_loader_preserves_strategy_then_expression_order():
     rows = load_all_trading_definitions()
 
-    assert len(rows) == 24
-    assert [row["strategy_layer"] for row in rows[:19]] == ["tactical_pattern"] * 19
-    assert [row["strategy_layer"] for row in rows[19:]] == ["expression_bucket"] * 5
+    assert len(rows) == 25
+    assert [row["strategy_layer"] for row in rows[:20]] == ["tactical_pattern"] * 20
+    assert [row["strategy_layer"] for row in rows[20:]] == ["expression_bucket"] * 5

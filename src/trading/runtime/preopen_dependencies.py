@@ -100,6 +100,7 @@ def build_live_preopen_dependencies(session: Any | None = None) -> LivePreopenDe
 
     from src.agents.prompt_registry import PromptRegistry
     from src.agents.trading import _default_agent_runner
+    from src.providers.global_context import get_global_context
     from src.providers.market_data import AlpacaMarketDataProvider
     from src.trading.brokers.paper_option import (
         DEFAULT_ALPACA_PAPER_TRADING_BASE_URL,
@@ -135,6 +136,7 @@ def build_live_preopen_dependencies(session: Any | None = None) -> LivePreopenDe
     signal_ingestion = SourceIngestionService(
         market_provider=market_provider,
         news_provider=news_provider,
+        global_context_fetcher=lambda as_of: get_global_context(as_of=as_of, limit=5),
         source_repository=source_repository,
         artifact_repository=source_repository,
         provider_name="alpaca_live",

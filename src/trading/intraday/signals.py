@@ -125,7 +125,12 @@ def _diff_signal_families(
             prior_value = prior_values.get(key)
             if current_value == prior_value:
                 continue
-            if isinstance(current_value, (int, float)) and isinstance(prior_value, (int, float)):
+            if (
+                isinstance(current_value, (int, float))
+                and isinstance(prior_value, (int, float))
+                and not isinstance(current_value, bool)
+                and not isinstance(prior_value, bool)
+            ):
                 family_delta[key] = current_value - prior_value
             else:
                 family_delta[key] = current_value

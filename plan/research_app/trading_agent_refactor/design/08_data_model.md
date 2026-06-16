@@ -18,6 +18,7 @@ Proposed new tables:
 | `theme_taxonomy` | User-maintained theme hierarchy used for read-through, risk exposure, peer basket construction, and UI grouping |
 | `fundamental_snapshots` | Point-in-time fundamental and valuation source rows with ticker, period/as-of metadata, provider/source refs, normalized metrics JSON, raw payload reference, and availability timestamps |
 | `event_news_items` | Point-in-time headline, calendar, and provider-event rows with event type, optional source ticker, sentiment/direction, importance, dedupe key, provider/source refs, raw payload reference, and availability timestamps |
+| `social_macro_items` | Point-in-time normalized social/policy rows derived from global context, with category, sentiment/direction, importance score, mention metadata, dedupe key, provider/source refs, and availability timestamps |
 | `macro_snapshots` | One macro snapshot/regime per run/day |
 | `macro_readthrough_events` | Structured peer/sector-leader earnings read-through events with source ticker, scope, mechanism, direction, affected theme/relationship, transcript/release provenance, and validity window |
 | `calendar_events` | Normalized future macro, economic, Fed, earnings, market-structure, and option-relevant events with source/provider provenance, scheduled time, event type, global importance, affected ticker/theme metadata, and raw payload reference |

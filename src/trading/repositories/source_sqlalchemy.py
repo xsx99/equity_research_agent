@@ -5,15 +5,19 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from src.db.models.trading import EventNewsItem, FundamentalSnapshot, ProviderRequestRun, SourceIngestionRun
+from src.db.models.insider_trades import InsiderTrade
+from src.db.models.trading import EventNewsItem, FundamentalSnapshot, ProviderRequestRun, SocialMacroItem, SourceIngestionRun
 from src.trading.data_sources.provider_resilience import ProviderRequestRunRecord
 from src.trading.signals.sources import (
     EventNewsItemRecord,
     FundamentalSnapshotRecord,
+    SocialMacroItemRecord,
     SourceIngestionRunRecord,
     SourceRecord,
     source_record_from_event_news_item,
     source_record_from_fundamental_snapshot,
+    source_record_from_insider_trade,
+    source_record_from_social_macro_item,
 )
 
 
@@ -130,6 +134,40 @@ class SQLAlchemySignalSourceRepository:
         row.metadata_json = dict(item.metadata_json)
         self.session.flush()
 
+    def save_social_macro_item(self, item: SocialMacroItemRecord) -> None:
+        row = self.session.query(SocialMacroItem).filter_by(
+            social_macro_item_id=_to_uuid(item.social_macro_item_id)
+        ).one_or_none()
+        if row is None:
+            row = SocialMacroItem(social_macro_item_id=_to_uuid(item.social_macro_item_id))
+            self.session.add(row)
+        row.ticker = item.ticker
+        row.category = item.category
+        row.source_type = item.source_type
+        row.source_key = item.source_key
+        row.provider = item.provider
+        row.title = item.title
+        row.summary = item.summary
+        row.direction = item.direction
+        row.sentiment_direction = item.sentiment_direction
+        row.importance_score = item.importance_score
+        row.importance_label = item.importance_label
+        row.policy_headwind_flag = item.policy_headwind_flag
+        row.policy_tailwind_flag = item.policy_tailwind_flag
+        row.explicit_ticker_mention_flag = item.explicit_ticker_mention_flag
+        row.explicit_theme_mention_flag = item.explicit_theme_mention_flag
+        row.theme_tags_json = list(item.theme_tags_json)
+        row.company_name_mentions_json = list(item.company_name_mentions_json)
+        row.source_refs_json = list(item.source_refs_json)
+        row.dedupe_key = item.dedupe_key
+        row.event_time = item.event_time
+        row.published_at = item.published_at
+        row.ingested_at = item.ingested_at
+        row.available_for_decision_at = item.available_for_decision_at
+        row.raw_payload_ref = item.raw_payload_ref
+        row.metadata_json = dict(item.metadata_json)
+        self.session.flush()
+
     def records_for_ticker(self, ticker: str) -> tuple[SourceRecord, ...]:
         symbol = ticker.strip().upper()
         records = [
@@ -144,6 +182,14 @@ class SQLAlchemySignalSourceRepository:
         records.extend(
             source_record_from_event_news_item(self._to_event_news_record(row))
             for row in self.session.query(EventNewsItem).filter_by(ticker=symbol).all()
+        )
+        records.extend(
+            source_record_from_social_macro_item(self._to_social_macro_record(row))
+            for row in self.session.query(SocialMacroItem).filter_by(ticker=symbol).all()
+        )
+        records.extend(
+            source_record_from_insider_trade(row)
+            for row in self.session.query(InsiderTrade).filter_by(ticker=symbol).all()
         )
         return tuple(sorted(records, key=lambda record: record.available_for_decision_at))
 
@@ -201,6 +247,36 @@ class SQLAlchemySignalSourceRepository:
             headline=row.headline,
             summary=row.summary,
             provider=row.provider,
+            source_refs_json=list(row.source_refs_json or []),
+            dedupe_key=row.dedupe_key,
+            event_time=row.event_time,
+            published_at=row.published_at,
+            ingested_at=row.ingested_at,
+            available_for_decision_at=row.available_for_decision_at,
+            raw_payload_ref=row.raw_payload_ref,
+            metadata_json=dict(row.metadata_json or {}),
+        )
+
+    def _to_social_macro_record(self, row: SocialMacroItem) -> SocialMacroItemRecord:
+        return SocialMacroItemRecord(
+            social_macro_item_id=str(row.social_macro_item_id),
+            ticker=row.ticker,
+            category=row.category,
+            source_type=row.source_type,
+            source_key=row.source_key,
+            provider=row.provider,
+            title=row.title,
+            summary=row.summary,
+            direction=row.direction,
+            sentiment_direction=row.sentiment_direction,
+            importance_score=float(row.importance_score) if row.importance_score is not None else None,
+            importance_label=row.importance_label,
+            policy_headwind_flag=bool(row.policy_headwind_flag),
+            policy_tailwind_flag=bool(row.policy_tailwind_flag),
+            explicit_ticker_mention_flag=bool(row.explicit_ticker_mention_flag),
+            explicit_theme_mention_flag=bool(row.explicit_theme_mention_flag),
+            theme_tags_json=list(row.theme_tags_json or []),
+            company_name_mentions_json=list(row.company_name_mentions_json or []),
             source_refs_json=list(row.source_refs_json or []),
             dedupe_key=row.dedupe_key,
             event_time=row.event_time,
