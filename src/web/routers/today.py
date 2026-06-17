@@ -51,6 +51,8 @@ from src.web.presenters.today_copy import (
     strategy_label,
     trade_identity_label,
 )
+from src.web.presenters.today_candidates import build_today_candidates_view
+from src.web.presenters.today_overview import build_today_overview
 from src.web.presenters.today_risk_macro import build_today_risk_macro_payload
 from src.web.presenters.today_workspace import build_ticker_workspace
 
@@ -273,22 +275,32 @@ def load_today_dashboard(
         latest_risk=latest_risk,
         latest_macro_snapshot=latest_macro_snapshot,
     )
+    job_timeline = _build_job_timeline(latest_reflection)
+    overview = build_today_overview(
+        header=header,
+        job_timeline=job_timeline,
+        risk_macro=risk_macro,
+        live_alerts=_load_live_alerts(session),
+        material_changes=_load_material_changes(session),
+        positions=positions,
+        closed_positions=closed_positions,
+    )
+    candidates = build_today_candidates_view(
+        rows=candidate_rows,
+        manual_requests=manual_requests,
+        themes=themes,
+        active_universe_filter=_serialize_universe_filter(active_universe_filter),
+        portfolio_intents=portfolio_intents,
+        relationships=relationships,
+        peer_baskets=peer_baskets,
+    )
 
     return {
         "selected_tab": selected_tab,
         "tabs": tuple({"id": tab_id, "label": label} for tab_id, label in _TAB_LABELS),
         "header": header,
-        "job_timeline": _build_job_timeline(latest_reflection),
-        "overview": {
-            "command_center": _build_overview_command_center(
-                header=header,
-                positions=positions,
-                closed_positions=closed_positions,
-                ticker_workspace=ticker_workspace,
-            ),
-            "live_alerts": _load_live_alerts(session),
-            "material_changes": _load_material_changes(session),
-        },
+        "job_timeline": job_timeline,
+        "overview": overview,
         "portfolio": {
             "positions": positions,
             "option_positions": _load_option_positions(session),
@@ -300,20 +312,7 @@ def load_today_dashboard(
         },
         "ticker_workspace": ticker_workspace,
         "risk_macro": risk_macro,
-        "candidates": {
-            "active_universe_filter": _serialize_universe_filter(active_universe_filter),
-            "summary": _build_candidates_summary(
-                rows=candidate_rows,
-                manual_requests=manual_requests,
-                themes=themes,
-            ),
-            "rows": candidate_rows,
-            "manual_requests": manual_requests,
-            "portfolio_intents": portfolio_intents,
-            "relationships": relationships,
-            "peer_baskets": peer_baskets,
-            "themes": themes,
-        },
+        "candidates": candidates,
         "learning_strategies": {
             "reflection": _serialize_reflection(latest_reflection),
             "learning_factors": _load_learning_factors(session),
@@ -390,6 +389,9 @@ def _build_header(
         "trade_date": trade_date,
         "macro_regime": getattr(latest_macro_snapshot, "regime", None) or "unavailable",
         "risk_appetite": latest_risk.risk_appetite if latest_risk else "unavailable",
+        "market_phase": "Pre-open" if trade_date else "Unavailable",
+        "runtime_mode": "live" if latest_risk else "dry_run",
+        "live_status": "degraded" if getattr(latest_macro_snapshot, "regime", None) is None else "live",
         "nav": latest_portfolio.net_liquidation_value if latest_portfolio else None,
         "day_pnl": latest_portfolio.day_pnl if latest_portfolio else None,
         "buying_power": latest_portfolio.buying_power if latest_portfolio else None,
