@@ -574,6 +574,9 @@ class TestTodayDashboard:
         assert "Signal Summary" in response.text
         assert "Risk Manager Summary" in response.text
         assert "Position / Execution State" in response.text
+        assert 'data-testid="signal-summary"' in response.text
+        assert 'data-testid="timeline-events"' in response.text
+        assert "sticky-rail" in response.text
         assert 'data-panel="trend"' not in response.text
         assert 'data-panel="decisions"' not in response.text
         assert 'data-panel="risk"' not in response.text
@@ -636,6 +639,7 @@ class TestTodayDashboard:
         assert "Technology concentration" in response.text
         assert "Macro regime unavailable" in response.text
         assert "macro-strip" in response.text
+        assert 'data-testid="event-risk-list"' in response.text
         assert "direct earnings gap risk" in response.text
         assert "AAPL / high" in response.text
         assert "block_open" in response.text
@@ -742,6 +746,7 @@ class TestTodayDashboard:
         assert "theme-chip-list" in response.text
         assert "scroll-panel" in response.text
         assert "scroll-rail" in response.text
+        assert 'data-testid="candidate-group-AAPL"' in response.text
         assert "trades-canvas" not in response.text
         assert "Signal Summary" not in response.text
 

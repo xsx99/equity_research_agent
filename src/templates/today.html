@@ -93,7 +93,7 @@
 
         {% if workspace and (workspace.buckets.action_now or workspace.buckets.open_positions or workspace.buckets.closed_today or workspace.buckets.reviewing or workspace.buckets.watch) %}
         <div class="ticker-workspace" data-selected-ticker="{{ workspace.selected_ticker }}">
-          <aside class="ticker-rail">
+          <aside class="ticker-rail sticky-rail">
             {% for bucket_id, bucket_label, bucket_items in (
               ("action_now", "Action Now", workspace.buckets.action_now),
               ("open_positions", "Open Positions", workspace.buckets.open_positions),
@@ -188,7 +188,7 @@
             </section>
 
             <div class="ticker-support-grid">
-              <section class="card subcard">
+              <section class="card subcard" data-testid="signal-summary">
                 <h4>Signal Summary</h4>
                 <div class="support-mini-meta">
                   <span class="detail-muted">{{ detail.latest_conclusion.signal_summary.summary_bullets | length }} highlighted signal{% if detail.latest_conclusion.signal_summary.summary_bullets|length != 1 %}s{% endif %}</span>
@@ -269,7 +269,7 @@
 
             {% if selected_detail_tab == "timeline" %}
             <div class="ticker-detail-split">
-              <section class="card subcard" data-panel="timeline">
+              <section class="card subcard scroll-panel" data-panel="timeline" data-testid="timeline-events">
                 <h4>Timeline</h4>
                 {% for item in detail.tabs.timeline %}
                 <a
@@ -717,7 +717,7 @@
           <span class="surface-block-count">{{ risk_macro.events | length }}</span>
         </div>
         {% if risk_macro.events %}
-        <div class="candidate-queue-list scroll-panel">
+        <div class="candidate-queue-list scroll-panel" data-testid="event-risk-list">
           {% for row in risk_macro.events %}
           <article class="candidate-queue-card">
             <div class="candidate-card-head">
@@ -907,7 +907,7 @@
         <div class="candidate-decision-list scroll-rail">
           {% for row in decision_readout %}
           {% set internal_ids = row.detail_internal_ids or {} %}
-          <article class="candidate-decision-card">
+          <article class="candidate-decision-card" data-testid="candidate-group-{{ row.ticker }}">
             <div class="candidate-card-head">
               <div>
                 <strong>{{ row.ticker }}</strong>

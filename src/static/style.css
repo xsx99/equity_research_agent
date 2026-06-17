@@ -670,6 +670,14 @@ a:hover { text-decoration: underline; }
   gap: 0.85rem;
 }
 
+.sticky-rail {
+  position: sticky;
+  top: 1rem;
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
+  padding-right: 0.2rem;
+}
+
 .ticker-bucket {
   border: 1px solid #dfe6ef;
   border-radius: 16px;
@@ -1180,6 +1188,13 @@ a:hover { text-decoration: underline; }
 
   .ticker-support-grid > :first-child {
     grid-column: auto;
+  }
+
+  .sticky-rail {
+    position: static;
+    max-height: none;
+    overflow: visible;
+    padding-right: 0;
   }
 }
 
