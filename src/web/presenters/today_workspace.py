@@ -13,6 +13,15 @@ _TECHNICAL_CHART_SPECS = (
     ("price / key level trend", {"price", "price_trend", "key_levels"}),
     ("relative strength trend", {"relative_strength", "relative_strength_trend", "rs"}),
 )
+_SIGNAL_GROUP_ORDER = (
+    "Risk blockers",
+    "Decision drivers",
+    "Trend",
+    "Insider",
+    "Policy / Social",
+    "Evidence",
+    "Data quality",
+)
 
 
 def build_ticker_workspace(
@@ -289,7 +298,7 @@ def _build_detail(
             "confidence": latest_decision.get("confidence"),
         },
         "signal_summary": {
-            "summary_bullets": _build_summary_bullets(signal_history.get("summary")),
+            **_build_signal_summary(signal_history.get("summary")),
             "technical_charts": technical_charts,
             "news_snippets": news_snippets,
             "fundamental_snippets": fundamental_snippets,
@@ -351,7 +360,38 @@ def _build_detail(
     }
 
 
-def _build_summary_bullets(summary_items: Any) -> list[str]:
+def _build_signal_summary(summary_items: Any) -> dict[str, Any]:
+    bullets = _dedupe_summary_bullets(summary_items)
+    if bullets == [_EMPTY_MARKER]:
+        return {
+            "summary_bullets": bullets,
+            "hidden_bullet_count": 0,
+            "grouped_sections": (),
+        }
+
+    grouped = _group_summary_bullets(bullets)
+    if len(bullets) <= 5:
+        primary = bullets
+        hidden_count = 0
+    else:
+        ordered = []
+        for label in _SIGNAL_GROUP_ORDER:
+            ordered.extend(grouped.get(label, ()))
+        primary = ordered[:5]
+        hidden_count = max(len(ordered) - len(primary), 0)
+    sections = tuple(
+        {"label": label, "bullets": tuple(grouped[label])}
+        for label in _SIGNAL_GROUP_ORDER
+        if grouped.get(label)
+    )
+    return {
+        "summary_bullets": primary,
+        "hidden_bullet_count": hidden_count,
+        "grouped_sections": sections,
+    }
+
+
+def _dedupe_summary_bullets(summary_items: Any) -> list[str]:
     if isinstance(summary_items, list):
         bullets = []
         seen: set[str] = set()
@@ -364,6 +404,30 @@ def _build_summary_bullets(summary_items: Any) -> list[str]:
         if bullets:
             return bullets
     return [_EMPTY_MARKER]
+
+
+def _group_summary_bullets(bullets: list[str]) -> dict[str, list[str]]:
+    grouped = {label: [] for label in _SIGNAL_GROUP_ORDER}
+    for bullet in bullets:
+        grouped[_summary_group_label(bullet)].append(bullet)
+    return grouped
+
+
+def _summary_group_label(bullet: str) -> str:
+    normalized = bullet.strip().lower()
+    if any(token in normalized for token in ("blocked", "risk ", "invalidator", "event cluster")):
+        return "Risk blockers"
+    if any(token in normalized for token in ("insider", "form 4", "cluster buy", "net buy")):
+        return "Insider"
+    if any(token in normalized for token in ("policy", "social", "tariff", "trump", "official update")):
+        return "Policy / Social"
+    if any(token in normalized for token in ("relative strength", "breakout", "trend", "volume", "price ")):
+        return "Trend"
+    if any(token in normalized for token in ("stale", "missing", "data quality", "freshness")):
+        return "Data quality"
+    if any(token in normalized for token in ("catalyst", "guidance", "earnings", "headline", "fresh ")):
+        return "Evidence"
+    return "Decision drivers"
 
 
 def _build_technical_charts(technical_items: Any) -> list[dict[str, Any]]:
@@ -430,18 +494,43 @@ def _build_timeline(
     closed_position: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     timeline: list[dict[str, Any]] = []
+    seen_signal_entries: set[tuple[str, str, str, str]] = set()
+    phase_counts: dict[str, int] = {}
+    previous_phase_state: dict[str, dict[str, str]] = {}
 
     for index, item in enumerate(signal_history.get("timeline") or [], start=1):
         if not isinstance(item, dict):
             continue
-        timeline.append(
-            {
-                "time": item.get("time"),
-                "event_type": item.get("event_type") or "signal",
-                "summary": item.get("summary") or _EMPTY_MARKER,
-                "detail_anchor": f"signal-{index}",
-            }
+        signal_entry_key = (
+            str(item.get("time") or ""),
+            str(item.get("phase") or ""),
+            str(item.get("event_type") or "signal"),
+            str(item.get("summary") or _EMPTY_MARKER),
         )
+        if signal_entry_key in seen_signal_entries:
+            continue
+        seen_signal_entries.add(signal_entry_key)
+        phase = str(item.get("phase") or "").strip().lower()
+        phase_counts[phase] = phase_counts.get(phase, 0) + 1
+        timeline_item = {
+            "time": item.get("time"),
+            "event_type": item.get("event_type") or "signal",
+            "summary": item.get("summary") or _EMPTY_MARKER,
+            "detail_anchor": f"signal-{index}",
+        }
+        if phase:
+            timeline_item["title"] = _timeline_phase_title(phase, phase_counts[phase], item.get("time"))
+            timeline_item["change_type"] = "baseline" if phase_counts[phase] == 1 else "delta"
+            current_state = _timeline_state_map(item.get("summary"))
+            previous_state = previous_phase_state.get(phase, {})
+            delta_fields = _timeline_delta_fields(previous_state, current_state)
+            if delta_fields:
+                timeline_item["delta_fields"] = tuple(delta_fields)
+            source_refs = tuple(item.get("source_refs") or ())
+            if source_refs:
+                timeline_item["source_refs"] = source_refs
+            previous_phase_state[phase] = current_state
+        timeline.append(timeline_item)
 
     for index, item in enumerate(news_items or [], start=1):
         if not isinstance(item, dict):
@@ -467,6 +556,55 @@ def _build_timeline(
 
     timeline.sort(key=lambda item: _sort_key(item.get("time")))
     return timeline or [_empty_timeline_item()]
+
+
+def _timeline_phase_title(phase: str, occurrence: int, time_value: Any) -> str:
+    base = " ".join(part.capitalize() for part in phase.replace("_", " ").split()) or "Signal"
+    if occurrence == 1:
+        return f"{base} Baseline"
+    if phase == "intraday":
+        label = _intraday_time_label(time_value)
+        return f"{base} Refresh {label}".strip()
+    return f"{base} Rerun"
+
+
+def _intraday_time_label(value: Any) -> str:
+    parsed = _parse_timestamp(value)
+    if parsed is None:
+        return ""
+    return parsed.astimezone(timezone.utc).strftime("%H:%M")
+
+
+def _timeline_state_map(summary: Any) -> dict[str, str]:
+    text = str(summary or "").strip()
+    if not text:
+        return {}
+    state: dict[str, str] = {}
+    for raw_clause in text.replace(";", ",").split(","):
+        clause = raw_clause.strip()
+        lowered = clause.lower()
+        if lowered.startswith("sentiment "):
+            state["sentiment"] = clause.split(" ", 1)[1].strip()
+        elif lowered.startswith("risk "):
+            state["risk"] = clause.split(" ", 1)[1].strip()
+        elif lowered.startswith("candidate "):
+            state["candidate"] = clause.split(" ", 1)[1].strip()
+        elif lowered.startswith("event "):
+            state["event"] = clause.split(" ", 1)[1].strip()
+    return state
+
+
+def _timeline_delta_fields(previous_state: dict[str, str], current_state: dict[str, str]) -> list[str]:
+    if not previous_state:
+        return []
+    delta_fields = []
+    for key, current_value in current_state.items():
+        previous_value = previous_state.get(key)
+        if previous_value and previous_value != current_value:
+            delta_fields.append(f"{key} {previous_value} -> {current_value}")
+        elif key not in previous_state:
+            delta_fields.append(f"new {key}")
+    return delta_fields
 
 
 def _build_decision_list(decisions: list[dict[str, Any]]) -> list[dict[str, Any]]:

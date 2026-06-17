@@ -1193,3 +1193,109 @@ def test_build_ticker_workspace_surfaces_key_drivers_and_counterarguments():
     assert detail["latest_conclusion"]["trade_decision"]["counterarguments"] == [
         "valuation is elevated versus peers"
     ]
+
+
+def test_build_ticker_workspace_computes_timeline_delta_entries_for_repeated_phase_runs():
+    workspace = build_ticker_workspace(
+        trade_rows=[
+            {
+                "ticker": "AAPL",
+                "decision": "enter_long",
+                "selected_strategy_id": "gap_continuation_v1",
+                "expression_bucket_id": "long_stock",
+                "confidence": 0.74,
+                "created_at": "2026-06-16T13:32:00Z",
+            },
+        ],
+        selected_ticker="AAPL",
+        positions_by_ticker={},
+        risk_by_ticker={},
+        signal_history_by_ticker={
+            "AAPL": {
+                "summary": ["Relative strength improved vs QQQ"],
+                "timeline": [
+                    {
+                        "time": "2026-06-16T12:45:00Z",
+                        "event_type": "signal_snapshot",
+                        "phase": "pre_open",
+                        "summary": "Sentiment neutral, risk approved",
+                        "source_refs": ["signal:1"],
+                    },
+                    {
+                        "time": "2026-06-16T12:55:00Z",
+                        "event_type": "signal_snapshot",
+                        "phase": "pre_open",
+                        "summary": "Sentiment negative, risk reduced",
+                        "source_refs": ["signal:2"],
+                    },
+                    {
+                        "time": "2026-06-16T12:55:00Z",
+                        "event_type": "signal_snapshot",
+                        "phase": "pre_open",
+                        "summary": "Sentiment negative, risk reduced",
+                        "source_refs": ["signal:2"],
+                    },
+                ],
+            }
+        },
+        news_by_ticker={},
+        fundamentals_by_ticker={},
+    )
+
+    timeline = workspace["detail"]["tabs"]["timeline"]
+
+    assert [item["title"] for item in timeline[:2]] == ["Pre Open Baseline", "Pre Open Rerun"]
+    assert timeline[0]["change_type"] == "baseline"
+    assert timeline[1]["change_type"] == "delta"
+    assert timeline[1]["delta_fields"] == ("sentiment neutral -> negative", "risk approved -> reduced")
+    assert timeline[1]["source_refs"] == ("signal:2",)
+
+
+def test_build_ticker_workspace_truncates_signal_summary_and_groups_hidden_bullets():
+    workspace = build_ticker_workspace(
+        trade_rows=[
+            {
+                "ticker": "NVDA",
+                "decision": "enter_long",
+                "created_at": "2026-06-16T13:32:00Z",
+            },
+        ],
+        selected_ticker="NVDA",
+        positions_by_ticker={},
+        risk_by_ticker={},
+        signal_history_by_ticker={
+            "NVDA": {
+                "summary": [
+                    "Risk blocked by event cluster",
+                    "Price broke above preopen resistance",
+                    "Relative strength improved vs QQQ",
+                    "Insider cluster buy count accelerated",
+                    "Policy headline turned into a tailwind",
+                    "Relative strength improved vs QQQ",
+                    "Fresh catalyst still intact",
+                    "Data quality: no stale inputs",
+                ]
+            }
+        },
+        news_by_ticker={},
+        fundamentals_by_ticker={},
+    )
+
+    signal_summary = workspace["detail"]["latest_conclusion"]["signal_summary"]
+
+    assert signal_summary["summary_bullets"] == [
+        "Risk blocked by event cluster",
+        "Price broke above preopen resistance",
+        "Relative strength improved vs QQQ",
+        "Insider cluster buy count accelerated",
+        "Policy headline turned into a tailwind",
+    ]
+    assert signal_summary["hidden_bullet_count"] == 2
+    assert [section["label"] for section in signal_summary["grouped_sections"]] == [
+        "Risk blockers",
+        "Trend",
+        "Insider",
+        "Policy / Social",
+        "Evidence",
+        "Data quality",
+    ]

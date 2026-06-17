@@ -279,6 +279,14 @@ def _dashboard_payload() -> dict:
         },
         "risk_macro": {
             "risk_config_version": "risk_config_resolver_v1",
+            "command_center": {
+                "regime": "risk_off",
+                "risk_appetite_label": "Balanced",
+                "exposure_usage_pct": 42.0,
+                "event_risk_level": "High",
+                "warning_banner": "Risk context degraded; review macro and provider availability before acting.",
+                "basis_note": "Macro summary uses canonical risk + event context.",
+            },
             "binding_constraints": ("theme cap near limit",),
             "summary": {
                 "risk_status": "Within Limits",
@@ -297,6 +305,16 @@ def _dashboard_payload() -> dict:
                     "portfolio_risk_level": "high",
                     "affected_ticker": "AAPL",
                     "risk_mechanism": "direct earnings gap risk",
+                },
+            ),
+            "risk_sources": (
+                {
+                    "ticker": "AAPL",
+                    "risk_source": "own_event",
+                    "severity": "high",
+                    "recommended_action": "block_open",
+                    "rationale": "Own-event risk is inside the active trade horizon.",
+                    "basis_note": "pending_trade",
                 },
             ),
             "exposures": (
@@ -437,6 +455,36 @@ class TestTodayDashboard:
     def test_get_today_dashboard_renders_tabs_and_sections(self, client):
         payload = _dashboard_payload()
         payload["selected_tab"] = "overview"
+        payload["overview"]["operator_strip"] = {
+            "primary": (
+                {"label": "Market Phase", "value": "Pre-open", "tone": "neutral"},
+                {"label": "Runtime Mode", "value": "Live Manual Review", "tone": "neutral"},
+            ),
+            "context": (
+                {"label": "Macro Regime", "value": "Risk Off", "tone": "warning"},
+                {"label": "Live Status", "value": "Degraded", "tone": "warning"},
+            ),
+        }
+        payload["overview"]["metric_cards"] = (
+            {
+                "label": "Net Liquidation Value",
+                "primary_value": "$1,000,000.00",
+                "secondary_value": None,
+                "meta": {
+                    "updated_at_label": "2026-06-16 13:31 UTC",
+                    "source_of_truth_label": "Broker equity snapshot",
+                    "basis_note": None,
+                },
+            },
+        )
+        payload["overview"]["current_summary"] = {
+            "headline": "Macro is defensive and operator attention is concentrated in a small queue.",
+            "items": ("3 open alerts", "2 material signal changes", "1 manual review request awaiting linkage"),
+            "hidden_item_count": 1,
+            "meta": {
+                "updated_at_label": "2026-06-16 13:31 UTC",
+            },
+        }
         with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
             response = client.get("/today?tab=overview")
 
@@ -466,6 +514,10 @@ class TestTodayDashboard:
         assert "surface-table-wrap" in response.text
         assert "surface-block" in response.text
         assert "surface-block-count" in response.text
+        assert "overview-operator-strip" in response.text
+        assert "overview-metric-card" in response.text
+        assert "Current Session Summary" in response.text
+        assert "Broker equity snapshot" in response.text
 
     def test_trades_tab_only_renders_trades_workspace_body(self, client):
         payload = _dashboard_payload()
@@ -583,6 +635,10 @@ class TestTodayDashboard:
         assert "Within Limits" in response.text
         assert "Technology concentration" in response.text
         assert "Macro regime unavailable" in response.text
+        assert "macro-strip" in response.text
+        assert "direct earnings gap risk" in response.text
+        assert "AAPL / high" in response.text
+        assert "block_open" in response.text
         assert "trades-canvas" not in response.text
         assert "AI Infrastructure" not in response.text
 
@@ -620,6 +676,50 @@ class TestTodayDashboard:
     def test_candidates_tab_renders_summary_and_operations_modules(self, client):
         payload = _dashboard_payload()
         payload["selected_tab"] = "candidates"
+        payload["candidates"]["action_queue"] = (
+            {
+                "ticker": "TSLA",
+                "label": "Pinned",
+                "summary": "Review Only because post-event review. Latest result: Still on watch.",
+            },
+            {
+                "ticker": "MSFT",
+                "label": "No clean entry, so no trade",
+                "summary": "Negative catalyst detected. No clean entry, so no trade. Watch Only.",
+            },
+        )
+        payload["candidates"]["manual_review_queue"] = (
+            {
+                "ticker": "TSLA",
+                "status_label": "Pinned",
+                "mode_label": "Review Only",
+                "operator_summary": "Review Only because post-event review. Latest result: Still on watch.",
+                "reason": "post-event review",
+                "last_evaluated_label": "6m ago",
+                "decision_state_label": "Enter Long",
+                "execution_state_label": "Risk blocked",
+                "latest_block_reason": "Awaiting fresh event-risk snapshot",
+                "dismiss_form_action": "/today/manual-requests/request-1/dismiss",
+                "linked_detail_url": "/today?tab=trades&ticker=TSLA&detail_tab=decisions",
+                "degraded_linkage_copy": None,
+            },
+        )
+        payload["candidates"]["decision_readout"] = (
+            {
+                "ticker": "AAPL",
+                "primary_reason": "Momentum setup with clean catalyst.",
+                "current_outcome_label": "Ready for review",
+                "trade_identity_label": "Action Now",
+                "strategy_label": "Gap continuation",
+                "duplicate_count": 4,
+                "alternatives": (
+                    {"strategy_label": "Pullback reclaim", "operator_summary": "Alternative pullback setup."},
+                    {"strategy_label": "RS breakout", "operator_summary": "Secondary continuation lens."},
+                    {"strategy_label": "Reversal try", "operator_summary": "Lower-ranked reversal setup."},
+                ),
+                "detail_internal_ids": {"strategy_match": "gap_continuation_v1"},
+            },
+        )
         with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
             response = client.get("/today?tab=candidates")
 
@@ -633,12 +733,15 @@ class TestTodayDashboard:
         assert "Review Only" in response.text
         assert "Still on watch" in response.text
         assert "Candidate Decisions" in response.text
-        assert "Negative catalyst detected" in response.text
-        assert "No clean entry, so no trade" in response.text
-        assert "Valuation repair setup" in response.text
+        assert "Momentum setup with clean catalyst." in response.text
+        assert "Strategy alternatives" in response.text
+        assert "Pullback reclaim" in response.text
+        assert "Awaiting fresh event-risk snapshot" in response.text
         assert "Advanced Universe Context" in response.text
         assert "Advanced" in response.text
         assert "theme-chip-list" in response.text
+        assert "scroll-panel" in response.text
+        assert "scroll-rail" in response.text
         assert "trades-canvas" not in response.text
         assert "Signal Summary" not in response.text
 
@@ -705,6 +808,10 @@ class TestTodayDashboard:
         payload = _dashboard_payload()
         payload["selected_tab"] = "trades"
         payload["ticker_workspace"]["detail"]["latest_conclusion"]["signal_summary"]["summary_bullets"] = ()
+        payload["ticker_workspace"]["detail"]["latest_conclusion"]["signal_summary"]["hidden_bullet_count"] = 3
+        payload["ticker_workspace"]["detail"]["latest_conclusion"]["signal_summary"]["grouped_sections"] = (
+            {"label": "Policy / Social", "bullets": ("Policy headline turned into a tailwind",)},
+        )
         payload["ticker_workspace"]["detail"]["latest_conclusion"]["signal_summary"]["technical_charts"] = ()
         payload["ticker_workspace"]["detail"]["latest_conclusion"]["signal_summary"]["news_snippets"] = ()
         payload["ticker_workspace"]["detail"]["latest_conclusion"]["signal_summary"]["fundamental_snippets"] = ()
@@ -715,6 +822,40 @@ class TestTodayDashboard:
         assert response.status_code == 200
         assert "surface-empty-copy" in response.text
         assert "Unavailable." in response.text
+
+    def test_trades_tab_renders_signal_summary_audit_details_and_timeline_delta_fields(self, client):
+        payload = _dashboard_payload()
+        payload["selected_tab"] = "trades"
+        payload["ticker_workspace"]["detail"]["latest_conclusion"]["signal_summary"]["hidden_bullet_count"] = 2
+        payload["ticker_workspace"]["detail"]["latest_conclusion"]["signal_summary"]["grouped_sections"] = (
+            {"label": "Insider", "bullets": ("Insider cluster buy count accelerated",)},
+            {"label": "Policy / Social", "bullets": ("Policy headline turned into a tailwind",)},
+        )
+        payload["ticker_workspace"]["selected_detail_item"] = {
+            "title": "Pre Open Rerun",
+            "summary": "Sentiment negative, risk reduced",
+            "detail": "Catalyst quality faded after a fresh event-risk check.",
+            "delta_fields": ("sentiment neutral -> negative", "risk approved -> reduced"),
+        }
+        payload["ticker_workspace"]["detail"]["tabs"]["timeline"] = (
+            {
+                "title": "Pre Open Baseline",
+                "summary": "Sentiment neutral, risk approved",
+            },
+            {
+                "title": "Pre Open Rerun",
+                "summary": "Sentiment negative, risk reduced",
+                "delta_fields": ("sentiment neutral -> negative", "risk approved -> reduced"),
+            },
+        )
+        with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
+            response = client.get("/today?tab=trades&ticker=AAPL")
+
+        assert response.status_code == 200
+        assert "Signal summary audit" in response.text
+        assert "Policy / Social" in response.text
+        assert "2 more summary item" in response.text or "2 more bullet" in response.text
+        assert "sentiment neutral -&gt; negative" in response.text
 
     def test_overview_empty_state_uses_quiet_standardized_text(self, client):
         payload = _dashboard_payload()

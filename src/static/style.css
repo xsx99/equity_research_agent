@@ -909,6 +909,48 @@ a:hover { text-decoration: underline; }
   margin-bottom: 1.1rem;
 }
 
+.overview-operator-strip {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+  margin-bottom: 1rem;
+}
+
+.overview-strip-grid,
+.overview-metric-grid {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.overview-strip-grid {
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+}
+
+.overview-strip-chip,
+.overview-metric-card {
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.85rem 0.9rem;
+  border-radius: 14px;
+  border: 1px solid #dfe6ef;
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.overview-strip-chip.tone-warning {
+  border-color: #e2c18a;
+  background: linear-gradient(180deg, #fffdf7 0%, #f9f1df 100%);
+}
+
+.overview-metric-grid {
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  margin-bottom: 1rem;
+}
+
+.overview-metric-meta {
+  display: grid;
+  gap: 0.2rem;
+}
+
 .empty-state-panel {
   display: grid;
   place-items: start;
@@ -967,6 +1009,19 @@ a:hover { text-decoration: underline; }
 .candidate-decision-list {
   display: grid;
   gap: 0.8rem;
+}
+
+.scroll-rail,
+.scroll-panel,
+.scroll-table,
+.audit-scroll {
+  overflow: auto;
+  max-height: 28rem;
+  padding-right: 0.2rem;
+}
+
+.scroll-rail {
+  max-height: 34rem;
 }
 
 .candidate-queue-card,
@@ -1028,6 +1083,12 @@ a:hover { text-decoration: underline; }
   color: #334155;
   font-size: 12px;
   font-weight: 600;
+}
+
+.detail-link {
+  color: #35516f;
+  font-weight: 700;
+  text-decoration: none;
 }
 
 .surface-summary-row {
@@ -1106,7 +1167,8 @@ a:hover { text-decoration: underline; }
 @media (max-width: 1100px) {
   .today-workspace,
   .operator-strip,
-  .ticker-workspace {
+  .ticker-workspace,
+  .overview-operator-strip {
     grid-template-columns: 1fr;
   }
 
@@ -1140,5 +1202,12 @@ a:hover { text-decoration: underline; }
   .form-row > select,
   .form-row > button {
     width: 100%;
+  }
+
+  .scroll-rail,
+  .scroll-panel,
+  .scroll-table,
+  .audit-scroll {
+    max-height: none;
   }
 }
