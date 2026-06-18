@@ -464,44 +464,17 @@ def test_build_ticker_workspace_shapes_latest_conclusion_and_evidence():
     assert latest_conclusion["risk_summary"]["status_label"] == "Approved"
     assert latest_conclusion["position_execution"]["position"]["pnl"] == "+2.1%"
 
-    assert detail["tabs"]["timeline"] == [
-        {
-            "time": "2026-06-03T13:00:00Z",
-            "event_type": "news",
-            "summary": "Raised guidance",
-            "detail_anchor": "news-2",
-        },
-        {
-            "time": "2026-06-03T14:20:00Z",
-            "event_type": "decision",
-            "summary": "Trim",
-            "detail_anchor": "decision-1",
-        },
-        {
-            "time": "2026-06-03T14:30:00Z",
-            "event_type": "signal",
-            "summary": "Relative strength inflected higher",
-            "detail_anchor": "signal-2",
-        },
-        {
-            "time": "2026-06-03T14:35:00Z",
-            "event_type": "decision",
-            "summary": "Enter Long",
-            "detail_anchor": "decision-2",
-        },
-        {
-            "time": "2026-06-03T14:40:00Z",
-            "event_type": "signal",
-            "summary": "Breakout follow-through confirmed",
-            "detail_anchor": "signal-1",
-        },
-        {
-            "time": "2026-06-03T14:50:00Z",
-            "event_type": "news",
-            "summary": "Late headline",
-            "detail_anchor": "news-1",
-        },
+    timeline = detail["tabs"]["timeline"]
+    assert [item["title"] for item in timeline] == [
+        "Decision: Trim",
+        "Initial Snapshot",
+        "Decision: Enter Long",
+        "Signal Update",
     ]
+    assert timeline[1]["signal_summary"] == ("Relative strength inflected higher",)
+    assert timeline[-1]["change_summary"] == ("signal summary updated",)
+    assert timeline[-1]["trade_decision"]["label"] == "Enter Long"
+    assert timeline[-1]["risk"]["status_label"] == "Approved"
     assert detail["tabs"]["trend"]["technical"][0]["chart_type"] == "price / key level trend"
     assert detail["tabs"]["decisions"] == [
         {
@@ -615,20 +588,12 @@ def test_build_ticker_workspace_detail_includes_entry_exit_reason_times_and_pnl(
         "entry_summary": "Momentum breakout confirmed",
         "exit_summary": "Target reached before close",
     }
-    assert detail["tabs"]["timeline"] == [
-        {
-            "time": "2026-06-05T14:31:00Z",
-            "event_type": "entry",
-            "summary": "Enter Long",
-            "detail_anchor": "decision-1",
-        },
-        {
-            "time": "2026-06-05T20:00:00Z",
-            "event_type": "close",
-            "summary": "Exit",
-            "detail_anchor": "decision-2",
-        },
+    assert [item["title"] for item in detail["tabs"]["timeline"]] == [
+        "Decision: Enter Long",
+        "Decision: Exit",
     ]
+    assert detail["tabs"]["timeline"][0]["trade_decision"]["summary"] == "Momentum breakout confirmed"
+    assert detail["tabs"]["timeline"][1]["trade_decision"]["summary"] == "Target reached before close"
 
 
 def test_build_ticker_workspace_surfaces_later_undated_decision_consistently():
@@ -705,26 +670,12 @@ def test_build_ticker_workspace_surfaces_later_undated_decision_consistently():
             "detail_anchor": "decision-3",
         },
     ]
-    assert detail["tabs"]["timeline"] == [
-        {
-            "time": "2026-06-03T14:20:00Z",
-            "event_type": "decision",
-            "summary": "Trim",
-            "detail_anchor": "decision-1",
-        },
-        {
-            "time": "2026-06-03T14:35:00Z",
-            "event_type": "decision",
-            "summary": "Enter Long",
-            "detail_anchor": "decision-2",
-        },
-        {
-            "time": None,
-            "event_type": "decision",
-            "summary": "Exit",
-            "detail_anchor": "decision-3",
-        },
+    assert [item["trade_decision"]["label"] for item in detail["tabs"]["timeline"]] == [
+        "Trim",
+        "Enter Long",
+        "Exit",
     ]
+    assert detail["tabs"]["timeline"][-1]["time_label"] is None
 
 
 def test_build_ticker_workspace_orders_timeline_and_decisions_by_real_datetimes():
@@ -801,32 +752,12 @@ def test_build_ticker_workspace_orders_timeline_and_decisions_by_real_datetimes(
             "detail_anchor": "decision-2",
         },
     ]
-    assert detail["tabs"]["timeline"] == [
-        {
-            "time": "2026-06-03T08:30:00+01:00",
-            "event_type": "signal",
-            "summary": "Signal event should come first",
-            "detail_anchor": "signal-1",
-        },
-        {
-            "time": "2026-06-03T10:00:00+02:00",
-            "event_type": "decision",
-            "summary": "Trim",
-            "detail_anchor": "decision-1",
-        },
-        {
-            "time": "2026-06-03T13:05:00Z",
-            "event_type": "news",
-            "summary": "UTC news",
-            "detail_anchor": "news-1",
-        },
-        {
-            "time": "2026-06-03T13:30:00Z",
-            "event_type": "decision",
-            "summary": "Enter Long",
-            "detail_anchor": "decision-2",
-        },
+    assert [item["title"] for item in detail["tabs"]["timeline"]] == [
+        "Initial Snapshot",
+        "Decision: Trim",
+        "Decision: Enter Long",
     ]
+    assert detail["tabs"]["timeline"][0]["time_label"] == "2026-06-03 07:30 UTC"
 
 
 def test_build_ticker_workspace_keeps_all_undated_decisions_consistent():
@@ -883,19 +814,9 @@ def test_build_ticker_workspace_keeps_all_undated_decisions_consistent():
             "detail_anchor": "decision-2",
         },
     ]
-    assert detail["tabs"]["timeline"] == [
-        {
-            "time": None,
-            "event_type": "decision",
-            "summary": "Trim",
-            "detail_anchor": "decision-1",
-        },
-        {
-            "time": None,
-            "event_type": "decision",
-            "summary": "Enter Long",
-            "detail_anchor": "decision-2",
-        },
+    assert [item["trade_decision"]["label"] for item in detail["tabs"]["timeline"]] == [
+        "Trim",
+        "Enter Long",
     ]
 
 
@@ -1038,9 +959,22 @@ def test_build_ticker_workspace_uses_empty_state_markers_when_detail_inputs_are_
     assert detail["tabs"]["timeline"] == [
         {
             "time": None,
-            "event_type": "decision",
-            "summary": "No Trade",
+            "time_label": None,
+            "title": "Decision: No Trade",
+            "change_type": "baseline",
+            "signal_summary": ("No material update",),
+            "trade_decision": {
+                "label": "No Trade",
+                "strategy_label": "No material update",
+                "summary": "No material update",
+            },
+            "risk": {
+                "status_label": "No Material Update",
+                "summary": "No material update",
+            },
+            "change_summary": (),
             "detail_anchor": "decision-1",
+            "source_refs": (),
         }
     ]
     assert detail["tabs"]["trend"]["news"] == [
@@ -1210,7 +1144,7 @@ def test_build_ticker_workspace_surfaces_key_drivers_and_counterarguments():
     ]
 
 
-def test_build_ticker_workspace_computes_timeline_delta_entries_for_repeated_phase_runs():
+def test_build_ticker_workspace_computes_history_cards_for_repeated_phase_runs():
     workspace = build_ticker_workspace(
         trade_rows=[
             {
@@ -1261,8 +1195,12 @@ def test_build_ticker_workspace_computes_timeline_delta_entries_for_repeated_pha
 
     assert [item["title"] for item in timeline[:2]] == ["Pre Open Baseline", "Pre Open Rerun"]
     assert timeline[0]["change_type"] == "baseline"
-    assert timeline[1]["change_type"] == "delta"
-    assert timeline[1]["delta_fields"] == ("sentiment neutral -> negative", "risk approved -> reduced")
+    assert timeline[0]["time_label"] == "2026-06-16 12:45 UTC"
+    assert timeline[0]["signal_summary"] == ("Sentiment neutral", "Risk approved")
+    assert timeline[0]["trade_decision"]["label"] == "Enter Long"
+    assert timeline[1]["change_type"] == "material_change"
+    assert timeline[1]["change_summary"] == ("sentiment neutral -> negative", "risk approved -> reduced")
+    assert timeline[1]["signal_summary"] == ("Sentiment negative", "Risk reduced")
     assert timeline[1]["source_refs"] == ("signal:2",)
 
 

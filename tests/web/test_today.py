@@ -105,10 +105,13 @@ def _dashboard_payload() -> dict:
             "selected_detail_tab": "timeline",
             "selected_detail_item_index": 0,
             "selected_detail_item": {
-                "event_type": "decision",
-                "title": "Decision submitted",
-                "summary": "Trading decision entered long",
-                "detail": "The system promoted AAPL from watch to enter_long after risk approval.",
+                "title": "Pre Open Baseline",
+                "time_label": "2026-06-02 14:20 UTC",
+                "change_type": "baseline",
+                "signal_summary": ("Relative strength improved vs QQQ",),
+                "trade_decision": {"label": "Watch", "summary": "Waiting for confirmation"},
+                "risk": {"status_label": "Approved", "summary": "Within limits"},
+                "change_summary": (),
             },
             "buckets": {
                 "action_now": (
@@ -249,16 +252,31 @@ def _dashboard_payload() -> dict:
                 "tabs": {
                     "timeline": (
                         {
-                            "event_type": "decision",
-                            "title": "Decision submitted",
-                            "summary": "Trading decision entered long",
-                            "detail": "The system promoted AAPL from watch to enter_long after risk approval.",
+                            "title": "Pre Open Baseline",
+                            "time_label": "2026-06-02 14:20 UTC",
+                            "change_type": "baseline",
+                            "signal_summary": (
+                                "Relative strength improved vs QQQ",
+                                "Price held above preopen resistance",
+                            ),
+                            "trade_decision": {"label": "Watch", "summary": "Waiting for confirmation"},
+                            "risk": {"status_label": "Approved", "summary": "Within limits"},
+                            "change_summary": (),
                         },
                         {
-                            "event_type": "signal_snapshot",
-                            "title": "Signal snapshot updated",
-                            "summary": "Relative strength improved vs QQQ",
-                            "detail": "Fresh pre-open signal snapshot showed improving relative strength and breakout confirmation.",
+                            "title": "Pre Open Rerun",
+                            "time_label": "2026-06-02 14:35 UTC",
+                            "change_type": "material_change",
+                            "signal_summary": (
+                                "Relative strength improved vs QQQ",
+                                "Price broke above preopen resistance",
+                            ),
+                            "trade_decision": {
+                                "label": "Enter Long",
+                                "summary": "The system promoted AAPL from watch to enter_long after risk approval.",
+                            },
+                            "risk": {"status_label": "Approved", "summary": "within_limits"},
+                            "change_summary": ("candidate watch -> enter long",),
                         },
                     ),
                     "trend": {
@@ -590,7 +608,8 @@ class TestTodayDashboard:
         assert "Risk Manager Summary" in response.text
         assert "Position / Execution State" in response.text
         assert 'data-testid="signal-summary"' in response.text
-        assert 'data-testid="timeline-events"' in response.text
+        assert 'data-testid="history-cards"' in response.text
+        assert "History" in response.text
         assert "sticky-rail" in response.text
         assert 'data-panel="trend"' not in response.text
         assert 'data-panel="decisions"' not in response.text
@@ -801,27 +820,42 @@ class TestTodayDashboard:
         assert "gpt-5" in response.text
         assert "trades-canvas" not in response.text
 
-    def test_timeline_tab_renders_list_and_selected_item_detail(self, client):
+    def test_timeline_tab_renders_history_cards(self, client):
         payload = _dashboard_payload()
         payload["selected_tab"] = "trades"
         payload["ticker_workspace"]["selected_detail_tab"] = "timeline"
-        payload["ticker_workspace"]["selected_detail_item_index"] = 1
-        payload["ticker_workspace"]["selected_detail_item"] = {
-            "event_type": "signal_snapshot",
-            "title": "Signal snapshot updated",
-            "summary": "Relative strength improved vs QQQ",
-            "detail": "Fresh pre-open signal snapshot showed improving relative strength and breakout confirmation.",
-        }
+        payload["ticker_workspace"]["detail"]["tabs"]["timeline"] = (
+            {
+                "title": "Pre Open Baseline",
+                "time_label": "2026-06-18 16:30 UTC",
+                "change_type": "baseline",
+                "signal_summary": ("Sentiment neutral", "risk approved"),
+                "trade_decision": {"label": "Watch", "summary": "Waiting for confirmation"},
+                "risk": {"status_label": "Approved", "summary": "Within limits"},
+                "change_summary": (),
+            },
+            {
+                "title": "Pre Open Rerun",
+                "time_label": "2026-06-18 16:42 UTC",
+                "change_type": "material_change",
+                "signal_summary": ("Sentiment negative", "direct negative catalyst: general_news"),
+                "trade_decision": {"label": "No Trade", "summary": "Catalyst quality faded"},
+                "risk": {"status_label": "Reduced", "summary": "Event risk increased"},
+                "change_summary": ("sentiment neutral -> negative", "risk approved -> reduced"),
+            },
+        )
         with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
-            response = client.get("/today?tab=trades&ticker=AAPL&detail_tab=timeline&detail_item_index=1")
+            response = client.get("/today?tab=trades&ticker=AAPL&detail_tab=timeline")
 
         assert response.status_code == 200
         assert 'data-panel="timeline"' in response.text
-        assert "Timeline Detail Sheet" in response.text
-        assert "Selected Event" in response.text
-        assert "Decision submitted" in response.text
-        assert "Signal snapshot updated" in response.text
-        assert "Fresh pre-open signal snapshot showed improving relative strength" in response.text
+        assert "History" in response.text
+        assert "Pre Open Baseline" in response.text
+        assert "Pre Open Rerun" in response.text
+        assert "Trade Decision" in response.text
+        assert "Risk" in response.text
+        assert "sentiment neutral -&gt; negative" in response.text
+        assert "Timeline Detail Sheet" not in response.text
         assert 'data-panel="trend"' not in response.text
 
     def test_trades_empty_support_copy_uses_quiet_standardized_text(self, client):
@@ -858,21 +892,24 @@ class TestTodayDashboard:
             {"label": "Insider", "bullets": ("Insider cluster buy count accelerated",)},
             {"label": "Policy / Social", "bullets": ("Policy headline turned into a tailwind",)},
         )
-        payload["ticker_workspace"]["selected_detail_item"] = {
-            "title": "Pre Open Rerun",
-            "summary": "Sentiment negative, risk reduced",
-            "detail": "Catalyst quality faded after a fresh event-risk check.",
-            "delta_fields": ("sentiment neutral -> negative", "risk approved -> reduced"),
-        }
         payload["ticker_workspace"]["detail"]["tabs"]["timeline"] = (
             {
                 "title": "Pre Open Baseline",
-                "summary": "Sentiment neutral, risk approved",
+                "time_label": "2026-06-18 16:30 UTC",
+                "change_type": "baseline",
+                "signal_summary": ("Sentiment neutral", "Risk approved"),
+                "trade_decision": {"label": "Watch", "summary": "Waiting for confirmation"},
+                "risk": {"status_label": "Approved", "summary": "Within limits"},
+                "change_summary": (),
             },
             {
                 "title": "Pre Open Rerun",
-                "summary": "Sentiment negative, risk reduced",
-                "delta_fields": ("sentiment neutral -> negative", "risk approved -> reduced"),
+                "time_label": "2026-06-18 16:42 UTC",
+                "change_type": "material_change",
+                "signal_summary": ("Sentiment negative", "Risk reduced"),
+                "trade_decision": {"label": "No Trade", "summary": "Catalyst quality faded after a fresh event-risk check."},
+                "risk": {"status_label": "Reduced", "summary": "Event risk increased"},
+                "change_summary": ("sentiment neutral -> negative", "risk approved -> reduced"),
             },
         )
         with patch("src.web.routers.today.load_today_dashboard", return_value=payload):

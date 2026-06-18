@@ -281,41 +281,68 @@
             </div>
 
             {% if selected_detail_tab == "timeline" %}
-            <div class="ticker-detail-split">
-              <section class="card subcard scroll-panel" data-panel="timeline" data-testid="timeline-events">
-                <h4>Timeline</h4>
+            <section class="card subcard scroll-panel" data-panel="timeline" data-testid="history-cards">
+              <h4>History</h4>
+              <div class="history-card-list">
                 {% for item in detail.tabs.timeline %}
-                <a
-                  class="detail-list-item {% if loop.index0 == workspace.selected_detail_item_index %}active{% endif %}"
-                  href="/today?tab=trades&ticker={{ workspace.selected_ticker }}&detail_tab=timeline&detail_item_index={{ loop.index0 }}"
-                >
-                  <strong>{{ item.title or item.event_type or item.label }}</strong>
-                  <span class="detail-muted">{{ item.summary or "No material update." }}</span>
-                </a>
-                {% else %}
-                <p class="detail-muted quiet-empty">No material update.</p>
-                {% endfor %}
-              </section>
+                {% set signal_bullets = item.signal_summary if item.signal_summary is defined else ((item.summary,) if item.summary is defined else ("No material update",)) %}
+                {% set trade_decision = item.trade_decision if item.trade_decision is defined else {"label": (item.summary if item.summary is defined else "No material update"), "summary": (item.detail if item.detail is defined else none)} %}
+                {% set risk_view = item.risk if item.risk is defined else {"status_label": "Unavailable", "summary": none} %}
+                {% set change_summary = item.change_summary if item.change_summary is defined else (item.delta_fields if item.delta_fields is defined else ()) %}
+                <article class="history-card history-card-{{ item.change_type or 'neutral' }}">
+                  <div class="history-card-head">
+                    <div>
+                      <div class="section-label">{{ item.title or "Latest Snapshot" }}</div>
+                      {% if item.time_label %}
+                      <strong>{{ item.time_label }}</strong>
+                      {% else %}
+                      <strong>Timestamp unavailable</strong>
+                      {% endif %}
+                    </div>
+                    <span class="surface-block-count">{{ (item.change_type or "snapshot").replace("_", " ") }}</span>
+                  </div>
 
-              <section class="card subcard timeline-detail-panel">
-                <h4>Timeline Detail Sheet</h4>
-                {% if selected_detail_item %}
-                <div class="section-label">Selected Event</div>
-                <p><strong>{{ selected_detail_item.title or selected_detail_item.event_type or selected_detail_item.label }}</strong></p>
-                <p class="detail-muted">{{ selected_detail_item.summary or "No material update." }}</p>
-                {% if selected_detail_item.delta_fields %}
-                <ul class="output-list">
-                  {% for field in selected_detail_item.delta_fields %}
-                  <li>{{ field }}</li>
-                  {% endfor %}
-                </ul>
-                {% endif %}
-                <p>{{ selected_detail_item.detail or selected_detail_item.summary or "No additional detail available." }}</p>
+                  <div class="history-card-grid">
+                    <div class="history-card-section">
+                      <span class="metric-label">Signal Summary</span>
+                      <ul class="history-card-listing">
+                        {% for bullet in signal_bullets %}
+                        <li>{{ bullet }}</li>
+                        {% endfor %}
+                      </ul>
+                    </div>
+                    <div class="history-card-section">
+                      <span class="metric-label">Trade Decision</span>
+                      <strong>{{ trade_decision.label or "No material update" }}</strong>
+                      {% if trade_decision.summary and trade_decision.summary != "No material update" %}
+                      <p class="detail-muted">{{ trade_decision.summary }}</p>
+                      {% endif %}
+                    </div>
+                    <div class="history-card-section">
+                      <span class="metric-label">Risk</span>
+                      <strong>{{ risk_view.status_label or "No material update" }}</strong>
+                      {% if risk_view.summary %}
+                      <p class="detail-muted">{{ risk_view.summary }}</p>
+                      {% endif %}
+                    </div>
+                  </div>
+
+                  {% if change_summary %}
+                  <div class="history-card-change">
+                    <span class="metric-label">What Changed</span>
+                    <ul class="history-card-listing">
+                      {% for field in change_summary %}
+                      <li>{{ field }}</li>
+                      {% endfor %}
+                    </ul>
+                  </div>
+                  {% endif %}
+                </article>
                 {% else %}
-                <p class="detail-muted quiet-empty">No timeline item selected.</p>
-                {% endif %}
-              </section>
-            </div>
+                <p class="detail-muted quiet-empty surface-empty-copy">No material update.</p>
+                {% endfor %}
+              </div>
+            </section>
             {% elif selected_detail_tab == "trend" %}
             <section class="card subcard" data-panel="trend">
               <h4>Trend</h4>
