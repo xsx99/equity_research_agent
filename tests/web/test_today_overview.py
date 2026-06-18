@@ -48,6 +48,10 @@ def test_build_today_overview_exposes_operator_strip_and_metric_provenance():
         positions=(
             {"ticker": "AAPL", "summary": "Open position, risk within limits"},
         ),
+        option_positions=(
+            {"ticker": "QQQ", "summary": "Open option position, max loss $230.00"},
+            {"ticker": "NVDA", "summary": "Open option position, max loss $220.00"},
+        ),
         closed_positions=(
             {"ticker": "TSLA", "summary": "Closed today after event risk increased"},
         ),
@@ -63,6 +67,11 @@ def test_build_today_overview_exposes_operator_strip_and_metric_provenance():
     assert payload["alert_bar"]["count"] == 3
     assert payload["current_summary"]["meta"]["updated_at_label"] == "2026-06-16 13:31 UTC"
     assert payload["current_summary"]["hidden_item_count"] == 2
+    assert payload["command_center"]["open_positions"] == (
+        {"ticker": "AAPL", "summary": "Open position, risk within limits"},
+        {"ticker": "QQQ", "summary": "Open option position, max loss $230.00"},
+        {"ticker": "NVDA", "summary": "Open option position, max loss $220.00"},
+    )
 
 
 def test_build_today_overview_dedupes_closed_positions_by_ticker_for_needs_review():
@@ -99,6 +108,7 @@ def test_build_today_overview_dedupes_closed_positions_by_ticker_for_needs_revie
         live_alerts=(),
         material_changes=(),
         positions=(),
+        option_positions=(),
         closed_positions=(
             {"ticker": "NVDA", "summary": "Closed recently and ready for review"},
             {"ticker": "NVDA", "summary": "Older NVDA close should not duplicate"},

@@ -186,6 +186,7 @@ def load_today_dashboard(
 
     trade_rows = _load_trade_rows(session)
     positions = _load_positions(session)
+    option_positions = _load_option_positions(session)
     closed_positions = _load_recent_closed_positions(session)
     positions_by_ticker = _group_latest_by_ticker(positions)
     closed_positions_by_ticker = _group_latest_by_ticker(closed_positions)
@@ -283,6 +284,7 @@ def load_today_dashboard(
         live_alerts=_load_live_alerts(session),
         material_changes=_load_material_changes(session),
         positions=positions,
+        option_positions=option_positions,
         closed_positions=closed_positions,
     )
     candidates = build_today_candidates_view(
@@ -303,7 +305,7 @@ def load_today_dashboard(
         "overview": overview,
         "portfolio": {
             "positions": positions,
-            "option_positions": _load_option_positions(session),
+            "option_positions": option_positions,
             "hedge_overlays": _load_hedge_overlays(session),
         },
         "trades": {

@@ -281,10 +281,25 @@ def _build_detail(
     position = positions_by_ticker.get(selected_ticker) or {"summary": _EMPTY_MARKER}
     closed_position = closed_positions_by_ticker.get(selected_ticker) or {}
     risk = risk_by_ticker.get(selected_ticker) or {}
+    risk_history = _build_risk_history(risk.get("history"))
     trade_summary = _decision_summary(latest_decision)
     key_drivers = _decision_rationale_items(latest_decision, "key_drivers")
     counterarguments = _decision_rationale_items(latest_decision, "counterarguments")
     invalidators = _decision_invalidators(latest_decision)
+    signal_summary = {
+        **_build_signal_summary(signal_history),
+        "technical_charts": technical_charts,
+        "news_snippets": news_snippets,
+        "event_news_summary": _build_event_news_summary(news_snippets),
+        "fundamental_snippets": fundamental_snippets,
+    }
+    latest_risk_summary = {
+        "status": risk.get("status") or _EMPTY_MARKER,
+        "status_label": risk_status_label(risk.get("status")) or _EMPTY_MARKER,
+        "reason": risk.get("reason") or _EMPTY_MARKER,
+        "lookahead_risk_source": risk.get("lookahead_risk_source"),
+        "hedge_overlay_reason": _hedge_overlay_reason(risk.get("generated_hedge_action")),
+    }
 
     latest_conclusion = {
         "trade_decision": {
@@ -297,20 +312,8 @@ def _build_detail(
             "expression_bucket_label": expression_bucket_label(latest_decision.get("expression_bucket_id")) or _EMPTY_MARKER,
             "confidence": latest_decision.get("confidence"),
         },
-        "signal_summary": {
-            **_build_signal_summary(signal_history.get("summary")),
-            "technical_charts": technical_charts,
-            "news_snippets": news_snippets,
-            "event_news_summary": _build_event_news_summary(news_snippets),
-            "fundamental_snippets": fundamental_snippets,
-        },
-        "risk_summary": {
-            "status": risk.get("status") or _EMPTY_MARKER,
-            "status_label": risk_status_label(risk.get("status")) or _EMPTY_MARKER,
-            "reason": risk.get("reason") or _EMPTY_MARKER,
-            "lookahead_risk_source": risk.get("lookahead_risk_source"),
-            "hedge_overlay_reason": _hedge_overlay_reason(risk.get("generated_hedge_action")),
-        },
+        "signal_summary": signal_summary,
+        "risk_summary": latest_risk_summary,
         "position_execution": {
             "position": position,
             "position_label": position.get("position_label"),
@@ -330,9 +333,10 @@ def _build_detail(
     tabs = {
         "timeline": _build_timeline(
             signal_history=signal_history,
-            news_items=news_by_ticker.get(selected_ticker),
             decisions=decision_history,
-            closed_position=closed_position,
+            risk_history=risk_history,
+            latest_signal_summary=signal_summary,
+            latest_risk_summary=latest_risk_summary,
         ),
         "trend": {
             "technical": technical_charts,
@@ -343,7 +347,7 @@ def _build_detail(
         "risk": {
             "current_stance": latest_conclusion["risk_summary"],
             "position_state": position,
-            "history": _build_risk_history(risk.get("history")),
+            "history": risk_history,
             "raw_json": risk.get("raw_json"),
         },
     }
@@ -361,12 +365,16 @@ def _build_detail(
     }
 
 
-def _build_signal_summary(summary_items: Any) -> dict[str, Any]:
+def _build_signal_summary(signal_history: Any) -> dict[str, Any]:
+    summary_items = signal_history.get("summary") if isinstance(signal_history, dict) else signal_history
+    timeline_items = signal_history.get("timeline") if isinstance(signal_history, dict) else None
     bullets = _dedupe_summary_bullets(summary_items)
     if bullets == [_EMPTY_MARKER]:
         return {
             "summary_bullets": bullets,
             "hidden_bullet_count": 0,
+            "latest_signal_time_label": _latest_signal_time_label(timeline_items),
+            "primary_sections": ({"label": "Status", "bullets": (_EMPTY_MARKER,)},),
             "grouped_sections": (),
         }
 
@@ -388,8 +396,19 @@ def _build_signal_summary(summary_items: Any) -> dict[str, Any]:
     return {
         "summary_bullets": primary,
         "hidden_bullet_count": hidden_count,
+        "latest_signal_time_label": _latest_signal_time_label(timeline_items),
+        "primary_sections": _primary_signal_sections(primary),
         "grouped_sections": sections,
     }
+
+
+def _primary_signal_sections(primary_bullets: list[str]) -> tuple[dict[str, Any], ...]:
+    grouped_primary = _group_summary_bullets(primary_bullets)
+    return tuple(
+        {"label": label, "bullets": tuple(grouped_primary[label])}
+        for label in _SIGNAL_GROUP_ORDER
+        if grouped_primary.get(label)
+    )
 
 
 def _dedupe_summary_bullets(summary_items: Any) -> list[str]:
@@ -509,76 +528,215 @@ def _build_event_news_summary(news_snippets: list[dict[str, Any]]) -> str | None
     return " ".join(sentences) if sentences else None
 
 
+def _latest_signal_time_label(timeline_items: Any) -> str | None:
+    if not isinstance(timeline_items, list):
+        return None
+
+    latest: datetime | None = None
+    for item in timeline_items:
+        if not isinstance(item, dict):
+            continue
+        parsed = _parse_timestamp(item.get("time"))
+        if parsed is None:
+            continue
+        if latest is None or parsed > latest:
+            latest = parsed
+
+    if latest is None:
+        return None
+    return latest.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+
 def _build_timeline(
     *,
     signal_history: dict[str, Any],
-    news_items: Any,
     decisions: list[dict[str, Any]],
-    closed_position: dict[str, Any] | None = None,
+    risk_history: list[dict[str, Any]],
+    latest_signal_summary: dict[str, Any],
+    latest_risk_summary: dict[str, Any],
 ) -> list[dict[str, Any]]:
     timeline: list[dict[str, Any]] = []
+    signal_events = _build_signal_timeline_events(signal_history.get("timeline"))
+    if signal_events:
+        material_events = [item for item in signal_events[1:] if item.get("material_change")]
+        if material_events:
+            timeline.append(
+                _history_card_from_signal_event(
+                    signal_events[0],
+                    decisions=decisions,
+                    risk_history=risk_history,
+                    latest_risk_summary=latest_risk_summary,
+                    change_type="baseline",
+                )
+            )
+            timeline.extend(
+                _history_card_from_signal_event(
+                    item,
+                    decisions=decisions,
+                    risk_history=risk_history,
+                    latest_risk_summary=latest_risk_summary,
+                    change_type="material_change",
+                )
+                for item in material_events
+            )
+        else:
+            timeline.append(
+                _history_card_from_signal_event(
+                    signal_events[-1],
+                    decisions=decisions,
+                    risk_history=risk_history,
+                    latest_risk_summary=latest_risk_summary,
+                    change_type="latest_snapshot",
+                )
+            )
+
+    timeline.extend(
+        _history_card_from_decision(
+            item,
+            risk_history=risk_history,
+            latest_risk_summary=latest_risk_summary,
+            latest_signal_summary=latest_signal_summary,
+            change_type="material_change" if index > 0 else "baseline",
+            detail_anchor=f"decision-{index + 1}",
+        )
+        for index, item in enumerate(decisions)
+    )
+
+    timeline.sort(key=lambda item: _sort_key(item.get("time")))
+    return timeline or [_empty_timeline_item()]
+
+
+def _build_signal_timeline_events(items: Any) -> list[dict[str, Any]]:
+    if not isinstance(items, list):
+        return []
+
+    events: list[dict[str, Any]] = []
+    ordered_items = _sort_timestamped_items(items, "time")
     seen_signal_entries: set[tuple[str, str, str, str]] = set()
     phase_counts: dict[str, int] = {}
     previous_phase_state: dict[str, dict[str, str]] = {}
+    previous_phase_summary: dict[str, str] = {}
 
-    for index, item in enumerate(signal_history.get("timeline") or [], start=1):
+    for index, item in enumerate(ordered_items, start=1):
         if not isinstance(item, dict):
             continue
+        phase = _timeline_phase_value(item)
+        event_type = str(item.get("event_type") or "signal").strip().lower() or "signal"
+        summary = str(item.get("summary") or _EMPTY_MARKER).strip() or _EMPTY_MARKER
         signal_entry_key = (
             str(item.get("time") or ""),
-            str(item.get("phase") or ""),
-            str(item.get("event_type") or "signal"),
-            str(item.get("summary") or _EMPTY_MARKER),
+            phase,
+            event_type,
+            summary,
         )
         if signal_entry_key in seen_signal_entries:
             continue
         seen_signal_entries.add(signal_entry_key)
-        phase = str(item.get("phase") or "").strip().lower()
-        phase_counts[phase] = phase_counts.get(phase, 0) + 1
-        timeline_item = {
+
+        phase_key = phase or event_type
+        phase_counts[phase_key] = phase_counts.get(phase_key, 0) + 1
+        current_state = _timeline_state_map(summary)
+        previous_state = previous_phase_state.get(phase_key, {})
+        previous_summary = previous_phase_summary.get(phase_key)
+        delta_fields = _timeline_delta_fields(previous_state, current_state)
+        summary_changed = bool(previous_summary and previous_summary != summary)
+
+        event = {
             "time": item.get("time"),
-            "event_type": item.get("event_type") or "signal",
-            "summary": item.get("summary") or _EMPTY_MARKER,
+            "time_label": _format_timestamp_label(item.get("time")),
+            "title": _timeline_history_title(phase, event_type, phase_counts[phase_key], item.get("time")),
+            "summary": summary,
             "detail_anchor": f"signal-{index}",
+            "material_change": phase_counts[phase_key] > 1 and (bool(delta_fields) or summary_changed),
         }
-        if phase:
-            timeline_item["title"] = _timeline_phase_title(phase, phase_counts[phase], item.get("time"))
-            timeline_item["change_type"] = "baseline" if phase_counts[phase] == 1 else "delta"
-            current_state = _timeline_state_map(item.get("summary"))
-            previous_state = previous_phase_state.get(phase, {})
-            delta_fields = _timeline_delta_fields(previous_state, current_state)
-            if delta_fields:
-                timeline_item["delta_fields"] = tuple(delta_fields)
-            source_refs = tuple(item.get("source_refs") or ())
-            if source_refs:
-                timeline_item["source_refs"] = source_refs
-            previous_phase_state[phase] = current_state
-        timeline.append(timeline_item)
+        if delta_fields:
+            event["change_summary"] = tuple(delta_fields)
+        elif event["material_change"]:
+            event["change_summary"] = ("signal summary updated",)
+        source_refs = tuple(item.get("source_refs") or ())
+        if source_refs:
+            event["source_refs"] = source_refs
 
-    for index, item in enumerate(news_items or [], start=1):
-        if not isinstance(item, dict):
-            continue
-        timeline.append(
-            {
-                "time": item.get("published_at"),
-                "event_type": "news",
-                "summary": item.get("title") or _EMPTY_MARKER,
-                "detail_anchor": f"news-{index}",
-            }
-        )
+        previous_phase_state[phase_key] = current_state
+        previous_phase_summary[phase_key] = summary
+        events.append(event)
 
-    for index, item in enumerate(decisions, start=1):
-        timeline.append(
-            {
-                "time": item.get("created_at"),
-                "event_type": _timeline_event_type(item, closed_position=closed_position),
-                "summary": _humanize_label(item.get("decision")) or _EMPTY_MARKER,
-                "detail_anchor": f"decision-{index}",
-            }
-        )
+    events.sort(key=lambda item: _sort_key(item.get("time")))
+    return events
 
-    timeline.sort(key=lambda item: _sort_key(item.get("time")))
-    return timeline or [_empty_timeline_item()]
+
+def _history_card_from_signal_event(
+    item: dict[str, Any],
+    *,
+    decisions: list[dict[str, Any]],
+    risk_history: list[dict[str, Any]],
+    latest_risk_summary: dict[str, Any],
+    change_type: str,
+) -> dict[str, Any]:
+    decision = _latest_item_as_of(decisions, "created_at", item.get("time"))
+    return {
+        "time": item.get("time"),
+        "time_label": item.get("time_label") or _format_timestamp_label(item.get("time")),
+        "title": item.get("title") or "Signal Snapshot",
+        "change_type": change_type,
+        "signal_summary": tuple(_history_signal_bullets(item.get("summary"))),
+        "trade_decision": _history_trade_decision_view(decision),
+        "risk": _history_risk_view(
+            _latest_item_as_of(risk_history, "time", item.get("time")),
+            latest_risk_summary=latest_risk_summary,
+        ),
+        "change_summary": tuple(item.get("change_summary") or ()),
+        "detail_anchor": item.get("detail_anchor"),
+        "source_refs": tuple(item.get("source_refs") or ()),
+    }
+
+
+def _history_card_from_decision(
+    item: dict[str, Any],
+    *,
+    risk_history: list[dict[str, Any]],
+    latest_risk_summary: dict[str, Any],
+    latest_signal_summary: dict[str, Any],
+    change_type: str,
+    detail_anchor: str,
+) -> dict[str, Any]:
+    label = _humanize_label(item.get("decision")) or _EMPTY_MARKER
+    return {
+        "time": item.get("created_at"),
+        "time_label": _format_timestamp_label(item.get("created_at")),
+        "title": f"Decision: {label}",
+        "change_type": change_type,
+        "signal_summary": tuple(latest_signal_summary.get("summary_bullets") or (_EMPTY_MARKER,)),
+        "trade_decision": _history_trade_decision_view(item),
+        "risk": _history_risk_view(
+            _latest_item_as_of(risk_history, "time", item.get("created_at")),
+            latest_risk_summary=latest_risk_summary,
+        ),
+        "change_summary": (),
+        "detail_anchor": detail_anchor,
+        "source_refs": (),
+    }
+
+
+def _timeline_phase_value(item: dict[str, Any]) -> str:
+    phase = str(item.get("phase") or "").strip().lower()
+    if phase:
+        return phase
+    event_type = str(item.get("event_type") or "").strip().lower()
+    if event_type in {"pre_open", "intraday", "post_close"}:
+        return event_type
+    return ""
+
+
+def _timeline_history_title(phase: str, event_type: str, occurrence: int, time_value: Any) -> str:
+    if phase:
+        return _timeline_phase_title(phase, occurrence, time_value)
+    if occurrence == 1:
+        return "Initial Snapshot"
+    if event_type == "intraday":
+        label = _intraday_time_label(time_value)
+        return f"Intraday Refresh {label}".strip()
+    return "Signal Update"
 
 
 def _timeline_phase_title(phase: str, occurrence: int, time_value: Any) -> str:
@@ -628,6 +786,66 @@ def _timeline_delta_fields(previous_state: dict[str, str], current_state: dict[s
         elif key not in previous_state:
             delta_fields.append(f"new {key}")
     return delta_fields
+
+
+def _history_signal_bullets(summary: Any) -> list[str]:
+    text = str(summary or "").strip()
+    if not text:
+        return [_EMPTY_MARKER]
+
+    bullets: list[str] = []
+    for clause in text.rstrip(".").split(";"):
+        for piece in clause.split(","):
+            normalized = piece.strip().rstrip(".")
+            if normalized:
+                bullets.append(normalized[0].upper() + normalized[1:] if normalized else normalized)
+    return bullets or [_EMPTY_MARKER]
+
+
+def _history_trade_decision_view(item: dict[str, Any] | None) -> dict[str, Any]:
+    row = item or {}
+    return {
+        "label": _humanize_label(row.get("decision")) or _EMPTY_MARKER,
+        "strategy_label": strategy_label(row.get("selected_strategy_id")) or _EMPTY_MARKER,
+        "summary": _decision_summary(row),
+    }
+
+
+def _history_risk_view(item: dict[str, Any] | None, *, latest_risk_summary: dict[str, Any]) -> dict[str, Any]:
+    if item:
+        return {
+            "status_label": risk_status_label(item.get("status")) or _humanize_label(item.get("status")) or _EMPTY_MARKER,
+            "summary": item.get("summary") or _EMPTY_MARKER,
+        }
+    return {
+        "status_label": latest_risk_summary.get("status_label") or _EMPTY_MARKER,
+        "summary": latest_risk_summary.get("reason") or _EMPTY_MARKER,
+    }
+
+
+def _latest_item_as_of(items: list[dict[str, Any]], time_key: str, as_of: Any) -> dict[str, Any] | None:
+    if not items:
+        return None
+
+    as_of_dt = _parse_timestamp(as_of)
+    if as_of_dt is None:
+        return items[-1]
+
+    latest: dict[str, Any] | None = None
+    for item in items:
+        item_dt = _parse_timestamp(item.get(time_key))
+        if item_dt is None:
+            continue
+        if item_dt <= as_of_dt:
+            latest = item
+    return latest or items[-1]
+
+
+def _format_timestamp_label(value: Any) -> str | None:
+    parsed = _parse_timestamp(value)
+    if parsed is None:
+        return None
+    return parsed.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
 
 def _build_decision_list(decisions: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -807,8 +1025,13 @@ def _empty_snippet() -> dict[str, Any]:
 def _empty_timeline_item() -> dict[str, Any]:
     return {
         "time": None,
-        "event_type": "empty",
-        "summary": _EMPTY_MARKER,
+        "time_label": None,
+        "title": "Latest Snapshot",
+        "change_type": "latest_snapshot",
+        "signal_summary": (_EMPTY_MARKER,),
+        "trade_decision": {"label": _EMPTY_MARKER, "strategy_label": _EMPTY_MARKER, "summary": _EMPTY_MARKER},
+        "risk": {"status_label": _EMPTY_MARKER, "summary": _EMPTY_MARKER},
+        "change_summary": (),
         "detail_anchor": "timeline-empty",
         "empty": True,
     }
