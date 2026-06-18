@@ -190,10 +190,35 @@
             <div class="ticker-support-grid">
               <section class="card subcard" data-testid="signal-summary">
                 <h4>Signal Summary</h4>
-                <div class="support-mini-meta">
+                <div class="support-mini-meta signal-summary-meta">
                   <span class="detail-muted">{{ detail.latest_conclusion.signal_summary.summary_bullets | length }} highlighted signal{% if detail.latest_conclusion.signal_summary.summary_bullets|length != 1 %}s{% endif %}</span>
+                  {% if detail.latest_conclusion.signal_summary.latest_signal_time_label %}
+                  <span class="detail-muted">Latest signal {{ detail.latest_conclusion.signal_summary.latest_signal_time_label }}</span>
+                  {% endif %}
+                  {% if detail.latest_conclusion.signal_summary.hidden_bullet_count %}
+                  <span class="detail-muted">{{ detail.latest_conclusion.signal_summary.hidden_bullet_count }} more signals in other groups</span>
+                  {% endif %}
                 </div>
-                {% if detail.latest_conclusion.signal_summary.summary_bullets %}
+                {% set primary_sections = detail.latest_conclusion.signal_summary.primary_sections if detail.latest_conclusion.signal_summary.primary_sections is defined else () %}
+                {% if primary_sections %}
+                <div class="signal-summary-grid">
+                  {% for section in primary_sections %}
+                  <article class="signal-summary-card">
+                    <div class="signal-summary-card-head">
+                      <span class="section-label">{{ section.label }}</span>
+                      {% if section.bullets|length > 1 %}
+                      <span class="surface-block-count">{{ section.bullets|length }}</span>
+                      {% endif %}
+                    </div>
+                    <ul class="signal-summary-list">
+                      {% for item in section.bullets %}
+                      <li>{{ item }}</li>
+                      {% endfor %}
+                    </ul>
+                  </article>
+                  {% endfor %}
+                </div>
+                {% elif detail.latest_conclusion.signal_summary.summary_bullets %}
                 <ul class="output-list">
                   {% for item in detail.latest_conclusion.signal_summary.summary_bullets %}
                   <li>{{ item }}</li>
@@ -205,22 +230,6 @@
                 {% if detail.latest_conclusion.signal_summary.event_news_summary %}
                 <div class="section-label">Event / News Summary</div>
                 <p class="detail-muted">{{ detail.latest_conclusion.signal_summary.event_news_summary }}</p>
-                {% endif %}
-                {% if detail.latest_conclusion.signal_summary.grouped_sections or detail.latest_conclusion.signal_summary.hidden_bullet_count %}
-                <details>
-                  <summary>Signal summary audit</summary>
-                  {% if detail.latest_conclusion.signal_summary.hidden_bullet_count %}
-                  <p class="detail-muted">{{ detail.latest_conclusion.signal_summary.hidden_bullet_count }} more summary item{% if detail.latest_conclusion.signal_summary.hidden_bullet_count != 1 %}s{% endif %} remain behind audit details.</p>
-                  {% endif %}
-                  {% for section in detail.latest_conclusion.signal_summary.grouped_sections %}
-                  <div class="section-label">{{ section.label }}</div>
-                  <ul class="output-list">
-                    {% for bullet in section.bullets %}
-                    <li>{{ bullet }}</li>
-                    {% endfor %}
-                  </ul>
-                  {% endfor %}
-                </details>
                 {% endif %}
               </section>
 

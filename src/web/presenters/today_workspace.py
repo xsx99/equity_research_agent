@@ -298,7 +298,7 @@ def _build_detail(
             "confidence": latest_decision.get("confidence"),
         },
         "signal_summary": {
-            **_build_signal_summary(signal_history.get("summary")),
+            **_build_signal_summary(signal_history),
             "technical_charts": technical_charts,
             "news_snippets": news_snippets,
             "event_news_summary": _build_event_news_summary(news_snippets),
@@ -361,12 +361,16 @@ def _build_detail(
     }
 
 
-def _build_signal_summary(summary_items: Any) -> dict[str, Any]:
+def _build_signal_summary(signal_history: Any) -> dict[str, Any]:
+    summary_items = signal_history.get("summary") if isinstance(signal_history, dict) else signal_history
+    timeline_items = signal_history.get("timeline") if isinstance(signal_history, dict) else None
     bullets = _dedupe_summary_bullets(summary_items)
     if bullets == [_EMPTY_MARKER]:
         return {
             "summary_bullets": bullets,
             "hidden_bullet_count": 0,
+            "latest_signal_time_label": _latest_signal_time_label(timeline_items),
+            "primary_sections": ({"label": "Status", "bullets": (_EMPTY_MARKER,)},),
             "grouped_sections": (),
         }
 
@@ -388,8 +392,19 @@ def _build_signal_summary(summary_items: Any) -> dict[str, Any]:
     return {
         "summary_bullets": primary,
         "hidden_bullet_count": hidden_count,
+        "latest_signal_time_label": _latest_signal_time_label(timeline_items),
+        "primary_sections": _primary_signal_sections(primary),
         "grouped_sections": sections,
     }
+
+
+def _primary_signal_sections(primary_bullets: list[str]) -> tuple[dict[str, Any], ...]:
+    grouped_primary = _group_summary_bullets(primary_bullets)
+    return tuple(
+        {"label": label, "bullets": tuple(grouped_primary[label])}
+        for label in _SIGNAL_GROUP_ORDER
+        if grouped_primary.get(label)
+    )
 
 
 def _dedupe_summary_bullets(summary_items: Any) -> list[str]:
@@ -507,6 +522,25 @@ def _build_event_news_summary(news_snippets: list[dict[str, Any]]) -> str | None
         elif title:
             sentences.append(f"{title}.")
     return " ".join(sentences) if sentences else None
+
+
+def _latest_signal_time_label(timeline_items: Any) -> str | None:
+    if not isinstance(timeline_items, list):
+        return None
+
+    latest: datetime | None = None
+    for item in timeline_items:
+        if not isinstance(item, dict):
+            continue
+        parsed = _parse_timestamp(item.get("time"))
+        if parsed is None:
+            continue
+        if latest is None or parsed > latest:
+            latest = parsed
+
+    if latest is None:
+        return None
+    return latest.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
 
 def _build_timeline(

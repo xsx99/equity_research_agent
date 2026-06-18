@@ -425,6 +425,16 @@ def test_build_ticker_workspace_shapes_latest_conclusion_and_evidence():
         "relative strength improving vs QQQ",
         "price holding above key breakout",
     ]
+    assert latest_conclusion["signal_summary"]["latest_signal_time_label"] == "2026-06-03 14:40 UTC"
+    assert latest_conclusion["signal_summary"]["primary_sections"] == (
+        {
+            "label": "Trend",
+            "bullets": (
+                "relative strength improving vs QQQ",
+                "price holding above key breakout",
+            ),
+        },
+    )
     assert latest_conclusion["signal_summary"]["technical_charts"] == [
         {
             "chart_type": "price / key level trend",
@@ -1279,7 +1289,15 @@ def test_build_ticker_workspace_truncates_signal_summary_and_groups_hidden_bulle
                     "Relative strength improved vs QQQ",
                     "Fresh catalyst still intact",
                     "Data quality: no stale inputs",
-                ]
+                ],
+                "timeline": [
+                    {
+                        "time": "2026-06-16T13:42:00Z",
+                        "event_type": "signal_snapshot",
+                        "phase": "pre_open",
+                        "summary": "Sentiment positive, risk approved",
+                    }
+                ],
             }
         },
         news_by_ticker={},
@@ -1296,6 +1314,19 @@ def test_build_ticker_workspace_truncates_signal_summary_and_groups_hidden_bulle
         "Policy headline turned into a tailwind",
     ]
     assert signal_summary["hidden_bullet_count"] == 2
+    assert signal_summary["latest_signal_time_label"] == "2026-06-16 13:42 UTC"
+    assert signal_summary["primary_sections"] == (
+        {"label": "Risk blockers", "bullets": ("Risk blocked by event cluster",)},
+        {
+            "label": "Trend",
+            "bullets": (
+                "Price broke above preopen resistance",
+                "Relative strength improved vs QQQ",
+            ),
+        },
+        {"label": "Insider", "bullets": ("Insider cluster buy count accelerated",)},
+        {"label": "Policy / Social", "bullets": ("Policy headline turned into a tailwind",)},
+    )
     assert [section["label"] for section in signal_summary["grouped_sections"]] == [
         "Risk blockers",
         "Trend",

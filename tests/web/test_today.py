@@ -216,6 +216,18 @@ def _dashboard_payload() -> dict:
                             "Relative strength improved vs QQQ",
                             "Price broke above preopen resistance",
                         ),
+                        "latest_signal_time_label": "2026-06-02 14:35 UTC",
+                        "primary_sections": (
+                            {
+                                "label": "Trend",
+                                "bullets": (
+                                    "Relative strength improved vs QQQ",
+                                    "Price broke above preopen resistance",
+                                ),
+                            },
+                        ),
+                        "hidden_bullet_count": 0,
+                        "grouped_sections": (),
                         "event_news_summary": "Raised guidance: Demand improved across core products.",
                         "technical_charts": (
                             {"chart_type": "Price / Key Level Trend", "summary": "Higher highs into the open"},
@@ -831,9 +843,16 @@ class TestTodayDashboard:
         assert "surface-empty-copy" in response.text
         assert "Unavailable." in response.text
 
-    def test_trades_tab_renders_signal_summary_audit_details_and_timeline_delta_fields(self, client):
+    def test_trades_tab_renders_signal_summary_sections_and_timeline_delta_fields(self, client):
         payload = _dashboard_payload()
         payload["selected_tab"] = "trades"
+        payload["ticker_workspace"]["detail"]["latest_conclusion"]["signal_summary"]["latest_signal_time_label"] = (
+            "2026-06-18 17:41 UTC"
+        )
+        payload["ticker_workspace"]["detail"]["latest_conclusion"]["signal_summary"]["primary_sections"] = (
+            {"label": "Trend", "bullets": ("Relative strength improved vs QQQ",)},
+            {"label": "Policy / Social", "bullets": ("Policy headline turned into a tailwind",)},
+        )
         payload["ticker_workspace"]["detail"]["latest_conclusion"]["signal_summary"]["hidden_bullet_count"] = 2
         payload["ticker_workspace"]["detail"]["latest_conclusion"]["signal_summary"]["grouped_sections"] = (
             {"label": "Insider", "bullets": ("Insider cluster buy count accelerated",)},
@@ -860,9 +879,11 @@ class TestTodayDashboard:
             response = client.get("/today?tab=trades&ticker=AAPL")
 
         assert response.status_code == 200
-        assert "Signal summary audit" in response.text
+        assert "Latest signal 2026-06-18 17:41 UTC" in response.text
+        assert "Trend" in response.text
         assert "Policy / Social" in response.text
-        assert "2 more summary item" in response.text or "2 more bullet" in response.text
+        assert "2 more signals in other groups" in response.text
+        assert "Signal summary audit" not in response.text
         assert "sentiment neutral -&gt; negative" in response.text
 
     def test_overview_empty_state_uses_quiet_standardized_text(self, client):

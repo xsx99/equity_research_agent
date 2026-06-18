@@ -818,6 +818,56 @@ a:hover { text-decoration: underline; }
   margin-bottom: 0.55rem;
 }
 
+.signal-summary-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem 0.9rem;
+}
+
+.signal-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.75rem;
+}
+
+.signal-summary-card {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.8rem 0.9rem;
+  border-radius: 14px;
+  border: 1px solid #dfe6ef;
+  background:
+    radial-gradient(circle at top left, rgba(194, 209, 229, 0.14), transparent 35%),
+    linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  box-shadow: 0 8px 18px rgba(36, 50, 65, 0.04);
+}
+
+.signal-summary-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.signal-summary-card-head .section-label {
+  margin: 0;
+}
+
+.signal-summary-list {
+  margin: 0;
+  padding-left: 1rem;
+}
+
+.signal-summary-list li {
+  margin-bottom: 0.35rem;
+  line-height: 1.45;
+  color: #334155;
+}
+
+.signal-summary-list li:last-child {
+  margin-bottom: 0;
+}
+
 .support-kv-list {
   display: grid;
   gap: 0.45rem;
