@@ -64,3 +64,50 @@ def test_build_today_overview_exposes_operator_strip_and_metric_provenance():
     assert payload["current_summary"]["meta"]["updated_at_label"] == "2026-06-16 13:31 UTC"
     assert payload["current_summary"]["hidden_item_count"] == 2
 
+
+def test_build_today_overview_dedupes_closed_positions_by_ticker_for_needs_review():
+    payload = build_today_overview(
+        header={
+            "trade_date": date(2026, 6, 16),
+            "market_phase": "Pre-open",
+            "macro_regime": "risk_off",
+            "risk_appetite": "balanced",
+            "runtime_mode": "live",
+            "live_status": "live",
+            "open_alert_count": None,
+            "material_signal_change_count": None,
+            "buying_power": Decimal("245000.00"),
+            "gross_exposure": Decimal("0.41"),
+            "day_pnl": Decimal("-512.20"),
+            "nav": Decimal("998250.00"),
+            "llm_cost_estimate": None,
+        },
+        job_timeline=(
+            {"label": "Manual Review", "status": "idle"},
+        ),
+        risk_macro={
+            "command_center": {
+                "regime": "risk_off",
+                "risk_appetite_label": "Balanced",
+                "updated_at": datetime(2026, 6, 16, 13, 31, tzinfo=timezone.utc),
+            },
+            "availability": {
+                "status": "available",
+                "issues": (),
+            },
+        },
+        live_alerts=(),
+        material_changes=(),
+        positions=(),
+        closed_positions=(
+            {"ticker": "NVDA", "summary": "Closed recently and ready for review"},
+            {"ticker": "NVDA", "summary": "Older NVDA close should not duplicate"},
+            {"ticker": "TSLA"},
+        ),
+    )
+
+    assert payload["command_center"]["needs_review"] == (
+        {"ticker": "NVDA", "summary": "Closed recently and ready for review"},
+        {"ticker": "TSLA", "summary": "Closed recently and ready for review"},
+    )
+    assert payload["current_summary"]["items"] == ("2 closed tickers pending review",)

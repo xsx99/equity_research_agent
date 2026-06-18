@@ -16,7 +16,12 @@ def build_today_overview(
     positions: tuple[dict[str, Any], ...],
     closed_positions: tuple[dict[str, Any], ...],
 ) -> dict[str, Any]:
-    command_center = _build_command_center(header=header, positions=positions, closed_positions=closed_positions)
+    deduped_closed_positions = _dedupe_rows_by_ticker(closed_positions)
+    command_center = _build_command_center(
+        header=header,
+        positions=positions,
+        closed_positions=deduped_closed_positions,
+    )
     metric_cards = (
         _metric_card(
             label="Net Liquidation Value",
@@ -60,7 +65,7 @@ def build_today_overview(
             if header.get("material_signal_change_count") is not None
             else None,
             f"{len(positions)} open positions" if positions else None,
-            f"{len(closed_positions)} closed tickers pending review" if closed_positions else None,
+            f"{len(deduped_closed_positions)} closed tickers pending review" if deduped_closed_positions else None,
         )
         if item
     )
@@ -116,7 +121,7 @@ def _build_command_center(
     needs_review = tuple(
         {
             "ticker": str(row.get("ticker") or "").strip().upper(),
-            "summary": row.get("summary") or "Closed today and ready for review",
+            "summary": row.get("summary") or "Closed recently and ready for review",
         }
         for row in closed_positions
         if str(row.get("ticker") or "").strip()
@@ -159,6 +164,18 @@ def _build_command_center(
         "open_positions": open_positions,
         "system_issues": tuple(system_issues),
     }
+
+
+def _dedupe_rows_by_ticker(rows: tuple[dict[str, Any], ...]) -> tuple[dict[str, Any], ...]:
+    deduped: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in rows:
+        ticker = str(row.get("ticker") or "").strip().upper()
+        if not ticker or ticker in seen:
+            continue
+        seen.add(ticker)
+        deduped.append(row)
+    return tuple(deduped)
 
 
 def _metric_card(

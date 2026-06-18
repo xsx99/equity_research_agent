@@ -54,7 +54,7 @@ def _dashboard_payload() -> dict:
         "overview": {
             "command_center": {
                 "needs_review": (
-                    {"ticker": "NVDA", "summary": "Closed today and ready for review"},
+                    {"ticker": "NVDA", "summary": "Closed recently and ready for review"},
                 ),
                 "open_positions": (
                     {"ticker": "AAPL", "summary": "Open position, risk within limits"},
@@ -659,7 +659,7 @@ class TestTodayDashboard:
         assert "Needs Review" in response.text
         assert "Open Positions" in response.text
         assert "System Issues" in response.text
-        assert "Closed today and ready for review" in response.text
+        assert "Closed recently and ready for review" in response.text
         assert "Open position, risk within limits" in response.text
         assert "Macro regime unavailable" in response.text
         assert "Session Watch" not in response.text
@@ -1502,7 +1502,13 @@ class TestTodayDashboard:
                         "ticker": "NVDA",
                         "status": "closed",
                         "closed_at": datetime(2026, 6, 5, 20, 5, tzinfo=timezone.utc),
-                        "summary": "Closed today and ready for review",
+                        "summary": "Closed recently and ready for review",
+                    },
+                    {
+                        "ticker": "NVDA",
+                        "status": "closed",
+                        "closed_at": datetime(2026, 6, 4, 20, 5, tzinfo=timezone.utc),
+                        "summary": "Older duplicate close should be suppressed",
                     },
                 ),
             ),
@@ -1532,7 +1538,7 @@ class TestTodayDashboard:
 
         assert dashboard["overview"]["command_center"] == {
             "needs_review": (
-                {"ticker": "NVDA", "summary": "Closed today and ready for review"},
+                {"ticker": "NVDA", "summary": "Closed recently and ready for review"},
             ),
             "open_positions": (
                 {"ticker": "AAPL", "summary": "Open position, risk within limits"},

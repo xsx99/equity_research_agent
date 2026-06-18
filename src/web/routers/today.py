@@ -419,7 +419,7 @@ def _build_overview_command_center(
     needs_review = tuple(
         {
             "ticker": str(row.get("ticker") or "").strip().upper(),
-            "summary": row.get("summary") or "Closed today and ready for review",
+            "summary": row.get("summary") or "Closed recently and ready for review",
         }
         for row in closed_positions
         if str(row.get("ticker") or "").strip()
