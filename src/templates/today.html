@@ -202,6 +202,10 @@
                 {% else %}
                 <p class="detail-muted quiet-empty surface-empty-copy">Unavailable.</p>
                 {% endif %}
+                {% if detail.latest_conclusion.signal_summary.event_news_summary %}
+                <div class="section-label">Event / News Summary</div>
+                <p class="detail-muted">{{ detail.latest_conclusion.signal_summary.event_news_summary }}</p>
+                {% endif %}
                 {% if detail.latest_conclusion.signal_summary.grouped_sections or detail.latest_conclusion.signal_summary.hidden_bullet_count %}
                 <details>
                   <summary>Signal summary audit</summary>

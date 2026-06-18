@@ -301,6 +301,7 @@ def _build_detail(
             **_build_signal_summary(signal_history.get("summary")),
             "technical_charts": technical_charts,
             "news_snippets": news_snippets,
+            "event_news_summary": _build_event_news_summary(news_snippets),
             "fundamental_snippets": fundamental_snippets,
         },
         "risk_summary": {
@@ -484,6 +485,28 @@ def _build_snippets(items: Any) -> list[dict[str, Any]]:
         )
     snippets.sort(key=lambda item: _sort_key_desc(item.get("time")))
     return snippets or [_empty_snippet()]
+
+
+def _build_event_news_summary(news_snippets: list[dict[str, Any]]) -> str | None:
+    material_snippets = [
+        item
+        for item in news_snippets
+        if not item.get("empty") and (item.get("title") or item.get("summary"))
+    ]
+    if not material_snippets:
+        return None
+
+    sentences: list[str] = []
+    for item in material_snippets[:2]:
+        title = str(item.get("title") or "").strip()
+        summary = str(item.get("summary") or "").strip()
+        if title and summary and summary != title:
+            sentences.append(f"{title}: {summary}.")
+        elif summary:
+            sentences.append(f"{summary}.")
+        elif title:
+            sentences.append(f"{title}.")
+    return " ".join(sentences) if sentences else None
 
 
 def _build_timeline(

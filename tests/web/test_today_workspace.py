@@ -445,6 +445,10 @@ def test_build_ticker_workspace_shapes_latest_conclusion_and_evidence():
         "Raised guidance",
         "Late headline",
     }
+    assert (
+        latest_conclusion["signal_summary"]["event_news_summary"]
+        == "Late headline: Follow-through demand. Raised guidance: Demand improved."
+    )
     assert latest_conclusion["signal_summary"]["fundamental_snippets"][0]["title"] == "Margin outlook"
     assert latest_conclusion["risk_summary"]["status"] == "approved"
     assert latest_conclusion["risk_summary"]["status_label"] == "Approved"
@@ -1010,6 +1014,7 @@ def test_build_ticker_workspace_uses_empty_state_markers_when_detail_inputs_are_
             "empty": True,
         }
     ]
+    assert latest_conclusion["signal_summary"]["event_news_summary"] is None
     assert latest_conclusion["signal_summary"]["fundamental_snippets"] == [
         {
             "title": "No material update",
