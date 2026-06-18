@@ -1513,7 +1513,23 @@ class TestTodayDashboard:
                 ),
             ),
             patch("src.web.routers.today._load_trade_detail", return_value=selected_nvda_detail),
-            patch("src.web.routers.today._load_option_positions", return_value=()),
+            patch(
+                "src.web.routers.today._load_option_positions",
+                return_value=(
+                    {
+                        "ticker": "QQQ",
+                        "option_strategy_type": "long_call",
+                        "trade_identity": "tactical_option_trade",
+                        "max_loss": Decimal("230.00"),
+                    },
+                    {
+                        "ticker": "NVDA",
+                        "option_strategy_type": "long_call",
+                        "trade_identity": "tactical_option_trade",
+                        "max_loss": Decimal("220.00"),
+                    },
+                ),
+            ),
             patch("src.web.routers.today._load_hedge_overlays", return_value=()),
             patch("src.web.routers.today._load_live_alerts", return_value=()),
             patch("src.web.routers.today._load_material_changes", return_value=()),
@@ -1542,6 +1558,8 @@ class TestTodayDashboard:
             ),
             "open_positions": (
                 {"ticker": "AAPL", "summary": "Open position, risk within limits"},
+                {"ticker": "QQQ", "summary": "Open option position, max loss $230.00"},
+                {"ticker": "NVDA", "summary": "Open option position, max loss $220.00"},
             ),
             "system_issues": (
                 {"label": "Macro regime unavailable", "summary": "Global macro regime data is unavailable."},

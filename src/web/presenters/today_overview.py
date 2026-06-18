@@ -14,12 +14,14 @@ def build_today_overview(
     live_alerts: tuple[dict[str, Any], ...],
     material_changes: tuple[dict[str, Any], ...],
     positions: tuple[dict[str, Any], ...],
+    option_positions: tuple[dict[str, Any], ...],
     closed_positions: tuple[dict[str, Any], ...],
 ) -> dict[str, Any]:
     deduped_closed_positions = _dedupe_rows_by_ticker(closed_positions)
+    open_positions = positions + option_positions
     command_center = _build_command_center(
         header=header,
-        positions=positions,
+        open_positions=open_positions,
         closed_positions=deduped_closed_positions,
     )
     metric_cards = (
@@ -64,7 +66,7 @@ def build_today_overview(
             f"{header.get('material_signal_change_count', 0)} material signal changes"
             if header.get("material_signal_change_count") is not None
             else None,
-            f"{len(positions)} open positions" if positions else None,
+            f"{len(open_positions)} open positions" if open_positions else None,
             f"{len(deduped_closed_positions)} closed tickers pending review" if deduped_closed_positions else None,
         )
         if item
@@ -115,7 +117,7 @@ def build_today_overview(
 def _build_command_center(
     *,
     header: dict[str, Any],
-    positions: tuple[dict[str, Any], ...],
+    open_positions: tuple[dict[str, Any], ...],
     closed_positions: tuple[dict[str, Any], ...],
 ) -> dict[str, tuple[dict[str, Any], ...]]:
     needs_review = tuple(
@@ -129,9 +131,9 @@ def _build_command_center(
     open_positions = tuple(
         {
             "ticker": str(row.get("ticker") or "").strip().upper(),
-            "summary": row.get("summary") or "Open position, risk within limits",
+            "summary": _open_position_summary(row),
         }
-        for row in positions
+        for row in open_positions
         if str(row.get("ticker") or "").strip()
     )
     system_issues: list[dict[str, Any]] = []
@@ -164,6 +166,20 @@ def _build_command_center(
         "open_positions": open_positions,
         "system_issues": tuple(system_issues),
     }
+
+
+def _open_position_summary(row: dict[str, Any]) -> str:
+    summary = str(row.get("summary") or "").strip()
+    if summary:
+        return summary
+    if row.get("option_strategy_type") is not None or row.get("max_loss") is not None:
+        max_loss = row.get("max_loss")
+        if isinstance(max_loss, Decimal):
+            return f"Open option position, max loss ${max_loss:,.2f}"
+        if max_loss is not None:
+            return f"Open option position, max loss {max_loss}"
+        return "Open option position"
+    return "Open position, risk within limits"
 
 
 def _dedupe_rows_by_ticker(rows: tuple[dict[str, Any], ...]) -> tuple[dict[str, Any], ...]:
