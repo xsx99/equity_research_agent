@@ -45,12 +45,24 @@ from src.trading.manual_review.sqlalchemy import SQLAlchemyManualTickerRequestSe
 from src.trading.repositories.sqlalchemy import SqlAlchemyTradingRepository
 from src.web.flash import flash, get_flash
 from src.web.presenters.today_copy import (
+    cache_status_label,
     candidate_result_label,
+    generic_status_label,
+    intent_type_label,
+    live_status_label,
+    macro_regime_label,
     manual_request_mode_label,
     manual_request_status_label,
+    option_strategy_type_label,
+    order_status_label,
+    risk_appetite_label,
+    runtime_mode_label,
+    scope_label,
     strategy_label,
     trade_identity_label,
 )
+from src.web.presenters.today_candidates import build_today_candidates_view
+from src.web.presenters.today_overview import build_today_overview
 from src.web.presenters.today_risk_macro import build_today_risk_macro_payload
 from src.web.presenters.today_workspace import build_ticker_workspace
 
@@ -184,6 +196,7 @@ def load_today_dashboard(
 
     trade_rows = _load_trade_rows(session)
     positions = _load_positions(session)
+    option_positions = _load_option_positions(session)
     closed_positions = _load_recent_closed_positions(session)
     positions_by_ticker = _group_latest_by_ticker(positions)
     closed_positions_by_ticker = _group_latest_by_ticker(closed_positions)
@@ -273,25 +286,36 @@ def load_today_dashboard(
         latest_risk=latest_risk,
         latest_macro_snapshot=latest_macro_snapshot,
     )
+    job_timeline = _build_job_timeline(latest_reflection)
+    overview = build_today_overview(
+        header=header,
+        job_timeline=job_timeline,
+        risk_macro=risk_macro,
+        live_alerts=_load_live_alerts(session),
+        material_changes=_load_material_changes(session),
+        positions=positions,
+        option_positions=option_positions,
+        closed_positions=closed_positions,
+    )
+    candidates = build_today_candidates_view(
+        rows=candidate_rows,
+        manual_requests=manual_requests,
+        themes=themes,
+        active_universe_filter=_serialize_universe_filter(active_universe_filter),
+        portfolio_intents=portfolio_intents,
+        relationships=relationships,
+        peer_baskets=peer_baskets,
+    )
 
     return {
         "selected_tab": selected_tab,
         "tabs": tuple({"id": tab_id, "label": label} for tab_id, label in _TAB_LABELS),
         "header": header,
-        "job_timeline": _build_job_timeline(latest_reflection),
-        "overview": {
-            "command_center": _build_overview_command_center(
-                header=header,
-                positions=positions,
-                closed_positions=closed_positions,
-                ticker_workspace=ticker_workspace,
-            ),
-            "live_alerts": _load_live_alerts(session),
-            "material_changes": _load_material_changes(session),
-        },
+        "job_timeline": job_timeline,
+        "overview": overview,
         "portfolio": {
             "positions": positions,
-            "option_positions": _load_option_positions(session),
+            "option_positions": option_positions,
             "hedge_overlays": _load_hedge_overlays(session),
         },
         "trades": {
@@ -300,20 +324,7 @@ def load_today_dashboard(
         },
         "ticker_workspace": ticker_workspace,
         "risk_macro": risk_macro,
-        "candidates": {
-            "active_universe_filter": _serialize_universe_filter(active_universe_filter),
-            "summary": _build_candidates_summary(
-                rows=candidate_rows,
-                manual_requests=manual_requests,
-                themes=themes,
-            ),
-            "rows": candidate_rows,
-            "manual_requests": manual_requests,
-            "portfolio_intents": portfolio_intents,
-            "relationships": relationships,
-            "peer_baskets": peer_baskets,
-            "themes": themes,
-        },
+        "candidates": candidates,
         "learning_strategies": {
             "reflection": _serialize_reflection(latest_reflection),
             "learning_factors": _load_learning_factors(session),
@@ -389,7 +400,16 @@ def _build_header(
     return {
         "trade_date": trade_date,
         "macro_regime": getattr(latest_macro_snapshot, "regime", None) or "unavailable",
+        "macro_regime_label": macro_regime_label(getattr(latest_macro_snapshot, "regime", None) or "unavailable"),
         "risk_appetite": latest_risk.risk_appetite if latest_risk else "unavailable",
+        "risk_appetite_label": risk_appetite_label(latest_risk.risk_appetite if latest_risk else "unavailable"),
+        "market_phase": "Pre-open" if trade_date else "Unavailable",
+        "runtime_mode": "live" if latest_risk else "dry_run",
+        "runtime_mode_label": runtime_mode_label("live" if latest_risk else "dry_run"),
+        "live_status": "degraded" if getattr(latest_macro_snapshot, "regime", None) is None else "live",
+        "live_status_label": live_status_label(
+            "degraded" if getattr(latest_macro_snapshot, "regime", None) is None else "live"
+        ),
         "nav": latest_portfolio.net_liquidation_value if latest_portfolio else None,
         "day_pnl": latest_portfolio.day_pnl if latest_portfolio else None,
         "buying_power": latest_portfolio.buying_power if latest_portfolio else None,
@@ -401,9 +421,15 @@ def _build_header(
 
 
 def _build_job_timeline(latest_reflection: DailyReflection | None) -> tuple[dict[str, Any], ...]:
-    rows = [{"label": "Workstation", "status": "available"}]
+    rows = [{"label": "Workstation", "status": "available", "status_label": generic_status_label("available")}]
     if latest_reflection:
-        rows.append({"label": "Reflection", "status": latest_reflection.status})
+        rows.append(
+            {
+                "label": "Reflection",
+                "status": latest_reflection.status,
+                "status_label": generic_status_label(latest_reflection.status),
+            }
+        )
     return tuple(rows)
 
 
@@ -417,7 +443,7 @@ def _build_overview_command_center(
     needs_review = tuple(
         {
             "ticker": str(row.get("ticker") or "").strip().upper(),
-            "summary": row.get("summary") or "Closed today and ready for review",
+            "summary": row.get("summary") or "Closed recently and ready for review",
         }
         for row in closed_positions
         if str(row.get("ticker") or "").strip()
@@ -601,6 +627,7 @@ def _load_positions(session: Any) -> tuple[dict[str, Any], ...]:
         {
             "ticker": row.ticker,
             "trade_identity": row.trade_identity,
+            "trade_identity_label": trade_identity_label(row.trade_identity),
             "strategy_id": row.strategy_id,
             "quantity": row.quantity,
             "market_value": row.market_value,
@@ -621,6 +648,7 @@ def _load_recent_closed_positions(session: Any) -> tuple[dict[str, Any], ...]:
         {
             "ticker": row.ticker,
             "trade_identity": row.trade_identity,
+            "trade_identity_label": trade_identity_label(row.trade_identity),
             "strategy_id": row.strategy_id,
             "quantity": row.quantity,
             "market_value": row.market_value,
@@ -644,7 +672,9 @@ def _load_option_positions(session: Any) -> tuple[dict[str, Any], ...]:
         {
             "ticker": row.ticker,
             "option_strategy_type": row.option_strategy_type,
+            "option_strategy_type_label": option_strategy_type_label(row.option_strategy_type),
             "trade_identity": row.trade_identity,
+            "trade_identity_label": trade_identity_label(row.trade_identity),
             "max_loss": row.max_loss,
         }
         for row in rows
@@ -662,6 +692,7 @@ def _load_hedge_overlays(session: Any) -> tuple[dict[str, Any], ...]:
         {
             "ticker": row.ticker,
             "option_strategy_type": row.option_strategy_type,
+            "option_strategy_type_label": option_strategy_type_label(row.option_strategy_type),
             "protected_notional": row.protected_notional,
         }
         for row in rows
@@ -947,6 +978,8 @@ def _load_portfolio_intents(session: Any) -> tuple[dict[str, Any], ...]:
             "ticker": row.ticker,
             "intent_type": row.intent_type,
             "lifecycle_status": row.lifecycle_status,
+            "intent_type_label": intent_type_label(row.intent_type),
+            "lifecycle_status_label": generic_status_label(row.lifecycle_status),
         }
         for row in rows
     )
@@ -992,6 +1025,7 @@ def _serialize_reflection(reflection: DailyReflection | None) -> dict[str, Any] 
         return None
     return {
         "status": reflection.status,
+        "status_label": generic_status_label(reflection.status),
         "what_worked": tuple((reflection.reflection_json or {}).get("what_worked") or []),
     }
 
@@ -1003,6 +1037,8 @@ def _load_learning_factors(session: Any) -> tuple[dict[str, Any], ...]:
             "title": row.title,
             "status": row.status,
             "scope": row.scope,
+            "status_label": generic_status_label(row.status),
+            "scope_label": scope_label(row.scope),
         }
         for row in rows
     )
@@ -1020,6 +1056,7 @@ def _load_strategy_performance(session: Any) -> tuple[dict[str, Any], ...]:
             {
                 "strategy_id": strategy_id,
                 "lifecycle_status": "observed",
+                "lifecycle_status_label": generic_status_label("observed"),
                 "win_rate": None,
                 "total_pnl": sum(alpha_values, Decimal("0")) if alpha_values else None,
             }
@@ -1033,6 +1070,7 @@ def _load_strategy_proposals(session: Any) -> tuple[dict[str, Any], ...]:
         {
             "proposed_strategy_id": row.proposed_strategy_id,
             "proposal_status": row.proposal_status,
+            "proposal_status_label": generic_status_label(row.proposal_status),
         }
         for row in rows
     )
@@ -1075,7 +1113,7 @@ def _normalize_tab(tab: str) -> str:
 
 
 def _normalize_detail_tab(detail_tab: str) -> str:
-    allowed = {"timeline", "trend", "decisions", "risk"}
+    allowed = {"timeline"}
     return detail_tab if detail_tab in allowed else "timeline"
 
 

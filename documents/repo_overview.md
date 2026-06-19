@@ -211,6 +211,15 @@ PR 11C keeps the same persisted trading artifacts but makes `/today` lifecycle-a
 - `src/templates/today.html` now renders `Overview` as a command center, `Risk & Macro` as summary-first with advanced audit tables collapsed, and `Candidates` as an action queue plus decision cards with universe/config internals demoted into advanced context
 - `/today` route coverage now also locks translated copy, lifecycle persistence, and candidate/risk summary behavior in `tests/web/test_today_copy.py`, `tests/web/test_today_workspace.py`, and `tests/web/test_today.py`
 
+The current `/today` operator-UI follow-up pushes more aggregation and display policy into focused presenter modules without changing the underlying persistence model:
+
+- `src/web/presenters/today_overview.py` now shapes the `Overview` command surface into an explicit operator strip, provenance-aware metric cards, alert summary, and a collapsible current-session summary so metric freshness and source-of-truth copy do not have to be inferred inside Jinja
+- `src/web/presenters/today_candidates.py` now owns candidate dedupe, grouped decision readout, manual-review queue normalization, and action-queue prioritization so repeated ticker rows and linked/unlinked manual-review audit states no longer depend on template-side grouping
+- `src/web/presenters/today_workspace.py` now keeps the ticker-first shape but also computes repeated-phase timeline deltas (`baseline` vs rerun state, delta fields, source refs) and truncates long signal summaries into a high-signal default list plus grouped audit sections
+- `src/web/routers/today.py` now routes `/today` through `today_overview`, `today_candidates`, `today_workspace`, and `today_risk_macro` presenter outputs instead of building overview/candidate summary rows inline, while still preserving the existing server-rendered FastAPI + Jinja contract
+- `src/templates/today.html` and `src/static/style.css` now render these presenter outputs as bounded-scroll operator surfaces: overview strip/metric cards, grouped candidate alternatives, manual-review audit cards with dismiss/drill-down controls, timeline delta detail, signal-summary audit disclosure, and a visible Risk & Macro strip plus event-risk readout
+- focused coverage now also lives in `tests/web/test_today_overview.py` and `tests/web/test_today_candidates.py`, while `tests/web/test_today.py` and `tests/web/test_today_workspace.py` lock the richer render contracts and presenter behavior
+
 This refinement still stays within the existing FastAPI + Jinja server-rendered architecture. It does not add schema changes, client-side state management, or new trading logic.
 
 ## PR 13 Scope

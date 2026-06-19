@@ -92,7 +92,7 @@ def test_today_risk_macro_presenter_builds_command_center_from_canonical_rows():
         exposures=({"factor_type": "sector", "factor_name": "Technology", "exposure": 5.2757},),
     )
 
-    assert payload["command_center"]["regime"] == "risk_off"
+    assert payload["command_center"]["regime"] == "Risk Off"
     assert payload["command_center"]["risk_appetite_label"] == "Balanced"
     assert payload["command_center"]["event_risk_level"] == "High"
     assert payload["command_center"]["hedge_posture"]["target_underlier"] == "QQQ"
@@ -100,7 +100,7 @@ def test_today_risk_macro_presenter_builds_command_center_from_canonical_rows():
     assert payload["summary"]["top_risk_sources"][0]["label"] == "Own event window"
     assert payload["macro"]["blocked_strategy_tags"] == ("gap_and_go_v1",)
     assert payload["events"][0]["affected_ticker"] == "AAPL"
-    assert payload["risk_sources"][0]["recommended_action"] == "block_open"
+    assert payload["risk_sources"][0]["recommended_action_label"] == "Block New Entry"
 
 
 def test_today_risk_macro_presenter_marks_missing_macro_as_availability_issue():
@@ -111,7 +111,7 @@ def test_today_risk_macro_presenter_marks_missing_macro_as_availability_issue():
         exposures=(),
     )
 
-    assert payload["command_center"]["regime"] == "unavailable"
+    assert payload["command_center"]["regime"] == "Unavailable"
     assert payload["summary"]["availability_issues"] == (
         {
             "label": "Macro regime unavailable",

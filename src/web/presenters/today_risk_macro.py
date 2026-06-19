@@ -4,7 +4,14 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from src.web.presenters.today_copy import risk_appetite_label
+from src.web.presenters.today_copy import (
+    event_type_label,
+    macro_regime_label,
+    operator_text,
+    recommended_action_label,
+    risk_appetite_label,
+    risk_source_label,
+)
 
 
 def build_today_risk_macro_payload(
@@ -38,7 +45,7 @@ def build_today_risk_macro_payload(
     return {
         "risk_config_version": getattr(latest_risk, "resolver_version", None),
         "command_center": {
-            "regime": getattr(macro_snapshot, "regime", None) or "unavailable",
+            "regime": macro_regime_label(getattr(macro_snapshot, "regime", None) or "unavailable"),
             "risk_appetite_label": risk_appetite_label(getattr(latest_risk, "risk_appetite", None) or "unavailable"),
             "exposure_usage_pct": _exposure_usage_pct(latest_risk),
             "event_risk_level": _event_risk_level(event_assessments),
@@ -66,7 +73,7 @@ def build_today_risk_macro_payload(
             ),
         },
         "macro": {
-            "regime": getattr(macro_snapshot, "regime", None) or "unavailable",
+            "regime": macro_regime_label(getattr(macro_snapshot, "regime", None) or "unavailable"),
             "risk_budget_multiplier": getattr(macro_snapshot, "risk_budget_multiplier", None),
             "blocked_strategy_tags": tuple(getattr(macro_snapshot, "blocked_strategy_tags", ()) or ()),
             "invalidators": tuple(getattr(macro_snapshot, "invalidators", ()) or ()),
@@ -104,17 +111,17 @@ def _top_risk_sources(
     rows: list[dict[str, Any]] = []
     for index, source_key in enumerate(source_keys[:3]):
         summary = binding_constraints[index] if index < len(binding_constraints) else _risk_source_summary(source_key)
-        rows.append({"label": _risk_source_label(source_key, exposures=exposures), "summary": summary})
+        rows.append({"label": _risk_source_label(source_key, exposures=exposures), "summary": operator_text(summary)})
     if not rows and exposures:
         first = exposures[0]
         rows.append(
             {
                 "label": f"{first.get('factor_name') or 'Portfolio'} concentration",
-                "summary": binding_constraints[0] if binding_constraints else "theme cap near limit",
+                "summary": operator_text(binding_constraints[0]) if binding_constraints else "theme cap near limit",
             }
         )
     elif not rows and binding_constraints:
-        rows.extend({"label": "Constraint pressure", "summary": item} for item in binding_constraints[:3])
+        rows.extend({"label": "Constraint pressure", "summary": operator_text(item)} for item in binding_constraints[:3])
     return tuple(rows)
 
 
@@ -144,6 +151,7 @@ def _event_row(event: object) -> dict[str, Any]:
     return {
         "scheduled_at": getattr(event, "event_time", None),
         "event_type": getattr(event, "event_type", None),
+        "event_type_label": event_type_label(getattr(event, "event_type", None)),
         "importance": getattr(event, "severity_hint", None),
         "portfolio_risk_level": getattr(event, "severity_hint", None),
         "affected_ticker": getattr(event, "ticker", None),
@@ -158,8 +166,10 @@ def _risk_source_row(assessment: object) -> dict[str, Any]:
     return {
         "ticker": getattr(assessment, "ticker", None),
         "risk_source": getattr(assessment, "risk_source", None),
+        "risk_source_label": risk_source_label(getattr(assessment, "risk_source", None)),
         "severity": getattr(assessment, "severity", None),
         "recommended_action": getattr(assessment, "recommended_action", None),
+        "recommended_action_label": recommended_action_label(getattr(assessment, "recommended_action", None)),
         "rationale": getattr(assessment, "rationale", None),
         "material_change": bool(metadata_json.get("material_change")),
         "updated_at": getattr(assessment, "available_for_decision_at", None),
