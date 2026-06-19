@@ -335,20 +335,6 @@
                 {% endfor %}
               </div>
             </section>
-
-            {% if detail.tabs.raw_json or detail.tabs.risk.raw_json %}
-            <details class="subcard raw-json-panel">
-              <summary>Raw JSON</summary>
-              {% if detail.tabs.raw_json %}
-              <div class="section-label">Workspace Detail JSON</div>
-              <pre>{{ detail.tabs.raw_json }}</pre>
-              {% endif %}
-              {% if detail.tabs.risk.raw_json %}
-              <div class="section-label">Risk JSON</div>
-              <pre>{{ detail.tabs.risk.raw_json }}</pre>
-              {% endif %}
-            </details>
-            {% endif %}
             {% elif detail %}
             <section class="card subcard ticker-detail-hero">
               <div class="surface-heading surface-heading-compact">

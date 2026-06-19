@@ -576,13 +576,14 @@ class TestTodayDashboard:
         assert response.status_code == 200
         assert "Latest Conclusion" in response.text
         assert "Trade Decision" in response.text
-        assert "own_earnings_beat_raise" in response.text
+        assert "Breakout confirmed + risk approved" in response.text
         assert "within_limits" in response.text
         assert "History" in response.text
         assert 'data-panel="timeline"' in response.text
         assert 'href="/today?tab=trades&ticker=AAPL&detail_tab=trend"' not in response.text
         assert 'href="/today?tab=trades&ticker=AAPL&detail_tab=decisions"' not in response.text
         assert 'href="/today?tab=trades&ticker=AAPL&detail_tab=risk"' not in response.text
+        assert "Raw JSON" not in response.text
         assert "Risk Posture" not in response.text
         assert "Primary strategy selected" not in response.text
 
@@ -620,6 +621,9 @@ class TestTodayDashboard:
         assert 'data-panel="trend"' not in response.text
         assert 'data-panel="decisions"' not in response.text
         assert 'data-panel="risk"' not in response.text
+        assert "Raw JSON" not in response.text
+        assert "Workspace Detail JSON" not in response.text
+        assert "Risk JSON" not in response.text
 
     def test_trades_workspace_renders_timeline_as_only_detail_section(self, client):
         payload = _dashboard_payload()
