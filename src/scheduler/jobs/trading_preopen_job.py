@@ -1,6 +1,7 @@
 """Scheduled job for the trading pre-open runtime."""
 from __future__ import annotations
 
+from src.core import config as app_config
 from src.core.logging import get_logger
 from src.scheduler.base import BaseJob, JobConfig
 from src.trading.runtime import run_job_phase
@@ -20,7 +21,11 @@ class TradingPreopenJob(BaseJob):
     def run(self) -> None:
         logger.info("trading_preopen_job_started")
         try:
-            result = run_job_phase("preopen")
+            result = run_job_phase(
+                "preopen",
+                execute_paper_orders=app_config.TRADING_EXECUTE_PAPER_ORDERS,
+                execute_paper_option_orders=app_config.TRADING_EXECUTE_PAPER_OPTION_ORDERS,
+            )
             if result.get("status") == "skipped":
                 logger.warning(
                     "trading_preopen_job_skipped",

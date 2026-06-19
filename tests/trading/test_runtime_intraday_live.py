@@ -1157,9 +1157,11 @@ def test_run_live_intraday_refresh_once_builds_default_dependencies_for_option_e
 
 
 def test_runtime_dispatch_routes_intraday_refresh_to_live_runtime():
+    from src.trading.runtime import dispatch
     from src.trading.runtime.intraday_refresh import run_live_intraday_refresh_once as live_handler
 
-    assert get_job_phase_handler("intraday_refresh") is live_handler
+    assert dispatch.JOB_PHASE_HANDLERS["intraday_refresh"] is live_handler
+    assert callable(get_job_phase_handler("intraday_refresh"))
 
 
 def test_build_live_intraday_refresh_dependencies_injects_option_broker_into_rebalance_pipeline(monkeypatch):

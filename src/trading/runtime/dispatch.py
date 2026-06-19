@@ -1,6 +1,7 @@
 """Shared dispatch helpers for scheduler phases and smoke modes."""
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable
 from typing import Any
 
@@ -23,7 +24,7 @@ from .smoke import (
 )
 from .strategy_evolution import run_live_strategy_evolution_once
 
-RuntimeHandler = Callable[[], dict[str, Any]]
+RuntimeHandler = Callable[..., dict[str, Any]]
 
 JOB_PHASE_HANDLERS: dict[str, RuntimeHandler] = {
     "preopen": run_live_preopen_once,
@@ -51,9 +52,17 @@ SMOKE_MODE_HANDLERS: dict[str, RuntimeHandler] = {
 def get_job_phase_handler(phase: str) -> RuntimeHandler:
     """Return the scheduler runtime handler for a supported phase."""
     try:
-        return JOB_PHASE_HANDLERS[phase]
+        handler = JOB_PHASE_HANDLERS[phase]
     except KeyError as exc:
         raise ValueError(f"unsupported_trading_job_phase:{phase}") from exc
+
+    params = inspect.signature(handler).parameters
+
+    def _invoke(**policy: Any) -> dict[str, Any]:
+        kwargs = {k: v for k, v in policy.items() if k in params and v is not None}
+        return handler(**kwargs)
+
+    return _invoke
 
 
 def get_smoke_mode_handler(mode: str) -> RuntimeHandler:

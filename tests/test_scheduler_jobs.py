@@ -34,7 +34,8 @@ def test_trading_scheduler_jobs_call_run_job_phase(monkeypatch, module_path, job
 
     monkeypatch.setattr(
         f"{module_path}.run_job_phase",
-        lambda requested_phase: called.append(requested_phase) or {"status": "passed", "phase": requested_phase},
+        lambda requested_phase, **kwargs: called.append(requested_phase)
+        or {"status": "passed", "phase": requested_phase},
     )
     monkeypatch.setattr(
         f"{module_path}.logger",
@@ -57,6 +58,50 @@ def test_trading_scheduler_jobs_call_run_job_phase(monkeypatch, module_path, job
         level == "info" and event.endswith("_job_completed") and kwargs.get("status") == "passed"
         for level, event, kwargs in events
     )
+
+
+@pytest.mark.parametrize(
+    ("module_path", "job_cls", "phase"),
+    [
+        ("src.scheduler.jobs.trading_preopen_job", TradingPreopenJob, "preopen"),
+        ("src.scheduler.jobs.manual_ticker_review_job", ManualTickerReviewJob, "manual_review"),
+        ("src.scheduler.jobs.intraday_signal_refresh_job", IntradaySignalRefreshJob, "intraday_refresh"),
+    ],
+)
+def test_live_trading_jobs_forward_execution_policy(monkeypatch, module_path, job_cls, phase):
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    monkeypatch.setattr(f"{module_path}.app_config.TRADING_EXECUTE_PAPER_ORDERS", True)
+    monkeypatch.setattr(f"{module_path}.app_config.TRADING_EXECUTE_PAPER_OPTION_ORDERS", False)
+    monkeypatch.setattr(
+        f"{module_path}.run_job_phase",
+        lambda requested_phase, **kwargs: calls.append((requested_phase, kwargs))
+        or {"status": "passed", "phase": requested_phase},
+    )
+    monkeypatch.setattr(
+        f"{module_path}.logger",
+        type(
+            "LoggerStub",
+            (),
+            {
+                "info": staticmethod(lambda *args, **kwargs: None),
+                "warning": staticmethod(lambda *args, **kwargs: None),
+                "error": staticmethod(lambda *args, **kwargs: None),
+            },
+        )(),
+    )
+
+    job_cls().run()
+
+    assert calls == [
+        (
+            phase,
+            {
+                "execute_paper_orders": True,
+                "execute_paper_option_orders": False,
+            },
+        )
+    ]
 
 
 def test_post_close_trading_job_logs_skipped_status_with_reasons(monkeypatch):

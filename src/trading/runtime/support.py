@@ -17,6 +17,37 @@ def seed_initial_strategy_definitions(repository: Any) -> None:
         repository.save_strategy_definition(StrategyDefinitionRecord.from_mapping(row))
 
 
+def seed_default_universe_filter_config(session: Any) -> None:
+    """Insert a permissive active universe filter profile when none exists."""
+    from src.db.models.trading import UniverseFilterConfig as UniverseFilterConfigModel
+
+    existing = (
+        session.query(UniverseFilterConfigModel)
+        .filter(UniverseFilterConfigModel.is_active.is_(True))
+        .first()
+    )
+    if existing is not None:
+        return
+    session.add(
+        UniverseFilterConfigModel(
+            profile_name="default",
+            version=1,
+            is_active=True,
+            min_price=5,
+            min_avg_dollar_volume=10_000_000,
+            included_sectors_json=[],
+            excluded_sectors_json=[],
+            included_industries_json=[],
+            excluded_industries_json=[],
+            exchanges_json=[],
+            asset_types_json=[],
+            manual_include_json=[],
+            manual_exclude_json=[],
+        )
+    )
+    session.flush()
+
+
 def build_execution_report(
     *,
     mode: str,

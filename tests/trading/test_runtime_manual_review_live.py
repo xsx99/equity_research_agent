@@ -326,9 +326,11 @@ def test_run_live_manual_review_once_builds_default_dependencies_when_not_inject
 
 
 def test_runtime_dispatch_routes_manual_review_to_live_runtime():
+    from src.trading.runtime import dispatch
     from src.trading.runtime.manual_review import run_live_manual_review_once as live_handler
 
-    assert get_job_phase_handler("manual_review") is live_handler
+    assert dispatch.JOB_PHASE_HANDLERS["manual_review"] is live_handler
+    assert callable(get_job_phase_handler("manual_review"))
 
 
 def test_live_manual_review_runtime_reports_request_execution_reachability_in_dry_run_mode():

@@ -341,6 +341,7 @@ def test_build_live_preopen_dependencies_wires_fallback_reapproval_into_paper_ex
             captured["paper_execution_kwargs"] = kwargs
 
     monkeypatch.setattr("src.trading.runtime.preopen_dependencies.seed_initial_strategy_definitions", lambda repo: captured.setdefault("seed_repo", repo))
+    monkeypatch.setattr("src.trading.runtime.preopen_dependencies.seed_default_universe_filter_config", lambda session: captured.setdefault("seed_session", session))
     monkeypatch.setattr("src.trading.runtime.preopen_dependencies.build_default_news_provider", lambda: "news-provider")
     monkeypatch.setattr("src.trading.runtime.preopen_dependencies.app_config.TRADING_MODEL_NAME", "gpt-5-mini")
     monkeypatch.setattr("src.agents.prompt_registry.PromptRegistry", _PromptRegistry)
@@ -367,6 +368,7 @@ def test_build_live_preopen_dependencies_wires_fallback_reapproval_into_paper_ex
 
     assert isinstance(dependencies, LivePreopenDependencies)
     assert captured["seed_repo"].__class__ is _Repo
+    assert captured["seed_session"].__class__ is object
     assert captured["trading_decision_kwargs"]["source_repository"].__class__ is _SourceRepo
     assert captured["paper_execution_kwargs"]["config_resolver"].__class__ is _ConfigResolver
     assert captured["paper_execution_kwargs"]["position_sizer"].__class__ is _PositionSizer

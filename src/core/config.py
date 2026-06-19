@@ -55,6 +55,14 @@ REFLECTION_MODEL_NAME = REFLECTION_MODEL_NAME_RAW or DEFAULT_FAST_MODEL_NAME
 REFLECTION_MODEL_CONFIGURED = bool(REFLECTION_MODEL_NAME_RAW)
 TRADING_UNIVERSE_SYMBOLS = os.getenv("TRADING_UNIVERSE_SYMBOLS", "")
 
+
+def _env_bool(name: str, default: bool) -> bool:
+    return os.getenv(name, str(default)).strip().lower() in ("1", "true", "yes", "y")
+
+
+TRADING_EXECUTE_PAPER_ORDERS = _env_bool("TRADING_EXECUTE_PAPER_ORDERS", True)
+TRADING_EXECUTE_PAPER_OPTION_ORDERS = _env_bool("TRADING_EXECUTE_PAPER_OPTION_ORDERS", False)
+
 if APP_ENV in {"prod", "production"} and not REFLECTION_MODEL_CONFIGURED:
     warnings.warn(
         "REFLECTION_MODEL_NAME is not configured; falling back to DEFAULT_FAST_MODEL_NAME",
