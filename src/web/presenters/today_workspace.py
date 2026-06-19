@@ -517,25 +517,35 @@ def _build_snippets(items: Any) -> list[dict[str, Any]]:
 
 
 def _build_event_news_summary(news_snippets: list[dict[str, Any]]) -> str | None:
-    material_snippets = [
-        item
-        for item in news_snippets
-        if not item.get("empty") and (item.get("title") or item.get("summary"))
-    ]
-    if not material_snippets:
+    primary_snippet = next(
+        (
+            item
+            for item in news_snippets
+            if not item.get("empty") and (item.get("title") or item.get("summary"))
+        ),
+        None,
+    )
+    if primary_snippet is None:
         return None
 
-    sentences: list[str] = []
-    for item in material_snippets[:2]:
-        title = str(item.get("title") or "").strip()
-        summary = str(item.get("summary") or "").strip()
-        if title and summary and summary != title:
-            sentences.append(f"{title}: {summary}.")
-        elif summary:
-            sentences.append(f"{summary}.")
-        elif title:
-            sentences.append(f"{title}.")
-    return " ".join(sentences) if sentences else None
+    title = str(primary_snippet.get("title") or "").strip()
+    summary = str(primary_snippet.get("summary") or "").strip()
+    if title and summary and summary != title:
+        return f"{title}: {_with_terminal_period(summary)}"
+    if summary:
+        return _with_terminal_period(summary)
+    if title:
+        return _with_terminal_period(title)
+    return None
+
+
+def _with_terminal_period(value: str) -> str:
+    stripped = value.rstrip()
+    if not stripped:
+        return stripped
+    if stripped.endswith((".", "!", "?")):
+        return stripped
+    return f"{stripped}."
 
 
 def _latest_signal_time_label(timeline_items: Any) -> str | None:
