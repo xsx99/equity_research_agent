@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
+from src.web.presenters.today_copy import job_status_label, live_status_label, macro_regime_label, risk_appetite_label, runtime_mode_label
+
 
 def build_today_overview(
     *,
@@ -78,13 +80,13 @@ def build_today_overview(
         "operator_strip": {
             "primary": (
                 _operator_item("Market Phase", header.get("market_phase") or "Unavailable"),
-                _operator_item("Runtime Mode", _humanize_label(header.get("runtime_mode")) or "Unavailable"),
+                _operator_item("Runtime Mode", runtime_mode_label(header.get("runtime_mode")) or "Unavailable"),
                 _operator_item("Alert Count", str(header.get("open_alert_count", 0)), tone=_alert_tone(header)),
             ),
             "context": (
-                _operator_item("Macro Regime", header.get("macro_regime") or "unavailable", tone=_macro_tone(header)),
-                _operator_item("Risk Appetite", _humanize_label(header.get("risk_appetite")) or "Unavailable"),
-                _operator_item("Live Status", _humanize_label(header.get("live_status")) or "Unavailable", tone=_live_tone(header)),
+                _operator_item("Macro Regime", macro_regime_label(header.get("macro_regime")) or "Unavailable", tone=_macro_tone(header)),
+                _operator_item("Risk Appetite", risk_appetite_label(header.get("risk_appetite")) or "Unavailable"),
+                _operator_item("Live Status", live_status_label(header.get("live_status")) or "Unavailable", tone=_live_tone(header)),
                 _operator_item("Job Status", _job_status(job_timeline)),
             ),
         },
@@ -228,7 +230,7 @@ def _job_status(job_timeline: tuple[dict[str, Any], ...]) -> str:
         return "Unavailable"
     latest = job_timeline[0]
     label = str(latest.get("label") or "").strip()
-    status = str(latest.get("status") or "").strip()
+    status = job_status_label(latest.get("status")) or ""
     return f"{label} / {status}".strip(" /")
 
 
@@ -298,9 +300,3 @@ def _live_tone(header: dict[str, Any]) -> str:
 def _alert_tone(header: dict[str, Any]) -> str:
     return "warning" if int(header.get("open_alert_count") or 0) > 0 else "neutral"
 
-
-def _humanize_label(value: Any) -> str | None:
-    text = str(value or "").strip()
-    if not text:
-        return None
-    return " ".join(part.capitalize() for part in text.replace("_", " ").replace("-", " ").split())

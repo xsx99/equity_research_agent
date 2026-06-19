@@ -499,7 +499,7 @@ def test_build_ticker_workspace_shapes_latest_conclusion_and_evidence():
         }
     ]
     assert latest_conclusion["trade_decision"]["label"] == "Enter Long"
-    assert detail["tabs"]["risk"]["history"][0]["summary"] == "Within limits"
+    assert detail["tabs"]["risk"]["history"][0]["summary"] == "Within Limits"
 
 
 def test_build_ticker_workspace_surfaces_lookahead_risk_source_and_hedge_overlay_reason():

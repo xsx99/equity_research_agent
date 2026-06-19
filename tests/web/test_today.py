@@ -38,7 +38,13 @@ def _dashboard_payload() -> dict:
         "header": {
             "trade_date": date(2026, 6, 2),
             "macro_regime": "neutral",
+            "macro_regime_label": "Neutral",
             "risk_appetite": "balanced",
+            "risk_appetite_label": "Balanced",
+            "runtime_mode": "dry_run",
+            "runtime_mode_label": "Dry Run",
+            "live_status": "live",
+            "live_status_label": "Live",
             "nav": Decimal("1000000"),
             "day_pnl": Decimal("1250.50"),
             "buying_power": Decimal("2000000"),
@@ -48,8 +54,8 @@ def _dashboard_payload() -> dict:
             "llm_cost_estimate": Decimal("18.42"),
         },
         "job_timeline": (
-            {"label": "Universe refresh", "status": "succeeded"},
-            {"label": "Reflection", "status": "succeeded"},
+            {"label": "Universe refresh", "status": "succeeded", "status_label": "Succeeded"},
+            {"label": "Reflection", "status": "succeeded", "status_label": "Succeeded"},
         ),
         "overview": {
             "command_center": {
@@ -75,6 +81,7 @@ def _dashboard_payload() -> dict:
                 {
                     "ticker": "AAPL",
                     "trade_identity": "tactical_stock_trade",
+                    "trade_identity_label": "Tactical Stock Trade",
                     "strategy_id": "earnings_drift_v1",
                     "quantity": Decimal("10"),
                     "market_value": Decimal("2145.20"),
@@ -84,7 +91,9 @@ def _dashboard_payload() -> dict:
                 {
                     "ticker": "NVDA",
                     "option_strategy_type": "long_call",
+                    "option_strategy_type_label": "Long Call",
                     "trade_identity": "tactical_option_trade",
+                    "trade_identity_label": "Tactical Option Trade",
                     "max_loss": Decimal("420.00"),
                 },
             ),
@@ -92,6 +101,7 @@ def _dashboard_payload() -> dict:
                 {
                     "ticker": "SPY",
                     "option_strategy_type": "long_put",
+                    "option_strategy_type_label": "Long Put",
                     "protected_notional": Decimal("25000"),
                 },
             ),
@@ -212,7 +222,7 @@ def _dashboard_payload() -> dict:
                         "expression_bucket_id": "long_stock",
                         "expression_bucket_label": "Long Stock",
                         "confidence": Decimal("0.72"),
-                        "summary": "Changed from watch to enter_long",
+                        "summary": "Changed from watch to Enter Long",
                     },
                     "signal_summary": {
                         "summary_bullets": (
@@ -242,10 +252,11 @@ def _dashboard_payload() -> dict:
                             {"title": "Margin outlook", "summary": "Gross margin remains stable"},
                         ),
                     },
-                    "risk_summary": {"status": "approved", "status_label": "Approved", "reason": "within_limits"},
+                    "risk_summary": {"status": "approved", "status_label": "Approved", "reason": "Within Limits"},
                     "position_execution": {
                         "position_label": "Long 10 shares",
                         "order_status": "filled",
+                        "order_status_label": "Filled",
                         "summary": "Order filled and position established",
                     },
                 },
@@ -273,9 +284,9 @@ def _dashboard_payload() -> dict:
                             ),
                             "trade_decision": {
                                 "label": "Enter Long",
-                                "summary": "The system promoted AAPL from watch to enter_long after risk approval.",
+                                "summary": "The system promoted AAPL from watch to Enter Long after risk approval.",
                             },
-                            "risk": {"status_label": "Approved", "summary": "within_limits"},
+                            "risk": {"status_label": "Approved", "summary": "Within Limits"},
                             "change_summary": ("candidate watch -> enter long",),
                         },
                     ),
@@ -294,7 +305,7 @@ def _dashboard_payload() -> dict:
                         {"decision": "Enter Long", "summary": "Primary strategy selected"},
                     ),
                     "risk": {
-                        "current_stance": {"status": "approved", "reason": "within_limits"},
+                        "current_stance": {"status": "approved", "reason": "Within Limits"},
                         "position_state": {"summary": "Risk budget available"},
                         "history": (
                             {"status": "approved", "summary": "Approved at target size"},
@@ -311,7 +322,7 @@ def _dashboard_payload() -> dict:
         "risk_macro": {
             "risk_config_version": "risk_config_resolver_v1",
             "command_center": {
-                "regime": "risk_off",
+                "regime": "Risk Off",
                 "risk_appetite_label": "Balanced",
                 "exposure_usage_pct": 42.0,
                 "event_risk_level": "High",
@@ -332,6 +343,7 @@ def _dashboard_payload() -> dict:
                 {
                     "scheduled_at": datetime(2026, 6, 3, 18, 0, tzinfo=timezone.utc),
                     "event_type": "own_company_earnings",
+                    "event_type_label": "Own Company Earnings",
                     "importance": "high",
                     "portfolio_risk_level": "high",
                     "affected_ticker": "AAPL",
@@ -342,8 +354,10 @@ def _dashboard_payload() -> dict:
                 {
                     "ticker": "AAPL",
                     "risk_source": "own_event",
+                    "risk_source_label": "Own Event",
                     "severity": "high",
                     "recommended_action": "block_open",
+                    "recommended_action_label": "Block New Entry",
                     "rationale": "Own-event risk is inside the active trade horizon.",
                     "basis_note": "pending_trade",
                 },
@@ -416,7 +430,13 @@ def _dashboard_payload() -> dict:
                 },
             ),
             "portfolio_intents": (
-                {"ticker": "VOO", "intent_type": "core_index", "lifecycle_status": "active"},
+                {
+                    "ticker": "VOO",
+                    "intent_type": "core_index",
+                    "intent_type_label": "Core Index",
+                    "lifecycle_status": "active",
+                    "lifecycle_status_label": "Active",
+                },
             ),
             "relationships": (
                 {"source_ticker": "NVDA", "target_ticker": "SMCI", "relationship_type": "supplier"},
@@ -431,19 +451,23 @@ def _dashboard_payload() -> dict:
         "learning_strategies": {
             "reflection": {
                 "status": "succeeded",
+                "status_label": "Succeeded",
                 "what_worked": ("Bullish catalyst continuation respected",),
             },
             "learning_factors": (
                 {
                     "title": "Tighten low-volume gap entries",
                     "status": "active",
+                    "status_label": "Active",
                     "scope": "strategy",
+                    "scope_label": "Strategy",
                 },
             ),
             "strategy_performance": (
                 {
                     "strategy_id": "earnings_drift_v1",
                     "lifecycle_status": "active",
+                    "lifecycle_status_label": "Active",
                     "win_rate": Decimal("0.58"),
                     "total_pnl": Decimal("4200"),
                 },
@@ -452,6 +476,7 @@ def _dashboard_payload() -> dict:
                 {
                     "proposed_strategy_id": "semis_readthrough_v1",
                     "proposal_status": "accepted",
+                    "proposal_status_label": "Accepted",
                 },
             ),
         },
@@ -469,7 +494,9 @@ def _dashboard_payload() -> dict:
                     "provider": "alpaca",
                     "endpoint": "market_bars",
                     "status": "succeeded",
+                    "status_label": "Succeeded",
                     "cache_status": "miss",
+                    "cache_status_label": "Cache Miss",
                 },
             ),
         },
@@ -577,7 +604,8 @@ class TestTodayDashboard:
         assert "Latest Conclusion" in response.text
         assert "Trade Decision" in response.text
         assert "Breakout confirmed + risk approved" in response.text
-        assert "within_limits" in response.text
+        assert "Within Limits" in response.text
+        assert "within_limits" not in response.text
         assert "History" in response.text
         assert 'data-panel="timeline"' in response.text
         assert 'href="/today?tab=trades&ticker=AAPL&detail_tab=trend"' not in response.text
@@ -677,7 +705,8 @@ class TestTodayDashboard:
         assert 'data-testid="event-risk-list"' in response.text
         assert "direct earnings gap risk" in response.text
         assert "AAPL / high" in response.text
-        assert "block_open" in response.text
+        assert "Block New Entry" in response.text
+        assert "block_open" not in response.text
         assert "trades-canvas" not in response.text
         assert "AI Infrastructure" not in response.text
 
@@ -708,6 +737,11 @@ class TestTodayDashboard:
         assert "surface-table-wrap" in response.text
         assert "$2,145.20" in response.text
         assert "$420.00" in response.text
+        assert "Tactical Stock Trade" in response.text
+        assert "Long Call" in response.text
+        assert "Long Put" in response.text
+        assert "tactical_stock_trade" not in response.text
+        assert "long_call" not in response.text
         assert "surface-block" in response.text
         assert "surface-block-count" in response.text
         assert "trades-canvas" not in response.text
@@ -778,6 +812,8 @@ class TestTodayDashboard:
         assert "Awaiting fresh event-risk snapshot" in response.text
         assert "Advanced Universe Context" in response.text
         assert "Advanced" in response.text
+        assert "Core Index / Active" in response.text
+        assert "core_index" not in response.text
         assert "theme-chip-list" in response.text
         assert "scroll-panel" in response.text
         assert "scroll-rail" in response.text
@@ -800,6 +836,12 @@ class TestTodayDashboard:
         assert "Strategy Performance" in response.text
         assert "$4,200.00" in response.text
         assert "Tighten low-volume gap entries" in response.text
+        assert "Succeeded" in response.text
+        assert "Accepted" in response.text
+        assert "Active" in response.text
+        assert "Strategy" in response.text
+        assert "succeeded" not in response.text
+        assert "accepted" not in response.text
         assert "tracked strategy" in response.text
         assert "trades-canvas" not in response.text
 
@@ -817,6 +859,10 @@ class TestTodayDashboard:
         assert "Provider Usage" in response.text
         assert "Provider Calls" in response.text
         assert "market_bars" in response.text
+        assert "Succeeded" in response.text
+        assert "Cache Miss" in response.text
+        assert ">succeeded<" not in response.text
+        assert ">miss<" not in response.text
         assert "surface-block" in response.text
         assert "gpt-5" in response.text
         assert "trades-canvas" not in response.text
@@ -839,7 +885,7 @@ class TestTodayDashboard:
                 "title": "Pre Open Rerun",
                 "time_label": "2026-06-18 16:42 UTC",
                 "change_type": "material_change",
-                "signal_summary": ("Sentiment negative", "direct negative catalyst: general_news"),
+                "signal_summary": ("Sentiment negative", "direct negative catalyst: General News"),
                 "trade_decision": {"label": "No Trade", "summary": "Catalyst quality faded"},
                 "risk": {"status_label": "Reduced", "summary": "Event risk increased"},
                 "change_summary": ("sentiment neutral -> negative", "risk approved -> reduced"),
@@ -1522,6 +1568,7 @@ class TestTodayDashboard:
             {
                 "ticker": "NVDA",
                 "trade_identity": "tactical_stock_trade",
+                "trade_identity_label": "Tactical Stock Trade",
                 "strategy_id": "breakout_v1",
                 "quantity": Decimal("0"),
                 "market_value": Decimal("0"),
@@ -1713,6 +1760,7 @@ class TestTodayDashboard:
             )
 
         assert dashboard["header"]["macro_regime"] == "risk_off"
+        assert dashboard["header"]["macro_regime_label"] == "Risk Off"
 
     def test_load_news_and_fundamentals_by_ticker_map_real_snapshot_and_event_rows(self):
         from src.web.routers.today import _load_fundamentals_by_ticker, _load_news_by_ticker

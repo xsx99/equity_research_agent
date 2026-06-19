@@ -52,17 +52,17 @@
           </article>
           <article class="operator-context-item">
             <span class="metric-label">Macro Regime</span>
-            <strong>{{ header.macro_regime }}</strong>
+            <strong>{{ header.macro_regime_label or header.macro_regime }}</strong>
           </article>
           <article class="operator-context-item">
             <span class="metric-label">Risk Appetite</span>
-            <strong>{{ header.risk_appetite }}</strong>
+            <strong>{{ header.risk_appetite_label or header.risk_appetite }}</strong>
           </article>
           <article class="operator-context-item">
             <span class="metric-label">Job Status</span>
             <strong>
               {% if job_timeline %}
-              {{ job_timeline[0].label }} / {{ job_timeline[0].status }}
+              {{ job_timeline[0].label }} / {{ job_timeline[0].status_label or job_timeline[0].status }}
               {% else %}
               Unavailable
               {% endif %}
@@ -256,7 +256,7 @@
                   {% if detail.latest_conclusion.position_execution.order_status %}
                   <div class="support-kv-row">
                     <span class="metric-label">Order</span>
-                    <strong>{{ detail.latest_conclusion.position_execution.order_status }}</strong>
+                    <strong>{{ detail.latest_conclusion.position_execution.order_status_label or detail.latest_conclusion.position_execution.order_status }}</strong>
                   </div>
                   {% endif %}
                 </div>
@@ -552,7 +552,7 @@
         <div class="surface-table-wrap">
           <table class="compact-table">
             <thead><tr><th>Ticker</th><th>Identity</th><th>Strategy</th><th>Qty</th><th>Market Value</th></tr></thead>
-            <tbody>{% for row in portfolio.positions %}<tr><td>{{ row.ticker }}</td><td>{{ row.trade_identity }}</td><td>{{ row.strategy_id }}</td><td>{{ fmt_number(row.quantity) }}</td><td>{{ fmt_currency(row.market_value) }}</td></tr>{% endfor %}</tbody>
+            <tbody>{% for row in portfolio.positions %}<tr><td>{{ row.ticker }}</td><td>{{ row.trade_identity_label or row.trade_identity }}</td><td>{{ row.strategy_id }}</td><td>{{ fmt_number(row.quantity) }}</td><td>{{ fmt_currency(row.market_value) }}</td></tr>{% endfor %}</tbody>
           </table>
         </div>
         {% else %}<p class="detail-muted quiet-empty">No open stock positions.</p>{% endif %}
@@ -566,7 +566,7 @@
         <div class="surface-table-wrap">
           <table class="compact-table">
             <thead><tr><th>Ticker</th><th>Strategy Type</th><th>Identity</th><th>Max Loss</th></tr></thead>
-            <tbody>{% for row in portfolio.option_positions %}<tr><td>{{ row.ticker }}</td><td>{{ row.option_strategy_type }}</td><td>{{ row.trade_identity }}</td><td>{{ fmt_currency(row.max_loss) }}</td></tr>{% endfor %}</tbody>
+            <tbody>{% for row in portfolio.option_positions %}<tr><td>{{ row.ticker }}</td><td>{{ row.option_strategy_type_label or row.option_strategy_type }}</td><td>{{ row.trade_identity_label or row.trade_identity }}</td><td>{{ fmt_currency(row.max_loss) }}</td></tr>{% endfor %}</tbody>
           </table>
         </div>
         {% else %}<p class="detail-muted quiet-empty">No open option positions.</p>{% endif %}
@@ -580,7 +580,7 @@
         <div class="surface-table-wrap">
           <table class="compact-table">
             <thead><tr><th>Ticker</th><th>Strategy Type</th><th>Protected Notional</th></tr></thead>
-            <tbody>{% for row in portfolio.hedge_overlays %}<tr><td>{{ row.ticker }}</td><td>{{ row.option_strategy_type }}</td><td>{{ fmt_currency(row.protected_notional) }}</td></tr>{% endfor %}</tbody>
+            <tbody>{% for row in portfolio.hedge_overlays %}<tr><td>{{ row.ticker }}</td><td>{{ row.option_strategy_type_label or row.option_strategy_type }}</td><td>{{ fmt_currency(row.protected_notional) }}</td></tr>{% endfor %}</tbody>
           </table>
         </div>
         {% else %}<p class="detail-muted quiet-empty">No hedge overlays.</p>{% endif %}
@@ -660,7 +660,7 @@
                 <strong>{{ row.risk_mechanism or row.event_type }}</strong>
                 <div class="detail-muted">{{ row.affected_ticker or "Portfolio" }} / {{ row.importance or row.portfolio_risk_level }}</div>
               </div>
-              <span class="detail-chip">{{ row.event_type }}</span>
+              <span class="detail-chip">{{ row.event_type_label or row.event_type }}</span>
             </div>
             <p>{{ row.scheduled_at }}</p>
           </article>
@@ -680,9 +680,9 @@
             <div class="candidate-card-head">
               <div>
                 <strong>{{ row.ticker or "Portfolio" }}</strong>
-                <div class="detail-muted">{{ row.risk_source }} / {{ row.severity }}</div>
+                <div class="detail-muted">{{ row.risk_source_label or row.risk_source }} / {{ row.severity }}</div>
               </div>
-              <span class="detail-chip">{{ row.recommended_action }}</span>
+              <span class="detail-chip">{{ row.recommended_action_label or row.recommended_action }}</span>
             </div>
             <p>{{ row.rationale }}</p>
           </article>
@@ -908,7 +908,7 @@
         </div>
         {% if candidates.portfolio_intents %}
         <div class="section-label">Portfolio Intents</div>
-        <ul class="output-list">{% for row in candidates.portfolio_intents %}<li>{{ row.ticker }}: {{ row.intent_type }} / {{ row.lifecycle_status }}</li>{% endfor %}</ul>
+        <ul class="output-list">{% for row in candidates.portfolio_intents %}<li>{{ row.ticker }}: {{ row.intent_type_label or row.intent_type }} / {{ row.lifecycle_status_label or row.lifecycle_status }}</li>{% endfor %}</ul>
         {% endif %}
         {% if candidates.relationships %}
         <div class="section-label">Relationships</div>
@@ -935,7 +935,7 @@
       <div class="surface-summary-row">
         <article class="summary-tile">
           <span class="metric-label">Reflection Snapshot</span>
-          <strong>{{ learning_strategies.reflection.status if learning_strategies.reflection else "Unavailable" }}</strong>
+          <strong>{{ learning_strategies.reflection.status_label if learning_strategies.reflection else "Unavailable" }}</strong>
         </article>
         <article class="summary-tile">
           <span class="metric-label">Strategy Pipeline</span>
@@ -953,7 +953,7 @@
       <section class="surface-block">
         <div class="section-label">Performance Snapshot</div>
         {% if learning_strategies.reflection %}
-        <p><strong>Reflection Status:</strong> {{ learning_strategies.reflection.status }}</p>
+        <p><strong>Reflection Status:</strong> {{ learning_strategies.reflection.status_label or learning_strategies.reflection.status }}</p>
         {% if learning_strategies.reflection.what_worked %}
         <ul class="output-list">
           {% for item in learning_strategies.reflection.what_worked %}<li>{{ item }}</li>{% endfor %}
@@ -970,7 +970,7 @@
         <div class="surface-table-wrap">
           <table class="compact-table">
             <thead><tr><th>Strategy</th><th>Status</th></tr></thead>
-            <tbody>{% for row in learning_strategies.strategy_proposals %}<tr><td>{{ row.proposed_strategy_id }}</td><td>{{ row.proposal_status }}</td></tr>{% endfor %}</tbody>
+            <tbody>{% for row in learning_strategies.strategy_proposals %}<tr><td>{{ row.proposed_strategy_id }}</td><td>{{ row.proposal_status_label or row.proposal_status }}</td></tr>{% endfor %}</tbody>
           </table>
         </div>
         {% else %}<p class="detail-muted quiet-empty">No strategy proposals.</p>{% endif %}
@@ -984,7 +984,7 @@
         <div class="surface-table-wrap">
           <table class="compact-table">
             <thead><tr><th>Strategy</th><th>Status</th><th>Win Rate</th><th>Total P&amp;L</th></tr></thead>
-            <tbody>{% for row in learning_strategies.strategy_performance %}<tr><td>{{ row.strategy_id }}</td><td>{{ row.lifecycle_status }}</td><td>{{ fmt_number(row.win_rate) }}</td><td>{{ fmt_currency(row.total_pnl) }}</td></tr>{% endfor %}</tbody>
+            <tbody>{% for row in learning_strategies.strategy_performance %}<tr><td>{{ row.strategy_id }}</td><td>{{ row.lifecycle_status_label or row.lifecycle_status }}</td><td>{{ fmt_number(row.win_rate) }}</td><td>{{ fmt_currency(row.total_pnl) }}</td></tr>{% endfor %}</tbody>
           </table>
         </div>
         {% else %}<p class="detail-muted quiet-empty">No strategy performance records.</p>{% endif %}
@@ -998,7 +998,7 @@
         <div class="surface-table-wrap">
           <table class="compact-table">
             <thead><tr><th>Title</th><th>Status</th><th>Scope</th></tr></thead>
-            <tbody>{% for row in learning_strategies.learning_factors %}<tr><td>{{ row.title }}</td><td>{{ row.status }}</td><td>{{ row.scope }}</td></tr>{% endfor %}</tbody>
+            <tbody>{% for row in learning_strategies.learning_factors %}<tr><td>{{ row.title }}</td><td>{{ row.status_label or row.status }}</td><td>{{ row.scope_label or row.scope }}</td></tr>{% endfor %}</tbody>
           </table>
         </div>
         {% else %}<p class="detail-muted quiet-empty">No active learning factors.</p>{% endif %}
@@ -1045,7 +1045,7 @@
         <div class="surface-table-wrap">
           <table class="compact-table">
             <thead><tr><th>Provider</th><th>Endpoint</th><th>Status</th><th>Cache</th></tr></thead>
-            <tbody>{% for row in ops_cost.provider_usage %}<tr><td>{{ row.provider }}</td><td>{{ row.endpoint }}</td><td>{{ row.status }}</td><td>{{ row.cache_status }}</td></tr>{% endfor %}</tbody>
+            <tbody>{% for row in ops_cost.provider_usage %}<tr><td>{{ row.provider }}</td><td>{{ row.endpoint }}</td><td>{{ row.status_label or row.status }}</td><td>{{ row.cache_status_label or row.cache_status }}</td></tr>{% endfor %}</tbody>
           </table>
         </div>
         {% else %}<p class="detail-muted quiet-empty">No provider usage events.</p>{% endif %}

@@ -4,7 +4,15 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from src.web.presenters.today_copy import expression_bucket_label, lifecycle_label, risk_status_label, strategy_label
+from src.web.presenters.today_copy import (
+    expression_bucket_label,
+    lifecycle_label,
+    operator_text,
+    order_status_label,
+    risk_reason_label,
+    risk_status_label,
+    strategy_label,
+)
 
 _ACTIONABLE_DECISIONS = {"enter_long", "enter_short", "trim", "exit"}
 _ACTIONABLE_ORDER_STATUSES = {"pending", "accepted", "partial_fill"}
@@ -296,7 +304,7 @@ def _build_detail(
     latest_risk_summary = {
         "status": risk.get("status") or _EMPTY_MARKER,
         "status_label": risk_status_label(risk.get("status")) or _EMPTY_MARKER,
-        "reason": risk.get("reason") or _EMPTY_MARKER,
+        "reason": risk_reason_label(risk.get("reason")) or operator_text(risk.get("reason")) or _EMPTY_MARKER,
         "lookahead_risk_source": risk.get("lookahead_risk_source"),
         "hedge_overlay_reason": _hedge_overlay_reason(risk.get("generated_hedge_action")),
     }
@@ -318,6 +326,8 @@ def _build_detail(
             "position": position,
             "position_label": position.get("position_label"),
             "order_status": position.get("order_status") or latest_decision.get("order_status") or _EMPTY_MARKER,
+            "order_status_label": order_status_label(position.get("order_status") or latest_decision.get("order_status"))
+            or _EMPTY_MARKER,
             "summary": position.get("summary") or _EMPTY_MARKER,
         },
     }
@@ -420,7 +430,7 @@ def _dedupe_summary_bullets(summary_items: Any) -> list[str]:
             if not bullet or bullet in seen:
                 continue
             seen.add(bullet)
-            bullets.append(bullet)
+            bullets.append(operator_text(bullet))
         if bullets:
             return bullets
     return [_EMPTY_MARKER]
@@ -496,8 +506,8 @@ def _build_snippets(items: Any) -> list[dict[str, Any]]:
             continue
         snippets.append(
             {
-                "title": item.get("title") or _EMPTY_MARKER,
-                "summary": item.get("summary") or _EMPTY_MARKER,
+                "title": operator_text(item.get("title")) or _EMPTY_MARKER,
+                "summary": operator_text(item.get("summary")) or _EMPTY_MARKER,
                 "time": item.get("published_at") or item.get("as_of"),
                 "empty": False,
             }
@@ -782,7 +792,9 @@ def _timeline_delta_fields(previous_state: dict[str, str], current_state: dict[s
     for key, current_value in current_state.items():
         previous_value = previous_state.get(key)
         if previous_value and previous_value != current_value:
-            delta_fields.append(f"{key} {previous_value} -> {current_value}")
+            delta_fields.append(
+                f"{key} {operator_text(previous_value) or previous_value} -> {operator_text(current_value) or current_value}"
+            )
         elif key not in previous_state:
             delta_fields.append(f"new {key}")
     return delta_fields
@@ -798,7 +810,8 @@ def _history_signal_bullets(summary: Any) -> list[str]:
         for piece in clause.split(","):
             normalized = piece.strip().rstrip(".")
             if normalized:
-                bullets.append(normalized[0].upper() + normalized[1:] if normalized else normalized)
+                cleaned = operator_text(normalized)
+                bullets.append(cleaned[0].upper() + cleaned[1:] if cleaned else cleaned)
     return bullets or [_EMPTY_MARKER]
 
 
@@ -815,7 +828,7 @@ def _history_risk_view(item: dict[str, Any] | None, *, latest_risk_summary: dict
     if item:
         return {
             "status_label": risk_status_label(item.get("status")) or _humanize_label(item.get("status")) or _EMPTY_MARKER,
-            "summary": item.get("summary") or _EMPTY_MARKER,
+            "summary": _risk_summary_copy(item.get("summary")),
         }
     return {
         "status_label": latest_risk_summary.get("status_label") or _EMPTY_MARKER,
@@ -880,7 +893,7 @@ def _build_risk_history(history: Any) -> list[dict[str, Any]]:
             {
                 "time": item.get("time"),
                 "status": item.get("status") or _EMPTY_MARKER,
-                "summary": item.get("summary") or _EMPTY_MARKER,
+                "summary": _risk_summary_copy(item.get("summary")),
             }
         )
     items.sort(key=lambda item: _sort_key(item.get("time")))
@@ -979,13 +992,13 @@ def _humanize_label(value: Any) -> str | None:
 def _decision_summary(row: dict[str, Any]) -> str:
     thesis = str(row.get("thesis") or "").strip()
     if thesis:
-        return thesis
+        return operator_text(thesis)
 
     metadata = row.get("metadata_json")
     if isinstance(metadata, dict):
         selection_reason = str(metadata.get("selection_reason") or "").strip()
         if selection_reason:
-            return selection_reason
+            return operator_text(selection_reason)
 
     return _EMPTY_MARKER
 
@@ -995,7 +1008,7 @@ def _decision_list_summary(row: dict[str, Any]) -> str:
     if isinstance(metadata, dict):
         selection_reason = str(metadata.get("selection_reason") or "").strip()
         if selection_reason:
-            return selection_reason
+            return operator_text(selection_reason)
     return _decision_summary(row)
 
 
@@ -1011,6 +1024,15 @@ def _decision_rationale_items(row: dict[str, Any], key: str) -> list[str]:
     if isinstance(values, list):
         return [str(item).strip() for item in values if str(item).strip()]
     return []
+
+
+def _risk_summary_copy(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return _EMPTY_MARKER
+    if text == _EMPTY_MARKER:
+        return _EMPTY_MARKER
+    return risk_reason_label(text) or operator_text(text) or text
 
 
 def _empty_snippet() -> dict[str, Any]:

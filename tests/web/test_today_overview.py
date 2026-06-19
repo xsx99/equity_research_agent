@@ -59,7 +59,9 @@ def test_build_today_overview_exposes_operator_strip_and_metric_provenance():
 
     assert payload["operator_strip"]["primary"][0] == {"label": "Market Phase", "value": "Pre-open", "tone": "neutral"}
     assert payload["operator_strip"]["context"][0]["label"] == "Macro Regime"
-    assert payload["operator_strip"]["context"][0]["value"] == "risk_off"
+    assert payload["operator_strip"]["context"][0]["value"] == "Risk Off"
+    assert payload["operator_strip"]["context"][2]["value"] == "Degraded"
+    assert payload["operator_strip"]["context"][3]["value"] == "Manual Review / Running"
     assert payload["metric_cards"][0]["label"] == "Net Liquidation Value"
     assert payload["metric_cards"][0]["meta"]["source_of_truth_label"] == "Broker equity snapshot"
     assert payload["metric_cards"][1]["meta"]["basis_note"] == "Review-window realized and unrealized session P&L."
