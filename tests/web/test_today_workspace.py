@@ -457,7 +457,7 @@ def test_build_ticker_workspace_shapes_latest_conclusion_and_evidence():
     }
     assert (
         latest_conclusion["signal_summary"]["event_news_summary"]
-        == "Late headline: Follow-through demand. Raised guidance: Demand improved."
+        == "Late headline: Follow-through demand."
     )
     assert latest_conclusion["signal_summary"]["fundamental_snippets"][0]["title"] == "Margin outlook"
     assert latest_conclusion["risk_summary"]["status"] == "approved"
