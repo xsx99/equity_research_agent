@@ -1079,7 +1079,7 @@ def _normalize_tab(tab: str) -> str:
 
 
 def _normalize_detail_tab(detail_tab: str) -> str:
-    allowed = {"timeline", "trend", "decisions", "risk"}
+    allowed = {"timeline"}
     return detail_tab if detail_tab in allowed else "timeline"
 
 

@@ -265,22 +265,14 @@
             </div>
 
             <div class="ticker-detail-nav" role="tablist" aria-label="Ticker detail sections">
-              {% for detail_tab_id, detail_tab_label in (
-                ("timeline", "Timeline"),
-                ("trend", "Trend"),
-                ("decisions", "Decisions"),
-                ("risk", "Risk")
-              ) %}
               <a
-                class="ticker-detail-nav-link {% if selected_detail_tab == detail_tab_id %}active{% endif %}"
-                href="/today?tab=trades&ticker={{ workspace.selected_ticker }}&detail_tab={{ detail_tab_id }}"
+                class="ticker-detail-nav-link active"
+                href="/today?tab=trades&ticker={{ workspace.selected_ticker }}&detail_tab=timeline"
               >
-                {{ detail_tab_label }}
+                Timeline
               </a>
-              {% endfor %}
             </div>
 
-            {% if selected_detail_tab == "timeline" %}
             <section class="card subcard scroll-panel" data-panel="timeline" data-testid="history-cards">
               <h4>History</h4>
               <div class="history-card-list">
@@ -343,89 +335,6 @@
                 {% endfor %}
               </div>
             </section>
-            {% elif selected_detail_tab == "trend" %}
-            <section class="card subcard" data-panel="trend">
-              <h4>Trend</h4>
-              <div class="surface-summary-row">
-                <article class="summary-tile">
-                  <span class="metric-label">Technical Context</span>
-                  <strong>{{ detail.tabs.trend.technical | length }} signal{% if detail.tabs.trend.technical|length != 1 %}s{% endif %}</strong>
-                </article>
-                <article class="summary-tile">
-                  <span class="metric-label">News Context</span>
-                  <strong>{{ detail.tabs.trend.news | length }} item{% if detail.tabs.trend.news|length != 1 %}s{% endif %}</strong>
-                </article>
-                <article class="summary-tile">
-                  <span class="metric-label">Fundamental Context</span>
-                  <strong>{{ detail.tabs.trend.fundamental | length }} note{% if detail.tabs.trend.fundamental|length != 1 %}s{% endif %}</strong>
-                </article>
-              </div>
-              <div class="section-label">Technical</div>
-              {% for item in detail.tabs.trend.technical %}
-              <div class="detail-muted">{{ item.title or item.label }}{% if item.summary %}: {{ item.summary }}{% endif %}</div>
-              {% else %}
-              <p class="detail-muted quiet-empty surface-empty-copy">Unavailable.</p>
-              {% endfor %}
-
-              <div class="section-label">News</div>
-              {% for item in detail.tabs.trend.news %}
-              <div class="detail-muted">{{ item.title or item.label }}{% if item.summary %}: {{ item.summary }}{% endif %}</div>
-              {% else %}
-              <p class="detail-muted quiet-empty surface-empty-copy">Unavailable.</p>
-              {% endfor %}
-
-              <div class="section-label">Fundamental</div>
-              {% for item in detail.tabs.trend.fundamental %}
-              <div class="detail-muted">{{ item.title or item.label }}{% if item.summary %}: {{ item.summary }}{% endif %}</div>
-              {% else %}
-              <p class="detail-muted quiet-empty surface-empty-copy">Unavailable.</p>
-              {% endfor %}
-            </section>
-            {% elif selected_detail_tab == "decisions" %}
-            <section class="card subcard" data-panel="decisions">
-              <h4>Decisions</h4>
-              <div class="surface-summary-row">
-                <article class="summary-tile">
-                  <span class="metric-label">Decision Ledger</span>
-                  <strong>{{ detail.tabs.decisions | length }} recorded decision{% if detail.tabs.decisions|length != 1 %}s{% endif %}</strong>
-                </article>
-                <article class="summary-tile">
-                  <span class="metric-label">Current Call</span>
-                  <strong>{{ detail.latest_conclusion.trade_decision.label or "No decision" }}</strong>
-                </article>
-              </div>
-              {% for item in detail.tabs.decisions %}
-              <div class="detail-muted">{{ item.decision or item.label or item.title }}{% if item.summary %}: {{ item.summary }}{% endif %}</div>
-              {% else %}
-              <p class="detail-muted quiet-empty">No material update.</p>
-              {% endfor %}
-            </section>
-            {% else %}
-            <section class="card subcard" data-panel="risk">
-              <h4>Risk</h4>
-              <div class="surface-summary-row">
-                <article class="summary-tile">
-                  <span class="metric-label">Risk Posture</span>
-                  <strong>{{ detail.tabs.risk.current_stance.status if detail.tabs.risk.current_stance else "Unavailable" }}</strong>
-                </article>
-                <article class="summary-tile">
-                  <span class="metric-label">Approval History</span>
-                  <strong>{{ detail.tabs.risk.history | length }} recorded check{% if detail.tabs.risk.history|length != 1 %}s{% endif %}</strong>
-                </article>
-              </div>
-              {% if detail.tabs.risk.current_stance %}
-              <div class="detail-muted">{{ detail.tabs.risk.current_stance.status }}{% if detail.tabs.risk.current_stance.reason %}: {{ detail.tabs.risk.current_stance.reason }}{% endif %}</div>
-              {% endif %}
-              {% if detail.tabs.risk.position_state %}
-              <div class="detail-muted">{{ detail.tabs.risk.position_state.summary or detail.tabs.risk.position_state.status }}</div>
-              {% endif %}
-              {% for item in detail.tabs.risk.history %}
-              <div class="detail-muted">{{ item.status or item.label or item.title }}{% if item.summary %}: {{ item.summary }}{% endif %}</div>
-              {% else %}
-              <p class="detail-muted quiet-empty">No material update.</p>
-              {% endfor %}
-            </section>
-            {% endif %}
 
             {% if detail.tabs.raw_json or detail.tabs.risk.raw_json %}
             <details class="subcard raw-json-panel">
