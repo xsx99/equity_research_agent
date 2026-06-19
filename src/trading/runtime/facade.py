@@ -19,9 +19,17 @@ TRADING_JOB_PHASES = (
 )
 
 
-def run_job_phase(phase: str) -> dict[str, Any]:
+def run_job_phase(
+    phase: str,
+    *,
+    execute_paper_orders: bool | None = None,
+    execute_paper_option_orders: bool | None = None,
+) -> dict[str, Any]:
     """Run one scheduler-facing trading phase."""
-    return dispatch.get_job_phase_handler(phase)()
+    return dispatch.get_job_phase_handler(phase)(
+        execute_paper_orders=execute_paper_orders,
+        execute_paper_option_orders=execute_paper_option_orders,
+    )
 
 
 def run_smoke_mode(mode: str) -> dict[str, Any]:

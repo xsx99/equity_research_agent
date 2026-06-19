@@ -10,6 +10,7 @@ from src.trading.runtime.lookahead_risk import LookaheadRiskWorkflowHelper
 from src.trading.runtime.preopen_risk import _LiveRiskWorkflow
 from src.trading.runtime.support import (
     build_default_news_provider,
+    seed_default_universe_filter_config,
     seed_initial_strategy_definitions,
 )
 
@@ -127,6 +128,7 @@ def build_live_preopen_dependencies(session: Any | None = None) -> LivePreopenDe
 
     trading_repository = SqlAlchemyTradingRepository(session)
     seed_initial_strategy_definitions(trading_repository)
+    seed_default_universe_filter_config(session)
     source_repository = SQLAlchemySignalSourceRepository(session)
     manual_request_service = SQLAlchemyManualTickerRequestService(session)
     market_provider = AlpacaMarketDataProvider()
