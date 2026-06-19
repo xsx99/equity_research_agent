@@ -576,8 +576,15 @@ class TestTodayDashboard:
         assert response.status_code == 200
         assert "Latest Conclusion" in response.text
         assert "Trade Decision" in response.text
-        assert "own_earnings_beat_raise" in response.text
+        assert "Breakout confirmed + risk approved" in response.text
         assert "within_limits" in response.text
+        assert "History" in response.text
+        assert 'data-panel="timeline"' in response.text
+        assert 'href="/today?tab=trades&ticker=AAPL&detail_tab=trend"' not in response.text
+        assert 'href="/today?tab=trades&ticker=AAPL&detail_tab=decisions"' not in response.text
+        assert 'href="/today?tab=trades&ticker=AAPL&detail_tab=risk"' not in response.text
+        assert "Raw JSON" not in response.text
+        assert "Risk Posture" not in response.text
         assert "Primary strategy selected" not in response.text
 
     def test_today_dashboard_renders_ticker_workspace_sections(self, client):
@@ -614,48 +621,42 @@ class TestTodayDashboard:
         assert 'data-panel="trend"' not in response.text
         assert 'data-panel="decisions"' not in response.text
         assert 'data-panel="risk"' not in response.text
+        assert "Raw JSON" not in response.text
+        assert "Workspace Detail JSON" not in response.text
+        assert "Risk JSON" not in response.text
 
-    def test_trades_detail_tab_renders_only_selected_panel(self, client):
+    def test_trades_workspace_renders_timeline_as_only_detail_section(self, client):
         payload = _dashboard_payload()
         payload["selected_tab"] = "trades"
-        payload["ticker_workspace"]["selected_detail_tab"] = "trend"
+        payload["ticker_workspace"]["selected_detail_tab"] = "timeline"
         with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
-            response = client.get("/today?tab=trades&ticker=AAPL&detail_tab=trend")
+            response = client.get("/today?tab=trades&ticker=AAPL&detail_tab=timeline")
 
         assert response.status_code == 200
         assert "ticker-detail-nav" in response.text
-        assert 'data-panel="trend"' in response.text
-        assert "Technical Context" in response.text
-        assert "Relative Strength" in response.text
-        assert 'data-panel="timeline"' not in response.text
+        assert "Timeline" in response.text
+        assert 'href="/today?tab=trades&ticker=AAPL&detail_tab=trend"' not in response.text
+        assert 'href="/today?tab=trades&ticker=AAPL&detail_tab=decisions"' not in response.text
+        assert 'href="/today?tab=trades&ticker=AAPL&detail_tab=risk"' not in response.text
+        assert 'data-panel="timeline"' in response.text
+        assert 'data-panel="trend"' not in response.text
+        assert 'data-panel="decisions"' not in response.text
+        assert 'data-panel="risk"' not in response.text
         assert "Primary strategy selected" not in response.text
 
-    def test_decisions_tab_renders_summary_first_structure(self, client):
+    def test_trades_workspace_invalid_detail_tab_falls_back_to_timeline(self, client):
         payload = _dashboard_payload()
         payload["selected_tab"] = "trades"
-        payload["ticker_workspace"]["selected_detail_tab"] = "decisions"
+        payload["ticker_workspace"]["selected_detail_tab"] = "timeline"
         with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
             response = client.get("/today?tab=trades&ticker=AAPL&detail_tab=decisions")
 
         assert response.status_code == 200
-        assert 'data-panel="decisions"' in response.text
-        assert "Decision Ledger" in response.text
-        assert "Current Call" in response.text
-        assert "Primary strategy selected" in response.text
+        assert 'data-panel="timeline"' in response.text
+        assert 'data-panel="decisions"' not in response.text
         assert 'data-panel="risk"' not in response.text
-
-    def test_risk_tab_renders_summary_first_structure(self, client):
-        payload = _dashboard_payload()
-        payload["selected_tab"] = "trades"
-        payload["ticker_workspace"]["selected_detail_tab"] = "risk"
-        with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
-            response = client.get("/today?tab=trades&ticker=AAPL&detail_tab=risk")
-
-        assert response.status_code == 200
-        assert 'data-panel="risk"' in response.text
-        assert "Risk Posture" in response.text
-        assert "Approval History" in response.text
-        assert "within_limits" in response.text
+        assert "Decision Ledger" not in response.text
+        assert "Risk Posture" not in response.text
         assert 'data-panel="decisions"' not in response.text
 
     def test_risk_macro_tab_renders_summary_first_structure(self, client):
