@@ -426,11 +426,36 @@ def _build_header(
         "nav": latest_portfolio.net_liquidation_value if latest_portfolio else None,
         "day_pnl": latest_portfolio.day_pnl if latest_portfolio else None,
         "buying_power": latest_portfolio.buying_power if latest_portfolio else None,
-        "gross_exposure": latest_risk.gross_exposure if latest_risk else None,
+        "gross_exposure": _exposure_ratio(
+            getattr(latest_risk, "gross_exposure", None),
+            getattr(latest_risk, "account_equity", None),
+        ),
         "open_alert_count": len([row for row in trade_rows if row.get("order_status") in {"rejected", "pending_new"}]),
         "material_signal_change_count": 0,
         "llm_cost_estimate": None,
     }
+
+
+def _exposure_ratio(exposure: object, account_equity: object) -> float | None:
+    exposure_value = _to_float(exposure)
+    if exposure_value is None:
+        return None
+    if abs(exposure_value) <= 1.0:
+        return exposure_value
+
+    equity_value = _to_float(account_equity)
+    if equity_value is None or equity_value == 0.0:
+        return None
+    return exposure_value / equity_value
+
+
+def _to_float(value: object) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _build_job_timeline(latest_reflection: DailyReflection | None) -> tuple[dict[str, Any], ...]:

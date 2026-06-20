@@ -101,6 +101,27 @@ def test_today_risk_macro_presenter_builds_command_center_from_canonical_rows():
     assert payload["macro"]["blocked_strategy_tags"] == ("gap_and_go_v1",)
     assert payload["events"][0]["affected_ticker"] == "AAPL"
     assert payload["risk_sources"][0]["recommended_action_label"] == "Block New Entry"
+    assert payload["command_center"]["exposure_usage_pct"] == 42.0
+
+
+def test_today_risk_macro_presenter_converts_notional_gross_exposure_to_equity_percentage():
+    decision_time = datetime(2026, 6, 16, 13, 0, tzinfo=timezone.utc)
+    latest_risk = SimpleNamespace(
+        risk_appetite="balanced",
+        resolver_version="risk_config_resolver_v1",
+        gross_exposure=49170.6164,
+        account_equity=1_000_000.0,
+        decision_time=decision_time,
+    )
+
+    payload = build_today_risk_macro_payload(
+        latest_risk=latest_risk,
+        latest_intent=None,
+        risk_macro_context={},
+        exposures=(),
+    )
+
+    assert payload["command_center"]["exposure_usage_pct"] == 4.92
 
 
 def test_today_risk_macro_presenter_marks_missing_macro_as_availability_issue():

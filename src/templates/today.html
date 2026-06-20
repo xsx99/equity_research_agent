@@ -640,7 +640,7 @@
           </article>
           <article class="overview-strip-chip">
             <span class="metric-label">Exposure Usage</span>
-            <strong>{{ risk_macro.command_center.exposure_usage_pct if risk_macro.command_center.exposure_usage_pct is not none else "Unavailable" }}</strong>
+            <strong>{% if risk_macro.command_center.exposure_usage_pct is not none %}{{ "%.2f%%"|format(risk_macro.command_center.exposure_usage_pct) }}{% else %}Unavailable{% endif %}</strong>
           </article>
           <article class="overview-strip-chip">
             <span class="metric-label">Event Risk</span>

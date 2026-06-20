@@ -541,6 +541,27 @@ def _dashboard_payload() -> dict:
     }
 
 
+def test_build_header_converts_notional_gross_exposure_to_ratio():
+    from src.web.routers.today import _build_header
+
+    latest_risk = SimpleNamespace(
+        gross_exposure=Decimal("49170.6164"),
+        account_equity=Decimal("1000000"),
+        risk_appetite="balanced",
+        decision_time=datetime(2026, 6, 20, 13, 0, tzinfo=timezone.utc),
+    )
+
+    header = _build_header(
+        latest_portfolio=None,
+        latest_risk=latest_risk,
+        trade_rows=[],
+        latest_reflection=None,
+        latest_macro_snapshot=None,
+    )
+
+    assert header["gross_exposure"] == pytest.approx(0.0491706164)
+
+
 class TestTodayDashboard:
     def test_root_redirects_to_today(self, client):
         response = client.get("/", follow_redirects=False)

@@ -230,7 +230,10 @@ def _exposure_usage_pct(latest_risk: object | None) -> float | None:
     gross_exposure = getattr(latest_risk, "gross_exposure", None)
     if gross_exposure is None:
         return None
-    return round(float(gross_exposure) * 100.0, 2)
+    exposure_ratio = _exposure_ratio(gross_exposure, getattr(latest_risk, "account_equity", None))
+    if exposure_ratio is None:
+        return None
+    return round(exposure_ratio * 100.0, 2)
 
 
 def _updated_at(*, macro_snapshot: object | None, latest_risk: object | None) -> datetime | None:
@@ -298,3 +301,25 @@ def _string_list(value: object) -> list[str]:
     if not isinstance(value, (list, tuple)):
         return []
     return [str(item) for item in value if str(item).strip()]
+
+
+def _exposure_ratio(exposure: object, account_equity: object) -> float | None:
+    exposure_value = _to_float(exposure)
+    if exposure_value is None:
+        return None
+    if abs(exposure_value) <= 1.0:
+        return exposure_value
+
+    equity_value = _to_float(account_equity)
+    if equity_value is None or equity_value == 0.0:
+        return None
+    return exposure_value / equity_value
+
+
+def _to_float(value: object) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None

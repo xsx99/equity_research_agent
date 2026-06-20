@@ -214,7 +214,7 @@ def test_build_today_overview_surfaces_provider_availability_issues_as_system_is
     )
 
 
-def test_build_today_overview_does_not_double_scale_large_gross_exposure_values():
+def test_build_today_overview_formats_notional_gross_exposure_as_equity_percentage():
     payload = build_today_overview(
         header={
             "trade_date": date(2026, 6, 16),
@@ -226,7 +226,7 @@ def test_build_today_overview_does_not_double_scale_large_gross_exposure_values(
             "open_alert_count": 0,
             "material_signal_change_count": 0,
             "buying_power": Decimal("245000.00"),
-            "gross_exposure": Decimal("49170.62"),
+            "gross_exposure": Decimal("0.0491706164"),
             "day_pnl": Decimal("12.34"),
             "nav": Decimal("998250.00"),
             "llm_cost_estimate": None,
@@ -249,7 +249,7 @@ def test_build_today_overview_does_not_double_scale_large_gross_exposure_values(
     )
 
     gross_exposure_card = next(card for card in payload["metric_cards"] if card["label"] == "Gross Exposure")
-    assert gross_exposure_card["primary_value"] == "49,170.62"
+    assert gross_exposure_card["primary_value"] == "4.9%"
 
 
 def test_build_today_overview_surfaces_latest_preopen_run_funnel_when_available():
