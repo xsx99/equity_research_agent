@@ -9,73 +9,47 @@
 <div class="today-shell">
   <header class="today-header">
     <div class="today-title-block">
-      <p class="eyebrow">Trading Workstation</p>
-      <h1>Today Dashboard</h1>
-      <p class="detail-muted">Operator workstation for V2 trading artifacts and controls.</p>
+      <h1>Today</h1>
+      <p class="detail-muted">{{ header.trade_date if header.trade_date else "—" }} · {{ header.market_phase or "Unavailable" }}</p>
     </div>
 
-    <div class="operator-strip">
-      <section class="operator-strip-group operator-strip-group-primary">
-        <div class="operator-group-heading">
-          <span class="section-label">Action Now</span>
-          <p class="detail-muted">Immediate session signals and capital posture.</p>
-        </div>
-        <div class="operator-metric-grid">
-          <article class="operator-metric operator-metric-hero">
-            <span class="metric-label">Open Alerts</span>
-            <strong class="operator-value">{{ header.open_alert_count }}</strong>
-          </article>
-          <article class="operator-metric operator-metric-hero">
-            <span class="metric-label">Material Changes</span>
-            <strong class="operator-value">{{ header.material_signal_change_count }}</strong>
-          </article>
-          <article class="operator-metric">
-            <span class="metric-label">Buying Power</span>
-          <strong class="operator-value">{{ fmt_currency(header.buying_power) if header.buying_power is not none else "Unavailable" }}</strong>
-          </article>
-          <article class="operator-metric">
-            <span class="metric-label">Gross Exposure</span>
-          <strong class="operator-value">{{ fmt_number(header.gross_exposure) if header.gross_exposure is not none else "Unavailable" }}</strong>
-          </article>
-        </div>
-      </section>
+    <div class="kpi-bar">
+      <article class="kpi">
+        <span class="kpi-label">Account Equity</span>
+        <strong class="kpi-value kpi-value-lg">{{ fmt_currency(header.account_equity) if header.account_equity is not none else "—" }}</strong>
+      </article>
+      <article class="kpi">
+        <span class="kpi-label">Day P&amp;L</span>
+        <strong class="kpi-value {% if header.day_pnl is not none and header.day_pnl > 0 %}kpi-pos{% elif header.day_pnl is not none and header.day_pnl < 0 %}kpi-neg{% endif %}">{{ fmt_currency(header.day_pnl) if header.day_pnl is not none else "—" }}</strong>
+        <span class="kpi-sub">{{ pct(header.day_pnl_pct) if header.day_pnl_pct is not none else "—" }}</span>
+      </article>
+      <article class="kpi">
+        <span class="kpi-label">Unrealized P&amp;L</span>
+        <strong class="kpi-value {% if header.unrealized_pnl is not none and header.unrealized_pnl > 0 %}kpi-pos{% elif header.unrealized_pnl is not none and header.unrealized_pnl < 0 %}kpi-neg{% endif %}">{{ fmt_currency(header.unrealized_pnl) if header.unrealized_pnl is not none else "—" }}</strong>
+      </article>
+      <article class="kpi">
+        <span class="kpi-label">Net / Gross Exp.</span>
+        <strong class="kpi-value">{{ pct(header.net_exposure) if header.net_exposure is not none else "—" }} / {{ pct(header.gross_exposure) if header.gross_exposure is not none else "—" }}</strong>
+      </article>
+      <article class="kpi">
+        <span class="kpi-label">Buying Power</span>
+        <strong class="kpi-value">{{ fmt_currency(header.buying_power) if header.buying_power is not none else "—" }}</strong>
+      </article>
+    </div>
 
-      <section class="operator-strip-group operator-strip-group-context">
-        <div class="operator-group-heading">
-          <span class="section-label">Session Context</span>
-          <p class="detail-muted">Context for interpreting the current session state.</p>
-        </div>
-        <div class="operator-context-list">
-          <article class="operator-context-item">
-            <span class="metric-label">Trade Date</span>
-            <strong>{{ header.trade_date if header.trade_date else "Unavailable" }}</strong>
-          </article>
-          <article class="operator-context-item">
-            <span class="metric-label">Macro Regime</span>
-            <strong>{{ header.macro_regime_label or header.macro_regime }}</strong>
-          </article>
-          <article class="operator-context-item">
-            <span class="metric-label">Risk Appetite</span>
-            <strong>{{ header.risk_appetite_label or header.risk_appetite }}</strong>
-          </article>
-          <article class="operator-context-item">
-            <span class="metric-label">Job Status</span>
-            <strong>
-              {% if job_timeline %}
-              {{ job_timeline[0].label }} / {{ job_timeline[0].status_label or job_timeline[0].status }}
-              {% else %}
-              Unavailable
-              {% endif %}
-            </strong>
-          </article>
-        </div>
-      </section>
+    <div class="kpi-context">
+      <span><strong>Macro Regime</strong> · {{ header.macro_regime_label or header.macro_regime }}</span>
+      <span><strong>Risk Appetite</strong> · {{ header.risk_appetite_label or header.risk_appetite }}</span>
+      <span><strong>Margin Util.</strong> · {{ pct(header.margin_util_pct) if header.margin_util_pct is not none else "—" }}</span>
+      <span><strong>Pre-open Job</strong> · {{ overview.latest_preopen_run.status_label if overview.latest_preopen_run else (job_timeline[0].status_label if job_timeline else "Unavailable") }}</span>
+      <span><strong>Open Alerts</strong> · {{ header.open_alert_count }}</span>
     </div>
   </header>
 
   <nav class="today-global-tabs" aria-label="Today sections">
     {% for tab in tabs %}
-    <a class="today-global-tab {% if selected_tab == tab.id %}active{% endif %}" href="/today?tab={{ tab.id }}">{{ tab.label }}</a>
+    {% if tab.id == "system" %}<span class="today-global-tab-spacer"></span>{% endif %}
+    <a class="today-global-tab {% if tab.id == 'system' %}today-global-tab-muted{% endif %} {% if selected_tab == tab.id %}active{% endif %}" href="/today?tab={{ tab.id }}">{{ tab.label }}</a>
     {% endfor %}
   </nav>
 
@@ -562,19 +536,22 @@
 
     {% elif selected_tab == "portfolio" %}
     <section class="card secondary-surface standalone-surface">
-      <div class="surface-heading"><div><p class="eyebrow">Focused Surface</p><h2>Portfolio</h2></div></div>
+      <div class="surface-heading"><div><h2>Portfolio</h2></div></div>
       <div class="surface-summary-row">
         <article class="summary-tile">
-          <span class="metric-label">Holdings Snapshot</span>
-          <strong>{{ portfolio.positions | length }} stock position{% if portfolio.positions|length != 1 %}s{% endif %}</strong>
+          <span class="metric-label">P&amp;L Snapshot</span>
+          <strong>{{ fmt_currency(portfolio.kpis.account_equity) if portfolio.kpis.account_equity is not none else "—" }}</strong>
+          <span class="detail-muted {% if portfolio.kpis.day_pnl is not none and portfolio.kpis.day_pnl > 0 %}kpi-pos{% elif portfolio.kpis.day_pnl is not none and portfolio.kpis.day_pnl < 0 %}kpi-neg{% endif %}">{{ fmt_currency(portfolio.kpis.day_pnl) if portfolio.kpis.day_pnl is not none else "—" }} day / {{ fmt_currency(portfolio.kpis.unrealized_pnl) if portfolio.kpis.unrealized_pnl is not none else "—" }} unrealized</span>
         </article>
         <article class="summary-tile">
-          <span class="metric-label">Stock Book</span>
-          <strong>{{ portfolio.option_positions | length }} option position{% if portfolio.option_positions|length != 1 %}s{% endif %}</strong>
+          <span class="metric-label">Cash / Buying Power</span>
+          <strong>{{ fmt_currency(portfolio.kpis.cash_balance) if portfolio.kpis.cash_balance is not none else "—" }}</strong>
+          <span class="detail-muted">{{ fmt_currency(portfolio.kpis.buying_power) if portfolio.kpis.buying_power is not none else "—" }} buying power</span>
         </article>
         <article class="summary-tile">
-          <span class="metric-label">Hedge Layer</span>
-          <strong>{{ portfolio.hedge_overlays | length }} overlay{% if portfolio.hedge_overlays|length != 1 %}s{% endif %}</strong>
+          <span class="metric-label">Exposure</span>
+          <strong>{{ pct(portfolio.kpis.net_exposure) if portfolio.kpis.net_exposure is not none else "—" }} / {{ pct(portfolio.kpis.gross_exposure) if portfolio.kpis.gross_exposure is not none else "—" }}</strong>
+          <span class="detail-muted">net / gross</span>
         </article>
       </div>
       <section class="surface-block">
@@ -582,6 +559,7 @@
           <div class="section-label">Stock Positions</div>
           <span class="surface-block-count">{{ portfolio.positions | length }}</span>
         </div>
+        <p class="detail-muted">{{ portfolio.position_summary.count }} positions · {{ fmt_currency(portfolio.position_summary.market_value) if portfolio.position_summary.market_value is not none else "—" }} market value · <span class="{% if portfolio.position_summary.unrealized_pnl is not none and portfolio.position_summary.unrealized_pnl > 0 %}kpi-pos{% elif portfolio.position_summary.unrealized_pnl is not none and portfolio.position_summary.unrealized_pnl < 0 %}kpi-neg{% endif %}">{{ fmt_currency(portfolio.position_summary.unrealized_pnl) if portfolio.position_summary.unrealized_pnl is not none else "—" }}</span></p>
         {% if portfolio.positions %}
         <div class="surface-table-wrap">
           <table class="compact-table">
@@ -596,6 +574,7 @@
           <div class="section-label">Option Positions</div>
           <span class="surface-block-count">{{ portfolio.option_positions | length }}</span>
         </div>
+        <p class="detail-muted">{{ portfolio.option_position_summary.count }} strategies · {{ fmt_currency(portfolio.option_position_summary.market_value) if portfolio.option_position_summary.market_value is not none else "—" }} · max loss {{ fmt_currency(portfolio.option_position_summary.max_loss) if portfolio.option_position_summary.max_loss is not none else "—" }}</p>
         {% if portfolio.option_positions %}
         <div class="surface-table-wrap">
           <table class="compact-table">
@@ -610,6 +589,7 @@
           <div class="section-label">Hedge Overlays</div>
           <span class="surface-block-count">{{ portfolio.hedge_overlays | length }}</span>
         </div>
+        <p class="detail-muted">{{ portfolio.hedge_overlay_summary.count }} overlay{% if portfolio.hedge_overlay_summary.count != 1 %}s{% endif %} · {{ fmt_currency(portfolio.hedge_overlay_summary.protected_notional) if portfolio.hedge_overlay_summary.protected_notional is not none else "—" }} protected notional</p>
         {% if portfolio.hedge_overlays %}
         <div class="surface-table-wrap">
           <table class="compact-table">
@@ -618,6 +598,62 @@
           </table>
         </div>
         {% else %}<p class="detail-muted quiet-empty">No hedge overlays.</p>{% endif %}
+      </section>
+      <section class="surface-block">
+        <div class="surface-block-head">
+          <div class="section-label">Needs Attention</div>
+        </div>
+        {% set needs_review = portfolio.needs_attention.needs_review %}
+        {% set live_alerts = portfolio.needs_attention.live_alerts %}
+        {% set material_changes = portfolio.needs_attention.material_changes %}
+        {% if not needs_review and not live_alerts and not material_changes %}
+        <p class="detail-muted quiet-empty surface-empty-copy">Nothing needs attention</p>
+        {% else %}
+        <div class="needs-attention-grid">
+          <section class="surface-block">
+            <div class="surface-block-head">
+              <div class="section-label">Needs Review</div>
+              <span class="surface-block-count">{{ needs_review | length }}</span>
+            </div>
+            {% if needs_review %}
+            {% for row in needs_review %}
+            <a href="/today?tab=trades&ticker={{ row.ticker }}" class="detail-link">{{ row.ticker }}</a>
+            <p class="detail-muted">{{ row.summary }}</p>
+            {% endfor %}
+            {% else %}
+            <p class="detail-muted quiet-empty surface-empty-copy">No review items.</p>
+            {% endif %}
+          </section>
+          <section class="surface-block">
+            <div class="surface-block-head">
+              <div class="section-label">Live Alerts</div>
+              <span class="surface-block-count">{{ live_alerts | length }}</span>
+            </div>
+            {% if live_alerts %}
+            {% for row in live_alerts %}
+            <a href="/today?tab=trades&ticker={{ row.ticker }}" class="detail-link">{{ row.ticker }}</a>
+            <p class="detail-muted">{{ row.headline }}</p>
+            {% endfor %}
+            {% else %}
+            <p class="detail-muted quiet-empty surface-empty-copy">No live alerts.</p>
+            {% endif %}
+          </section>
+          <section class="surface-block">
+            <div class="surface-block-head">
+              <div class="section-label">Material Changes</div>
+              <span class="surface-block-count">{{ material_changes | length }}</span>
+            </div>
+            {% if material_changes %}
+            {% for row in material_changes %}
+            <a href="/today?tab=trades&ticker={{ row.ticker }}" class="detail-link">{{ row.ticker }}</a>
+            <p class="detail-muted">{{ row.summary }}</p>
+            {% endfor %}
+            {% else %}
+            <p class="detail-muted quiet-empty surface-empty-copy">No material changes.</p>
+            {% endif %}
+          </section>
+        </div>
+        {% endif %}
       </section>
     </section>
 
@@ -756,8 +792,15 @@
     {% elif selected_tab == "candidates" %}
     <section class="card secondary-surface standalone-surface">
       <div class="surface-heading">
-        <div><p class="eyebrow">Focused Surface</p><h2>Candidates</h2></div>
+        <div><h2>Candidates</h2></div>
         <p class="detail-muted">Operator queue, candidate decisions, and advanced universe context.</p>
+      </div>
+      <div class="surface-summary-row">
+        <article class="summary-tile">
+          <span class="metric-label">Candidate Summary</span>
+          <strong>{{ candidates.aggregate_summary.scored }} scored</strong>
+          <span class="detail-muted">{{ candidates.aggregate_summary.actionable }} actionable · {{ candidates.aggregate_summary.watch }} watch · {{ candidates.aggregate_summary.blocked }} blocked</span>
+        </article>
       </div>
       {% set candidate_summary = candidates.summary or {} %}
       {% set action_queue = candidates.action_queue if candidates.action_queue is defined else (candidate_summary.action_queue or ()) %}
@@ -963,34 +1006,47 @@
       </section>
     </section>
 
-    {% elif selected_tab == "learning-strategies" %}
+    {% elif selected_tab == "system" %}
     <section class="card secondary-surface standalone-surface">
-      <div class="surface-heading"><div><p class="eyebrow">Focused Surface</p><h2>Learning &amp; Strategies</h2></div></div>
+      <div class="surface-heading"><div><h2>System</h2></div></div>
       <div class="surface-summary-row">
         <article class="summary-tile">
           <span class="metric-label">Reflection Snapshot</span>
-          <strong>{{ learning_strategies.reflection.status_label if learning_strategies.reflection else "Unavailable" }}</strong>
+          <strong>{{ system.learning_strategies.reflection.status_label if system.learning_strategies.reflection else "Unavailable" }}</strong>
         </article>
         <article class="summary-tile">
           <span class="metric-label">Strategy Pipeline</span>
-          <strong>{{ learning_strategies.strategy_proposals | length }} proposal{% if learning_strategies.strategy_proposals|length != 1 %}s{% endif %}</strong>
+          <strong>{{ system.learning_strategies.strategy_proposals | length }} proposal{% if system.learning_strategies.strategy_proposals|length != 1 %}s{% endif %}</strong>
+          <span class="detail-muted">{{ system.learning_strategies.strategy_performance | length }} tracked strategy{% if system.learning_strategies.strategy_performance|length != 1 %}s{% endif %}</span>
         </article>
         <article class="summary-tile">
-          <span class="metric-label">Learning Factors</span>
-          <strong>{{ learning_strategies.learning_factors | length }} active factor{% if learning_strategies.learning_factors|length != 1 %}s{% endif %}</strong>
+          <span class="metric-label">LLM Spend</span>
+          <strong>{{ system.llm_usage_summary.count }} usage row{% if system.llm_usage_summary.count != 1 %}s{% endif %}</strong>
+          <span class="detail-muted">{{ fmt_currency(system.llm_usage_summary.estimated_cost) if system.llm_usage_summary.estimated_cost is not none else "—" }} estimated cost</span>
         </article>
         <article class="summary-tile">
-          <span class="metric-label">Strategy Performance</span>
-          <strong>{{ learning_strategies.strategy_performance | length }} tracked strategy{% if learning_strategies.strategy_performance|length != 1 %}s{% endif %}</strong>
+          <span class="metric-label">Provider Calls</span>
+          <strong>{{ system.provider_usage_summary.count }} provider event{% if system.provider_usage_summary.count != 1 %}s{% endif %}</strong>
         </article>
       </div>
       <section class="surface-block">
+        <div class="surface-block-head">
+          <div class="section-label">System Issues</div>
+          <span class="surface-block-count">{{ system.system_issues | length }}</span>
+        </div>
+        {% if system.system_issues %}
+        {% for row in system.system_issues %}
+        <p><strong>{{ row.label }}</strong>: {{ row.summary }}</p>
+        {% endfor %}
+        {% else %}<p class="detail-muted quiet-empty surface-empty-copy">No system issues.</p>{% endif %}
+      </section>
+      <section class="surface-block">
         <div class="section-label">Performance Snapshot</div>
-        {% if learning_strategies.reflection %}
-        <p><strong>Reflection Status:</strong> {{ learning_strategies.reflection.status_label or learning_strategies.reflection.status }}</p>
-        {% if learning_strategies.reflection.what_worked %}
+        {% if system.learning_strategies.reflection %}
+        <p><strong>Reflection Status:</strong> {{ system.learning_strategies.reflection.status_label or system.learning_strategies.reflection.status }}</p>
+        {% if system.learning_strategies.reflection.what_worked %}
         <ul class="output-list">
-          {% for item in learning_strategies.reflection.what_worked %}<li>{{ item }}</li>{% endfor %}
+          {% for item in system.learning_strategies.reflection.what_worked %}<li>{{ item }}</li>{% endfor %}
         </ul>
         {% endif %}
         {% else %}<p class="detail-muted quiet-empty">No reflection recorded.</p>{% endif %}
@@ -998,13 +1054,13 @@
       <section class="surface-block">
         <div class="surface-block-head">
           <div class="section-label">Strategy Proposals</div>
-          <span class="surface-block-count">{{ learning_strategies.strategy_proposals | length }}</span>
+          <span class="surface-block-count">{{ system.learning_strategies.strategy_proposals | length }}</span>
         </div>
-        {% if learning_strategies.strategy_proposals %}
+        {% if system.learning_strategies.strategy_proposals %}
         <div class="surface-table-wrap">
           <table class="compact-table">
             <thead><tr><th>Strategy</th><th>Status</th></tr></thead>
-            <tbody>{% for row in learning_strategies.strategy_proposals %}<tr><td>{{ row.proposed_strategy_id }}</td><td>{{ row.proposal_status_label or row.proposal_status }}</td></tr>{% endfor %}</tbody>
+            <tbody>{% for row in system.learning_strategies.strategy_proposals %}<tr><td>{{ row.proposed_strategy_id }}</td><td>{{ row.proposal_status_label or row.proposal_status }}</td></tr>{% endfor %}</tbody>
           </table>
         </div>
         {% else %}<p class="detail-muted quiet-empty">No strategy proposals.</p>{% endif %}
@@ -1012,13 +1068,13 @@
       <section class="surface-block">
         <div class="surface-block-head">
           <div class="section-label">Strategy Performance</div>
-          <span class="surface-block-count">{{ learning_strategies.strategy_performance | length }}</span>
+          <span class="surface-block-count">{{ system.learning_strategies.strategy_performance | length }}</span>
         </div>
-        {% if learning_strategies.strategy_performance %}
+        {% if system.learning_strategies.strategy_performance %}
         <div class="surface-table-wrap">
           <table class="compact-table">
             <thead><tr><th>Strategy</th><th>Status</th><th>Win Rate</th><th>Total P&amp;L</th></tr></thead>
-            <tbody>{% for row in learning_strategies.strategy_performance %}<tr><td>{{ row.strategy_id }}</td><td>{{ row.lifecycle_status_label or row.lifecycle_status }}</td><td>{{ fmt_number(row.win_rate) }}</td><td>{{ fmt_currency(row.total_pnl) }}</td></tr>{% endfor %}</tbody>
+            <tbody>{% for row in system.learning_strategies.strategy_performance %}<tr><td>{{ row.strategy_id }}</td><td>{{ row.lifecycle_status_label or row.lifecycle_status }}</td><td>{{ fmt_number(row.win_rate) }}</td><td>{{ fmt_currency(row.total_pnl) }}</td></tr>{% endfor %}</tbody>
           </table>
         </div>
         {% else %}<p class="detail-muted quiet-empty">No strategy performance records.</p>{% endif %}
@@ -1026,13 +1082,14 @@
       <section class="surface-block">
         <div class="surface-block-head">
           <div class="section-label">Learning Factors</div>
-          <span class="surface-block-count">{{ learning_strategies.learning_factors | length }}</span>
+          <span class="surface-block-count">{{ system.learning_strategies.learning_factors | length }}</span>
         </div>
-        {% if learning_strategies.learning_factors %}
+        <p class="detail-muted">{{ system.learning_strategies.learning_factors | length }} factor{% if system.learning_strategies.learning_factors|length != 1 %}s{% endif %} · {{ system.exposure_summary.total_exposure if system.exposure_summary.total_exposure is not none else "—" }}</p>
+        {% if system.learning_strategies.learning_factors %}
         <div class="surface-table-wrap">
           <table class="compact-table">
             <thead><tr><th>Title</th><th>Status</th><th>Scope</th></tr></thead>
-            <tbody>{% for row in learning_strategies.learning_factors %}<tr><td>{{ row.title }}</td><td>{{ row.status_label or row.status }}</td><td>{{ row.scope_label or row.scope }}</td></tr>{% endfor %}</tbody>
+            <tbody>{% for row in system.learning_strategies.learning_factors %}<tr><td>{{ row.title }}</td><td>{{ row.status_label or row.status }}</td><td>{{ row.scope_label or row.scope }}</td></tr>{% endfor %}</tbody>
           </table>
         </div>
         {% else %}<p class="detail-muted quiet-empty">No active learning factors.</p>{% endif %}
@@ -1040,10 +1097,10 @@
       <section class="surface-block">
         <div class="surface-block-head">
           <div class="section-label">Loop Observability</div>
-          <span class="surface-block-count">{{ learning_strategies.observability.funnel | length }}</span>
+          <span class="surface-block-count">{{ system.learning_strategies.observability.funnel | length }}</span>
         </div>
         <div class="surface-summary-row">
-          {% for row in learning_strategies.observability.funnel %}
+          {% for row in system.learning_strategies.observability.funnel %}
           <article class="summary-tile">
             <span class="metric-label">{{ row.label }}</span>
             <strong>{{ row.count }}</strong>
@@ -1051,7 +1108,7 @@
           {% endfor %}
         </div>
         <div class="surface-summary-row">
-          {% for row in learning_strategies.observability.promotion_breakdown %}
+          {% for row in system.learning_strategies.observability.promotion_breakdown %}
           <article class="summary-tile">
             <span class="metric-label">{{ row.label }} Promotions</span>
             <strong>{{ row.count }}</strong>
@@ -1059,44 +1116,26 @@
           {% endfor %}
         </div>
         <div class="section-label">Today Weight Inputs</div>
-        {% if learning_strategies.observability.weight_inputs %}
+        {% if system.learning_strategies.observability.weight_inputs %}
         <div class="surface-table-wrap">
           <table class="compact-table">
             <thead><tr><th>Factor</th><th>Scope</th><th>Effect</th></tr></thead>
-            <tbody>{% for row in learning_strategies.observability.weight_inputs %}<tr><td>{{ row.title }}</td><td>{{ row.scope_label }}</td><td>{{ row.effect_summary }}</td></tr>{% endfor %}</tbody>
+            <tbody>{% for row in system.learning_strategies.observability.weight_inputs %}<tr><td>{{ row.title }}</td><td>{{ row.scope_label }}</td><td>{{ row.effect_summary }}</td></tr>{% endfor %}</tbody>
           </table>
         </div>
         {% else %}<p class="detail-muted quiet-empty">No active learning-factor weight inputs recorded.</p>{% endif %}
       </section>
-    </section>
-
-    {% else %}
-    <section class="card secondary-surface standalone-surface">
-      <div class="surface-heading"><div><p class="eyebrow">Focused Surface</p><h2>Ops &amp; Cost</h2></div></div>
-      <div class="surface-summary-row">
-        <article class="summary-tile">
-          <span class="metric-label">LLM Spend</span>
-          <strong>{{ ops_cost.llm_usage | length }} usage row{% if ops_cost.llm_usage|length != 1 %}s{% endif %}</strong>
-        </article>
-        <article class="summary-tile">
-          <span class="metric-label">Model Footprint</span>
-          <strong>{{ ops_cost.llm_usage[0].model if ops_cost.llm_usage else "Unavailable" }}</strong>
-        </article>
-        <article class="summary-tile">
-          <span class="metric-label">Provider Calls</span>
-          <strong>{{ ops_cost.provider_usage | length }} provider event{% if ops_cost.provider_usage|length != 1 %}s{% endif %}</strong>
-        </article>
-      </div>
       <section class="surface-block">
         <div class="surface-block-head">
           <div class="section-label">Usage Ledger</div>
-          <span class="surface-block-count">{{ ops_cost.llm_usage | length }}</span>
+          <span class="surface-block-count">{{ system.ops_cost.llm_usage | length }}</span>
         </div>
-        {% if ops_cost.llm_usage %}
+        {% if system.ops_cost.llm_usage %}
+        <p class="detail-muted">{{ system.llm_usage_summary.count }} event{% if system.llm_usage_summary.count != 1 %}s{% endif %} · {{ fmt_currency(system.llm_usage_summary.estimated_cost) if system.llm_usage_summary.estimated_cost is not none else "—" }} estimated cost</p>
         <div class="surface-table-wrap">
           <table class="compact-table">
             <thead><tr><th>Pipeline</th><th>Provider</th><th>Model</th><th>Estimated Cost</th></tr></thead>
-            <tbody>{% for row in ops_cost.llm_usage %}<tr><td>{{ row.pipeline_name }}</td><td>{{ row.provider }}</td><td>{{ row.model }}</td><td>{{ fmt_currency(row.estimated_cost) }}</td></tr>{% endfor %}</tbody>
+            <tbody>{% for row in system.ops_cost.llm_usage %}<tr><td>{{ row.pipeline_name }}</td><td>{{ row.provider }}</td><td>{{ row.model }}</td><td>{{ fmt_currency(row.estimated_cost) }}</td></tr>{% endfor %}</tbody>
           </table>
         </div>
         {% else %}<p class="detail-muted quiet-empty">No LLM usage events.</p>{% endif %}
@@ -1104,16 +1143,23 @@
       <section class="surface-block">
         <div class="surface-block-head">
           <div class="section-label">Provider Usage</div>
-          <span class="surface-block-count">{{ ops_cost.provider_usage | length }}</span>
+          <span class="surface-block-count">{{ system.ops_cost.provider_usage | length }}</span>
         </div>
-        {% if ops_cost.provider_usage %}
+        {% if system.ops_cost.provider_usage %}
         <div class="surface-table-wrap">
           <table class="compact-table">
             <thead><tr><th>Provider</th><th>Endpoint</th><th>Status</th><th>Cache</th></tr></thead>
-            <tbody>{% for row in ops_cost.provider_usage %}<tr><td>{{ row.provider }}</td><td>{{ row.endpoint }}</td><td>{{ row.status_label or row.status }}</td><td>{{ row.cache_status_label or row.cache_status }}</td></tr>{% endfor %}</tbody>
+            <tbody>{% for row in system.ops_cost.provider_usage %}<tr><td>{{ row.provider }}</td><td>{{ row.endpoint }}</td><td>{{ row.status_label or row.status }}</td><td>{{ row.cache_status_label or row.cache_status }}</td></tr>{% endfor %}</tbody>
           </table>
         </div>
         {% else %}<p class="detail-muted quiet-empty">No provider usage events.</p>{% endif %}
+      </section>
+      <section class="surface-block">
+        <div class="surface-block-head">
+          <div class="section-label">Event / Exposure Snapshot</div>
+          <span class="surface-block-count">{{ system.event_summary.count }}</span>
+        </div>
+        <p class="detail-muted">{{ system.event_summary.count }} event{% if system.event_summary.count != 1 %}s{% endif %} · {{ system.exposure_summary.total_exposure if system.exposure_summary.total_exposure is not none else "—" }}</p>
       </section>
     </section>
     {% endif %}

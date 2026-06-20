@@ -25,18 +25,17 @@ def _dashboard_payload() -> dict:
     manual_request_id = str(uuid.uuid4())
     universe_filter_id = str(uuid.uuid4())
     return {
-        "selected_tab": "overview",
+        "selected_tab": "portfolio",
         "tabs": (
-            {"id": "overview", "label": "Overview"},
             {"id": "portfolio", "label": "Portfolio"},
             {"id": "trades", "label": "Trades"},
-            {"id": "risk-macro", "label": "Risk & Macro"},
             {"id": "candidates", "label": "Candidates"},
-            {"id": "learning-strategies", "label": "Learning & Strategies"},
-            {"id": "ops-cost", "label": "Ops & Cost"},
+            {"id": "risk-macro", "label": "Risk & Macro"},
+            {"id": "system", "label": "System"},
         ),
         "header": {
             "trade_date": date(2026, 6, 2),
+            "market_phase": "Pre-open",
             "macro_regime": "neutral",
             "macro_regime_label": "Neutral",
             "risk_appetite": "balanced",
@@ -46,9 +45,18 @@ def _dashboard_payload() -> dict:
             "live_status": "live",
             "live_status_label": "Live",
             "nav": Decimal("1000000"),
+            "account_equity": Decimal("1000000"),
             "day_pnl": Decimal("1250.50"),
+            "day_pnl_pct": Decimal("0.001252"),
+            "realized_pnl": Decimal("430.25"),
+            "unrealized_pnl": Decimal("820.25"),
             "buying_power": Decimal("2000000"),
+            "cash_balance": Decimal("155000"),
+            "stock_market_value": Decimal("2145.20"),
+            "option_market_value": Decimal("840.75"),
             "gross_exposure": Decimal("0.42"),
+            "net_exposure": Decimal("0.31"),
+            "margin_util_pct": Decimal("0.06"),
             "open_alert_count": 2,
             "material_signal_change_count": 3,
             "llm_cost_estimate": Decimal("18.42"),
@@ -93,6 +101,16 @@ def _dashboard_payload() -> dict:
             ),
         },
         "portfolio": {
+            "kpis": {
+                "account_equity": Decimal("1000000"),
+                "day_pnl": Decimal("1250.50"),
+                "realized_pnl": Decimal("430.25"),
+                "unrealized_pnl": Decimal("820.25"),
+                "gross_exposure": Decimal("0.42"),
+                "net_exposure": Decimal("0.31"),
+                "cash_balance": Decimal("155000"),
+                "buying_power": Decimal("2000000"),
+            },
             "positions": (
                 {
                     "ticker": "AAPL",
@@ -101,6 +119,16 @@ def _dashboard_payload() -> dict:
                     "strategy_id": "earnings_drift_v1",
                     "quantity": Decimal("10"),
                     "market_value": Decimal("2145.20"),
+                    "unrealized_pnl": Decimal("325.10"),
+                },
+                {
+                    "ticker": "MSFT",
+                    "trade_identity": "tactical_stock_trade",
+                    "trade_identity_label": "Tactical Stock Trade",
+                    "strategy_id": "relative_strength_breakout_v1",
+                    "quantity": Decimal("5"),
+                    "market_value": Decimal("1550.80"),
+                    "unrealized_pnl": Decimal("-25.10"),
                 },
             ),
             "option_positions": (
@@ -110,6 +138,7 @@ def _dashboard_payload() -> dict:
                     "option_strategy_type_label": "Long Call",
                     "trade_identity": "tactical_option_trade",
                     "trade_identity_label": "Tactical Option Trade",
+                    "market_value": Decimal("840.75"),
                     "max_loss": Decimal("420.00"),
                 },
             ),
@@ -121,6 +150,31 @@ def _dashboard_payload() -> dict:
                     "protected_notional": Decimal("25000"),
                 },
             ),
+            "position_summary": {
+                "count": 2,
+                "market_value": Decimal("3696.00"),
+                "unrealized_pnl": Decimal("300.00"),
+            },
+            "option_position_summary": {
+                "count": 1,
+                "market_value": Decimal("840.75"),
+                "max_loss": Decimal("420.00"),
+            },
+            "hedge_overlay_summary": {
+                "count": 1,
+                "protected_notional": Decimal("25000"),
+            },
+            "needs_attention": {
+                "needs_review": (
+                    {"ticker": "NVDA", "summary": "Closed recently and ready for review"},
+                ),
+                "live_alerts": (
+                    {"ticker": "NVDA", "severity": "high", "headline": "Raised guidance"},
+                ),
+                "material_changes": (
+                    {"ticker": "AAPL", "summary": "Relative strength improved vs QQQ"},
+                ),
+            },
         },
         "trades": {
             "rows": (),
@@ -463,6 +517,12 @@ def _dashboard_payload() -> dict:
             "themes": (
                 {"theme_id": "ai_infra", "display_name": "AI Infrastructure"},
             ),
+            "aggregate_summary": {
+                "scored": 1,
+                "actionable": 0,
+                "watch": 1,
+                "blocked": 1,
+            },
         },
         "learning_strategies": {
             "reflection": {
@@ -538,6 +598,107 @@ def _dashboard_payload() -> dict:
                 },
             ),
         },
+        "system": {
+            "system_issues": (
+                {"label": "Macro regime unavailable", "summary": "Global macro regime feed has not published yet."},
+            ),
+            "learning_strategies": {
+                "reflection": {
+                    "status": "succeeded",
+                    "status_label": "Succeeded",
+                    "what_worked": ("Bullish catalyst continuation respected",),
+                },
+                "learning_factors": (
+                    {
+                        "title": "Tighten low-volume gap entries",
+                        "status": "active",
+                        "status_label": "Active",
+                        "scope": "strategy",
+                        "scope_label": "Strategy",
+                    },
+                ),
+                "strategy_performance": (
+                    {
+                        "strategy_id": "earnings_drift_v1",
+                        "lifecycle_status": "active",
+                        "lifecycle_status_label": "Active",
+                        "win_rate": Decimal("0.58"),
+                        "total_pnl": Decimal("4200"),
+                    },
+                ),
+                "strategy_proposals": (
+                    {
+                        "proposed_strategy_id": "semis_readthrough_v1",
+                        "proposal_status": "accepted",
+                        "proposal_status_label": "Accepted",
+                    },
+                ),
+                "observability": {
+                    "funnel": (
+                        {"label": "Learning Factors Created", "count": 1},
+                        {"label": "Applied Today", "count": 1},
+                        {"label": "Strategy Proposals", "count": 1},
+                        {"label": "New Strategy Definitions", "count": 1},
+                        {"label": "Promoted", "count": 1},
+                    ),
+                    "promotion_breakdown": (
+                        {"label": "Shadow", "count": 1},
+                        {"label": "Experimental", "count": 0},
+                        {"label": "Active", "count": 0},
+                    ),
+                    "weight_inputs": (
+                        {
+                            "factor_key": "lf-risk",
+                            "title": "Tighten low-volume gap entries",
+                            "scope_label": "Strategy",
+                            "effect_summary": "increase score",
+                        },
+                    ),
+                },
+            },
+            "ops_cost": {
+                "llm_usage": (
+                    {
+                        "pipeline_name": "trading",
+                        "provider": "openai",
+                        "model": "gpt-5",
+                        "estimated_cost": Decimal("12.30"),
+                    },
+                ),
+                "provider_usage": (
+                    {
+                        "provider": "alpaca",
+                        "endpoint": "market_bars",
+                        "status": "succeeded",
+                        "status_label": "Succeeded",
+                        "cache_status": "miss",
+                        "cache_status_label": "Cache Miss",
+                    },
+                ),
+            },
+            "risk_macro": {
+                "events": (
+                    {"event_type_label": "Own Company Earnings"},
+                ),
+                "exposures": (
+                    {"factor_type": "sector", "factor_name": "Technology", "exposure": Decimal("5.2757000000000005")},
+                ),
+            },
+            "exposure_summary": {
+                "count": 1,
+                "total_exposure": Decimal("5.2757000000000005"),
+            },
+            "event_summary": {
+                "count": 1,
+            },
+            "llm_usage_summary": {
+                "count": 1,
+                "estimated_cost": Decimal("12.30"),
+            },
+            "provider_usage_summary": {
+                "count": 1,
+            },
+        },
     }
 
 
@@ -569,61 +730,38 @@ class TestTodayDashboard:
         assert response.status_code == 303
         assert response.headers["location"] == "/today"
 
-    def test_get_today_dashboard_renders_tabs_and_sections(self, client):
+    def test_get_today_dashboard_renders_portfolio_home_header_and_tabs(self, client):
         payload = _dashboard_payload()
-        payload["selected_tab"] = "overview"
-        payload["overview"]["operator_strip"] = {
-            "primary": (
-                {"label": "Market Phase", "value": "Pre-open", "tone": "neutral"},
-                {"label": "Runtime Mode", "value": "Live Manual Review", "tone": "neutral"},
-            ),
-            "context": (
-                {"label": "Macro Regime", "value": "Risk Off", "tone": "warning"},
-                {"label": "Live Status", "value": "Degraded", "tone": "warning"},
-            ),
-        }
-        payload["overview"]["metric_cards"] = (
-            {
-                "label": "Net Liquidation Value",
-                "primary_value": "$1,000,000.00",
-                "secondary_value": None,
-                "meta": {
-                    "updated_at_label": "2026-06-16 13:31 UTC",
-                    "source_of_truth_label": "Broker equity snapshot",
-                    "basis_note": None,
-                },
-            },
-        )
-        payload["overview"]["current_summary"] = {
-            "headline": "Macro is defensive and operator attention is concentrated in a small queue.",
-            "items": ("3 open alerts", "2 material signal changes", "1 manual review request awaiting linkage"),
-            "hidden_item_count": 1,
-            "meta": {
-                "updated_at_label": "2026-06-16 13:31 UTC",
-            },
-        }
         with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
-            response = client.get("/today?tab=overview")
+            response = client.get("/today?tab=portfolio")
 
         assert response.status_code == 200
-        assert "Today Dashboard" in response.text
+        assert "<h1>Today</h1>" in response.text
         assert "today-shell" in response.text
-        assert "operator-strip" in response.text
-        assert "operator-strip-group-primary" in response.text
-        assert "operator-strip-group-context" in response.text
+        assert "kpi-bar" in response.text
+        assert "kpi-context" in response.text
         assert "today-global-tabs" in response.text
         assert "today-workspace" in response.text
-        assert "Overview" in response.text
         assert "Portfolio" in response.text
         assert "Trades" in response.text
-        assert "Risk &amp; Macro" in response.text
         assert "Candidates" in response.text
-        assert "Learning &amp; Strategies" in response.text
-        assert "Ops &amp; Cost" in response.text
-        assert "Raised guidance" in response.text
+        assert "Risk &amp; Macro" in response.text
+        assert "System" in response.text
+        assert "Overview" not in response.text
+        assert "Learning &amp; Strategies" not in response.text
+        assert "Ops &amp; Cost" not in response.text
+        assert "Account Equity" in response.text
+        assert "Day P&amp;L" in response.text
+        assert "Unrealized P&amp;L" in response.text
+        assert "Net / Gross Exp." in response.text
+        assert "Buying Power" in response.text
+        assert "Margin Util." in response.text
+        assert "Open Alerts" in response.text
+        assert "Pre-open Job" in response.text
+        assert "$1,000,000.00" in response.text
+        assert "$1,250.50" in response.text
+        assert "$820.25" in response.text
         assert "Needs Review" in response.text
-        assert "Open Positions" in response.text
-        assert "System Issues" in response.text
         assert "trades-canvas" not in response.text
         assert "TSLA" not in response.text
         assert "AI Infrastructure" not in response.text
@@ -631,10 +769,9 @@ class TestTodayDashboard:
         assert "surface-table-wrap" in response.text
         assert "surface-block" in response.text
         assert "surface-block-count" in response.text
-        assert "overview-operator-strip" in response.text
-        assert "overview-metric-card" in response.text
-        assert "Current Session Summary" in response.text
-        assert "Broker equity snapshot" in response.text
+        assert "today-global-tab-muted" in response.text
+        assert "today-global-tab-spacer" in response.text
+        assert 'href="/today?tab=system"' in response.text
 
     def test_trades_tab_only_renders_trades_workspace_body(self, client):
         payload = _dashboard_payload()
@@ -769,51 +906,36 @@ class TestTodayDashboard:
         assert "trades-canvas" not in response.text
         assert "AI Infrastructure" not in response.text
 
-    def test_overview_tab_renders_command_center_modules(self, client):
+    def test_portfolio_tab_renders_needs_attention_modules(self, client):
         payload = _dashboard_payload()
-        payload["selected_tab"] = "overview"
+        payload["selected_tab"] = "portfolio"
         with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
-            response = client.get("/today?tab=overview")
+            response = client.get("/today?tab=portfolio")
 
         assert response.status_code == 200
         assert "Needs Review" in response.text
-        assert "Open Positions" in response.text
-        assert "System Issues" in response.text
+        assert "Live Alerts" in response.text
+        assert "Material Changes" in response.text
         assert "Closed recently and ready for review" in response.text
-        assert "Open position, risk within limits" in response.text
-        assert "Macro regime unavailable" in response.text
+        assert "Relative strength improved vs QQQ" in response.text
+        assert "Raised guidance" in response.text
+        assert "System Issues" not in response.text
+        assert "Latest Preopen Run" not in response.text
         assert "Session Watch" not in response.text
 
-    def test_overview_tab_renders_latest_preopen_run_block(self, client):
+    def test_portfolio_tab_collapses_empty_needs_attention_to_single_line(self, client):
         payload = _dashboard_payload()
-        payload["selected_tab"] = "overview"
-        with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
-            response = client.get("/today?tab=overview")
-
-        assert response.status_code == 200
-        assert "Latest Preopen Run" in response.text
-        assert "Signals built, but no candidates were selected." in response.text
-        assert "Dry Run" in response.text
-        assert "2026-06-02 13:49 UTC" in response.text
-
-    def test_overview_tab_renders_latest_preopen_run_empty_state(self, client):
-        payload = _dashboard_payload()
-        payload["selected_tab"] = "overview"
-        payload["overview"]["latest_preopen_run"] = {
-            "status_label": "Unavailable",
-            "as_of_label": None,
-            "completed_at_label": None,
-            "execution_mode_label": None,
-            "headline": None,
-            "summary_tiles": (),
-            "empty_copy": "No persisted preopen run is available for the current trade date yet.",
+        payload["selected_tab"] = "portfolio"
+        payload["portfolio"]["needs_attention"] = {
+            "needs_review": (),
+            "live_alerts": (),
+            "material_changes": (),
         }
         with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
-            response = client.get("/today?tab=overview")
+            response = client.get("/today?tab=portfolio")
 
         assert response.status_code == 200
-        assert "Latest Preopen Run" in response.text
-        assert "No persisted preopen run is available for the current trade date yet." in response.text
+        assert "Nothing needs attention" in response.text
 
     def test_portfolio_tab_renders_summary_first_structure(self, client):
         payload = _dashboard_payload()
@@ -822,14 +944,21 @@ class TestTodayDashboard:
             response = client.get("/today?tab=portfolio")
 
         assert response.status_code == 200
-        assert "Holdings Snapshot" in response.text
-        assert "Stock Book" in response.text
+        assert "P&amp;L Snapshot" in response.text
+        assert "Cash / Buying Power" in response.text
+        assert "Exposure" in response.text
         assert "surface-table-wrap" in response.text
         assert "$2,145.20" in response.text
         assert "$420.00" in response.text
         assert "Tactical Stock Trade" in response.text
         assert "Long Call" in response.text
         assert "Long Put" in response.text
+        assert "2 positions" in response.text
+        assert "$3,696.00 market value" in response.text
+        assert "$300.00" in response.text
+        assert "1 strategies" in response.text
+        assert "$840.75" in response.text
+        assert "max loss $420.00" in response.text
         assert "tactical_stock_trade" not in response.text
         assert "long_call" not in response.text
         assert "surface-block" in response.text
@@ -911,17 +1040,21 @@ class TestTodayDashboard:
         assert "trades-canvas" not in response.text
         assert "Signal Summary" not in response.text
 
-    def test_learning_tab_renders_summary_first_structure(self, client):
+    def test_system_tab_renders_learning_and_ops_modules(self, client):
         payload = _dashboard_payload()
-        payload["selected_tab"] = "learning-strategies"
+        payload["selected_tab"] = "system"
         with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
-            response = client.get("/today?tab=learning-strategies")
+            response = client.get("/today?tab=system")
 
         assert response.status_code == 200
+        assert "System" in response.text
+        assert "System Issues" in response.text
         assert "Reflection Snapshot" in response.text
         assert "Strategy Pipeline" in response.text
         assert "Performance Snapshot" in response.text
-        assert "surface-block" in response.text
+        assert "LLM Spend" in response.text
+        assert "Usage Ledger" in response.text
+        assert "Provider Usage" in response.text
         assert "Bullish catalyst continuation respected" in response.text
         assert "Strategy Performance" in response.text
         assert "$4,200.00" in response.text
@@ -930,31 +1063,25 @@ class TestTodayDashboard:
         assert "Accepted" in response.text
         assert "Active" in response.text
         assert "Strategy" in response.text
+        assert "gpt-5" in response.text
+        assert "market_bars" in response.text
         assert "succeeded" not in response.text
         assert "accepted" not in response.text
         assert "tracked strategy" in response.text
         assert "trades-canvas" not in response.text
 
-    def test_ops_cost_tab_renders_summary_first_structure(self, client):
+    def test_system_tab_aggregate_lines_render_for_risk_exposure_and_llm_usage(self, client):
         payload = _dashboard_payload()
-        payload["selected_tab"] = "ops-cost"
+        payload["selected_tab"] = "system"
         with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
-            response = client.get("/today?tab=ops-cost")
+            response = client.get("/today?tab=system")
 
         assert response.status_code == 200
-        assert "LLM Spend" in response.text
-        assert "Model Footprint" in response.text
-        assert "Usage Ledger" in response.text
-        assert "$12.30" in response.text
-        assert "Provider Usage" in response.text
-        assert "Provider Calls" in response.text
-        assert "market_bars" in response.text
-        assert "Succeeded" in response.text
-        assert "Cache Miss" in response.text
-        assert ">succeeded<" not in response.text
-        assert ">miss<" not in response.text
+        assert "1 factor" in response.text
+        assert "5.2757000000000005" in response.text
+        assert "1 event" in response.text
+        assert "$12.30 estimated cost" in response.text
         assert "surface-block" in response.text
-        assert "gpt-5" in response.text
         assert "trades-canvas" not in response.text
 
     def test_timeline_tab_renders_history_cards(self, client):
@@ -1060,13 +1187,13 @@ class TestTodayDashboard:
         assert "Signal summary audit" not in response.text
         assert "sentiment neutral -&gt; negative" in response.text
 
-    def test_overview_empty_state_uses_quiet_standardized_text(self, client):
+    def test_portfolio_empty_state_uses_quiet_standardized_text(self, client):
         payload = _dashboard_payload()
-        payload["selected_tab"] = "overview"
-        payload["overview"]["live_alerts"] = ()
-        payload["overview"]["material_changes"] = ()
+        payload["selected_tab"] = "portfolio"
+        payload["portfolio"]["needs_attention"]["live_alerts"] = ()
+        payload["portfolio"]["needs_attention"]["material_changes"] = ()
         with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
-            response = client.get("/today?tab=overview")
+            response = client.get("/today?tab=portfolio")
 
         assert response.status_code == 200
         assert "No live alerts." in response.text
@@ -1190,7 +1317,7 @@ class TestTodayDashboard:
         ):
             dashboard = load_today_dashboard(
                 session,
-                selected_tab="overview",
+                selected_tab="portfolio",
                 decision_id=None,
                 selected_ticker="MSFT",
             )
@@ -1228,7 +1355,7 @@ class TestTodayDashboard:
         ):
             dashboard = load_today_dashboard(
                 session,
-                selected_tab="overview",
+                selected_tab="portfolio",
                 decision_id=None,
                 selected_ticker="NVDA",
             )
@@ -1302,7 +1429,7 @@ class TestTodayDashboard:
                 selected_detail_item_index=99,
             )
 
-        assert dashboard["selected_tab"] == "overview"
+        assert dashboard["selected_tab"] == "portfolio"
         assert dashboard["ticker_workspace"]["selected_detail_tab"] == "timeline"
         assert dashboard["ticker_workspace"]["selected_detail_item_index"] == 0
         assert dashboard["ticker_workspace"]["selected_detail_item"]["title"] == "Decision submitted"
@@ -1753,7 +1880,7 @@ class TestTodayDashboard:
         ):
             dashboard = load_today_dashboard(
                 session,
-                selected_tab="overview",
+                selected_tab="portfolio",
                 decision_id=None,
                 selected_ticker="NVDA",
             )
@@ -1854,7 +1981,7 @@ class TestTodayDashboard:
         ):
             dashboard = load_today_dashboard(
                 session,
-                selected_tab="overview",
+                selected_tab="portfolio",
                 decision_id=None,
                 selected_ticker=None,
             )
@@ -2158,7 +2285,7 @@ def test_load_today_dashboard_includes_learning_observability():
     ):
         dashboard = load_today_dashboard(
             session,
-            selected_tab="learning-strategies",
+            selected_tab="system",
             decision_id=None,
             selected_ticker=None,
         )

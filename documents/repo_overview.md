@@ -218,6 +218,12 @@ PR 11C keeps the same persisted trading artifacts but makes `/today` lifecycle-a
 
 The current `/today` operator-UI follow-up pushes more aggregation and display policy into focused presenter modules without changing the underlying persistence model:
 
+## PR 11 Today UI Operator Refresh
+
+- `src/web/routers/today.py` now treats the portfolio view as the `/today` home surface, normalizes unknown tabs back to `portfolio`, and shapes additive read-model fields for the redesign: money-first header KPIs, safe account/P&L percentages, per-table aggregate summaries, collapsed needs-attention groups, a merged `system` view, and candidate aggregate counts. No new queries were added; the route reuses existing portfolio/risk/candidate/learning/ops payloads.
+- `src/templates/today.html` now renders the 5-tab information architecture from the implementation plan: `Portfolio`, `Trades`, `Candidates`, `Risk & Macro`, and a muted right-aligned `System` tab. The header is now a compact KPI bar plus context line, portfolio is the summary-first home with per-table aggregate lines and a collapsed needs-attention empty state, and `System` merges the old learning/ops surfaces.
+- `src/static/style.css` now includes additive presentation-only styles for the KPI bar, muted `System` tab treatment, and needs-attention grid while preserving the existing light/warm theme.
+
 - `src/web/presenters/today_overview.py` now shapes the `Overview` command surface into an explicit operator strip, provenance-aware metric cards, alert summary, and a collapsible current-session summary so metric freshness and source-of-truth copy do not have to be inferred inside Jinja
 - `src/web/presenters/today_candidates.py` now owns candidate dedupe, grouped decision readout, manual-review queue normalization, and action-queue prioritization so repeated ticker rows and linked/unlinked manual-review audit states no longer depend on template-side grouping
 - `src/web/presenters/today_workspace.py` now keeps the ticker-first shape but also computes repeated-phase timeline deltas (`baseline` vs rerun state, delta fields, source refs) and truncates long signal summaries into a high-signal default list plus grouped audit sections

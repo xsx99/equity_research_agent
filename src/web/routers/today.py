@@ -74,13 +74,11 @@ router = APIRouter()
 _templates: Jinja2Templates | None = None
 
 _TAB_LABELS = (
-    ("overview", "Overview"),
     ("portfolio", "Portfolio"),
     ("trades", "Trades"),
-    ("risk-macro", "Risk & Macro"),
     ("candidates", "Candidates"),
-    ("learning-strategies", "Learning & Strategies"),
-    ("ops-cost", "Ops & Cost"),
+    ("risk-macro", "Risk & Macro"),
+    ("system", "System"),
 )
 
 
@@ -92,7 +90,7 @@ def init(templates: Jinja2Templates) -> None:
 @router.get("/today", response_class=HTMLResponse)
 def today_dashboard(
     request: Request,
-    tab: str = "overview",
+    tab: str = "portfolio",
     decision_id: str | None = None,
     ticker: str | None = None,
     detail_tab: str = "timeline",
@@ -317,6 +315,32 @@ def load_today_dashboard(
         relationships=relationships,
         peer_baskets=peer_baskets,
     )
+    portfolio = _build_portfolio_view(
+        header=header,
+        positions=positions,
+        option_positions=option_positions,
+        hedge_overlays=_load_hedge_overlays(session),
+        overview=overview,
+    )
+    learning_strategies = build_today_learning_strategies(
+        reflection=_serialize_reflection(latest_reflection),
+        learning_factors=_load_learning_factors(session),
+        strategy_performance=_load_strategy_performance(session),
+        strategy_proposals=_load_strategy_proposals(session),
+        strategy_definitions=_load_strategy_definitions(session),
+        strategy_evaluation_results=_load_strategy_evaluation_results(session),
+    )
+    ops_cost = {
+        "llm_usage": _load_llm_usage(session),
+        "provider_usage": (),
+    }
+    system = _build_system_view(
+        overview=overview,
+        learning_strategies=learning_strategies,
+        ops_cost=ops_cost,
+        risk_macro=risk_macro,
+    )
+    candidates = _attach_candidate_summary(candidates)
 
     return {
         "selected_tab": selected_tab,
@@ -324,11 +348,7 @@ def load_today_dashboard(
         "header": header,
         "job_timeline": job_timeline,
         "overview": overview,
-        "portfolio": {
-            "positions": positions,
-            "option_positions": option_positions,
-            "hedge_overlays": _load_hedge_overlays(session),
-        },
+        "portfolio": portfolio,
         "trades": {
             "rows": trade_rows,
             "selected_detail": audit_detail,
@@ -336,18 +356,9 @@ def load_today_dashboard(
         "ticker_workspace": ticker_workspace,
         "risk_macro": risk_macro,
         "candidates": candidates,
-        "learning_strategies": build_today_learning_strategies(
-            reflection=_serialize_reflection(latest_reflection),
-            learning_factors=_load_learning_factors(session),
-            strategy_performance=_load_strategy_performance(session),
-            strategy_proposals=_load_strategy_proposals(session),
-            strategy_definitions=_load_strategy_definitions(session),
-            strategy_evaluation_results=_load_strategy_evaluation_results(session),
-        ),
-        "ops_cost": {
-            "llm_usage": _load_llm_usage(session),
-            "provider_usage": (),
-        },
+        "learning_strategies": learning_strategies,
+        "ops_cost": ops_cost,
+        "system": system,
     }
 
 
@@ -424,11 +435,32 @@ def _build_header(
             "degraded" if getattr(latest_macro_snapshot, "regime", None) is None else "live"
         ),
         "nav": latest_portfolio.net_liquidation_value if latest_portfolio else None,
+        "account_equity": latest_portfolio.account_equity if latest_portfolio else None,
+        "cash_balance": latest_portfolio.cash_balance if latest_portfolio else None,
         "day_pnl": latest_portfolio.day_pnl if latest_portfolio else None,
+        "day_pnl_pct": _safe_pct(
+            latest_portfolio.day_pnl if latest_portfolio else None,
+            _safe_diff(
+                latest_portfolio.account_equity if latest_portfolio else None,
+                latest_portfolio.day_pnl if latest_portfolio else None,
+            ),
+        ),
+        "realized_pnl": latest_portfolio.realized_pnl if latest_portfolio else None,
+        "unrealized_pnl": latest_portfolio.unrealized_pnl if latest_portfolio else None,
         "buying_power": latest_portfolio.buying_power if latest_portfolio else None,
+<<<<<<< HEAD
         "gross_exposure": _exposure_ratio(
             getattr(latest_risk, "gross_exposure", None),
             getattr(latest_risk, "account_equity", None),
+=======
+        "stock_market_value": latest_portfolio.stock_market_value if latest_portfolio else None,
+        "option_market_value": latest_portfolio.option_market_value if latest_portfolio else None,
+        "gross_exposure": latest_risk.gross_exposure if latest_risk else None,
+        "net_exposure": latest_risk.net_exposure if latest_risk else None,
+        "margin_util_pct": _safe_pct(
+            latest_portfolio.total_margin_requirement if latest_portfolio else None,
+            latest_portfolio.account_equity if latest_portfolio else None,
+>>>>>>> 0629cc008b79ffbf7eab1b10994799c9cc1a9e5d
         ),
         "open_alert_count": len([row for row in trade_rows if row.get("order_status") in {"rejected", "pending_new"}]),
         "material_signal_change_count": 0,
@@ -469,6 +501,145 @@ def _build_job_timeline(latest_reflection: DailyReflection | None) -> tuple[dict
             }
         )
     return tuple(rows)
+
+
+def _safe_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _safe_diff(a: Any, b: Any) -> float | None:
+    left = _safe_float(a)
+    right = _safe_float(b)
+    if left is None or right is None:
+        return None
+    return left - right
+
+
+def _safe_pct(numerator: Any, denominator: Any) -> float | None:
+    num = _safe_float(numerator)
+    den = _safe_float(denominator)
+    if num is None or den in (None, 0):
+        return None
+    return num / den
+
+
+def _safe_sum(rows: tuple[dict[str, Any], ...], key: str) -> float | None:
+    total = 0.0
+    found = False
+    for row in rows:
+        value = _safe_float(row.get(key))
+        if value is None:
+            continue
+        total += value
+        found = True
+    return total if found else None
+
+
+def _build_portfolio_view(
+    *,
+    header: dict[str, Any],
+    positions: tuple[dict[str, Any], ...],
+    option_positions: tuple[dict[str, Any], ...],
+    hedge_overlays: tuple[dict[str, Any], ...],
+    overview: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "positions": positions,
+        "option_positions": option_positions,
+        "hedge_overlays": hedge_overlays,
+        "position_summary": {
+            "count": len(positions),
+            "market_value": _safe_sum(positions, "market_value"),
+            "unrealized_pnl": _safe_sum(positions, "unrealized_pnl"),
+        },
+        "option_position_summary": {
+            "count": len(option_positions),
+            "market_value": _safe_sum(option_positions, "market_value"),
+            "max_loss": _safe_sum(option_positions, "max_loss"),
+        },
+        "hedge_overlay_summary": {
+            "count": len(hedge_overlays),
+            "protected_notional": _safe_sum(hedge_overlays, "protected_notional"),
+        },
+        "kpis": {
+            "account_equity": header.get("account_equity"),
+            "day_pnl": header.get("day_pnl"),
+            "realized_pnl": header.get("realized_pnl"),
+            "unrealized_pnl": header.get("unrealized_pnl"),
+            "gross_exposure": header.get("gross_exposure"),
+            "net_exposure": header.get("net_exposure"),
+            "cash_balance": header.get("cash_balance"),
+            "buying_power": header.get("buying_power"),
+        },
+        "needs_attention": {
+            "needs_review": tuple(overview.get("command_center", {}).get("needs_review") or ()),
+            "live_alerts": tuple(overview.get("live_alerts") or ()),
+            "material_changes": tuple(overview.get("material_changes") or ()),
+        },
+    }
+
+
+def _build_system_view(
+    *,
+    overview: dict[str, Any],
+    learning_strategies: dict[str, Any],
+    ops_cost: dict[str, Any],
+    risk_macro: dict[str, Any],
+) -> dict[str, Any]:
+    exposures = tuple(risk_macro.get("exposures") or ())
+    llm_usage = tuple(ops_cost.get("llm_usage") or ())
+    provider_usage = tuple(ops_cost.get("provider_usage") or ())
+    events = tuple(risk_macro.get("events") or ())
+    return {
+        "system_issues": tuple(overview.get("command_center", {}).get("system_issues") or ()),
+        "learning_strategies": learning_strategies,
+        "ops_cost": ops_cost,
+        "risk_macro": risk_macro,
+        "exposure_summary": {
+            "count": len(exposures),
+            "total_exposure": _safe_sum(exposures, "exposure"),
+        },
+        "event_summary": {
+            "count": len(events),
+        },
+        "llm_usage_summary": {
+            "count": len(llm_usage),
+            "estimated_cost": _safe_sum(llm_usage, "estimated_cost"),
+        },
+        "provider_usage_summary": {
+            "count": len(provider_usage),
+        },
+    }
+
+
+def _attach_candidate_summary(candidates: dict[str, Any]) -> dict[str, Any]:
+    decision_readout = tuple(candidates.get("decision_readout") or ())
+    actionable = sum(1 for row in decision_readout if row.get("action_required"))
+    watch = sum(
+        1
+        for row in decision_readout
+        if "watch" in str(row.get("current_outcome_label") or "").strip().lower()
+    )
+    blocked = sum(
+        1
+        for row in decision_readout
+        if "blocked" in str(row.get("current_outcome_label") or "").strip().lower()
+        or "no trade" in str(row.get("current_outcome_label") or "").strip().lower()
+    )
+    return {
+        **candidates,
+        "aggregate_summary": {
+            "scored": len(decision_readout),
+            "actionable": actionable,
+            "watch": watch,
+            "blocked": blocked,
+        },
+    }
 
 
 def _build_overview_command_center(
@@ -693,6 +864,7 @@ def _load_positions(session: Any) -> tuple[dict[str, Any], ...]:
             "strategy_id": row.strategy_id,
             "quantity": row.quantity,
             "market_value": row.market_value,
+            "unrealized_pnl": getattr(row, "unrealized_pnl", None),
         }
         for row in rows
     )
@@ -737,6 +909,7 @@ def _load_option_positions(session: Any) -> tuple[dict[str, Any], ...]:
             "option_strategy_type_label": option_strategy_type_label(row.option_strategy_type),
             "trade_identity": row.trade_identity,
             "trade_identity_label": trade_identity_label(row.trade_identity),
+            "market_value": getattr(row, "market_value", None),
             "max_loss": row.max_loss,
         }
         for row in rows
@@ -1211,7 +1384,7 @@ def _serialize_universe_filter(config: UniverseFilterConfig | None) -> dict[str,
 
 def _normalize_tab(tab: str) -> str:
     allowed = {tab_id for tab_id, _ in _TAB_LABELS}
-    return tab if tab in allowed else "overview"
+    return tab if tab in allowed else "portfolio"
 
 
 def _normalize_detail_tab(detail_tab: str) -> str:
