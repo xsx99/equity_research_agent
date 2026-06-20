@@ -6,7 +6,7 @@ import argparse
 import json
 import sys
 import uuid
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -33,6 +33,12 @@ from src.trading.workflows.strategy_scoring import StrategyPipelineResult
 from src.trading.workflows.trading_decision import TradingDecisionPipeline
 
 
+@dataclass(frozen=True)
+class _ManualRequestScope:
+    request_id: uuid.UUID
+    owned: bool
+
+
 def run_smoke(
     *,
     ticker: str,
@@ -43,22 +49,18 @@ def run_smoke(
     now = as_of or datetime.now(timezone.utc)
     ticker = ticker.strip().upper()
     instrument = instrument.strip().lower()
-    request_id = uuid.uuid4()
     reason = f"codex live preopen order smoke:{instrument}:{ticker}"
 
     with SessionLocal() as session:
-        session.add(
-            ManualTickerRequest(
-                manual_ticker_request_id=request_id,
-                ticker=ticker,
-                reason=reason,
-                mode="paper_trade_eligible",
-                status="active",
-                created_at=now,
-                metadata_json={"smoke": True},
-            )
+        request_scope = _ensure_manual_request_scope(
+            session=session,
+            ticker=ticker,
+            reason=reason,
+            now=now,
         )
-        session.commit()
+        request_id = request_scope.request_id
+        if request_scope.owned:
+            session.commit()
 
         try:
             dependencies = build_live_preopen_dependencies(session)
@@ -157,11 +159,44 @@ def run_smoke(
             }
         finally:
             session.rollback()
-            row = session.query(ManualTickerRequest).filter_by(manual_ticker_request_id=request_id).one_or_none()
-            if row is not None:
-                row.status = "dismissed"
-                row.dismissed_at = datetime.now(timezone.utc)
-                session.commit()
+            if request_scope.owned:
+                row = session.query(ManualTickerRequest).filter_by(manual_ticker_request_id=request_id).one_or_none()
+                if row is not None:
+                    row.status = "dismissed"
+                    row.dismissed_at = datetime.now(timezone.utc)
+                    session.commit()
+
+
+def _ensure_manual_request_scope(
+    *,
+    session: Any,
+    ticker: str,
+    reason: str,
+    now: datetime,
+) -> _ManualRequestScope:
+    existing = (
+        session.query(ManualTickerRequest)
+        .filter_by(ticker=ticker, status="active")
+        .order_by(ManualTickerRequest.created_at.desc())
+        .first()
+    )
+    if existing is not None:
+        return _ManualRequestScope(request_id=existing.manual_ticker_request_id, owned=False)
+
+    request_id = uuid.uuid4()
+    session.add(
+        ManualTickerRequest(
+            manual_ticker_request_id=request_id,
+            ticker=ticker,
+            reason=reason,
+            mode="paper_trade_eligible",
+            status="active",
+            created_at=now,
+            metadata_json={"smoke": True},
+        )
+    )
+    session.flush()
+    return _ManualRequestScope(request_id=request_id, owned=True)
 
 
 class _SmokeStrategyPipeline:

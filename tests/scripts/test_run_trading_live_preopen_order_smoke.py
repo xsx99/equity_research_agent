@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import uuid
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from scripts import run_trading_live_preopen_order_smoke
+from src.db.models.trading import ManualTickerRequest
 from src.trading.strategies.classifier import TradeClassificationRecord
 from src.trading.strategies.matching import CandidateScoreRecord
 from src.trading.workflows.strategy_scoring import StrategyPipelineResult
@@ -324,3 +326,54 @@ def test_build_smoke_trading_decision_pipeline_preserves_source_repository(monke
     assert captured["repository"] == "trading-repo"
     assert captured["source_repository"] == "source-repo"
     assert captured["manual_request_service"] == "manual-service"
+
+
+def test_ensure_manual_request_scope_reuses_existing_active_ticker_request():
+    existing_id = uuid.uuid4()
+
+    class _Query:
+        def __init__(self, row):
+            self.row = row
+
+        def filter_by(self, **kwargs):
+            assert kwargs == {"ticker": "NVDA", "status": "active"}
+            return self
+
+        def order_by(self, *_args, **_kwargs):
+            return self
+
+        def first(self):
+            return self.row
+
+    class _Session:
+        def __init__(self, row):
+            self.row = row
+            self.added = []
+
+        def query(self, model):
+            assert model is ManualTickerRequest
+            return _Query(self.row)
+
+        def add(self, row):
+            self.added.append(row)
+
+        def flush(self):
+            raise AssertionError("flush should not run when reusing an active manual request")
+
+    session = _Session(
+        SimpleNamespace(
+            manual_ticker_request_id=existing_id,
+            mode="paper_trade_eligible",
+        )
+    )
+
+    scope = run_trading_live_preopen_order_smoke._ensure_manual_request_scope(
+        session=session,
+        ticker="NVDA",
+        reason="codex live preopen order smoke:stock:NVDA",
+        now=datetime(2026, 6, 20, 3, 18, tzinfo=timezone.utc),
+    )
+
+    assert scope.request_id == existing_id
+    assert scope.owned is False
+    assert session.added == []

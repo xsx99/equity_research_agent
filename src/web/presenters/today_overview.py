@@ -21,8 +21,11 @@ def build_today_overview(
 ) -> dict[str, Any]:
     deduped_closed_positions = _dedupe_rows_by_ticker(closed_positions)
     open_positions = positions + option_positions
+    resolved_live_status = _resolved_live_status(header=header, risk_macro=risk_macro)
     command_center = _build_command_center(
         header=header,
+        risk_macro=risk_macro,
+        live_status=resolved_live_status,
         open_positions=open_positions,
         closed_positions=deduped_closed_positions,
     )
@@ -49,7 +52,7 @@ def build_today_overview(
         ),
         _metric_card(
             label="Gross Exposure",
-            value=_format_percent(header.get("gross_exposure")),
+            value=_format_exposure(header.get("gross_exposure")),
             source_of_truth_label="Risk snapshot exposure usage",
             updated_at=_risk_macro_updated_at(risk_macro),
         ),
@@ -86,7 +89,7 @@ def build_today_overview(
             "context": (
                 _operator_item("Macro Regime", macro_regime_label(header.get("macro_regime")) or "Unavailable", tone=_macro_tone(header)),
                 _operator_item("Risk Appetite", risk_appetite_label(header.get("risk_appetite")) or "Unavailable"),
-                _operator_item("Live Status", live_status_label(header.get("live_status")) or "Unavailable", tone=_live_tone(header)),
+                _operator_item("Live Status", live_status_label(resolved_live_status) or "Unavailable", tone=_live_tone(resolved_live_status)),
                 _operator_item("Job Status", _job_status(job_timeline)),
             ),
         },
@@ -119,6 +122,8 @@ def build_today_overview(
 def _build_command_center(
     *,
     header: dict[str, Any],
+    risk_macro: dict[str, Any],
+    live_status: str,
     open_positions: tuple[dict[str, Any], ...],
     closed_positions: tuple[dict[str, Any], ...],
 ) -> dict[str, tuple[dict[str, Any], ...]]:
@@ -139,16 +144,22 @@ def _build_command_center(
         if str(row.get("ticker") or "").strip()
     )
     system_issues: list[dict[str, Any]] = []
+    for row in tuple(risk_macro.get("summary", {}).get("availability_issues") or ()):
+        label = str(row.get("label") or "").strip()
+        summary = str(row.get("summary") or "").strip()
+        if label and summary:
+            system_issues.append({"label": label, "summary": summary})
     if str(header.get("macro_regime") or "").strip().lower() == "unavailable":
-        system_issues.append(
-            {
-                "label": "Macro regime unavailable",
-                "summary": "Global macro regime data is unavailable.",
-            }
-        )
+        macro_issue = {
+            "label": "Macro regime unavailable",
+            "summary": "Global macro regime data is unavailable.",
+        }
+        if macro_issue not in system_issues:
+            system_issues.append(macro_issue)
     if (
-        str(header.get("live_status") or "").strip().lower() == "degraded"
+        str(live_status or "").strip().lower() == "degraded"
         and str(header.get("macro_regime") or "").strip().lower() != "unavailable"
+        and not system_issues
     ):
         system_issues.append(
             {
@@ -237,20 +248,27 @@ def _job_status(job_timeline: tuple[dict[str, Any], ...]) -> str:
 def _format_metric_value(label: str, value: Any) -> str:
     if value is None:
         return "Unavailable"
+    if isinstance(value, str):
+        return value
     if isinstance(value, Decimal):
         lowered = label.lower()
         if "cost" in lowered or "p&l" in lowered or "value" in lowered or "power" in lowered:
             return f"${value:,.2f}"
+        if "exposure" in lowered:
+            return f"{value:,.2f}"
     return str(value)
 
 
-def _format_percent(value: Any) -> str | None:
+def _format_exposure(value: Any) -> str | Decimal | None:
     if value is None:
         return None
     try:
-        return f"{float(value) * 100:.1f}%"
+        numeric = Decimal(str(value))
     except (TypeError, ValueError):
         return str(value)
+    if abs(numeric) <= Decimal("1"):
+        return f"{float(numeric) * 100:.1f}%"
+    return numeric
 
 
 def _format_timestamp_label(value: Any) -> str | None:
@@ -292,11 +310,16 @@ def _macro_tone(header: dict[str, Any]) -> str:
     return "warning" if regime in {"risk_off", "unavailable"} else "neutral"
 
 
-def _live_tone(header: dict[str, Any]) -> str:
-    status = str(header.get("live_status") or "").strip().lower()
+def _live_tone(live_status: Any) -> str:
+    status = str(live_status or "").strip().lower()
     return "warning" if status == "degraded" else "neutral"
+
+
+def _resolved_live_status(*, header: dict[str, Any], risk_macro: dict[str, Any]) -> str:
+    if str(risk_macro.get("availability", {}).get("status") or "").strip().lower() == "degraded":
+        return "degraded"
+    return str(header.get("live_status") or "").strip().lower() or "unavailable"
 
 
 def _alert_tone(header: dict[str, Any]) -> str:
     return "warning" if int(header.get("open_alert_count") or 0) > 0 else "neutral"
-

@@ -123,3 +123,130 @@ def test_build_today_overview_dedupes_closed_positions_by_ticker_for_needs_revie
         {"ticker": "TSLA", "summary": "Closed recently and ready for review"},
     )
     assert payload["current_summary"]["items"] == ("2 closed tickers pending review",)
+
+
+def test_build_today_overview_formats_gross_exposure_once():
+    payload = build_today_overview(
+        header={
+            "trade_date": date(2026, 6, 16),
+            "market_phase": "Pre-open",
+            "macro_regime": "neutral",
+            "risk_appetite": "balanced",
+            "runtime_mode": "live",
+            "live_status": "live",
+            "open_alert_count": 0,
+            "material_signal_change_count": 0,
+            "buying_power": Decimal("245000.00"),
+            "gross_exposure": Decimal("0.41"),
+            "day_pnl": Decimal("12.34"),
+            "nav": Decimal("998250.00"),
+            "llm_cost_estimate": None,
+        },
+        job_timeline=(),
+        risk_macro={
+            "command_center": {
+                "updated_at": datetime(2026, 6, 16, 13, 31, tzinfo=timezone.utc),
+            },
+            "availability": {
+                "status": "available",
+                "issues": (),
+            },
+        },
+        live_alerts=(),
+        material_changes=(),
+        positions=(),
+        option_positions=(),
+        closed_positions=(),
+    )
+
+    gross_exposure_card = next(card for card in payload["metric_cards"] if card["label"] == "Gross Exposure")
+    assert gross_exposure_card["primary_value"] == "41.0%"
+
+
+def test_build_today_overview_surfaces_provider_availability_issues_as_system_issues():
+    payload = build_today_overview(
+        header={
+            "trade_date": date(2026, 6, 16),
+            "market_phase": "Pre-open",
+            "macro_regime": "neutral",
+            "risk_appetite": "balanced",
+            "runtime_mode": "live",
+            "live_status": "live",
+            "open_alert_count": 0,
+            "material_signal_change_count": 0,
+            "buying_power": Decimal("245000.00"),
+            "gross_exposure": Decimal("0.41"),
+            "day_pnl": Decimal("12.34"),
+            "nav": Decimal("998250.00"),
+            "llm_cost_estimate": None,
+        },
+        job_timeline=(),
+        risk_macro={
+            "command_center": {
+                "updated_at": datetime(2026, 6, 16, 13, 31, tzinfo=timezone.utc),
+            },
+            "summary": {
+                "availability_issues": (
+                    {
+                        "label": "Provider rate limited",
+                        "summary": "Canonical equity profile provider is rate limited.",
+                    },
+                ),
+            },
+            "availability": {
+                "status": "degraded",
+                "issues": ("provider_rate_limited",),
+            },
+        },
+        live_alerts=(),
+        material_changes=(),
+        positions=(),
+        option_positions=(),
+        closed_positions=(),
+    )
+
+    assert payload["operator_strip"]["context"][2]["value"] == "Degraded"
+    assert payload["command_center"]["system_issues"] == (
+        {
+            "label": "Provider rate limited",
+            "summary": "Canonical equity profile provider is rate limited.",
+        },
+    )
+
+
+def test_build_today_overview_does_not_double_scale_large_gross_exposure_values():
+    payload = build_today_overview(
+        header={
+            "trade_date": date(2026, 6, 16),
+            "market_phase": "Pre-open",
+            "macro_regime": "neutral",
+            "risk_appetite": "balanced",
+            "runtime_mode": "live",
+            "live_status": "live",
+            "open_alert_count": 0,
+            "material_signal_change_count": 0,
+            "buying_power": Decimal("245000.00"),
+            "gross_exposure": Decimal("49170.62"),
+            "day_pnl": Decimal("12.34"),
+            "nav": Decimal("998250.00"),
+            "llm_cost_estimate": None,
+        },
+        job_timeline=(),
+        risk_macro={
+            "command_center": {
+                "updated_at": datetime(2026, 6, 16, 13, 31, tzinfo=timezone.utc),
+            },
+            "availability": {
+                "status": "available",
+                "issues": (),
+            },
+        },
+        live_alerts=(),
+        material_changes=(),
+        positions=(),
+        option_positions=(),
+        closed_positions=(),
+    )
+
+    gross_exposure_card = next(card for card in payload["metric_cards"] if card["label"] == "Gross Exposure")
+    assert gross_exposure_card["primary_value"] == "49,170.62"
