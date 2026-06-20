@@ -512,6 +512,63 @@ a:hover { text-decoration: underline; }
   gap: 0.35rem;
 }
 
+.kpi-bar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.8rem;
+}
+
+.kpi {
+  display: grid;
+  gap: 0.28rem;
+  padding: 0.95rem 1rem;
+  border-radius: 16px;
+  border: 1px solid #ddd7c8;
+  background:
+    radial-gradient(circle at top left, rgba(204, 176, 126, 0.16), transparent 36%),
+    linear-gradient(180deg, #fffdf8 0%, #f5f0e4 100%);
+  box-shadow: 0 10px 24px rgba(84, 67, 45, 0.07);
+}
+
+.kpi-label {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #7a5a39;
+  font-weight: 700;
+}
+
+.kpi-value {
+  font-size: 1rem;
+  line-height: 1.2;
+  color: #1f2937;
+}
+
+.kpi-value-lg {
+  font-size: 1.35rem;
+}
+
+.kpi-sub {
+  color: #5f6b7a;
+  font-size: 12px;
+}
+
+.kpi-pos {
+  color: #1a7f37;
+}
+
+.kpi-neg {
+  color: #b42318;
+}
+
+.kpi-context {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+  color: #536273;
+  font-size: 12px;
+}
+
 .eyebrow {
   font-size: 11px;
   text-transform: uppercase;
@@ -608,6 +665,10 @@ a:hover { text-decoration: underline; }
   flex-wrap: wrap;
 }
 
+.today-global-tab-spacer {
+  flex: 1 1 auto;
+}
+
 .today-global-tab {
   display: inline-flex;
   align-items: center;
@@ -623,9 +684,22 @@ a:hover { text-decoration: underline; }
   text-transform: uppercase;
 }
 
+.today-global-tab-muted {
+  color: #667085;
+  border-color: #d7d3c9;
+  background: #f7f4ec;
+  opacity: 0.9;
+}
+
 .today-global-tab.active {
   background: #243241;
   border-color: #243241;
+  color: #fffaf1;
+}
+
+.today-global-tab-muted.active {
+  background: #6e7781;
+  border-color: #6e7781;
   color: #fffaf1;
 }
 
@@ -1222,6 +1296,12 @@ a:hover { text-decoration: underline; }
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 0.75rem;
   margin-bottom: 1rem;
+}
+
+.needs-attention-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.9rem;
 }
 
 .surface-block {
