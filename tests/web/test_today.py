@@ -58,6 +58,22 @@ def _dashboard_payload() -> dict:
             {"label": "Reflection", "status": "succeeded", "status_label": "Succeeded"},
         ),
         "overview": {
+            "latest_preopen_run": {
+                "status_label": "Passed",
+                "as_of_label": "2026-06-02 13:49 UTC",
+                "completed_at_label": "2026-06-02 13:49 UTC",
+                "execution_mode_label": "Dry Run",
+                "headline": "Signals built, but no candidates were selected.",
+                "summary_tiles": (
+                    {"label": "Signals", "value": "17"},
+                    {"label": "Candidates", "value": "0"},
+                    {"label": "Classifications", "value": "0"},
+                    {"label": "Risk Decisions", "value": "0"},
+                    {"label": "Trading Decisions", "value": "0"},
+                    {"label": "Orders Submitted", "value": "0"},
+                ),
+                "empty_copy": None,
+            },
             "command_center": {
                 "needs_review": (
                     {"ticker": "NVDA", "summary": "Closed recently and ready for review"},
@@ -746,6 +762,37 @@ class TestTodayDashboard:
         assert "Open position, risk within limits" in response.text
         assert "Macro regime unavailable" in response.text
         assert "Session Watch" not in response.text
+
+    def test_overview_tab_renders_latest_preopen_run_block(self, client):
+        payload = _dashboard_payload()
+        payload["selected_tab"] = "overview"
+        with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
+            response = client.get("/today?tab=overview")
+
+        assert response.status_code == 200
+        assert "Latest Preopen Run" in response.text
+        assert "Signals built, but no candidates were selected." in response.text
+        assert "Dry Run" in response.text
+        assert "2026-06-02 13:49 UTC" in response.text
+
+    def test_overview_tab_renders_latest_preopen_run_empty_state(self, client):
+        payload = _dashboard_payload()
+        payload["selected_tab"] = "overview"
+        payload["overview"]["latest_preopen_run"] = {
+            "status_label": "Unavailable",
+            "as_of_label": None,
+            "completed_at_label": None,
+            "execution_mode_label": None,
+            "headline": None,
+            "summary_tiles": (),
+            "empty_copy": "No persisted preopen run is available for the current trade date yet.",
+        }
+        with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
+            response = client.get("/today?tab=overview")
+
+        assert response.status_code == 200
+        assert "Latest Preopen Run" in response.text
+        assert "No persisted preopen run is available for the current trade date yet." in response.text
 
     def test_portfolio_tab_renders_summary_first_structure(self, client):
         payload = _dashboard_payload()

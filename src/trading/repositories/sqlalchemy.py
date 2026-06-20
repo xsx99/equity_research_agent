@@ -44,6 +44,7 @@ from src.db.models.trading import (
     StrategyProposal,
     TradeClassification,
     TradingDecision,
+    TradingRuntimeRun,
     UniverseFilterConfig,
     UniverseSnapshot,
     UniverseSymbol,
@@ -160,6 +161,54 @@ class SQLAlchemyTradingRepository:
             for row in self.session.query(LearningFactor).all()
             if row.status in {"active", "shadow"}
         ]
+
+    def save_runtime_run(self, payload: dict[str, Any]) -> None:
+        row = TradingRuntimeRun(
+            phase=str(payload["phase"]),
+            status=str(payload["status"]),
+            trade_date=payload["trade_date"],
+            as_of=_datetime_value(payload["as_of"]),
+            started_at=_datetime_value(payload["started_at"]),
+            completed_at=_datetime_value(payload["completed_at"]),
+            summary_json=dict(payload.get("summary_json") or {}),
+            execution_json=dict(payload.get("execution_json") or {}),
+            metadata_json=dict(payload.get("metadata_json") or {}),
+        )
+        self.session.add(row)
+        self.session.flush()
+
+    def load_latest_runtime_run(
+        self,
+        *,
+        phase: str,
+        trade_date: date | None = None,
+    ) -> dict[str, Any] | None:
+        rows = [
+            row
+            for row in self.session.query(TradingRuntimeRun).all()
+            if row.phase == phase and (trade_date is None or row.trade_date == trade_date)
+        ]
+        if not rows:
+            return None
+        row = max(
+            rows,
+            key=lambda item: (
+                item.completed_at,
+                item.as_of,
+                getattr(item, "created_at", None) or datetime.min.replace(tzinfo=timezone.utc),
+            ),
+        )
+        return {
+            "phase": row.phase,
+            "status": row.status,
+            "trade_date": row.trade_date,
+            "as_of": row.as_of,
+            "started_at": row.started_at,
+            "completed_at": row.completed_at,
+            "summary_json": dict(row.summary_json or {}),
+            "execution_json": dict(row.execution_json or {}),
+            "metadata_json": dict(row.metadata_json or {}),
+        }
 
     def save_macro_snapshot(self, snapshot: MacroSnapshotRecord) -> None:
         row = None
@@ -1900,6 +1949,20 @@ def _decimal_or_none(value: float | None) -> Decimal | None:
     if value is None:
         return None
     return Decimal(str(value))
+
+
+def _datetime_value(value: Any) -> datetime:
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value
+    text = str(value).strip()
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    parsed = datetime.fromisoformat(text)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
 
 
 def _decimal_to_float(value: Any) -> float | None:

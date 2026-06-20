@@ -250,3 +250,114 @@ def test_build_today_overview_does_not_double_scale_large_gross_exposure_values(
 
     gross_exposure_card = next(card for card in payload["metric_cards"] if card["label"] == "Gross Exposure")
     assert gross_exposure_card["primary_value"] == "49,170.62"
+
+
+def test_build_today_overview_surfaces_latest_preopen_run_funnel_when_available():
+    payload = build_today_overview(
+        header={
+            "trade_date": date(2026, 6, 20),
+            "market_phase": "Pre-open",
+            "macro_regime": "neutral",
+            "risk_appetite": "balanced",
+            "runtime_mode": "live",
+            "live_status": "live",
+            "open_alert_count": 0,
+            "material_signal_change_count": 0,
+            "buying_power": Decimal("245000.00"),
+            "gross_exposure": Decimal("0.41"),
+            "day_pnl": Decimal("12.34"),
+            "nav": Decimal("998250.00"),
+            "llm_cost_estimate": None,
+        },
+        job_timeline=(),
+        risk_macro={
+            "command_center": {
+                "updated_at": datetime(2026, 6, 20, 13, 31, tzinfo=timezone.utc),
+            },
+            "availability": {
+                "status": "available",
+                "issues": (),
+            },
+        },
+        live_alerts=(),
+        material_changes=(),
+        positions=(),
+        option_positions=(),
+        closed_positions=(),
+        latest_preopen_run={
+            "phase": "preopen",
+            "status": "passed",
+            "trade_date": date(2026, 6, 20),
+            "as_of": "2026-06-20T13:49:26+00:00",
+            "completed_at": "2026-06-20T13:49:26+00:00",
+            "summary_json": {
+                "signal_snapshot_count": 17,
+                "candidate_count": 4,
+                "classification_count": 2,
+                "risk_decision_count": 0,
+                "trading_decision_count": 0,
+            },
+            "execution_json": {
+                "mode": "dry_run",
+                "orders_submitted": 0,
+            },
+        },
+    )
+
+    assert payload["latest_preopen_run"]["status_label"] == "Passed"
+    assert payload["latest_preopen_run"]["execution_mode_label"] == "Dry Run"
+    assert payload["latest_preopen_run"]["headline"] == "Candidates scored, but none reached risk approval."
+    assert payload["latest_preopen_run"]["summary_tiles"] == (
+        {"label": "Signals", "value": "17"},
+        {"label": "Candidates", "value": "4"},
+        {"label": "Classifications", "value": "2"},
+        {"label": "Risk Decisions", "value": "0"},
+        {"label": "Trading Decisions", "value": "0"},
+        {"label": "Orders Submitted", "value": "0"},
+    )
+
+
+def test_build_today_overview_surfaces_explicit_empty_state_when_preopen_run_missing():
+    payload = build_today_overview(
+        header={
+            "trade_date": date(2026, 6, 20),
+            "market_phase": "Pre-open",
+            "macro_regime": "neutral",
+            "risk_appetite": "balanced",
+            "runtime_mode": "live",
+            "live_status": "live",
+            "open_alert_count": 0,
+            "material_signal_change_count": 0,
+            "buying_power": Decimal("245000.00"),
+            "gross_exposure": Decimal("0.41"),
+            "day_pnl": Decimal("12.34"),
+            "nav": Decimal("998250.00"),
+            "llm_cost_estimate": None,
+        },
+        job_timeline=(),
+        risk_macro={
+            "command_center": {
+                "updated_at": datetime(2026, 6, 20, 13, 31, tzinfo=timezone.utc),
+            },
+            "availability": {
+                "status": "available",
+                "issues": (),
+            },
+        },
+        live_alerts=(),
+        material_changes=(),
+        positions=(),
+        option_positions=(),
+        closed_positions=(),
+        latest_preopen_run=None,
+    )
+
+    assert payload["latest_preopen_run"] == {
+        "status_label": "Unavailable",
+        "as_of_label": None,
+        "completed_at_label": None,
+        "execution_mode_label": None,
+        "headline": None,
+        "summary_tiles": (),
+        "empty_copy": "No persisted preopen run is available for the current trade date yet.",
+    }

@@ -27,7 +27,11 @@ from src.db.models.trading import (
     PaperOrder,
     TradingDecision,
 )
-from src.trading.runtime.preopen import LivePreopenRuntime, build_live_preopen_dependencies
+from src.trading.runtime.preopen import (
+    LivePreopenRuntime,
+    build_live_preopen_dependencies,
+    save_preopen_runtime_run,
+)
 from src.trading.strategies.classifier import TradeClassificationRecord
 from src.trading.workflows.strategy_scoring import StrategyPipelineResult
 from src.trading.workflows.trading_decision import TradingDecisionPipeline
@@ -97,6 +101,7 @@ def run_smoke(
                 execute_paper_orders=execute_paper_orders,
                 execute_paper_option_orders=execute_paper_orders and instrument == "option",
             ).run()
+            save_preopen_runtime_run(session, result)
             session.commit()
 
             decision = (

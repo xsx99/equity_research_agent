@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -289,6 +290,12 @@ def load_today_dashboard(
         latest_risk=latest_risk,
         latest_macro_snapshot=latest_macro_snapshot,
     )
+    latest_preopen_run = _load_latest_preopen_runtime_run_for_today(
+        session,
+        latest_portfolio=latest_portfolio,
+        latest_risk=latest_risk,
+        latest_reflection=latest_reflection,
+    )
     job_timeline = _build_job_timeline(latest_reflection)
     overview = build_today_overview(
         header=header,
@@ -299,6 +306,7 @@ def load_today_dashboard(
         positions=positions,
         option_positions=option_positions,
         closed_positions=closed_positions,
+        latest_preopen_run=latest_preopen_run,
     )
     candidates = build_today_candidates_view(
         rows=candidate_rows,
@@ -517,6 +525,30 @@ def _load_latest_macro_snapshot_for_today(
     return SqlAlchemyTradingRepository(session).load_latest_macro_snapshot(
         trade_date=trade_date,
         decision_time=decision_time,
+    )
+
+
+def _load_latest_preopen_runtime_run_for_today(
+    session: Any,
+    *,
+    latest_portfolio: PortfolioSnapshot | None,
+    latest_risk: PortfolioRiskSnapshot | None,
+    latest_reflection: DailyReflection | None,
+) -> dict[str, Any] | None:
+    if not isinstance(session, SQLAlchemySession):
+        return None
+    trade_date = (
+        latest_risk.decision_time.date()
+        if latest_risk is not None
+        else latest_portfolio.snapshot_time.date()
+        if latest_portfolio is not None
+        else latest_reflection.trade_date
+        if latest_reflection is not None
+        else datetime.now(timezone.utc).date()
+    )
+    return SqlAlchemyTradingRepository(session).load_latest_runtime_run(
+        phase="preopen",
+        trade_date=trade_date,
     )
 
 

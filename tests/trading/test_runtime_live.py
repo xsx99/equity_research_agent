@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from types import SimpleNamespace
+
+import pytest
 
 from src.trading.data_sources.universe import UniverseAsset, UniverseFilterConfig
 from src.trading.data_sources.live_universe import LiveUniverseProvider
@@ -31,6 +34,11 @@ from src.trading.runtime.support import (
 )
 from src.trading.strategies.catalog import get_initial_strategy_definitions
 from src.trading.strategies.matching import StrategyDefinitionRecord
+
+
+@contextmanager
+def _context_manager(session: object):
+    yield session
 
 
 class _CallRecorder:
@@ -281,11 +289,146 @@ def test_run_live_preopen_once_builds_default_dependencies_when_not_injected(mon
         "src.trading.runtime.preopen.build_live_preopen_dependencies",
         lambda _session: runtime_instance.dependencies,
     )
+    monkeypatch.setattr(
+        "src.trading.runtime.preopen._save_runtime_run",
+        lambda _session, _payload: None,
+    )
 
     result = run_live_preopen_once(now=lambda: datetime(2026, 6, 3, 12, 45, tzinfo=timezone.utc))
 
     assert result["status"] == "passed"
     assert result["execution"]["mode"] == "dry_run"
+
+
+def test_run_live_preopen_once_persists_passed_runtime_row(monkeypatch):
+    persisted: list[dict[str, object]] = []
+
+    class _Session:
+        def commit(self) -> None:
+            return None
+
+        def rollback(self) -> None:
+            raise AssertionError("rollback should not be called on success")
+
+    runtime_report = {
+        "phase": "preopen",
+        "status": "passed",
+        "trade_date": date(2026, 6, 20),
+        "as_of": "2026-06-20T13:49:26+00:00",
+        "started_at": "2026-06-20T13:48:49+00:00",
+        "completed_at": "2026-06-20T13:49:26+00:00",
+        "summary": {
+            "manual_request_count": 1,
+            "signal_snapshot_count": 17,
+            "candidate_count": 4,
+            "classification_count": 2,
+            "risk_decision_count": 1,
+            "trading_decision_count": 1,
+        },
+        "execution": {
+            "mode": "dry_run",
+            "orders_submitted": 0,
+            "option_orders_submitted": 0,
+        },
+    }
+
+    monkeypatch.setattr(
+        "src.trading.runtime.preopen.get_session",
+        lambda: _context_manager(_Session()),
+    )
+    monkeypatch.setattr(
+        "src.trading.runtime.preopen.build_live_preopen_dependencies",
+        lambda _session: object(),
+    )
+    monkeypatch.setattr(
+        "src.trading.runtime.preopen.LivePreopenRuntime",
+        lambda **_kwargs: SimpleNamespace(run=lambda: runtime_report),
+    )
+    monkeypatch.setattr(
+        "src.trading.runtime.preopen._save_runtime_run",
+        lambda session, payload: persisted.append(payload),
+    )
+
+    result = run_live_preopen_once()
+
+    assert result == runtime_report
+    assert persisted == [
+        {
+            "phase": "preopen",
+            "status": "passed",
+            "trade_date": date(2026, 6, 20),
+            "as_of": "2026-06-20T13:49:26+00:00",
+            "started_at": "2026-06-20T13:48:49+00:00",
+            "completed_at": "2026-06-20T13:49:26+00:00",
+            "summary_json": runtime_report["summary"],
+            "execution_json": runtime_report["execution"],
+            "metadata_json": {
+                "source": "run_live_preopen_once",
+                "report_version": "v1",
+            },
+        }
+    ]
+
+
+def test_run_live_preopen_once_persists_failed_runtime_row_before_reraising(monkeypatch):
+    persisted: list[dict[str, object]] = []
+
+    class _Session:
+        def __init__(self) -> None:
+            self.rollback_calls = 0
+            self.commit_calls = 0
+
+        def commit(self) -> None:
+            self.commit_calls += 1
+
+        def rollback(self) -> None:
+            self.rollback_calls += 1
+
+    session = _Session()
+
+    monkeypatch.setattr(
+        "src.trading.runtime.preopen.get_session",
+        lambda: _context_manager(session),
+    )
+    monkeypatch.setattr(
+        "src.trading.runtime.preopen.build_live_preopen_dependencies",
+        lambda _session: object(),
+    )
+    monkeypatch.setattr(
+        "src.trading.runtime.preopen.LivePreopenRuntime",
+        lambda **_kwargs: SimpleNamespace(
+            run=lambda: (_ for _ in ()).throw(RuntimeError("paper_execution_workflow_not_configured"))
+        ),
+    )
+    monkeypatch.setattr(
+        "src.trading.runtime.preopen._save_runtime_run",
+        lambda current_session, payload: persisted.append(payload),
+    )
+
+    with pytest.raises(RuntimeError, match="paper_execution_workflow_not_configured"):
+        run_live_preopen_once(now=lambda: datetime(2026, 6, 20, 13, 49, tzinfo=timezone.utc))
+
+    assert session.rollback_calls == 1
+    assert session.commit_calls == 1
+    assert persisted == [
+        {
+            "phase": "preopen",
+            "status": "failed",
+            "trade_date": date(2026, 6, 20),
+            "as_of": datetime(2026, 6, 20, 13, 49, tzinfo=timezone.utc),
+            "started_at": datetime(2026, 6, 20, 13, 49, tzinfo=timezone.utc),
+            "completed_at": datetime(2026, 6, 20, 13, 49, tzinfo=timezone.utc),
+            "summary_json": {
+                "reasons": ["paper_execution_workflow_not_configured"],
+                "exception_type": "RuntimeError",
+            },
+            "execution_json": {},
+            "metadata_json": {
+                "source": "run_live_preopen_once",
+                "report_version": "v1",
+            },
+        }
+    ]
 
 
 def test_build_live_preopen_dependencies_wires_fallback_reapproval_into_paper_execution(monkeypatch):

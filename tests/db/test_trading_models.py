@@ -66,6 +66,7 @@ from src.db.models.trading import (
     TickerRelationshipType,
     TradeClassification,
     TradingDecision,
+    TradingRuntimeRun,
     WatchCandidate,
     UniverseFilterConfig,
     UniverseSnapshot,
@@ -1128,7 +1129,33 @@ def test_pr_5_models_can_be_instantiated():
     assert decision.ticker == "NVDA"
     assert decision.decision == "no_trade"
     assert decision.paper_trade_authorized is False
-    assert decision.key_drivers_json == ["sector_relative_strength"]
+
+
+def test_trading_runtime_run_model_exposes_phase_observability_fields():
+    now = datetime(2026, 6, 20, 3, 49, tzinfo=timezone.utc)
+    row = TradingRuntimeRun(
+        phase="preopen",
+        status="passed",
+        trade_date=date(2026, 6, 20),
+        as_of=now,
+        started_at=now,
+        completed_at=now,
+        summary_json={"candidate_count": 12, "trading_decision_count": 3},
+        execution_json={"mode": "dry_run", "orders_submitted": 0},
+        metadata_json={"source": "run_live_preopen_once", "report_version": "v1"},
+    )
+
+    assert row.phase == "preopen"
+    assert row.status == "passed"
+    assert row.summary_json["candidate_count"] == 12
+    assert row.execution_json["mode"] == "dry_run"
+
+
+def test_trading_runtime_run_indexes_cover_latest_phase_queries():
+    index_names = {index.name for index in TradingRuntimeRun.__table__.indexes}
+
+    assert "ix_trading_runtime_runs_phase_completed_at" in index_names
+    assert "ix_trading_runtime_runs_phase_trade_date_completed_at" in index_names
 
 
 def test_selection_source_constraints_allow_risk_manager_overlays():

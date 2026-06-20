@@ -431,6 +431,40 @@
         {% endif %}
       </details>
       {% endif %}
+      {% if overview.latest_preopen_run %}
+      <section class="surface-block">
+        <div class="surface-block-head">
+          <div class="section-label">Latest Preopen Run</div>
+          <span class="surface-block-count">{{ overview.latest_preopen_run.status_label }}</span>
+        </div>
+        {% if overview.latest_preopen_run.empty_copy %}
+        <p class="detail-muted quiet-empty surface-empty-copy">{{ overview.latest_preopen_run.empty_copy }}</p>
+        {% else %}
+        <div class="surface-summary-row">
+          {% for tile in overview.latest_preopen_run.summary_tiles %}
+          <article class="summary-tile">
+            <span class="metric-label">{{ tile.label }}</span>
+            <strong>{{ tile.value }}</strong>
+          </article>
+          {% endfor %}
+        </div>
+        {% if overview.latest_preopen_run.headline %}
+        <p>{{ overview.latest_preopen_run.headline }}</p>
+        {% endif %}
+        <div class="overview-metric-meta">
+          {% if overview.latest_preopen_run.execution_mode_label %}
+          <div class="detail-muted">Execution Mode: {{ overview.latest_preopen_run.execution_mode_label }}</div>
+          {% endif %}
+          {% if overview.latest_preopen_run.as_of_label %}
+          <div class="detail-muted">As Of {{ overview.latest_preopen_run.as_of_label }}</div>
+          {% endif %}
+          {% if overview.latest_preopen_run.completed_at_label %}
+          <div class="detail-muted">Completed {{ overview.latest_preopen_run.completed_at_label }}</div>
+          {% endif %}
+        </div>
+        {% endif %}
+      </section>
+      {% endif %}
       <div class="surface-summary-row">
         <article class="summary-tile">
           <span class="metric-label">Needs Review</span>

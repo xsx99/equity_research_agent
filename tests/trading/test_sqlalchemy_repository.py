@@ -19,6 +19,7 @@ from src.db.models.trading import (
     PaperOptionOrder,
     PortfolioEventRiskAssessment,
     RiskDecision,
+    TradingRuntimeRun,
     TradingDecision,
     UniverseFilterConfig,
     UniverseSnapshot,
@@ -153,6 +154,67 @@ def test_sqlalchemy_repository_persists_universe_snapshot_and_symbols():
     assert persisted_snapshot.provider == "alpaca_live"
     assert persisted_snapshot.universe_filter_config_id == filter_id
     assert len(persisted_symbols) == 2
+
+
+def test_sqlalchemy_repository_saves_and_loads_latest_runtime_run_by_phase_and_trade_date():
+    session = _FakeSession()
+    repository = SqlAlchemyTradingRepository(session)
+    first_completed = datetime(2026, 6, 20, 13, 45, tzinfo=timezone.utc)
+    latest_completed = datetime(2026, 6, 20, 13, 49, tzinfo=timezone.utc)
+
+    repository.save_runtime_run(
+        {
+            "phase": "preopen",
+            "status": "passed",
+            "trade_date": date(2026, 6, 20),
+            "as_of": latest_completed,
+            "started_at": datetime(2026, 6, 20, 13, 40, tzinfo=timezone.utc),
+            "completed_at": first_completed,
+            "summary_json": {"candidate_count": 3},
+            "execution_json": {"mode": "dry_run", "orders_submitted": 0},
+            "metadata_json": {"source": "run_live_preopen_once"},
+        }
+    )
+    repository.save_runtime_run(
+        {
+            "phase": "preopen",
+            "status": "failed",
+            "trade_date": date(2026, 6, 19),
+            "as_of": datetime(2026, 6, 19, 13, 49, tzinfo=timezone.utc),
+            "started_at": datetime(2026, 6, 19, 13, 40, tzinfo=timezone.utc),
+            "completed_at": datetime(2026, 6, 19, 13, 41, tzinfo=timezone.utc),
+            "summary_json": {"reasons": ["provider_unavailable"]},
+            "execution_json": {"mode": "dry_run", "orders_submitted": 0},
+            "metadata_json": {"source": "run_live_preopen_once"},
+        }
+    )
+    repository.save_runtime_run(
+        {
+            "phase": "preopen",
+            "status": "passed",
+            "trade_date": date(2026, 6, 20),
+            "as_of": latest_completed,
+            "started_at": datetime(2026, 6, 20, 13, 47, tzinfo=timezone.utc),
+            "completed_at": latest_completed,
+            "summary_json": {"candidate_count": 9, "trading_decision_count": 2},
+            "execution_json": {"mode": "execute", "orders_submitted": 1},
+            "metadata_json": {"source": "run_live_preopen_once"},
+        }
+    )
+
+    latest_same_day = repository.load_latest_runtime_run(
+        phase="preopen",
+        trade_date=date(2026, 6, 20),
+    )
+    latest_any_day = repository.load_latest_runtime_run(phase="preopen")
+
+    assert latest_same_day is not None
+    assert latest_same_day["status"] == "passed"
+    assert latest_same_day["trade_date"] == date(2026, 6, 20)
+    assert latest_same_day["summary_json"]["candidate_count"] == 9
+    assert latest_same_day["execution_json"]["mode"] == "execute"
+    assert latest_any_day == latest_same_day
+    assert len(session.query(TradingRuntimeRun).all()) == 3
 
 
 def test_trading_decision_payload_includes_rationale_fields_for_reflection_consumers():

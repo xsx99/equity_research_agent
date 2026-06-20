@@ -5,7 +5,14 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
-from src.web.presenters.today_copy import job_status_label, live_status_label, macro_regime_label, risk_appetite_label, runtime_mode_label
+from src.web.presenters.today_copy import (
+    generic_status_label,
+    job_status_label,
+    live_status_label,
+    macro_regime_label,
+    risk_appetite_label,
+    runtime_mode_label,
+)
 
 
 def build_today_overview(
@@ -18,6 +25,7 @@ def build_today_overview(
     positions: tuple[dict[str, Any], ...],
     option_positions: tuple[dict[str, Any], ...],
     closed_positions: tuple[dict[str, Any], ...],
+    latest_preopen_run: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     deduped_closed_positions = _dedupe_rows_by_ticker(closed_positions)
     open_positions = positions + option_positions
@@ -98,6 +106,7 @@ def build_today_overview(
             "count": int(header.get("open_alert_count") or 0),
             "warning_banner": risk_macro.get("command_center", {}).get("warning_banner"),
         },
+        "latest_preopen_run": _build_latest_preopen_run_view(latest_preopen_run),
         "current_summary": {
             "headline": (
                 "Macro and execution context require active operator review."
@@ -179,6 +188,58 @@ def _build_command_center(
         "open_positions": open_positions,
         "system_issues": tuple(system_issues),
     }
+
+
+def _build_latest_preopen_run_view(latest_preopen_run: dict[str, Any] | None) -> dict[str, Any]:
+    if not latest_preopen_run:
+        return {
+            "status_label": "Unavailable",
+            "as_of_label": None,
+            "completed_at_label": None,
+            "execution_mode_label": None,
+            "headline": None,
+            "summary_tiles": (),
+            "empty_copy": "No persisted preopen run is available for the current trade date yet.",
+        }
+
+    summary = dict(latest_preopen_run.get("summary_json") or {})
+    execution = dict(latest_preopen_run.get("execution_json") or {})
+    return {
+        "status_label": generic_status_label(latest_preopen_run.get("status")) or "Unavailable",
+        "as_of_label": _format_timestamp_label(latest_preopen_run.get("as_of")),
+        "completed_at_label": _format_timestamp_label(latest_preopen_run.get("completed_at")),
+        "execution_mode_label": runtime_mode_label(execution.get("mode")) if execution.get("mode") else None,
+        "headline": _preopen_headline(summary=summary, execution=execution),
+        "summary_tiles": (
+            {"label": "Signals", "value": str(int(summary.get("signal_snapshot_count", 0) or 0))},
+            {"label": "Candidates", "value": str(int(summary.get("candidate_count", 0) or 0))},
+            {"label": "Classifications", "value": str(int(summary.get("classification_count", 0) or 0))},
+            {"label": "Risk Decisions", "value": str(int(summary.get("risk_decision_count", 0) or 0))},
+            {"label": "Trading Decisions", "value": str(int(summary.get("trading_decision_count", 0) or 0))},
+            {"label": "Orders Submitted", "value": str(int(execution.get("orders_submitted", 0) or 0))},
+        ),
+        "empty_copy": None,
+    }
+
+
+def _preopen_headline(*, summary: dict[str, Any], execution: dict[str, Any]) -> str:
+    signals = int(summary.get("signal_snapshot_count", 0) or 0)
+    candidates = int(summary.get("candidate_count", 0) or 0)
+    risk_decisions = int(summary.get("risk_decision_count", 0) or 0)
+    trading_decisions = int(summary.get("trading_decision_count", 0) or 0)
+    mode = str(execution.get("mode") or "").strip().lower()
+
+    if signals <= 0:
+        return "Preopen started, but no signal snapshots were built."
+    if candidates <= 0:
+        return "Signals built, but no candidates were selected."
+    if risk_decisions <= 0:
+        return "Candidates scored, but none reached risk approval."
+    if trading_decisions <= 0:
+        return "Risk approved candidates, but no trading decisions were generated."
+    if mode == "dry_run":
+        return "Trading decisions were generated in dry-run mode."
+    return "Trading decisions were generated and execution was enabled."
 
 
 def _open_position_summary(row: dict[str, Any]) -> str:

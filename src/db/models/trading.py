@@ -1117,6 +1117,42 @@ class StrategyRun(Base):
     )
 
 
+class TradingRuntimeRun(Base):
+    """Persisted normalized runtime report for one scheduler-facing invocation."""
+
+    __tablename__ = "trading_runtime_runs"
+
+    trading_runtime_run_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    phase = Column(String(32), nullable=False, index=True)
+    status = Column(String(16), nullable=False, index=True)
+    trade_date = Column(Date, nullable=False, index=True)
+    as_of = Column(DateTime(timezone=True), nullable=False, index=True)
+    started_at = Column(DateTime(timezone=True), nullable=False)
+    completed_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    summary_json = Column(JSONB, nullable=False, default=dict)
+    execution_json = Column(JSONB, nullable=False, default=dict)
+    metadata_json = Column(JSONB, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('passed', 'failed', 'skipped')",
+            name="ck_trading_runtime_runs_status",
+        ),
+        Index(
+            "ix_trading_runtime_runs_phase_completed_at",
+            "phase",
+            "completed_at",
+        ),
+        Index(
+            "ix_trading_runtime_runs_phase_trade_date_completed_at",
+            "phase",
+            "trade_date",
+            "completed_at",
+        ),
+    )
+
+
 class CandidateScore(Base):
     """Ranked ticker candidate for one strategy definition."""
 
