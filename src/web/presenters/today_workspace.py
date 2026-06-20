@@ -17,6 +17,7 @@ from src.web.presenters.today_copy import (
 _ACTIONABLE_DECISIONS = {"enter_long", "enter_short", "trim", "exit"}
 _ACTIONABLE_ORDER_STATUSES = {"pending", "accepted", "partial_fill"}
 _EMPTY_MARKER = "No material update"
+_NO_MATERIAL_TICKER_NEWS = "No material ticker-specific news."
 _TECHNICAL_CHART_SPECS = (
     ("price / key level trend", {"price", "price_trend", "key_levels"}),
     ("relative strength trend", {"relative_strength", "relative_strength_trend", "rs"}),
@@ -509,6 +510,8 @@ def _build_snippets(items: Any) -> list[dict[str, Any]]:
                 "title": operator_text(item.get("title")) or _EMPTY_MARKER,
                 "summary": operator_text(item.get("summary")) or _EMPTY_MARKER,
                 "time": item.get("published_at") or item.get("as_of"),
+                "event_type": item.get("event_type"),
+                "importance": item.get("importance"),
                 "empty": False,
             }
         )
@@ -521,12 +524,13 @@ def _build_event_news_summary(news_snippets: list[dict[str, Any]]) -> str | None
         (
             item
             for item in news_snippets
-            if not item.get("empty") and (item.get("title") or item.get("summary"))
+            if _is_material_news_snippet(item)
         ),
         None,
     )
     if primary_snippet is None:
-        return None
+        has_non_empty_news = any(not item.get("empty") for item in news_snippets)
+        return _NO_MATERIAL_TICKER_NEWS if has_non_empty_news else None
 
     title = str(primary_snippet.get("title") or "").strip()
     summary = str(primary_snippet.get("summary") or "").strip()
@@ -537,6 +541,20 @@ def _build_event_news_summary(news_snippets: list[dict[str, Any]]) -> str | None
     if title:
         return _with_terminal_period(title)
     return None
+
+
+def _is_material_news_snippet(item: dict[str, Any]) -> bool:
+    if item.get("empty"):
+        return False
+    if not (item.get("title") or item.get("summary")):
+        return False
+    event_type = str(item.get("event_type") or "").strip().casefold()
+    if event_type == "general_news":
+        return False
+    importance = str(item.get("importance") or "").strip().casefold()
+    if importance == "low":
+        return False
+    return True
 
 
 def _with_terminal_period(value: str) -> str:
@@ -1050,6 +1068,8 @@ def _empty_snippet() -> dict[str, Any]:
         "title": _EMPTY_MARKER,
         "summary": _EMPTY_MARKER,
         "time": None,
+        "event_type": None,
+        "importance": None,
         "empty": True,
     }
 

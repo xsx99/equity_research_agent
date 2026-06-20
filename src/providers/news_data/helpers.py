@@ -53,6 +53,15 @@ _COMPANY_CATALYST_TERMS = (
 )
 _GENERIC_GENERAL_NEWS_PATTERNS = (
     re.compile(r"\b(in focus|stocks? to watch|market recap|morning news|midday update)\b", flags=re.IGNORECASE),
+    re.compile(r"\bone fund\b", flags=re.IGNORECASE),
+    re.compile(r"\bmake .* a year\b", flags=re.IGNORECASE),
+    re.compile(r"\bcompounds?\b", flags=re.IGNORECASE),
+    re.compile(r"\bretire(?:ment)?\b", flags=re.IGNORECASE),
+    re.compile(r"\bthese .* stocks?\b", flags=re.IGNORECASE),
+    re.compile(r"\bbest stocks?\b", flags=re.IGNORECASE),
+    re.compile(r"\bmotley\b", flags=re.IGNORECASE),
+    re.compile(r"\bshould you buy\b", flags=re.IGNORECASE),
+    re.compile(r"\bstocks? to buy\b", flags=re.IGNORECASE),
 )
 _SIGNAL_TYPE_PRIORITY = {
     "earnings_guidance": 120,
@@ -349,16 +358,58 @@ def news_importance(signal_type: str, event_type: str) -> str:
         return "medium"
     return "low"
 
+def _core_company_name(company_name: str | None) -> str:
+    if not company_name:
+        return ""
+    words = re.findall(r"[a-z0-9]+", company_name.casefold())
+    while words and words[-1] in {
+        "inc",
+        "corp",
+        "corporation",
+        "co",
+        "company",
+        "holdings",
+        "holding",
+        "group",
+        "plc",
+        "ltd",
+        "limited",
+        "sa",
+        "ag",
+        "nv",
+        "llc",
+    }:
+        words.pop()
+    return " ".join(words)
 
-def _is_irrelevant_general_news(title: str, summary: str, signal_type: str, event_type: str) -> bool:
+
+def _mentions_ticker_or_company(text: str, ticker: str, company_name: str | None) -> bool:
+    normalized_ticker = ticker.strip().casefold()
+    if normalized_ticker and re.search(rf"\b{re.escape(normalized_ticker)}\b", text):
+        return True
+    core_name = _core_company_name(company_name)
+    if not core_name:
+        return False
+    return core_name in text
+
+
+def _is_irrelevant_general_news(
+    title: str,
+    summary: str,
+    signal_type: str,
+    event_type: str,
+    *,
+    ticker: str,
+    company_name: str | None = None,
+) -> bool:
     if signal_type != "general_news" or event_type != "general_news":
         return False
     text = f"{title} {summary}".casefold()
     if any(term in text for term in _COMPANY_CATALYST_TERMS):
         return False
-    if summary.strip():
-        return False
-    return any(pattern.search(title) for pattern in _GENERIC_GENERAL_NEWS_PATTERNS)
+    if not _mentions_ticker_or_company(text, ticker, company_name):
+        return True
+    return False
 
 
 def _extract_money_values(text: str) -> tuple[str, ...]:
@@ -417,6 +468,7 @@ def _specificity_score(title: str, summary: str, signal_type: str, event_type: s
 def condense_news_items(
     *,
     ticker: str,
+    company_name: str | None = None,
     items: list[NewsItem] | tuple[NewsItem, ...],
     as_of: datetime,
 ) -> NewsCondensationResult:
@@ -436,7 +488,14 @@ def condense_news_items(
         if _looks_low_signal(title):
             dropped_low_signal_count += 1
             continue
-        if _is_irrelevant_general_news(title, summary, signal_type, event_type):
+        if _is_irrelevant_general_news(
+            title,
+            summary,
+            signal_type,
+            event_type,
+            ticker=ticker,
+            company_name=company_name,
+        ):
             dropped_irrelevant_count += 1
             continue
         published_at = parse_news_datetime(normalized.get("published_at"), fallback=as_of)

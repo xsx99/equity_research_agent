@@ -1742,6 +1742,8 @@ def _load_news_by_ticker(session: Any) -> dict[str, list[dict[str, Any]]]:
             title=row.headline,
             summary=row.summary,
             published_at=row.published_at,
+            event_type=getattr(row, "event_type", None),
+            importance=getattr(row, "importance", None),
         )
     return grouped
 
@@ -1939,6 +1941,8 @@ def _append_news_snippet(
     title: Any,
     summary: Any,
     published_at: Any,
+    event_type: Any = None,
+    importance: Any = None,
 ) -> None:
     normalized_title = str(title or "").strip()
     if not normalized_title:
@@ -1954,6 +1958,8 @@ def _append_news_snippet(
             "title": normalized_title,
             "summary": normalized_summary,
             "published_at": published_at,
+            "event_type": str(event_type or "").strip() or None,
+            "importance": str(importance or "").strip() or None,
         }
     )
 

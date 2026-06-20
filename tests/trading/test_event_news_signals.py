@@ -85,3 +85,26 @@ def test_event_news_signals_apply_negative_catalyst_precedence():
     signals = build_event_news_signals(records, decision_time=now)
 
     assert signals.values["direct_negative_catalyst_type"] == "bankruptcy"
+
+
+def test_event_news_signals_do_not_surface_general_news_as_direct_negative_catalyst():
+    now = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+    records = [
+        SourceRecord(
+            ticker="AAPL",
+            source_family="events_news",
+            source="fixture",
+            source_table="event_news_items",
+            source_record_id="general-news-negative",
+            event_time=now - timedelta(hours=2),
+            published_at=now - timedelta(hours=2),
+            ingested_at=now - timedelta(hours=2),
+            available_for_decision_at=now - timedelta(hours=2),
+            payload={"event_type": "general_news", "sentiment": "negative", "importance": "low"},
+        ),
+    ]
+
+    signals = build_event_news_signals(records, decision_time=now)
+
+    assert signals.values["sentiment_direction"] == "negative"
+    assert signals.values["direct_negative_catalyst_type"] is None

@@ -214,6 +214,39 @@ def test_condense_news_items_prefers_earlier_report_and_emits_metadata():
     assert kept.metadata["dropped_sources"] == ["Newswire"]
 
 
+def test_condense_news_items_filters_clickbait_general_news_with_summary_when_ticker_is_not_mentioned():
+    as_of = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+
+    result = condense_news_items(
+        ticker="AAPL",
+        company_name="Apple Inc.",
+        items=[
+            {
+                "title": "Making $100K a Year? Here's the One Fund That Compounds Without the Research",
+                "summary": "A generic retirement-focused pitch that never references the company.",
+                "published_at": "2026-06-01T09:00:00+00:00",
+                "source": "The Motley Fool",
+                "url": "https://example.com/clickbait",
+                "signal_type": "general_news",
+            },
+            {
+                "title": "Apple raises March-quarter revenue guidance",
+                "summary": "Management increased guidance after stronger-than-expected demand.",
+                "published_at": "2026-06-01T10:00:00+00:00",
+                "source": "Business Wire",
+                "url": "https://example.com/guidance",
+                "signal_type": "earnings_guidance",
+            },
+        ],
+        as_of=as_of,
+    )
+
+    assert result.raw_news_item_count == 2
+    assert result.kept_news_item_count == 1
+    assert result.dropped_irrelevant_count == 1
+    assert [item.title for item in result.kept_items] == ["Apple raises March-quarter revenue guidance"]
+
+
 def test_condense_news_items_keeps_stage_change_as_new_fact():
     as_of = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
 

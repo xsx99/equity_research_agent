@@ -176,6 +176,7 @@ class SourceIngestionService:
                 errors.append(exc)
 
         for ticker in normalized_tickers:
+            company_name: str | None = None
             if "technical" in families:
                 try:
                     record = self._refresh_technical(ticker, as_of, bars_policy)
@@ -187,6 +188,14 @@ class SourceIngestionService:
                 try:
                     snapshot = self._refresh_fundamental(ticker, as_of, context_policy)
                     if snapshot is not None:
+                        normalized_metrics = (
+                            snapshot.normalized_metrics_json
+                            if isinstance(snapshot.normalized_metrics_json, dict)
+                            else {}
+                        )
+                        raw_company_name = normalized_metrics.get("company_name")
+                        if isinstance(raw_company_name, str) and raw_company_name.strip():
+                            company_name = raw_company_name.strip()
                         fundamental_snapshots.append(snapshot)
                         source_records.append(source_record_from_fundamental_snapshot(snapshot))
                 except Exception as exc:
@@ -200,7 +209,12 @@ class SourceIngestionService:
                     errors.append(exc)
             if "events_news" in families and self.news_provider is not None:
                 try:
-                    refresh_result = self._refresh_events_news(ticker, as_of, news_policy)
+                    refresh_result = self._refresh_events_news(
+                        ticker,
+                        as_of,
+                        news_policy,
+                        company_name=company_name,
+                    )
                     event_news_items.extend(refresh_result.items)
                     source_records.extend(source_record_from_event_news_item(item) for item in refresh_result.items)
                     for key, value in refresh_result.summary.items():
@@ -382,6 +396,8 @@ class SourceIngestionService:
         ticker: str,
         as_of: datetime,
         policy: ProviderResiliencePolicy,
+        *,
+        company_name: str | None = None,
     ) -> _EventsNewsRefreshResult:
         if self.news_provider is None:
             return _EventsNewsRefreshResult(
@@ -398,7 +414,12 @@ class SourceIngestionService:
                 summary=_empty_news_condensation_summary(),
             )
         if _news_condenser_enabled():
-            condensed = condense_news_items(ticker=ticker, items=items, as_of=as_of)
+            condensed = condense_news_items(
+                ticker=ticker,
+                company_name=company_name,
+                items=items,
+                as_of=as_of,
+            )
             records = tuple(
                 _event_news_item_from_condensed(ticker, item, as_of, self.provider_name)
                 for item in condensed.kept_items

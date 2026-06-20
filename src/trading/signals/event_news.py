@@ -104,8 +104,8 @@ def build_event_news_signals(
             sentiment_score += 1
         elif sentiment == "negative":
             sentiment_score -= 1
-            rank = _NEGATIVE_CATALYST_PRECEDENCE.get(event_type, 0)
-            if rank > negative_catalyst_rank:
+            rank = _NEGATIVE_CATALYST_PRECEDENCE.get(event_type)
+            if rank is not None and rank > negative_catalyst_rank:
                 negative_catalyst_rank = rank
                 negative_catalyst_type = event_type
 

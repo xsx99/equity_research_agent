@@ -942,6 +942,8 @@ def test_build_ticker_workspace_uses_empty_state_markers_when_detail_inputs_are_
             "title": "No material update",
             "summary": "No material update",
             "time": None,
+            "event_type": None,
+            "importance": None,
             "empty": True,
         }
     ]
@@ -951,6 +953,8 @@ def test_build_ticker_workspace_uses_empty_state_markers_when_detail_inputs_are_
             "title": "No material update",
             "summary": "No material update",
             "time": None,
+            "event_type": None,
+            "importance": None,
             "empty": True,
         }
     ]
@@ -982,6 +986,8 @@ def test_build_ticker_workspace_uses_empty_state_markers_when_detail_inputs_are_
             "title": "No material update",
             "summary": "No material update",
             "time": None,
+            "event_type": None,
+            "importance": None,
             "empty": True,
         }
     ]
@@ -990,6 +996,8 @@ def test_build_ticker_workspace_uses_empty_state_markers_when_detail_inputs_are_
             "title": "No material update",
             "summary": "No material update",
             "time": None,
+            "event_type": None,
+            "importance": None,
             "empty": True,
         }
     ]
@@ -1013,6 +1021,47 @@ def test_build_ticker_workspace_uses_empty_state_markers_when_detail_inputs_are_
             "empty": True,
         }
     ]
+
+
+def test_build_ticker_workspace_skips_general_and_low_importance_news_in_summary():
+    workspace = build_ticker_workspace(
+        trade_rows=[
+            {
+                "ticker": "AAPL",
+                "decision": "no_trade",
+                "risk_status": "approved",
+                "order_status": None,
+                "material_signal_change": False,
+            },
+        ],
+        selected_ticker="AAPL",
+        positions_by_ticker={},
+        risk_by_ticker={},
+        signal_history_by_ticker={},
+        news_by_ticker={
+            "AAPL": [
+                {
+                    "title": "Broad market recap",
+                    "summary": "A generic market article.",
+                    "published_at": "2026-06-05T13:00:00Z",
+                    "event_type": "general_news",
+                    "importance": "medium",
+                },
+                {
+                    "title": "Analyst chatter",
+                    "summary": "A ticker-specific but low-importance note.",
+                    "published_at": "2026-06-05T12:00:00Z",
+                    "event_type": "analyst_upgrade",
+                    "importance": "low",
+                },
+            ]
+        },
+        fundamentals_by_ticker={},
+    )
+
+    latest_conclusion = workspace["detail"]["latest_conclusion"]
+
+    assert latest_conclusion["signal_summary"]["event_news_summary"] == "No material ticker-specific news."
 
 
 def test_build_ticker_workspace_surfaces_trade_reasoning_in_latest_conclusion_and_decisions():
