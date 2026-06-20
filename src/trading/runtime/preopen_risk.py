@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import datetime
+from datetime import date, datetime
 from typing import TYPE_CHECKING, Any
 
 from src.trading.events import CalendarEventPipeline, PortfolioEventRiskAssessmentPipeline
@@ -300,6 +300,7 @@ def _build_preopen_calendar_events(
                 ticker=str(getattr(candidate, "ticker", "")),
                 decision_time=decision_time,
                 earnings_in_days=_earnings_in_days(snapshot),
+                earnings_date=_earnings_date(snapshot),
             )
         )
     return tuple(events)
@@ -342,6 +343,27 @@ def _earnings_in_days(snapshot: object | None) -> int | None:
         return value
     if isinstance(value, float):
         return int(value)
+    return None
+
+
+def _earnings_date(snapshot: object | None) -> date | None:
+    if snapshot is None:
+        return None
+    signal_json = dict(getattr(snapshot, "signal_json", {}) or {})
+    event_news = dict(signal_json.get("events_news", {}) or {})
+    fundamental = dict(signal_json.get("fundamental", {}) or {})
+    for value in (
+        event_news.get("known_event_date"),
+        fundamental.get("known_event_date"),
+        fundamental.get("earnings_date"),
+    ):
+        if isinstance(value, date):
+            return value
+        if isinstance(value, str):
+            try:
+                return date.fromisoformat(value)
+            except ValueError:
+                continue
     return None
 
 

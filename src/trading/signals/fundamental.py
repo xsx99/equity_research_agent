@@ -42,6 +42,10 @@ def build_fundamental_signals(records: list[SourceRecord] | tuple[SourceRecord, 
         "fcf_margin_score": payload.get("fcf_margin_score"),
         "short_interest_bucket": _short_interest_bucket(payload.get("short_interest_pct_float")),
     }
+    if payload.get("earnings_date") is not None:
+        values["earnings_date"] = payload.get("earnings_date")
+    if payload.get("known_event_date") is not None:
+        values["known_event_date"] = payload.get("known_event_date")
     missing = tuple(field for field in REQUIRED_FUNDAMENTAL_FIELDS if values.get(field) is None)
     return FundamentalSignals(values=values, missing=missing)
 

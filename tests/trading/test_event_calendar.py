@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
@@ -126,6 +126,23 @@ def test_event_calendar_pipeline_normalizes_earnings_macro_option_and_readthroug
     assert events[2].event_key == "earnings:NVDA:2026-06-18"
     assert events[3].event_key == "macro:fomc:2026-06-17"
     assert events[4].event_key == "option_expiry:NVDA:2026-06-20"
+
+
+def test_event_calendar_pipeline_prefers_real_earnings_date_when_available():
+    decision_time = datetime(2026, 6, 16, 12, 0, tzinfo=timezone.utc)
+    pipeline = CalendarEventPipeline(now=lambda: decision_time)
+
+    events = pipeline.build_events(
+        ticker="AAPL",
+        decision_time=decision_time,
+        earnings_in_days=1,
+        earnings_date=date(2026, 7, 31),
+    )
+
+    assert len(events) == 1
+    assert events[0].event_type == "earnings"
+    assert events[0].event_key == "earnings:AAPL:2026-07-31"
+    assert events[0].event_time == datetime(2026, 7, 31, 20, 0, tzinfo=timezone.utc)
 
 
 def test_portfolio_event_risk_assessment_pipeline_scores_existing_position_pending_trade_and_hides_low_relevance():

@@ -42,6 +42,7 @@ class CalendarEventPipeline:
         ticker: str,
         decision_time: datetime,
         earnings_in_days: int | None = None,
+        earnings_date: date | datetime | None = None,
         macro_events: tuple[dict[str, Any], ...] = (),
         option_expiry_dates: tuple[date, ...] = (),
         company_event_payloads: tuple[dict[str, Any], ...] = (),
@@ -83,9 +84,14 @@ class CalendarEventPipeline:
                     metadata_json=dict(getattr(readthrough, "metadata_json", {}) or {}),
                 )
             )
-        if earnings_in_days is not None and earnings_in_days >= 0:
-            event_date = decision_time.date() + timedelta(days=earnings_in_days)
-            event_time = datetime.combine(event_date, time(20, 0), tzinfo=timezone.utc)
+        normalized_earnings_time = _normalize_earnings_time(earnings_date)
+        if normalized_earnings_time is not None or (earnings_in_days is not None and earnings_in_days >= 0):
+            event_time = normalized_earnings_time
+            if event_time is None:
+                event_date = decision_time.date() + timedelta(days=earnings_in_days)
+                event_time = datetime.combine(event_date, time(20, 0), tzinfo=timezone.utc)
+            else:
+                event_date = event_time.date()
             event_key = f"earnings:{symbol}:{event_date.isoformat()}"
             events.append(
                 CalendarEventRecord(
@@ -152,3 +158,13 @@ class CalendarEventPipeline:
                 key=lambda item: (priority.get(item.event_type, 99), item.event_time, item.event_key),
             )
         )
+
+
+def _normalize_earnings_time(value: date | datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+    return datetime.combine(value, time(20, 0), tzinfo=timezone.utc)

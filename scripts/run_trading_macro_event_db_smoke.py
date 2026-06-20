@@ -6,7 +6,7 @@ import argparse
 import json
 import sys
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -22,6 +22,8 @@ from src.trading.macro import MacroSnapshotRecord
 from src.trading.repositories.sqlalchemy import SqlAlchemyTradingRepository
 from src.trading.risk import PortfolioRiskIntentRecord, PortfolioRiskSnapshotRecord, RiskFactorExposureRecord
 from src.web.presenters.today_risk_macro import build_today_risk_macro_payload
+
+SMOKE_AAPL_EARNINGS_DATE = date(2026, 7, 31)
 
 
 def run_smoke(
@@ -109,7 +111,7 @@ def run_smoke(
             event_key=f"{smoke_run_id}:earnings:AAPL",
             event_type="earnings",
             ticker="AAPL",
-            event_time=smoke_time + timedelta(hours=6),
+            event_time=datetime.combine(SMOKE_AAPL_EARNINGS_DATE, time(20, 0), tzinfo=timezone.utc),
             published_at=smoke_time,
             available_for_decision_at=smoke_time,
             title="AAPL earnings",

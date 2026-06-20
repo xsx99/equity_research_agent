@@ -1,7 +1,7 @@
 """Backend risk/macro presenter for the today workstation."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime, timezone
 from typing import Any
 
 from src.web.presenters.today_copy import (
@@ -149,7 +149,7 @@ def _availability(*, macro_snapshot: object | None, latest_intent: object | None
 
 def _event_row(event: object) -> dict[str, Any]:
     return {
-        "scheduled_at": getattr(event, "event_time", None),
+        "scheduled_at": _format_event_date(getattr(event, "event_time", None)),
         "event_type": getattr(event, "event_type", None),
         "event_type_label": event_type_label(getattr(event, "event_type", None)),
         "importance": getattr(event, "severity_hint", None),
@@ -218,6 +218,14 @@ def _operator_note(
     if top_risk_sources:
         return top_risk_sources[0]["summary"]
     return "No material macro or event-risk issue is currently active."
+
+
+def _format_event_date(value: object) -> str | None:
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc).strftime("%b %d, %Y")
+    if isinstance(value, date):
+        return value.strftime("%b %d, %Y")
+    return None
 
 
 def _hedge_posture(latest_intent: object | None) -> dict[str, Any] | None:

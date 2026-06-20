@@ -18,6 +18,7 @@ class MarketSnapshot(TypedDict):
     sector: Optional[str]
     company_name: Optional[str]
     earnings_in_days: Optional[int]
+    earnings_date: Optional[date]
     pe_ratio: Optional[float]
     ps_ratio: Optional[float]
     short_interest_pct_float: Optional[float]

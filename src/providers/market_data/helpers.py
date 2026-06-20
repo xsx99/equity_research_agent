@@ -24,6 +24,7 @@ def _empty_snapshot() -> MarketSnapshot:
         "sector": None,
         "company_name": None,
         "earnings_in_days": None,
+        "earnings_date": None,
         "pe_ratio": None,
         "ps_ratio": None,
         "short_interest_pct_float": None,

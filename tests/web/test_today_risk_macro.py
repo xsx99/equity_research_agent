@@ -100,8 +100,35 @@ def test_today_risk_macro_presenter_builds_command_center_from_canonical_rows():
     assert payload["summary"]["top_risk_sources"][0]["label"] == "Own event window"
     assert payload["macro"]["blocked_strategy_tags"] == ("gap_and_go_v1",)
     assert payload["events"][0]["affected_ticker"] == "AAPL"
+    assert payload["events"][0]["scheduled_at"] == "Jun 16, 2026"
     assert payload["risk_sources"][0]["recommended_action_label"] == "Block New Entry"
     assert payload["command_center"]["exposure_usage_pct"] == 42.0
+
+
+def test_today_risk_macro_presenter_formats_event_dates_without_raw_timestamps():
+    decision_time = datetime(2026, 6, 16, 13, 0, tzinfo=timezone.utc)
+    event = CalendarEventRecord(
+        calendar_event_id="event-earnings",
+        event_key="earnings:AAPL:2026-07-31",
+        event_type="earnings",
+        ticker="AAPL",
+        event_time=datetime(2026, 7, 31, 20, 0, 12, 123456, tzinfo=timezone.utc),
+        published_at=decision_time,
+        available_for_decision_at=decision_time,
+        title="AAPL earnings",
+        severity_hint="high",
+        source="fixture",
+        metadata_json={},
+    )
+
+    payload = build_today_risk_macro_payload(
+        latest_risk=None,
+        latest_intent=None,
+        risk_macro_context={"calendar_events": (event,)},
+        exposures=(),
+    )
+
+    assert payload["events"][0]["scheduled_at"] == "Jul 31, 2026"
 
 
 def test_today_risk_macro_presenter_converts_notional_gross_exposure_to_equity_percentage():

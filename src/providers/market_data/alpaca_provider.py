@@ -225,6 +225,7 @@ class AlpacaMarketDataProvider:
         company_name: Optional[str] = None
         market_cap: Optional[float] = None
         metrics: dict[str, Any] = {}
+        earnings_calendar: dict[str, Any] = {"earnings_in_days": None, "earnings_date": None}
         if self.finnhub_api_key:
             profile = self._fetch_profile_from_finnhub(ticker)
             sector = self._extract_sector_from_profile(profile)
@@ -233,6 +234,7 @@ class AlpacaMarketDataProvider:
                 company_name = raw_name.strip()
             market_cap = self._extract_market_cap_from_profile(profile)
             metrics = self._fetch_metrics_from_finnhub(ticker)
+            earnings_calendar = self._fetch_earnings_in_days_from_finnhub(ticker)
         pe_ratio = self._extract_metric_value(metrics, "peBasicExclExtraTTM", "peTTM", "peNormalizedAnnual")
         ps_ratio = self._extract_metric_value(metrics, "psTTM", "psAnnual", "priceToSalesAnnual")
         short_interest_pct_float = self._extract_metric_value(
@@ -245,7 +247,9 @@ class AlpacaMarketDataProvider:
             "sector": sector,
             "company_name": company_name,
             "market_cap": market_cap,
-            "earnings_in_days": self._fetch_earnings_in_days_from_finnhub(ticker),
+            "earnings_in_days": earnings_calendar.get("earnings_in_days"),
+            "earnings_date": earnings_calendar.get("earnings_date"),
+            "known_event_date": earnings_calendar.get("earnings_date"),
             "pe_ratio": pe_ratio,
             "ps_ratio": ps_ratio,
             "short_interest_pct_float": short_interest_pct_float,
@@ -402,9 +406,9 @@ class AlpacaMarketDataProvider:
                 return value
         return None
 
-    def _fetch_earnings_in_days_from_finnhub(self, ticker: str) -> Optional[int]:
+    def _fetch_earnings_in_days_from_finnhub(self, ticker: str) -> dict[str, Any]:
         if not self.finnhub_api_key:
-            return None
+            return {"earnings_in_days": None, "earnings_date": None}
         today = datetime.now(timezone.utc).date()
         response = self._client.get(
             "https://finnhub.io/api/v1/calendar/earnings",
@@ -419,9 +423,10 @@ class AlpacaMarketDataProvider:
         payload = response.json()
         events = payload.get("earningsCalendar", [])
         if not isinstance(events, list):
-            return None
+            return {"earnings_in_days": None, "earnings_date": None}
 
         nearest_delta: Optional[int] = None
+        nearest_date: Optional[date] = None
         for event in events:
             if not isinstance(event, dict):
                 continue
@@ -437,7 +442,8 @@ class AlpacaMarketDataProvider:
                 continue
             if nearest_delta is None or delta < nearest_delta:
                 nearest_delta = delta
-        return nearest_delta
+                nearest_date = event_date
+        return {"earnings_in_days": nearest_delta, "earnings_date": nearest_date}
 
     def close(self) -> None:
         if self._owns_client:

@@ -214,7 +214,7 @@ def test_fetch_context_enriches_fundamental_scores_from_finnhub_payloads():
             },
             "calendar/earnings": {
                 "earningsCalendar": [
-                    {"date": "2026-06-10"},
+                    {"date": "2026-07-10"},
                 ]
             },
         }
@@ -231,6 +231,8 @@ def test_fetch_context_enriches_fundamental_scores_from_finnhub_payloads():
     assert context["company_name"] == "Apple Inc."
     assert context["sector"] == "Technology"
     assert context["market_cap"] == pytest.approx(3_000_000_000_000.0)
+    assert context["earnings_date"] == date(2026, 7, 10)
+    assert context["earnings_in_days"] is not None
     assert context["revenue_growth_score"] is not None
     assert context["margin_trend_score"] is not None
     assert context["quality_score"] is not None

@@ -324,6 +324,8 @@ class SourceIngestionService:
                 "sector",
                 "company_name",
                 "earnings_in_days",
+                "earnings_date",
+                "known_event_date",
             }
         }
         return FundamentalSnapshotRecord(

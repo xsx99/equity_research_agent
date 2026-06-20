@@ -448,19 +448,19 @@ def _build_header(
         "realized_pnl": latest_portfolio.realized_pnl if latest_portfolio else None,
         "unrealized_pnl": latest_portfolio.unrealized_pnl if latest_portfolio else None,
         "buying_power": latest_portfolio.buying_power if latest_portfolio else None,
-<<<<<<< HEAD
+        "stock_market_value": latest_portfolio.stock_market_value if latest_portfolio else None,
+        "option_market_value": latest_portfolio.option_market_value if latest_portfolio else None,
         "gross_exposure": _exposure_ratio(
             getattr(latest_risk, "gross_exposure", None),
             getattr(latest_risk, "account_equity", None),
-=======
-        "stock_market_value": latest_portfolio.stock_market_value if latest_portfolio else None,
-        "option_market_value": latest_portfolio.option_market_value if latest_portfolio else None,
-        "gross_exposure": latest_risk.gross_exposure if latest_risk else None,
-        "net_exposure": latest_risk.net_exposure if latest_risk else None,
+        ),
+        "net_exposure": _exposure_ratio(
+            getattr(latest_risk, "net_exposure", None),
+            getattr(latest_risk, "account_equity", None),
+        ),
         "margin_util_pct": _safe_pct(
             latest_portfolio.total_margin_requirement if latest_portfolio else None,
             latest_portfolio.account_equity if latest_portfolio else None,
->>>>>>> 0629cc008b79ffbf7eab1b10994799c9cc1a9e5d
         ),
         "open_alert_count": len([row for row in trade_rows if row.get("order_status") in {"rejected", "pending_new"}]),
         "material_signal_change_count": 0,

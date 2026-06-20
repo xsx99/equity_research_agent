@@ -67,6 +67,7 @@ def get_market_snapshot(
         "sector": None,
         "company_name": None,
         "earnings_in_days": None,
+        "earnings_date": None,
         "pe_ratio": None,
         "ps_ratio": None,
         "short_interest_pct_float": None,
@@ -123,6 +124,7 @@ def get_market_snapshot(
         snapshot["sector"] = context.get("sector")
         snapshot["company_name"] = context.get("company_name")
         snapshot["earnings_in_days"] = _to_int_or_none(context.get("earnings_in_days"))
+        snapshot["earnings_date"] = context.get("earnings_date") if isinstance(context.get("earnings_date"), date) else None
         snapshot["pe_ratio"] = _to_float_or_none(context.get("pe_ratio"))
         snapshot["ps_ratio"] = _to_float_or_none(context.get("ps_ratio"))
         snapshot["short_interest_pct_float"] = _to_float_or_none(context.get("short_interest_pct_float"))
