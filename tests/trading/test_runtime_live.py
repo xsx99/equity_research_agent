@@ -6,13 +6,17 @@ from types import SimpleNamespace
 
 from src.trading.data_sources.universe import UniverseAsset, UniverseFilterConfig
 from src.trading.data_sources.live_universe import LiveUniverseProvider
+from src.trading.learning.apply import LearningAdjustments
 from src.trading.risk import (
     HedgeActionRecord,
     OptionRiskAssessment,
     PortfolioRiskIntentRecord,
     RiskDecisionRecord,
 )
-from src.trading.runtime.preopen_dependencies import _ConfiguredLiveUniverseScanPipeline
+from src.trading.runtime.preopen_dependencies import (
+    _ConfiguredLiveUniverseScanPipeline,
+    _RepositoryUniverseFilterLoader,
+)
 from src.trading.runtime.preopen_risk import _LiveRiskWorkflow, _build_trade_risk_request
 from src.trading.runtime.preopen import (
     LivePreopenDependencies,
@@ -288,7 +292,11 @@ def test_build_live_preopen_dependencies_wires_fallback_reapproval_into_paper_ex
     captured: dict[str, object] = {}
 
     class _Repo:
-        pass
+        def load_active_learning_factors(self):
+            return []
+
+        def load_active_universe_filter_config(self):
+            return UniverseFilterConfig(manual_include=("AAPL",))
 
     class _SourceRepo:
         pass
@@ -342,6 +350,11 @@ def test_build_live_preopen_dependencies_wires_fallback_reapproval_into_paper_ex
 
     monkeypatch.setattr("src.trading.runtime.preopen_dependencies.seed_initial_strategy_definitions", lambda repo: captured.setdefault("seed_repo", repo))
     monkeypatch.setattr("src.trading.runtime.preopen_dependencies.seed_default_universe_filter_config", lambda session: captured.setdefault("seed_session", session))
+    monkeypatch.setattr(
+        "src.trading.runtime.preopen_dependencies.get_active_tickers",
+        lambda session: [captured.setdefault("watchlist_session", session), "MSFT", "NVDA"][1:],
+        raising=False,
+    )
     monkeypatch.setattr("src.trading.runtime.preopen_dependencies.build_default_news_provider", lambda: "news-provider")
     monkeypatch.setattr("src.trading.runtime.preopen_dependencies.app_config.TRADING_MODEL_NAME", "gpt-5-mini")
     monkeypatch.setattr("src.agents.prompt_registry.PromptRegistry", _PromptRegistry)
@@ -365,10 +378,13 @@ def test_build_live_preopen_dependencies_wires_fallback_reapproval_into_paper_ex
     monkeypatch.setattr("src.trading.workflows.paper_execution.PaperExecutionWorkflow", _PaperExecutionWorkflow)
 
     dependencies = build_live_preopen_dependencies(session=object())
+    loaded_config = dependencies.universe_filter_loader.load_active()
 
     assert isinstance(dependencies, LivePreopenDependencies)
     assert captured["seed_repo"].__class__ is _Repo
     assert captured["seed_session"].__class__ is object
+    assert captured["watchlist_session"].__class__ is object
+    assert loaded_config.manual_include == ("AAPL", "MSFT", "NVDA")
     assert captured["trading_decision_kwargs"]["source_repository"].__class__ is _SourceRepo
     assert captured["paper_execution_kwargs"]["config_resolver"].__class__ is _ConfigResolver
     assert captured["paper_execution_kwargs"]["position_sizer"].__class__ is _PositionSizer
@@ -376,6 +392,21 @@ def test_build_live_preopen_dependencies_wires_fallback_reapproval_into_paper_ex
     assert captured["paper_execution_kwargs"]["option_risk_manager"].__class__ is _OptionRiskManager
     assert captured["paper_execution_kwargs"]["option_broker"].__class__ is _OptionBroker
     assert captured["option_broker_kwargs"]["trading_base_url"] == "https://paper-api.alpaca.markets"
+
+
+def test_repository_universe_filter_loader_merges_active_watchlist_tickers():
+    loader = _RepositoryUniverseFilterLoader(
+        repository=SimpleNamespace(
+            load_active_universe_filter_config=lambda: UniverseFilterConfig(
+                manual_include=("AAPL", "MSFT")
+            )
+        ),
+        watchlist_ticker_loader=lambda: ["nvda", "AAPL", "tsla"],
+    )
+
+    config = loader.load_active()
+
+    assert config.manual_include == ("AAPL", "MSFT", "NVDA", "TSLA")
 
 
 def test_configured_live_universe_scan_pipeline_prefers_targeted_symbols_for_manual_scope():
@@ -1714,3 +1745,72 @@ def test_live_risk_workflow_persists_portfolio_risk_intent_and_materializes_gene
     assert saved_decisions[-1].metadata_json["risk_context"]["calendar_event_ids"] == ["calendar-1"]
     assert saved_decisions[-1].metadata_json["risk_context"]["portfolio_event_risk_assessment_ids"] == ["assessment-1"]
     assert saved_decisions[-1].generated_hedge_action["target_underlier"] == "QQQ"
+
+
+def test_live_risk_workflow_applies_learning_adjustment_to_macro_risk_budget():
+    captured_macro_multipliers: list[float] = []
+
+    class _Repository:
+        def load_signal_snapshots_for_decision(self, *, decision_time, snapshot_type):
+            del decision_time, snapshot_type
+            return ()
+
+        def save_portfolio_risk_snapshot(self, snapshot):
+            del snapshot
+
+        def save_risk_factor_exposures(self, exposures):
+            del exposures
+
+        def save_macro_snapshot(self, snapshot):
+            del snapshot
+
+    class _ConfigResolver:
+        def resolve(self, **kwargs):
+            captured_macro_multipliers.append(kwargs["macro_risk_budget_multiplier"])
+            return SimpleNamespace(
+                risk_appetite="balanced",
+                resolver_version="v1",
+                margin_model_profile="alpaca",
+                margin_model_version="broker",
+                max_sector_weight=0.30,
+            )
+
+    class _RiskManager:
+        def build_portfolio_risk_snapshot(self, portfolio_context, config):
+            del portfolio_context, config
+            return SimpleNamespace(portfolio_risk_snapshot_id="risk-snapshot-1")
+
+        def compute_factor_exposures(self, portfolio_context):
+            del portfolio_context
+            return ()
+
+    workflow = _LiveRiskWorkflow(
+        repository=_Repository(),
+        source_repository=SimpleNamespace(),
+        config_resolver=_ConfigResolver(),
+        position_sizer=SimpleNamespace(),
+        risk_manager=_RiskManager(),
+        macro_snapshot_pipeline=SimpleNamespace(
+            build_snapshot=lambda as_of: SimpleNamespace(
+                macro_snapshot_id="macro-1",
+                trade_date=as_of.date(),
+                snapshot_time=as_of,
+                risk_budget_multiplier=0.8,
+            )
+        ),
+        learning_adjustments=LearningAdjustments(
+            strategy_score_multiplier={},
+            risk_budget_multiplier=0.85,
+            applied_factor_keys=("lf-risk",),
+            shadow_factor_keys=(),
+        ),
+    )
+
+    workflow.run(
+        candidates=(),
+        classifications=(),
+        portfolio_context=SimpleNamespace(account_equity=100000.0, total_margin_requirement=0.0),
+        decision_time=datetime(2026, 6, 5, 13, 0, tzinfo=timezone.utc),
+    )
+
+    assert captured_macro_multipliers == [0.68]

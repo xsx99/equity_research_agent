@@ -5,6 +5,7 @@ from src.trading.signals.event_news import build_event_news_signals
 from src.trading.signals.source_ingestion import SourceIngestionService
 from src.trading.signals.sources import InMemorySignalSourceRepository, source_record_from_event_news_item
 from src.trading.signals import SignalSnapshotResult
+from src.trading.learning.apply import LearningAdjustments
 from src.trading.strategies.matching import StrategyDefinitionRecord, StrategyMatcher
 
 
@@ -394,3 +395,28 @@ def test_strategy_matcher_score_is_not_inflated_by_duplicate_news_volume_after_c
     assert len(result.event_news_items) == 1
     assert signals.values["high_signal_news_count_24h"] == 1
     assert candidates[0].core_signal_evidence["events_news.high_signal_news_count_24h"] == 1
+
+
+def test_strategy_matcher_applies_learning_factor_score_multiplier():
+    snapshot = _snapshot(
+        technical={"relative_volume": 1.8, "rs_vs_spy_1d": 0.022, "return_20d": 0.11},
+        events_news={
+            "sentiment_direction": "positive",
+            "high_signal_news_count_24h": 1,
+            "catalyst_quality_score": 0.9,
+            "direct_negative_catalyst_type": None,
+        },
+    )
+    definition = _definition("relative_strength_rotation_v1")
+
+    base_candidate = StrategyMatcher().match_snapshot(snapshot, [definition], strategy_run_id="run-1")[0]
+    adjusted_candidate = StrategyMatcher(
+        learning_adjustments=LearningAdjustments(
+            strategy_score_multiplier={"relative_strength_rotation_v1": 1.1},
+            risk_budget_multiplier=1.0,
+            applied_factor_keys=("lf-1",),
+            shadow_factor_keys=(),
+        )
+    ).match_snapshot(snapshot, [definition], strategy_run_id="run-2")[0]
+
+    assert adjusted_candidate.candidate_score > base_candidate.candidate_score

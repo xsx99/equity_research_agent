@@ -52,17 +52,18 @@ SMOKE_MODE_HANDLERS: dict[str, RuntimeHandler] = {
 def get_job_phase_handler(phase: str) -> RuntimeHandler:
     """Return the scheduler runtime handler for a supported phase."""
     try:
-        handler = JOB_PHASE_HANDLERS[phase]
+        return JOB_PHASE_HANDLERS[phase]
     except KeyError as exc:
         raise ValueError(f"unsupported_trading_job_phase:{phase}") from exc
 
+
+def invoke_job_phase_handler(phase: str, **policy: Any) -> dict[str, Any]:
+    """Call the requested phase handler while dropping unsupported policy kwargs."""
+    handler = get_job_phase_handler(phase)
     params = inspect.signature(handler).parameters
 
-    def _invoke(**policy: Any) -> dict[str, Any]:
-        kwargs = {k: v for k, v in policy.items() if k in params and v is not None}
-        return handler(**kwargs)
-
-    return _invoke
+    kwargs = {k: v for k, v in policy.items() if k in params and v is not None}
+    return handler(**kwargs)
 
 
 def get_smoke_mode_handler(mode: str) -> RuntimeHandler:

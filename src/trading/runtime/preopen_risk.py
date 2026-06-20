@@ -3,11 +3,14 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.trading.events import CalendarEventPipeline, PortfolioEventRiskAssessmentPipeline
 from src.trading.macro import MacroSnapshotPipeline
 from src.trading.runtime.lookahead_risk import LookaheadRiskWorkflowHelper
+
+if TYPE_CHECKING:
+    from src.trading.learning.apply import LearningAdjustments
 
 
 class _LiveRiskWorkflow:
@@ -24,6 +27,7 @@ class _LiveRiskWorkflow:
         macro_snapshot_pipeline: MacroSnapshotPipeline | None = None,
         calendar_event_pipeline: CalendarEventPipeline | None = None,
         event_risk_pipeline: PortfolioEventRiskAssessmentPipeline | None = None,
+        learning_adjustments: "LearningAdjustments | None" = None,
     ) -> None:
         self.repository = repository
         self.source_repository = source_repository
@@ -35,6 +39,7 @@ class _LiveRiskWorkflow:
         self.macro_snapshot_pipeline = macro_snapshot_pipeline
         self.calendar_event_pipeline = calendar_event_pipeline
         self.event_risk_pipeline = event_risk_pipeline
+        self.learning_adjustments = learning_adjustments
 
     def run(
         self,
@@ -64,10 +69,13 @@ class _LiveRiskWorkflow:
             macro_snapshot = self.macro_snapshot_pipeline.build_snapshot(as_of=decision_time)
             if hasattr(self.repository, "save_macro_snapshot"):
                 self.repository.save_macro_snapshot(macro_snapshot)
+        macro_multiplier = float(getattr(macro_snapshot, "risk_budget_multiplier", 1.0) or 1.0)
+        if self.learning_adjustments is not None:
+            macro_multiplier *= self.learning_adjustments.risk_budget_multiplier
         config = self.config_resolver.resolve(
             risk_appetite="balanced",
             portfolio_context=portfolio_context,
-            macro_risk_budget_multiplier=float(getattr(macro_snapshot, "risk_budget_multiplier", 1.0) or 1.0),
+            macro_risk_budget_multiplier=macro_multiplier,
         )
         portfolio_snapshot = self.risk_manager.build_portfolio_risk_snapshot(portfolio_context, config)
         exposures = self.risk_manager.compute_factor_exposures(portfolio_context)

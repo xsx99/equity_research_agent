@@ -335,6 +335,14 @@ def test_strategy_evolution_models_can_be_instantiated():
     )
     proposal = StrategyProposal(
         trade_date=date(2026, 6, 2),
+        daily_reflection=DailyReflection(
+            trade_date=date(2026, 6, 2),
+            status="succeeded",
+            portfolio_summary_json={},
+            reflection_json={},
+            strategy_proposal_hints_json=[],
+            metadata_json={},
+        ),
         prompt_run=prompt_run,
         proposal_status="accepted",
         proposed_strategy_id="post_gap_vwap_reclaim_v1",
@@ -361,6 +369,7 @@ def test_strategy_evolution_models_can_be_instantiated():
     )
 
     assert proposal.prompt_run is prompt_run
+    assert proposal.daily_reflection is not None
     assert evaluation.strategy_definition is definition
     assert evaluation.strategy_proposal is proposal
 
@@ -1370,3 +1379,13 @@ def test_trading_migration_contains_alpaca_option_execution_contract_updates():
     assert '"broker_order_id"' in text
     assert '"client_order_id"' in text
     assert '"order_class"' in text
+
+
+def test_trading_migration_contains_strategy_proposal_reflection_link():
+    migration_path = Path("alembic/versions/026_strategy_proposal_reflection_link.py")
+    text = migration_path.read_text(encoding="utf-8")
+
+    assert 'down_revision: Union[str, None] = "025"' in text
+    assert '"strategy_proposals"' in text
+    assert '"daily_reflection_id"' in text
+    assert '"daily_reflections"' in text

@@ -26,7 +26,8 @@ def run_job_phase(
     execute_paper_option_orders: bool | None = None,
 ) -> dict[str, Any]:
     """Run one scheduler-facing trading phase."""
-    return dispatch.get_job_phase_handler(phase)(
+    return dispatch.invoke_job_phase_handler(
+        phase,
         execute_paper_orders=execute_paper_orders,
         execute_paper_option_orders=execute_paper_option_orders,
     )

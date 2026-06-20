@@ -49,6 +49,7 @@ class StrategyProposalRecord:
     prompt_template: Any
     prompt_run: PromptRunRecord
     usage_events: list[UsageEventRecord]
+    source_daily_reflection_id: str
     proposal_status: str
     proposed_strategy_id: str
     display_name: str
@@ -156,6 +157,7 @@ class StrategyEvolutionPipeline:
                 prompt_template=prompt_template,
                 prompt_run=prompt_run,
                 usage_events=list(usage_events),
+                source_daily_reflection_id=_first_reflection_id(request.daily_reflections),
                 proposal_status="proposal_failed",
                 proposed_strategy_id="proposal_failed",
                 display_name="Proposal Failed",
@@ -186,6 +188,7 @@ class StrategyEvolutionPipeline:
                     prompt_template=prompt_template,
                     prompt_run=prompt_run,
                     usage_events=list(usage_events),
+                    source_daily_reflection_id=_first_reflection_id(request.daily_reflections),
                     proposal_status="duplicate_rejected",
                     proposed_strategy_id=str(proposal_json["proposed_strategy_id"]),
                     display_name=str(proposal_json["display_name"]),
@@ -255,6 +258,10 @@ class StrategyEvolutionPipeline:
                 prompt_template=prompt_template,
                 prompt_run=prompt_run,
                 usage_events=list(usage_events),
+                source_daily_reflection_id=_resolve_proposal_reflection_id(
+                    proposal_json,
+                    request.daily_reflections,
+                ),
                 proposal_status="accepted",
                 proposed_strategy_id=final_definition.strategy_id,
                 display_name=final_definition.display_name,
@@ -409,3 +416,22 @@ def _jaccard(left: set[str], right: set[str]) -> float:
 
 def _normalize_text_tokens(text: str) -> set[str]:
     return {token for token in re.findall(r"[a-z0-9]+", text.lower()) if len(token) > 2}
+
+
+def _first_reflection_id(reflections: Iterable[DailyReflectionRecord]) -> str:
+    for reflection in reflections:
+        return reflection.daily_reflection_id
+    return ""
+
+
+def _resolve_proposal_reflection_id(
+    proposal_json: dict[str, Any],
+    reflections: Iterable[DailyReflectionRecord],
+) -> str:
+    wanted = [str(item) for item in proposal_json.get("source_reflection_ids", []) if str(item)]
+    if wanted:
+        valid_ids = {reflection.daily_reflection_id for reflection in reflections}
+        for reflection_id in wanted:
+            if reflection_id in valid_ids:
+                return reflection_id
+    return _first_reflection_id(reflections)

@@ -1,11 +1,13 @@
 """Dependency contracts and builders for the live preopen runtime."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any, Protocol
 
 from src.core import config as app_config
+from src.research.repositories.research_repository import get_active_tickers
+from src.trading.learning.apply import build_learning_adjustments
 from src.trading.runtime.lookahead_risk import LookaheadRiskWorkflowHelper
 from src.trading.runtime.preopen_risk import _LiveRiskWorkflow
 from src.trading.runtime.support import (
@@ -125,10 +127,14 @@ def build_live_preopen_dependencies(session: Any | None = None) -> LivePreopenDe
     from src.trading.workflows.signal_snapshot import SignalPipeline
     from src.trading.workflows.strategy_scoring import StrategyPipeline
     from src.trading.workflows.trading_decision import TradingDecisionPipeline
+    from src.trading.strategies.matching import StrategyMatcher
 
     trading_repository = SqlAlchemyTradingRepository(session)
     seed_initial_strategy_definitions(trading_repository)
     seed_default_universe_filter_config(session)
+    learning_adjustments = build_learning_adjustments(
+        getattr(trading_repository, "load_active_learning_factors", lambda: [])()
+    )
     source_repository = SQLAlchemySignalSourceRepository(session)
     manual_request_service = SQLAlchemyManualTickerRequestService(session)
     market_provider = AlpacaMarketDataProvider()
@@ -150,7 +156,10 @@ def build_live_preopen_dependencies(session: Any | None = None) -> LivePreopenDe
     risk_manager = RiskManager()
     option_risk_manager = OptionRiskManager()
     return LivePreopenDependencies(
-        universe_filter_loader=_RepositoryUniverseFilterLoader(trading_repository),
+        universe_filter_loader=_RepositoryUniverseFilterLoader(
+            trading_repository,
+            watchlist_ticker_loader=lambda: get_active_tickers(session),
+        ),
         manual_request_loader=manual_request_service,
         universe_scan_pipeline=_ConfiguredLiveUniverseScanPipeline(
             provider=LiveUniverseProvider(market_provider=market_provider)
@@ -164,6 +173,7 @@ def build_live_preopen_dependencies(session: Any | None = None) -> LivePreopenDe
         strategy_pipeline=StrategyPipeline(
             repository=trading_repository,
             manual_request_service=manual_request_service,
+            matcher=StrategyMatcher(learning_adjustments=learning_adjustments),
         ),
         portfolio_sync_workflow=BrokerPortfolioSyncWorkflow(
             repository=trading_repository,
@@ -184,6 +194,7 @@ def build_live_preopen_dependencies(session: Any | None = None) -> LivePreopenDe
             ),
             calendar_event_pipeline=CalendarEventPipeline(),
             event_risk_pipeline=PortfolioEventRiskAssessmentPipeline(),
+            learning_adjustments=learning_adjustments,
         ),
         trading_decision_pipeline=TradingDecisionPipeline(
             repository=trading_repository,
@@ -208,11 +219,35 @@ def build_live_preopen_dependencies(session: Any | None = None) -> LivePreopenDe
 
 
 class _RepositoryUniverseFilterLoader:
-    def __init__(self, repository: Any) -> None:
+    def __init__(
+        self,
+        repository: Any,
+        *,
+        watchlist_ticker_loader: Any | None = None,
+    ) -> None:
         self.repository = repository
+        self.watchlist_ticker_loader = watchlist_ticker_loader or (lambda: [])
 
     def load_active(self) -> object:
-        return self.repository.load_active_universe_filter_config()
+        config = self.repository.load_active_universe_filter_config()
+        if not hasattr(config, "manual_include"):
+            return config
+        watchlist_tickers = tuple(
+            str(ticker).strip().upper()
+            for ticker in self.watchlist_ticker_loader()
+            if str(ticker).strip()
+        )
+        if not watchlist_tickers:
+            return config
+        merged = tuple(
+            sorted(
+                {
+                    *getattr(config, "manual_include", ()),
+                    *watchlist_tickers,
+                }
+            )
+        )
+        return replace(config, manual_include=merged)
 
 
 class _ConfiguredLiveUniverseScanPipeline:

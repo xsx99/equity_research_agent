@@ -8,16 +8,12 @@ def test_run_job_phase_delegates_through_runtime_dispatch(monkeypatch):
     expected = {"status": "passed", "phase": "preopen"}
     seen: dict[str, object] = {}
 
-    def _fake_get_job_phase_handler(phase: str):
+    def _fake_invoke_job_phase_handler(phase: str, **kwargs):
         assert phase == "preopen"
+        seen.update(kwargs)
+        return expected
 
-        def _handler(**kwargs):
-            seen.update(kwargs)
-            return expected
-
-        return _handler
-
-    monkeypatch.setattr(dispatch, "get_job_phase_handler", _fake_get_job_phase_handler)
+    monkeypatch.setattr(dispatch, "invoke_job_phase_handler", _fake_invoke_job_phase_handler)
 
     result = runtime.run_job_phase(
         "preopen",
@@ -33,10 +29,11 @@ def test_run_job_phase_delegates_through_runtime_dispatch(monkeypatch):
 
 
 def test_run_job_phase_raises_for_unsupported_phase(monkeypatch):
-    def _fake_get_job_phase_handler(phase: str):
+    def _fake_invoke_job_phase_handler(phase: str, **kwargs):
+        del kwargs
         raise ValueError(f"unsupported_trading_job_phase:{phase}")
 
-    monkeypatch.setattr(dispatch, "get_job_phase_handler", _fake_get_job_phase_handler)
+    monkeypatch.setattr(dispatch, "invoke_job_phase_handler", _fake_invoke_job_phase_handler)
 
     try:
         runtime.run_job_phase("unsupported")
@@ -55,7 +52,8 @@ def test_get_job_phase_handler_filters_unsupported_execution_kwargs(monkeypatch)
 
     monkeypatch.setitem(dispatch.JOB_PHASE_HANDLERS, "reflection", _reflection_handler)
 
-    result = dispatch.get_job_phase_handler("reflection")(
+    result = dispatch.invoke_job_phase_handler(
+        "reflection",
         execute_paper_orders=True,
         execute_paper_option_orders=False,
     )

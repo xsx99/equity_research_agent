@@ -479,6 +479,28 @@ def _dashboard_payload() -> dict:
                     "proposal_status_label": "Accepted",
                 },
             ),
+            "observability": {
+                "funnel": (
+                    {"label": "Learning Factors Created", "count": 1},
+                    {"label": "Applied Today", "count": 1},
+                    {"label": "Strategy Proposals", "count": 1},
+                    {"label": "New Strategy Definitions", "count": 1},
+                    {"label": "Promoted", "count": 1},
+                ),
+                "promotion_breakdown": (
+                    {"label": "Shadow", "count": 1},
+                    {"label": "Experimental", "count": 0},
+                    {"label": "Active", "count": 0},
+                ),
+                "weight_inputs": (
+                    {
+                        "factor_key": "lf-risk",
+                        "title": "Tighten low-volume gap entries",
+                        "scope_label": "Strategy",
+                        "effect_summary": "increase score",
+                    },
+                ),
+            },
         },
         "ops_cost": {
             "llm_usage": (
@@ -1094,6 +1116,8 @@ class TestTodayDashboard:
             patch("src.web.routers.today._load_learning_factors", return_value=()),
             patch("src.web.routers.today._load_strategy_performance", return_value=()),
             patch("src.web.routers.today._load_strategy_proposals", return_value=()),
+            patch("src.web.routers.today._load_strategy_definitions", return_value=()),
+            patch("src.web.routers.today._load_strategy_evaluation_results", return_value=()),
             patch("src.web.routers.today._load_llm_usage", return_value=()),
         ):
             dashboard = load_today_dashboard(
@@ -1129,6 +1153,8 @@ class TestTodayDashboard:
             patch("src.web.routers.today._load_learning_factors", return_value=()),
             patch("src.web.routers.today._load_strategy_performance", return_value=()),
             patch("src.web.routers.today._load_strategy_proposals", return_value=()),
+            patch("src.web.routers.today._load_strategy_definitions", return_value=()),
+            patch("src.web.routers.today._load_strategy_evaluation_results", return_value=()),
             patch("src.web.routers.today._load_llm_usage", return_value=()),
             patch("src.web.routers.today._load_trade_detail") as load_trade_detail,
         ):
@@ -1195,6 +1221,8 @@ class TestTodayDashboard:
             patch("src.web.routers.today._load_learning_factors", return_value=()),
             patch("src.web.routers.today._load_strategy_performance", return_value=()),
             patch("src.web.routers.today._load_strategy_proposals", return_value=()),
+            patch("src.web.routers.today._load_strategy_definitions", return_value=()),
+            patch("src.web.routers.today._load_strategy_evaluation_results", return_value=()),
             patch("src.web.routers.today._load_llm_usage", return_value=()),
         ):
             dashboard = load_today_dashboard(
@@ -1263,6 +1291,8 @@ class TestTodayDashboard:
             stack.enter_context(patch("src.web.routers.today._load_learning_factors", return_value=()))
             stack.enter_context(patch("src.web.routers.today._load_strategy_performance", return_value=()))
             stack.enter_context(patch("src.web.routers.today._load_strategy_proposals", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_strategy_definitions", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_strategy_evaluation_results", return_value=()))
             stack.enter_context(patch("src.web.routers.today._load_llm_usage", return_value=()))
             dashboard = load_today_dashboard(
                 session,
@@ -1338,6 +1368,8 @@ class TestTodayDashboard:
             stack.enter_context(patch("src.web.routers.today._load_learning_factors", return_value=()))
             stack.enter_context(patch("src.web.routers.today._load_strategy_performance", return_value=()))
             stack.enter_context(patch("src.web.routers.today._load_strategy_proposals", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_strategy_definitions", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_strategy_evaluation_results", return_value=()))
             stack.enter_context(patch("src.web.routers.today._load_llm_usage", return_value=()))
             dashboard = load_today_dashboard(
                 session,
@@ -2007,8 +2039,65 @@ def _patched_today_route_dependencies(session: MagicMock, *, trade_rows: list[di
     stack.enter_context(patch("src.web.routers.today._load_learning_factors", return_value=()))
     stack.enter_context(patch("src.web.routers.today._load_strategy_performance", return_value=()))
     stack.enter_context(patch("src.web.routers.today._load_strategy_proposals", return_value=()))
+    stack.enter_context(patch("src.web.routers.today._load_strategy_definitions", return_value=()))
+    stack.enter_context(patch("src.web.routers.today._load_strategy_evaluation_results", return_value=()))
     stack.enter_context(patch("src.web.routers.today._load_llm_usage", return_value=()))
     return _exit_stack_with_result(stack, load_trade_detail)
+
+
+def test_load_today_dashboard_includes_learning_observability():
+    from src.web.routers.today import load_today_dashboard
+
+    session = _query_stub_session()
+
+    with (
+        patch("src.web.routers.today._load_trade_rows", return_value=[]),
+        patch("src.web.routers.today._load_positions", return_value=()),
+        patch("src.web.routers.today._load_option_positions", return_value=()),
+        patch("src.web.routers.today._load_hedge_overlays", return_value=()),
+        patch("src.web.routers.today._load_live_alerts", return_value=()),
+        patch("src.web.routers.today._load_material_changes", return_value=()),
+        patch("src.web.routers.today._load_risk_exposures", return_value=()),
+        patch("src.web.routers.today._load_candidate_rows", return_value=()),
+        patch("src.web.routers.today._load_manual_requests", return_value=()),
+        patch("src.web.routers.today._load_portfolio_intents", return_value=()),
+        patch("src.web.routers.today._load_relationships", return_value=()),
+        patch("src.web.routers.today._load_peer_baskets", return_value=()),
+        patch("src.web.routers.today._load_themes", return_value=()),
+        patch(
+            "src.web.routers.today._load_learning_factors",
+            return_value=(
+                {
+                    "factor_key": "lf-risk",
+                    "title": "Reduce risk after failed breakouts",
+                    "status": "active",
+                    "status_label": "Active",
+                    "scope": "risk",
+                    "scope_label": "Risk",
+                    "effect_tags": ("reduce_exposure",),
+                },
+            ),
+        ),
+        patch("src.web.routers.today._load_strategy_performance", return_value=()),
+        patch("src.web.routers.today._load_strategy_proposals", return_value=({"proposed_strategy_id": "new_v1"},)),
+        patch("src.web.routers.today._load_strategy_definitions", return_value=({"strategy_id": "new_v1"},)),
+        patch(
+            "src.web.routers.today._load_strategy_evaluation_results",
+            return_value=({"evaluation_status": "promoted", "new_lifecycle_status": "shadow"},),
+        ),
+        patch("src.web.routers.today._load_llm_usage", return_value=()),
+        patch("src.web.routers.today._load_trade_detail", return_value=None),
+    ):
+        dashboard = load_today_dashboard(
+            session,
+            selected_tab="learning-strategies",
+            decision_id=None,
+            selected_ticker=None,
+        )
+
+    assert dashboard["learning_strategies"]["observability"]["funnel"][0]["count"] == 1
+    assert dashboard["learning_strategies"]["observability"]["funnel"][4]["count"] == 1
+    assert dashboard["learning_strategies"]["observability"]["weight_inputs"][0]["factor_key"] == "lf-risk"
 
 
 @contextmanager

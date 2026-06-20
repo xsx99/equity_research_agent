@@ -4,9 +4,12 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Iterable
+from typing import TYPE_CHECKING, Any, Iterable
 
 from src.trading.signals import SignalSnapshotResult
+
+if TYPE_CHECKING:
+    from src.trading.learning.apply import LearningAdjustments
 
 
 SELECTION_SOURCES = ("scanner", "manual_request", "watchlist_pin")
@@ -112,6 +115,9 @@ class CandidateScoreRecord:
 class StrategyMatcher:
     """Score strategy definitions using only deterministic PR02 signal snapshots."""
 
+    def __init__(self, *, learning_adjustments: "LearningAdjustments | None" = None) -> None:
+        self._learning_adjustments = learning_adjustments
+
     def match_snapshot(
         self,
         snapshot: SignalSnapshotResult,
@@ -152,6 +158,7 @@ class StrategyMatcher:
                 continue
             score = _apply_insider_modifier(score, snapshot)
             score = _apply_social_macro_modifier(score, snapshot)
+            score = self._apply_learning_factor_modifier(score, definition)
 
             rejection_reason = None
             selection_reason = "deterministic PR02 signals matched strategy"
@@ -267,6 +274,12 @@ class StrategyMatcher:
             strategy_lifecycle_status=definition.lifecycle_status,
             strategy_source=definition.source,
         )
+
+    def _apply_learning_factor_modifier(self, score: float, definition: StrategyDefinitionRecord) -> float:
+        if self._learning_adjustments is None:
+            return score
+        multiplier = self._learning_adjustments.strategy_score_multiplier.get(definition.strategy_id, 1.0)
+        return _clamp(score * multiplier)
 
 
 def create_strategy_run(

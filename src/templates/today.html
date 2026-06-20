@@ -1003,6 +1003,37 @@
         </div>
         {% else %}<p class="detail-muted quiet-empty">No active learning factors.</p>{% endif %}
       </section>
+      <section class="surface-block">
+        <div class="surface-block-head">
+          <div class="section-label">Loop Observability</div>
+          <span class="surface-block-count">{{ learning_strategies.observability.funnel | length }}</span>
+        </div>
+        <div class="surface-summary-row">
+          {% for row in learning_strategies.observability.funnel %}
+          <article class="summary-tile">
+            <span class="metric-label">{{ row.label }}</span>
+            <strong>{{ row.count }}</strong>
+          </article>
+          {% endfor %}
+        </div>
+        <div class="surface-summary-row">
+          {% for row in learning_strategies.observability.promotion_breakdown %}
+          <article class="summary-tile">
+            <span class="metric-label">{{ row.label }} Promotions</span>
+            <strong>{{ row.count }}</strong>
+          </article>
+          {% endfor %}
+        </div>
+        <div class="section-label">Today Weight Inputs</div>
+        {% if learning_strategies.observability.weight_inputs %}
+        <div class="surface-table-wrap">
+          <table class="compact-table">
+            <thead><tr><th>Factor</th><th>Scope</th><th>Effect</th></tr></thead>
+            <tbody>{% for row in learning_strategies.observability.weight_inputs %}<tr><td>{{ row.title }}</td><td>{{ row.scope_label }}</td><td>{{ row.effect_summary }}</td></tr>{% endfor %}</tbody>
+          </table>
+        </div>
+        {% else %}<p class="detail-muted quiet-empty">No active learning-factor weight inputs recorded.</p>{% endif %}
+      </section>
     </section>
 
     {% else %}

@@ -257,6 +257,12 @@ class StrategyProposal(Base):
         nullable=True,
         index=True,
     )
+    daily_reflection_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("daily_reflections.daily_reflection_id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     proposal_status = Column(String(32), nullable=False, index=True)
     proposed_strategy_id = Column(String(64), nullable=False, index=True)
     display_name = Column(String(128), nullable=False)
@@ -276,6 +282,7 @@ class StrategyProposal(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     prompt_run = relationship("LlmPromptRun")
+    daily_reflection = relationship("DailyReflection")
     evaluation_results = relationship("StrategyEvaluationResult", back_populates="strategy_proposal")
 
     __table_args__ = (

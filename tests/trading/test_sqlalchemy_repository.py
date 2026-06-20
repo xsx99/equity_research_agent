@@ -8,6 +8,8 @@ from typing import Any
 
 from src.db.models.trading import (
     CalendarEvent,
+    DailyReflection,
+    LearningFactor,
     ManualTickerRequest,
     MacroSnapshot,
     OptionStrategyLeg,
@@ -33,6 +35,7 @@ from src.trading.risk.hedges import RiskHedgeDecisionRecord
 from src.trading.risk.options import OptionRiskSnapshotRecord
 from src.trading.options.strategy import OptionStrategyDecisionRecord, OptionStrategyLegRecord
 from src.trading.portfolio.state import PortfolioSnapshot, StockPosition
+from src.trading.post_close.reflection import LearningFactorRecord
 from src.trading.repositories.sqlalchemy import SqlAlchemyTradingRepository, _trading_decision_payload
 from src.trading.workflows.paper_execution import PaperExecutionWorkflow
 from src.trading.manual_review.requests import ManualTickerRequestService
@@ -1113,3 +1116,86 @@ def test_load_intraday_request_contexts_includes_option_execution_metadata():
     assert context.metadata_json["option_strategy"]["option_strategy_type"] == "long_put"
     assert context.metadata_json["option_strategy_type"] == "long_put"
     assert context.metadata_json["paper_option_position_id"] == expected_position_id
+
+
+def test_sqlalchemy_repository_loads_active_and_shadow_learning_factors():
+    now = datetime(2026, 6, 5, 15, 30, tzinfo=timezone.utc)
+    reflection_id = uuid.uuid4()
+    session = _FakeSession()
+    repository = SqlAlchemyTradingRepository(session)
+    session.rows_by_type[DailyReflection] = [
+        SimpleNamespace(
+            daily_reflection_id=reflection_id,
+            trade_date=now.date(),
+            status="succeeded",
+            portfolio_summary_json={},
+            reflection_json={},
+            strategy_proposal_hints_json=[],
+            metadata_json={},
+            created_at=now,
+        )
+    ]
+    session.rows_by_type[LearningFactor] = [
+        SimpleNamespace(
+            learning_factor_id=uuid.uuid4(),
+            factor_key="lf-active",
+            daily_reflection_id=reflection_id,
+            trade_date=now.date(),
+            title="Raise score",
+            factor_type="candidate_filter",
+            scope="strategy",
+            status="active",
+            strategy_id="relative_strength_rotation_v1",
+            condition="relative_volume > 1.5",
+            recommendation="Favor the setup.",
+            confidence=Decimal("0.72"),
+            activation_policy="shadow_promoted",
+            effect_tags_json=["increase_score"],
+            evidence_json=["worked recently"],
+            metadata_json={},
+            created_at=now,
+        ),
+        SimpleNamespace(
+            learning_factor_id=uuid.uuid4(),
+            factor_key="lf-shadow",
+            daily_reflection_id=reflection_id,
+            trade_date=now.date(),
+            title="Reduce exposure",
+            factor_type="risk_control",
+            scope="risk",
+            status="shadow",
+            strategy_id=None,
+            condition="event cluster",
+            recommendation="Observe for now.",
+            confidence=Decimal("0.61"),
+            activation_policy="shadow",
+            effect_tags_json=["reduce_exposure"],
+            evidence_json=["one eventful session"],
+            metadata_json={},
+            created_at=now,
+        ),
+        SimpleNamespace(
+            learning_factor_id=uuid.uuid4(),
+            factor_key="lf-candidate",
+            daily_reflection_id=reflection_id,
+            trade_date=now.date(),
+            title="Ignore",
+            factor_type="candidate_filter",
+            scope="strategy",
+            status="candidate",
+            strategy_id="relative_strength_rotation_v1",
+            condition="unused",
+            recommendation="Should not load.",
+            confidence=Decimal("0.55"),
+            activation_policy="candidate",
+            effect_tags_json=[],
+            evidence_json=[],
+            metadata_json={},
+            created_at=now,
+        ),
+    ]
+
+    rows = repository.load_active_learning_factors()
+
+    assert [row.factor_key for row in rows] == ["lf-active", "lf-shadow"]
+    assert all(isinstance(row, LearningFactorRecord) for row in rows)

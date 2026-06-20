@@ -154,6 +154,13 @@ class SQLAlchemyTradingRepository:
             is_active=bool(row.is_active),
         )
 
+    def load_active_learning_factors(self) -> list[LearningFactorRecord]:
+        return [
+            _learning_factor_record(row)
+            for row in self.session.query(LearningFactor).all()
+            if row.status in {"active", "shadow"}
+        ]
+
     def save_macro_snapshot(self, snapshot: MacroSnapshotRecord) -> None:
         row = None
         natural_key = (snapshot.trade_date, snapshot.snapshot_time, snapshot.source_set_key)
@@ -379,6 +386,7 @@ class SQLAlchemyTradingRepository:
             strategy_proposal_id=_to_uuid(proposal.strategy_proposal_id),
             trade_date=proposal.trade_date,
             prompt_run_id=None,
+            daily_reflection_id=_to_uuid_or_none(proposal.source_daily_reflection_id),
             proposal_status=proposal.proposal_status,
             proposed_strategy_id=proposal.proposed_strategy_id,
             display_name=proposal.display_name,

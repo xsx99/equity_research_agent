@@ -377,20 +377,6 @@ class InMemoryTradingRepository:
         if versioned not in existing:
             self.llm_prompt_templates.append(template)
 
-
-def _portfolio_event_risk_assessment_key(assessment: PortfolioEventRiskAssessmentRecord) -> str:
-    if assessment.portfolio_event_risk_assessment_id:
-        return assessment.portfolio_event_risk_assessment_id
-    return "|".join(
-        (
-            assessment.calendar_event_id or "synthetic",
-            assessment.portfolio_risk_snapshot_id or "no_snapshot",
-            assessment.ticker,
-            assessment.risk_source,
-            assessment.available_for_decision_at.isoformat() if assessment.available_for_decision_at else "na",
-        )
-    )
-
     def save_prompt_run(self, prompt_run: object) -> None:
         self.llm_prompt_runs.append(prompt_run)
 
@@ -491,3 +477,17 @@ def _portfolio_event_risk_assessment_key(assessment: PortfolioEventRiskAssessmen
 
     def save_strategy_evaluation_result(self, result: "StrategyEvaluationResultRecord") -> None:
         self.strategy_evaluation_results.append(result)
+
+
+def _portfolio_event_risk_assessment_key(assessment: PortfolioEventRiskAssessmentRecord) -> str:
+    if assessment.portfolio_event_risk_assessment_id:
+        return assessment.portfolio_event_risk_assessment_id
+    return "|".join(
+        (
+            assessment.calendar_event_id or "synthetic",
+            assessment.portfolio_risk_snapshot_id or "no_snapshot",
+            assessment.ticker,
+            assessment.risk_source,
+            assessment.available_for_decision_at.isoformat() if assessment.available_for_decision_at else "na",
+        )
+    )

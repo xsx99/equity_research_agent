@@ -35,6 +35,8 @@ from src.db.models.trading import (
     RiskFactorExposure,
     RiskHedgeDecision,
     SignalSnapshot,
+    StrategyDefinition,
+    StrategyEvaluationResult,
     StrategyProposal,
     ThemeTaxonomy,
     TickerRelationship,
@@ -62,6 +64,7 @@ from src.web.presenters.today_copy import (
     trade_identity_label,
 )
 from src.web.presenters.today_candidates import build_today_candidates_view
+from src.web.presenters.today_learning_strategies import build_today_learning_strategies
 from src.web.presenters.today_overview import build_today_overview
 from src.web.presenters.today_risk_macro import build_today_risk_macro_payload
 from src.web.presenters.today_workspace import build_ticker_workspace
@@ -325,12 +328,14 @@ def load_today_dashboard(
         "ticker_workspace": ticker_workspace,
         "risk_macro": risk_macro,
         "candidates": candidates,
-        "learning_strategies": {
-            "reflection": _serialize_reflection(latest_reflection),
-            "learning_factors": _load_learning_factors(session),
-            "strategy_performance": _load_strategy_performance(session),
-            "strategy_proposals": _load_strategy_proposals(session),
-        },
+        "learning_strategies": build_today_learning_strategies(
+            reflection=_serialize_reflection(latest_reflection),
+            learning_factors=_load_learning_factors(session),
+            strategy_performance=_load_strategy_performance(session),
+            strategy_proposals=_load_strategy_proposals(session),
+            strategy_definitions=_load_strategy_definitions(session),
+            strategy_evaluation_results=_load_strategy_evaluation_results(session),
+        ),
         "ops_cost": {
             "llm_usage": _load_llm_usage(session),
             "provider_usage": (),
@@ -1034,9 +1039,11 @@ def _load_learning_factors(session: Any) -> tuple[dict[str, Any], ...]:
     rows = session.query(LearningFactor).order_by(LearningFactor.created_at.desc()).limit(20).all()
     return tuple(
         {
+            "factor_key": row.factor_key,
             "title": row.title,
             "status": row.status,
             "scope": row.scope,
+            "effect_tags": tuple(row.effect_tags_json or ()),
             "status_label": generic_status_label(row.status),
             "scope_label": scope_label(row.scope),
         }
@@ -1071,6 +1078,44 @@ def _load_strategy_proposals(session: Any) -> tuple[dict[str, Any], ...]:
             "proposed_strategy_id": row.proposed_strategy_id,
             "proposal_status": row.proposal_status,
             "proposal_status_label": generic_status_label(row.proposal_status),
+        }
+        for row in rows
+    )
+
+
+def _load_strategy_definitions(session: Any) -> tuple[dict[str, Any], ...]:
+    rows = (
+        session.query(StrategyDefinition)
+        .filter(StrategyDefinition.source == "reflection_learning")
+        .order_by(StrategyDefinition.created_at.desc())
+        .limit(20)
+        .all()
+    )
+    return tuple(
+        {
+            "strategy_id": row.strategy_id,
+            "lifecycle_status": row.lifecycle_status,
+            "lifecycle_status_label": generic_status_label(row.lifecycle_status),
+            "source": row.source,
+        }
+        for row in rows
+    )
+
+
+def _load_strategy_evaluation_results(session: Any) -> tuple[dict[str, Any], ...]:
+    rows = (
+        session.query(StrategyEvaluationResult)
+        .order_by(StrategyEvaluationResult.created_at.desc())
+        .limit(20)
+        .all()
+    )
+    return tuple(
+        {
+            "evaluation_status": row.evaluation_status,
+            "evaluation_status_label": generic_status_label(row.evaluation_status),
+            "new_lifecycle_status": row.new_lifecycle_status,
+            "new_lifecycle_status_label": generic_status_label(row.new_lifecycle_status),
+            "strategy_id": row.strategy_id,
         }
         for row in rows
     )

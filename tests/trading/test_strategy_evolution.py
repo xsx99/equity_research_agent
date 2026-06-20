@@ -187,6 +187,7 @@ def test_strategy_evolution_pipeline_creates_shadow_strategy_from_unique_proposa
     assert len(result.strategy_proposals) == 1
     assert result.strategy_proposals[0].proposal_status == "accepted"
     assert result.strategy_proposals[0].proposed_lifecycle_status == "shadow"
+    assert result.strategy_proposals[0].source_daily_reflection_id == "reflection-1"
     assert len(result.strategy_definitions) == 1
     assert result.strategy_definitions[0].strategy_id == "post_gap_vwap_reclaim_v1"
     assert result.strategy_definitions[0].lifecycle_status == "shadow"
@@ -252,6 +253,7 @@ def test_strategy_evolution_pipeline_rejects_duplicates_and_persists_failed_prop
 
     assert duplicate_result.strategy_proposals[0].proposal_status == "duplicate_rejected"
     assert duplicate_result.strategy_proposals[0].duplicate_of_strategy_id == "gap_and_go_v1"
+    assert duplicate_result.strategy_proposals[0].source_daily_reflection_id == "reflection-1"
     assert duplicate_result.strategy_definitions == ()
 
     failed_pipeline = StrategyEvolutionPipeline(
@@ -264,4 +266,5 @@ def test_strategy_evolution_pipeline_rejects_duplicates_and_persists_failed_prop
     failed_result = failed_pipeline.run(request=_request())
 
     assert failed_result.strategy_proposals[0].proposal_status == "proposal_failed"
+    assert failed_result.strategy_proposals[0].source_daily_reflection_id == "reflection-1"
     assert failed_result.strategy_definitions == ()
