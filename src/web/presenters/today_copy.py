@@ -4,6 +4,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+_SMOKE_DISPLAY_LABEL = "Live pre-open verification"
+
 _STRATEGY_LABELS = {
     "direct_negative_catalyst": "Negative catalyst detected",
     "valuation_repair_quality_software_v1": "Valuation repair setup",
@@ -130,9 +132,19 @@ _INLINE_LABELS = {
 }
 
 _INLINE_IDENTIFIER_PATTERN = re.compile(r"\b[a-z]+(?:_[a-z]+)+\b")
+_SMOKE_COPY_PATTERN = re.compile(
+    r"lpsmoke(?:[_\s-]?\d+)?|codex live preopen (?:verification|order smoke(?::[A-Za-z0-9._-]+)?)",
+    re.IGNORECASE,
+)
+_DEGRADED_LINKAGE_PATTERN = re.compile(
+    r"backend audit linkage has not reached a signal snapshot yet\.?",
+    re.IGNORECASE,
+)
 
 
 def strategy_label(value: Any) -> str:
+    if is_internal_smoke_text(value):
+        return _SMOKE_DISPLAY_LABEL
     return _mapped_or_humanized(value, _STRATEGY_LABELS)
 
 
@@ -228,7 +240,19 @@ def operator_text(value: Any) -> str:
     text = str(value or "").strip()
     if not text:
         return ""
+    if _DEGRADED_LINKAGE_PATTERN.fullmatch(text):
+        return "Signal details not available yet."
+    if _SMOKE_COPY_PATTERN.fullmatch(text):
+        return _SMOKE_DISPLAY_LABEL
+    text = _SMOKE_COPY_PATTERN.sub(_SMOKE_DISPLAY_LABEL, text)
     return _INLINE_IDENTIFIER_PATTERN.sub(_replace_inline_identifier, text)
+
+
+def is_internal_smoke_text(value: Any) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return False
+    return _SMOKE_COPY_PATTERN.search(text) is not None
 
 
 def _mapped_or_humanized(value: Any, mapping: dict[str, str]) -> str:

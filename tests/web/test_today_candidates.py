@@ -132,8 +132,79 @@ def test_build_today_candidates_view_separates_manual_review_queue_and_action_qu
 
     assert [row["ticker"] for row in payload["manual_review_queue"]] == ["TSLA", "META"]
     assert payload["manual_review_queue"][0]["linked_detail_url"] == "/today?tab=trades&ticker=TSLA&detail_tab=decisions"
-    assert payload["manual_review_queue"][1]["degraded_linkage_copy"] == "Backend audit linkage has not reached a signal snapshot yet."
+    assert payload["manual_review_queue"][1]["degraded_linkage_copy"] == "Signal details not available yet."
     assert [row["ticker"] for row in payload["action_queue"]] == ["TSLA", "NVDA", "META"]
+
+
+def test_build_today_candidates_view_filters_smoke_rows_and_uses_plain_linkage_copy():
+    payload = build_today_candidates_view(
+        rows=(
+            {
+                "ticker": "NVDA",
+                "decision_time": "2026-06-16T13:10:00Z",
+                "current_outcome_label": "Ready for review",
+                "operator_summary": "codex live preopen verification",
+                "trade_identity_label": "Action Now",
+                "strategy_label": "Lpsmoke 181857",
+                "strategy_match": "lpsmoke_181857",
+                "candidate_score": 0.88,
+                "detail_internal_ids": {"strategy_match": "lpsmoke_181857"},
+            },
+            {
+                "ticker": "AAPL",
+                "decision_time": "2026-06-16T13:09:00Z",
+                "current_outcome_label": "Ready for review",
+                "operator_summary": "Momentum setup with clean catalyst.",
+                "trade_identity_label": "Action Now",
+                "strategy_label": "Gap continuation",
+                "strategy_match": "gap_continuation_v1",
+                "candidate_score": 0.84,
+                "detail_internal_ids": {"strategy_match": "gap_continuation_v1"},
+            },
+        ),
+        manual_requests=(
+            {
+                "manual_ticker_request_id": "request-1",
+                "ticker": "NVDA",
+                "reason": "codex live preopen order smoke:NVDA",
+                "mode_label": "Review Only",
+                "status_label": "Pinned",
+                "operator_summary": "Review Only because codex live preopen order smoke:NVDA.",
+                "last_evaluated_label": None,
+                "linked_detail_url": None,
+                "decision_state_label": "Pending evaluation",
+                "execution_state_label": "Unlinked",
+                "latest_block_reason": None,
+                "dismiss_form_action": "/today/manual-requests/request-1/dismiss",
+                "degraded_linkage_copy": None,
+            },
+            {
+                "manual_ticker_request_id": "request-2",
+                "ticker": "TSLA",
+                "reason": "post-event review",
+                "mode_label": "Review Only",
+                "status_label": "Pinned",
+                "operator_summary": "Review Only because post-event review.",
+                "last_evaluated_label": None,
+                "linked_detail_url": None,
+                "decision_state_label": "Pending evaluation",
+                "execution_state_label": "Unlinked",
+                "latest_block_reason": None,
+                "dismiss_form_action": "/today/manual-requests/request-2/dismiss",
+                "degraded_linkage_copy": None,
+            },
+        ),
+        themes=(),
+        active_universe_filter=None,
+        portfolio_intents=(),
+        relationships=(),
+        peer_baskets=(),
+    )
+
+    assert [row["ticker"] for row in payload["decision_readout"]] == ["AAPL"]
+    assert [row["ticker"] for row in payload["manual_review_queue"]] == ["TSLA"]
+    assert payload["manual_review_queue"][0]["degraded_linkage_copy"] == "Signal details not available yet."
+    assert [row["ticker"] for row in payload["action_queue"]] == ["AAPL", "TSLA"]
 
 
 def test_build_today_candidates_view_populates_signal_bullets_from_core_signal_evidence():

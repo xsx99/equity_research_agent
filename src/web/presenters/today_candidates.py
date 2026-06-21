@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.web.presenters.today_copy import operator_text
+from src.web.presenters.today_copy import is_internal_smoke_text, operator_text, strategy_label
 
 
 def build_today_candidates_view(
@@ -16,8 +16,10 @@ def build_today_candidates_view(
     relationships: tuple[dict[str, Any], ...],
     peer_baskets: tuple[dict[str, Any], ...],
 ) -> dict[str, Any]:
-    decision_readout = _group_candidate_rows(rows)
-    manual_review_queue = _normalize_manual_review_rows(manual_requests)
+    decision_readout = _group_candidate_rows(tuple(row for row in rows if not _is_smoke_candidate_row(row)))
+    manual_review_queue = _normalize_manual_review_rows(
+        tuple(row for row in manual_requests if not _is_smoke_manual_review_row(row))
+    )
     action_queue = _build_action_queue(decision_readout, manual_review_queue)
     return {
         "summary": {
@@ -53,9 +55,9 @@ def _group_candidate_rows(rows: tuple[dict[str, Any], ...]) -> tuple[dict[str, A
             {
                 "ticker": ticker,
                 "latest_outcome": primary.get("current_outcome_label") or primary.get("result_status") or "Unavailable",
-                "primary_reason": primary.get("operator_summary") or "No material update.",
+                "primary_reason": operator_text(primary.get("operator_summary")) or "No material update.",
                 "trade_identity_label": primary.get("trade_identity_label"),
-                "strategy_label": primary.get("strategy_label") or primary.get("strategy_match") or "Unavailable",
+                "strategy_label": _display_strategy_label(primary),
                 "decision_time": primary.get("decision_time"),
                 "selection_reason": _clean_copy(primary.get("selection_reason")),
                 "signal_bullets": _signal_bullets(primary.get("core_signal_evidence")),
@@ -64,8 +66,8 @@ def _group_candidate_rows(rows: tuple[dict[str, Any], ...]) -> tuple[dict[str, A
                 "duplicate_count": len(sorted_items),
                 "alternatives": tuple(
                     {
-                        "strategy_label": item.get("strategy_label") or item.get("strategy_match") or "Unavailable",
-                        "operator_summary": item.get("operator_summary") or "No material update.",
+                        "strategy_label": _display_strategy_label(item),
+                        "operator_summary": operator_text(item.get("operator_summary")) or "No material update.",
                         "trade_identity_label": item.get("trade_identity_label"),
                         "candidate_score": item.get("candidate_score"),
                     }
@@ -84,12 +86,14 @@ def _group_candidate_rows(rows: tuple[dict[str, Any], ...]) -> tuple[dict[str, A
 def _normalize_manual_review_rows(rows: tuple[dict[str, Any], ...]) -> tuple[dict[str, Any], ...]:
     normalized_rows = []
     for row in rows:
-        degraded_copy = row.get("degraded_linkage_copy")
+        degraded_copy = _clean_linkage_copy(row.get("degraded_linkage_copy"))
         if not degraded_copy and not row.get("linked_detail_url"):
-            degraded_copy = "Backend audit linkage has not reached a signal snapshot yet."
+            degraded_copy = "Signal details not available yet."
         normalized_rows.append(
             {
                 **row,
+                "reason": operator_text(row.get("reason")),
+                "operator_summary": operator_text(row.get("operator_summary")) or operator_text(row.get("reason")),
                 "last_evaluated_label": row.get("last_evaluated_label") or str(row.get("last_evaluated_at") or "").strip() or None,
                 "decision_state_label": row.get("decision_state_label")
                 or _humanize(row.get("latest_decision_action"))
@@ -169,6 +173,29 @@ def _humanize(value: Any) -> str | None:
     if not text:
         return None
     return " ".join(part.capitalize() for part in text.replace("_", " ").replace("-", " ").split())
+
+
+def _is_smoke_candidate_row(row: dict[str, Any]) -> bool:
+    return any(
+        is_internal_smoke_text(row.get(key))
+        for key in ("strategy_label", "strategy_match", "selection_source", "operator_summary", "selection_reason")
+    )
+
+
+def _is_smoke_manual_review_row(row: dict[str, Any]) -> bool:
+    return any(
+        is_internal_smoke_text(row.get(key))
+        for key in ("reason", "operator_summary", "degraded_linkage_copy")
+    )
+
+
+def _display_strategy_label(row: dict[str, Any]) -> str:
+    return strategy_label(row.get("strategy_label") or row.get("strategy_match")) or "Unavailable"
+
+
+def _clean_linkage_copy(value: Any) -> str | None:
+    cleaned = operator_text(value)
+    return cleaned or None
 
 
 def _signal_bullets(evidence: dict[str, Any] | Any) -> tuple[str, ...]:
