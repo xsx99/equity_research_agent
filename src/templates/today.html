@@ -925,6 +925,10 @@
                 <strong>{{ row.strategy_label or row.strategy_match }}</strong>
               </div>
               <div>
+                <span class="metric-label">Confidence</span>
+                <strong>{{ fmt_number(row.confidence) if row.confidence is not none else "—" }}</strong>
+              </div>
+              <div>
                 <span class="metric-label">Duplicate Rows</span>
                 <strong>{{ row.duplicate_count or 1 }}</strong>
               </div>
@@ -954,6 +958,9 @@
                 <div>
                   <span class="metric-label">{{ alt.strategy_label }}</span>
                   <strong>{{ alt.trade_identity_label or "Alternative" }}</strong>
+                  {% if alt.confidence is not none %}
+                  <div class="detail-muted">Confidence {{ fmt_number(alt.confidence) }}</div>
+                  {% endif %}
                   <div class="detail-muted">{{ alt.operator_summary }}</div>
                 </div>
                 {% endfor %}

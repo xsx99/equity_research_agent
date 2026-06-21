@@ -1007,6 +1007,7 @@ class TestTodayDashboard:
                 "current_outcome_label": "Ready for review",
                 "trade_identity_label": "Action Now",
                 "strategy_label": "Gap continuation",
+                "confidence": 0.91,
                 "selection_reason": "relative strength and catalyst quality remain aligned",
                 "signal_bullets": (
                     "Technical: 20d return 8.26%, relative volume 0.78.",
@@ -1017,9 +1018,21 @@ class TestTodayDashboard:
                 "invalidators": ("Invalidators: loses VWAP.",),
                 "duplicate_count": 4,
                 "alternatives": (
-                    {"strategy_label": "Pullback reclaim", "operator_summary": "Alternative pullback setup."},
-                    {"strategy_label": "RS breakout", "operator_summary": "Secondary continuation lens."},
-                    {"strategy_label": "Reversal try", "operator_summary": "Lower-ranked reversal setup."},
+                    {
+                        "strategy_label": "Pullback reclaim",
+                        "operator_summary": "Alternative pullback setup.",
+                        "confidence": 0.77,
+                    },
+                    {
+                        "strategy_label": "RS breakout",
+                        "operator_summary": "Secondary continuation lens.",
+                        "confidence": 0.73,
+                    },
+                    {
+                        "strategy_label": "Reversal try",
+                        "operator_summary": "Lower-ranked reversal setup.",
+                        "confidence": 0.41,
+                    },
                 ),
                 "detail_internal_ids": {"strategy_match": "gap_continuation_v1"},
             },
@@ -1039,12 +1052,15 @@ class TestTodayDashboard:
         assert "Candidate Decisions" in response.text
         assert "Momentum setup with clean catalyst." in response.text
         assert "Signals Used" in response.text
+        assert "Confidence" in response.text
+        assert "0.91" in response.text
         assert "relative strength and catalyst quality remain aligned" in response.text
         assert "Technical: 20d return 8.26%, relative volume 0.78." in response.text
         assert "Risk tags: gap risk, momentum." in response.text
         assert "Invalidators: loses VWAP." in response.text
         assert "Strategy alternatives" in response.text
         assert "Pullback reclaim" in response.text
+        assert "0.77" in response.text
         assert "Awaiting fresh event-risk snapshot" in response.text
         assert "Advanced Universe Context" not in response.text
         assert "Source ID:" not in response.text
@@ -1059,6 +1075,94 @@ class TestTodayDashboard:
         assert 'data-testid="candidate-group-AAPL"' in response.text
         assert "trades-canvas" not in response.text
         assert "Signal Summary" not in response.text
+
+    def test_load_today_dashboard_prefers_selected_audit_detail_confidence_over_workspace_zero(self):
+        from src.web.routers.today import load_today_dashboard
+
+        session = _query_stub_session()
+        trade_rows = [
+            {
+                "trading_decision_id": "decision-nvda",
+                "decision_time": datetime(2026, 6, 3, 23, 25, 34, tzinfo=timezone.utc),
+                "created_at": datetime(2026, 6, 3, 23, 25, 34, tzinfo=timezone.utc),
+                "ticker": "NVDA",
+                "decision": "enter_long",
+                "instrument_type": "stock",
+                "trade_identity": "tactical_stock_trade",
+                "selected_strategy_id": "breakout_v1",
+                "expression_bucket_id": "long_stock",
+                "approved_weight": Decimal("0.05"),
+                "confidence": Decimal("0.0"),
+                "risk_status": "approved",
+                "order_status": "accepted",
+                "material_signal_change": False,
+            }
+        ]
+        selected_detail = {
+            "trading_decision_id": "decision-nvda",
+            "ticker": "NVDA",
+            "decision": "enter_long",
+            "decision_time": datetime(2026, 6, 3, 23, 25, 34, tzinfo=timezone.utc),
+            "strategy_id": "breakout_v1",
+            "expression_bucket_id": "long_stock",
+            "trade_identity": "tactical_stock_trade",
+            "confidence": Decimal("0.74"),
+            "thesis": "Breakout remains valid after the open.",
+            "key_drivers": [],
+            "counterarguments": [],
+            "invalidators": [],
+            "metadata_json": {},
+            "risk_decision": None,
+            "signal_snapshot": {},
+            "strategy_scores": (),
+            "outcomes": (),
+        }
+
+        with ExitStack() as stack:
+            stack.enter_context(patch("src.web.routers.today._load_trade_rows", return_value=trade_rows))
+            stack.enter_context(patch("src.web.routers.today._load_trade_detail", return_value=selected_detail))
+            stack.enter_context(patch("src.web.routers.today._load_positions", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_option_positions", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_recent_closed_positions", return_value=()))
+            stack.enter_context(
+                patch(
+                    "src.web.routers.today._load_risk_by_ticker",
+                    return_value={"NVDA": {"status": "approved", "reason": "within_limits"}},
+                )
+            )
+            stack.enter_context(
+                patch(
+                    "src.web.routers.today._load_signal_history_by_ticker",
+                    return_value={"NVDA": {"technical": [], "summary": [], "timeline": []}},
+                )
+            )
+            stack.enter_context(patch("src.web.routers.today._load_news_by_ticker", return_value={}))
+            stack.enter_context(patch("src.web.routers.today._load_fundamentals_by_ticker", return_value={}))
+            stack.enter_context(patch("src.web.routers.today._load_candidate_rows", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_manual_requests", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_portfolio_intents", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_relationships", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_peer_baskets", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_themes", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_live_alerts", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_material_changes", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_risk_exposures", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_learning_factors", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_strategy_performance", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_strategy_proposals", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_strategy_definitions", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_strategy_evaluation_results", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_llm_usage", return_value=()))
+            dashboard = load_today_dashboard(
+                session,
+                selected_tab="trades",
+                decision_id="decision-nvda",
+                selected_ticker="NVDA",
+            )
+
+        assert (
+            dashboard["ticker_workspace"]["detail"]["latest_conclusion"]["trade_decision"]["confidence"] == Decimal("0.74")
+        )
 
     def test_system_tab_renders_learning_and_ops_modules(self, client):
         payload = _dashboard_payload()
@@ -1714,6 +1818,7 @@ class TestTodayDashboard:
             {
                 "ticker": "UBER",
                 "candidate_score": 0.32,
+                "confidence": 0.32,
                 "decision_time": "2026-06-03T23:25:34+00:00",
                 "selection_source": "direct_negative_catalyst",
                 "why_reviewed_label": "Negative catalyst detected",

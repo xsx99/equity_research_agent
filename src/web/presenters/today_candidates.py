@@ -58,6 +58,7 @@ def _group_candidate_rows(rows: tuple[dict[str, Any], ...]) -> tuple[dict[str, A
                 "primary_reason": operator_text(primary.get("operator_summary")) or "No material update.",
                 "trade_identity_label": primary.get("trade_identity_label"),
                 "strategy_label": _display_strategy_label(primary),
+                "confidence": _candidate_confidence(primary),
                 "decision_time": primary.get("decision_time"),
                 "selection_reason": _clean_copy(primary.get("selection_reason")),
                 "signal_bullets": _signal_bullets(primary.get("core_signal_evidence")),
@@ -70,6 +71,7 @@ def _group_candidate_rows(rows: tuple[dict[str, Any], ...]) -> tuple[dict[str, A
                         "operator_summary": operator_text(item.get("operator_summary")) or "No material update.",
                         "trade_identity_label": item.get("trade_identity_label"),
                         "candidate_score": item.get("candidate_score"),
+                        "confidence": _candidate_confidence(item),
                     }
                     for item in sorted_items[1:]
                 ),
@@ -173,6 +175,16 @@ def _humanize(value: Any) -> str | None:
     if not text:
         return None
     return " ".join(part.capitalize() for part in text.replace("_", " ").replace("-", " ").split())
+
+
+def _candidate_confidence(row: dict[str, Any]) -> float | None:
+    value = row.get("confidence")
+    if value is None:
+        value = row.get("candidate_score")
+    try:
+        return float(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
 
 
 def _is_smoke_candidate_row(row: dict[str, Any]) -> bool:

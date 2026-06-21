@@ -74,6 +74,8 @@ def test_build_today_candidates_view_groups_duplicate_candidate_rows_by_ticker()
     assert payload["decision_readout"][0]["duplicate_count"] == 4
     assert len(payload["decision_readout"][0]["alternatives"]) == 3
     assert payload["decision_readout"][0]["primary_reason"] == "Momentum setup with clean catalyst."
+    assert payload["decision_readout"][0]["confidence"] == 0.91
+    assert payload["decision_readout"][0]["alternatives"][0]["confidence"] == 0.77
 
 
 def test_build_today_candidates_view_separates_manual_review_queue_and_action_queue():
@@ -244,6 +246,7 @@ def test_build_today_candidates_view_populates_signal_bullets_from_core_signal_e
 
     row = payload["decision_readout"][0]
     assert row["selection_reason"] == "relative strength and catalyst quality remain aligned"
+    assert row["confidence"] == 0.91
     assert row["signal_bullets"] == (
         "Technical: 20d return 8.26%, relative volume 0.78.",
         "Fundamental: quality 0.98, revenue growth 0.65, margin trend 0.93.",

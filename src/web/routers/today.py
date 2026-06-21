@@ -1123,6 +1123,7 @@ def _load_candidate_rows(session: Any) -> tuple[dict[str, Any], ...]:
         {
             "ticker": row.ticker,
             "candidate_score": float(row.candidate_score) if row.candidate_score is not None else None,
+            "confidence": float(row.candidate_score) if row.candidate_score is not None else None,
             "decision_time": row.decision_time.isoformat() if row.decision_time is not None else None,
             "selection_source": row.selection_source,
             "why_reviewed_label": strategy_label(row.selection_source),
@@ -1486,7 +1487,7 @@ def _merge_audit_detail_into_workspace_detail(
         trade_decision["expression_bucket_id"] = (
             audit_detail.get("expression_bucket_id") or trade_decision.get("expression_bucket_id")
         )
-    if trade_decision.get("confidence") is None:
+    if audit_detail.get("confidence") is not None:
         trade_decision["confidence"] = audit_detail.get("confidence")
 
     if (
