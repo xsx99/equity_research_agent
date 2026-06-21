@@ -929,6 +929,23 @@
                 <strong>{{ row.duplicate_count or 1 }}</strong>
               </div>
             </div>
+            <div>
+              <span class="metric-label">Signals Used</span>
+              {% if row.selection_reason %}
+              <div class="detail-muted">{{ row.selection_reason }}</div>
+              {% endif %}
+              <ul class="history-card-listing">
+                {% for bullet in row.signal_bullets %}
+                <li>{{ bullet }}</li>
+                {% endfor %}
+                {% for bullet in row.risk_tags %}
+                <li>{{ bullet }}</li>
+                {% endfor %}
+                {% for bullet in row.invalidators %}
+                <li>{{ bullet }}</li>
+                {% endfor %}
+              </ul>
+            </div>
             {% if row.alternatives %}
             <details>
               <summary>Strategy alternatives</summary>

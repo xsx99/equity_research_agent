@@ -1003,6 +1003,14 @@ class TestTodayDashboard:
                 "current_outcome_label": "Ready for review",
                 "trade_identity_label": "Action Now",
                 "strategy_label": "Gap continuation",
+                "selection_reason": "relative strength and catalyst quality remain aligned",
+                "signal_bullets": (
+                    "Technical: 20d return 8.26%, relative volume 0.78.",
+                    "Fundamental: quality 0.98, revenue growth 0.65, margin trend 0.93.",
+                    "News: sentiment positive, 2 high-signal items / 24h.",
+                ),
+                "risk_tags": ("Risk tags: gap risk, momentum.",),
+                "invalidators": ("Invalidators: loses VWAP.",),
                 "duplicate_count": 4,
                 "alternatives": (
                     {"strategy_label": "Pullback reclaim", "operator_summary": "Alternative pullback setup."},
@@ -1026,6 +1034,11 @@ class TestTodayDashboard:
         assert "Still on watch" in response.text
         assert "Candidate Decisions" in response.text
         assert "Momentum setup with clean catalyst." in response.text
+        assert "Signals Used" in response.text
+        assert "relative strength and catalyst quality remain aligned" in response.text
+        assert "Technical: 20d return 8.26%, relative volume 0.78." in response.text
+        assert "Risk tags: gap risk, momentum." in response.text
+        assert "Invalidators: loses VWAP." in response.text
         assert "Strategy alternatives" in response.text
         assert "Pullback reclaim" in response.text
         assert "Awaiting fresh event-risk snapshot" in response.text
@@ -1694,6 +1707,8 @@ class TestTodayDashboard:
         assert rows == (
             {
                 "ticker": "UBER",
+                "candidate_score": 0.32,
+                "decision_time": "2026-06-03T23:25:34+00:00",
                 "selection_source": "direct_negative_catalyst",
                 "why_reviewed_label": "Negative catalyst detected",
                 "result_status": "blocked_by_missing_data",
@@ -1702,6 +1717,11 @@ class TestTodayDashboard:
                 "trade_identity_label": "Watch Only",
                 "strategy_match": "valuation_repair_quality_software_v1",
                 "strategy_label": "Valuation repair setup",
+                "core_signal_evidence": {},
+                "selection_reason": None,
+                "risk_tags": [],
+                "invalidators": [],
+                "missing_required_signals": [],
                 "operator_summary": "Negative catalyst detected. Blocked: required data unavailable. Watch Only.",
                 "detail_internal_ids": {
                     "selection_source": "direct_negative_catalyst",

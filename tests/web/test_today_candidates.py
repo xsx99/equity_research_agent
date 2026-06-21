@@ -134,3 +134,49 @@ def test_build_today_candidates_view_separates_manual_review_queue_and_action_qu
     assert payload["manual_review_queue"][0]["linked_detail_url"] == "/today?tab=trades&ticker=TSLA&detail_tab=decisions"
     assert payload["manual_review_queue"][1]["degraded_linkage_copy"] == "Backend audit linkage has not reached a signal snapshot yet."
     assert [row["ticker"] for row in payload["action_queue"]] == ["TSLA", "NVDA", "META"]
+
+
+def test_build_today_candidates_view_populates_signal_bullets_from_core_signal_evidence():
+    payload = build_today_candidates_view(
+        rows=(
+            {
+                "ticker": "AAPL",
+                "decision_time": "2026-06-16T13:35:00Z",
+                "current_outcome_label": "Ready for review",
+                "operator_summary": "Momentum setup with clean catalyst.",
+                "trade_identity_label": "Action Now",
+                "strategy_label": "Gap continuation",
+                "strategy_match": "gap_continuation_v1",
+                "candidate_score": 0.91,
+                "selection_reason": "relative strength and catalyst quality remain aligned",
+                "core_signal_evidence": {
+                    "technical.return_20d": 0.0826,
+                    "technical.relative_volume": 0.78,
+                    "fundamental.quality_score": 0.98,
+                    "fundamental.revenue_growth_score": 0.65,
+                    "fundamental.margin_trend_score": 0.93,
+                    "events_news.sentiment_direction": "positive",
+                    "events_news.high_signal_news_count_24h": 2,
+                },
+                "risk_tags": ["gap_risk", "momentum"],
+                "invalidators": ["loses VWAP"],
+                "detail_internal_ids": {"strategy_match": "gap_continuation_v1"},
+            },
+        ),
+        manual_requests=(),
+        themes=(),
+        active_universe_filter=None,
+        portfolio_intents=(),
+        relationships=(),
+        peer_baskets=(),
+    )
+
+    row = payload["decision_readout"][0]
+    assert row["selection_reason"] == "relative strength and catalyst quality remain aligned"
+    assert row["signal_bullets"] == (
+        "Technical: 20d return 8.26%, relative volume 0.78.",
+        "Fundamental: quality 0.98, revenue growth 0.65, margin trend 0.93.",
+        "News: sentiment positive, 2 high-signal items / 24h.",
+    )
+    assert row["risk_tags"] == ("Risk tags: Gap Risk, momentum.",)
+    assert row["invalidators"] == ("Invalidators: loses VWAP.",)

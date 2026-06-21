@@ -1122,6 +1122,8 @@ def _load_candidate_rows(session: Any) -> tuple[dict[str, Any], ...]:
     return tuple(
         {
             "ticker": row.ticker,
+            "candidate_score": float(row.candidate_score) if row.candidate_score is not None else None,
+            "decision_time": row.decision_time.isoformat() if row.decision_time is not None else None,
             "selection_source": row.selection_source,
             "why_reviewed_label": strategy_label(row.selection_source),
             "result_status": _candidate_result_status(row),
@@ -1132,6 +1134,11 @@ def _load_candidate_rows(session: Any) -> tuple[dict[str, Any], ...]:
             ),
             "strategy_match": row.strategy_id,
             "strategy_label": strategy_label(row.strategy_id),
+            "core_signal_evidence": dict(getattr(row, "core_signal_evidence_json", None) or {}),
+            "selection_reason": getattr(row, "selection_reason", None),
+            "risk_tags": list(getattr(row, "risk_tags_json", None) or []),
+            "invalidators": list(getattr(row, "invalidators_json", None) or []),
+            "missing_required_signals": list(getattr(row, "missing_required_signals_json", None) or []),
             "operator_summary": _sentence_join(
                 strategy_label(row.selection_source),
                 candidate_result_label(_candidate_result_status(row)),
