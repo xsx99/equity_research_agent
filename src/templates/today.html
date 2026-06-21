@@ -1039,11 +1039,14 @@
           <div class="section-label">Strategy Performance</div>
           <span class="surface-block-count">{{ system.learning_strategies.strategy_performance | length }}</span>
         </div>
+        <p class="detail-muted">
+          {{ system.learning_strategies.learning_summary_text or "No strategy learning summary available." }}
+        </p>
         {% if system.learning_strategies.strategy_performance %}
         <div class="surface-table-wrap">
           <table class="compact-table">
-            <thead><tr><th>Strategy</th><th>Status</th><th>Win Rate</th><th>Total P&amp;L</th></tr></thead>
-            <tbody>{% for row in system.learning_strategies.strategy_performance %}<tr><td>{{ row.strategy_id }}</td><td>{{ row.lifecycle_status_label or row.lifecycle_status }}</td><td>{{ fmt_number(row.win_rate) }}</td><td>{{ fmt_currency(row.total_pnl) }}</td></tr>{% endfor %}</tbody>
+            <thead><tr><th>Strategy</th><th>Status</th><th>Win Rate</th><th>Total P&amp;L</th><th>Learning Summary</th></tr></thead>
+            <tbody>{% for row in system.learning_strategies.strategy_performance %}<tr><td>{{ row.strategy_id }}</td><td>{{ row.lifecycle_status_label or row.lifecycle_status }}</td><td>{% if row.win_rate is not none %}{{ fmt_number(row.win_rate) }}%{% else %}—{% endif %}</td><td>{{ fmt_currency(row.total_pnl) }}</td><td>{{ row.learning_summary }}</td></tr>{% endfor %}</tbody>
           </table>
         </div>
         {% else %}<p class="detail-muted quiet-empty">No strategy performance records.</p>{% endif %}

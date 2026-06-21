@@ -1296,12 +1296,18 @@ def _load_strategy_performance(session: Any) -> tuple[dict[str, Any], ...]:
     performance = []
     for strategy_id, items in grouped.items():
         alpha_values = [item.alpha for item in items if item.alpha is not None]
+        winning_alpha_values = [alpha for alpha in alpha_values if alpha > 0]
+        win_rate = (
+            (Decimal(len(winning_alpha_values)) / Decimal(len(alpha_values)) * Decimal("100")).quantize(Decimal("0.1"))
+            if alpha_values
+            else None
+        )
         performance.append(
             {
                 "strategy_id": strategy_id,
                 "lifecycle_status": "observed",
                 "lifecycle_status_label": generic_status_label("observed"),
-                "win_rate": None,
+                "win_rate": win_rate,
                 "total_pnl": sum(alpha_values, Decimal("0")) if alpha_values else None,
             }
         )

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from decimal import Decimal
+
 from src.web.presenters.today_learning_strategies import build_today_learning_strategies
 
 
@@ -78,3 +80,45 @@ def test_build_today_learning_strategies_exposes_funnel_and_weight_inputs():
             "effect_summary": "increase score",
         },
     )
+
+
+def test_build_today_learning_strategies_adds_learning_summary_text():
+    payload = build_today_learning_strategies(
+        reflection={"status": "succeeded", "status_label": "Succeeded"},
+        learning_factors=(
+            {
+                "factor_key": "lf-earnings-vol",
+                "title": "Post-earnings volatility mean reversion",
+                "status": "active",
+                "status_label": "Active",
+                "scope": "strategy",
+                "scope_label": "Strategy",
+                "strategy_id": "earnings_drift_v1",
+                "recommendation": "Increase put-spread allocation in elevated-vol regimes.",
+                "confidence": Decimal("0.78"),
+                "effect_tags": ("increase_score",),
+            },
+        ),
+        strategy_performance=(
+            {
+                "strategy_id": "earnings_drift_v1",
+                "lifecycle_status": "active",
+                "lifecycle_status_label": "Active",
+                "win_rate": Decimal("62.0"),
+                "total_pnl": Decimal("3240"),
+            },
+        ),
+        strategy_proposals=(),
+        strategy_definitions=(),
+        strategy_evaluation_results=(),
+    )
+
+    performance_row = payload["strategy_performance"][0]
+    assert performance_row["learning_summary"]
+    assert "62.0% win rate" in performance_row["learning_summary"]
+    assert "Latest learning" in performance_row["learning_summary"]
+    assert "Post-earnings volatility mean reversion" in performance_row["learning_summary"]
+    assert "Increase put-spread allocation in elevated-vol regimes." in performance_row["learning_summary"]
+    assert payload["learning_summary_text"]
+    assert "1 active strategy" in payload["learning_summary_text"]
+    assert "earnings_drift_v1" in payload["learning_summary_text"]

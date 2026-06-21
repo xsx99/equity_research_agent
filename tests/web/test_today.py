@@ -530,6 +530,7 @@ def _dashboard_payload() -> dict:
                 "status_label": "Succeeded",
                 "what_worked": ("Bullish catalyst continuation respected",),
             },
+            "learning_summary_text": "1 active strategy tracked today. top performer: earnings_drift_v1 (+$4,200.00 total P&L). key new learning: Tighten low-volume gap entries (confidence 0.78).",
             "learning_factors": (
                 {
                     "title": "Tighten low-volume gap entries",
@@ -544,8 +545,9 @@ def _dashboard_payload() -> dict:
                     "strategy_id": "earnings_drift_v1",
                     "lifecycle_status": "active",
                     "lifecycle_status_label": "Active",
-                    "win_rate": Decimal("0.58"),
+                    "win_rate": Decimal("58.0"),
                     "total_pnl": Decimal("4200"),
+                    "learning_summary": "earnings_drift_v1 - active, 58.0% win rate (+$4,200.00 total P&L). Latest learning: Tighten low-volume gap entries (confidence 0.78); recommendation: tighten sizing after low-volume opens.",
                 },
             ),
             "strategy_proposals": (
@@ -608,6 +610,7 @@ def _dashboard_payload() -> dict:
                     "status_label": "Succeeded",
                     "what_worked": ("Bullish catalyst continuation respected",),
                 },
+                "learning_summary_text": "1 active strategy tracked today. top performer: earnings_drift_v1 (+$4,200.00 total P&L). key new learning: Tighten low-volume gap entries (confidence 0.78).",
                 "learning_factors": (
                     {
                         "title": "Tighten low-volume gap entries",
@@ -622,8 +625,9 @@ def _dashboard_payload() -> dict:
                         "strategy_id": "earnings_drift_v1",
                         "lifecycle_status": "active",
                         "lifecycle_status_label": "Active",
-                        "win_rate": Decimal("0.58"),
+                        "win_rate": Decimal("58.0"),
                         "total_pnl": Decimal("4200"),
+                        "learning_summary": "earnings_drift_v1 - active, 58.0% win rate (+$4,200.00 total P&L). Latest learning: Tighten low-volume gap entries (confidence 0.78); recommendation: tighten sizing after low-volume opens.",
                     },
                 ),
                 "strategy_proposals": (
@@ -1074,6 +1078,8 @@ class TestTodayDashboard:
         assert "Bullish catalyst continuation respected" in response.text
         assert "Strategy Performance" in response.text
         assert "$4,200.00" in response.text
+        assert "1 active strategy tracked today." in response.text
+        assert "Latest learning: Tighten low-volume gap entries" in response.text
         assert "Tighten low-volume gap entries" in response.text
         assert "Succeeded" in response.text
         assert "Accepted" in response.text
@@ -2315,6 +2321,38 @@ def test_load_today_dashboard_includes_learning_observability():
     assert dashboard["learning_strategies"]["observability"]["funnel"][0]["count"] == 1
     assert dashboard["learning_strategies"]["observability"]["funnel"][4]["count"] == 1
     assert dashboard["learning_strategies"]["observability"]["weight_inputs"][0]["factor_key"] == "lf-risk"
+
+
+def test_load_strategy_performance_computes_win_rate_percentage():
+    from src.web.routers.today import _load_strategy_performance
+
+    session = MagicMock()
+    session.query.return_value.order_by.return_value.all.return_value = [
+        SimpleNamespace(strategy_id="earnings_drift_v1", alpha=Decimal("1.2")),
+        SimpleNamespace(strategy_id="earnings_drift_v1", alpha=Decimal("-0.3")),
+        SimpleNamespace(strategy_id="earnings_drift_v1", alpha=None),
+        SimpleNamespace(strategy_id="gap_reclaim_v1", alpha=Decimal("0.5")),
+        SimpleNamespace(strategy_id="gap_reclaim_v1", alpha=Decimal("0.7")),
+    ]
+
+    performance = _load_strategy_performance(session)
+
+    assert performance == (
+        {
+            "strategy_id": "earnings_drift_v1",
+            "lifecycle_status": "observed",
+            "lifecycle_status_label": "Observed",
+            "win_rate": Decimal("50.0"),
+            "total_pnl": Decimal("0.9"),
+        },
+        {
+            "strategy_id": "gap_reclaim_v1",
+            "lifecycle_status": "observed",
+            "lifecycle_status_label": "Observed",
+            "win_rate": Decimal("100.0"),
+            "total_pnl": Decimal("1.2"),
+        },
+    )
 
 
 @contextmanager
