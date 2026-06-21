@@ -1491,8 +1491,6 @@ def _merge_audit_detail_into_workspace_detail(
     latest_conclusion["trade_decision"] = trade_decision
     latest_conclusion["risk_summary"] = risk_summary
 
-    tabs["raw_json"] = audit_detail
-    risk_tab["raw_json"] = audit_detail.get("risk_decision")
     tabs["risk"] = risk_tab
 
     return {
@@ -1587,19 +1585,13 @@ def _load_risk_by_ticker(session: Any) -> dict[str, dict[str, Any]]:
         ticker = str(row.ticker or "").strip().upper()
         if not ticker or ticker in grouped:
             continue
-        raw_json = {
-            "status": row.status,
-            "reason_code": row.reason_code,
-            "lookahead_risk_source": _risk_decision_lookahead_source(row),
-            "binding_constraint": _risk_decision_binding_constraint(row),
-            "generated_hedge_action": getattr(row, "generated_hedge_action_json", None),
-        }
+        lookahead_risk_source = _risk_decision_lookahead_source(row)
+        generated_hedge_action = getattr(row, "generated_hedge_action_json", None)
         grouped[ticker] = {
             "status": row.status,
             "reason": row.reason_code,
-            "lookahead_risk_source": raw_json["lookahead_risk_source"],
-            "generated_hedge_action": raw_json["generated_hedge_action"],
-            "raw_json": raw_json,
+            "lookahead_risk_source": lookahead_risk_source,
+            "generated_hedge_action": generated_hedge_action,
             "history": [
                 {
                     "time": row.decision_time or row.created_at,

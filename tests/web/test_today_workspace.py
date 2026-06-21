@@ -541,7 +541,7 @@ def test_build_ticker_workspace_surfaces_lookahead_risk_source_and_hedge_overlay
 
     assert risk_summary["lookahead_risk_source"] == "own_event"
     assert risk_summary["hedge_overlay_reason"] == "macro_high_overlay"
-    assert workspace["detail"]["tabs"]["risk"]["raw_json"]["generated_hedge_action"]["reason_code"] == "macro_high_overlay"
+    assert "raw_json" not in workspace["detail"]["tabs"]["risk"]
 
 
 def test_build_ticker_workspace_detail_includes_entry_exit_reason_times_and_pnl():

@@ -768,25 +768,6 @@
         {% endfor %}
         {% else %}<p class="detail-muted quiet-empty">No availability issues recorded.</p>{% endif %}
       </section>
-      <details class="surface-block">
-        <summary>Advanced Risk Audit</summary>
-        <div class="section-label">Binding Constraints</div>
-        {% if risk_macro.binding_constraints %}
-        <ul class="output-list">{% for item in risk_macro.binding_constraints %}<li>{{ item }}</li>{% endfor %}</ul>
-        {% else %}<p class="detail-muted quiet-empty">No binding constraints recorded.</p>{% endif %}
-        <div class="surface-block-head">
-          <div class="section-label">Exposures</div>
-          <span class="surface-block-count">{{ risk_macro.exposures | length }}</span>
-        </div>
-        {% if risk_macro.exposures %}
-        <div class="surface-table-wrap">
-          <table class="compact-table">
-            <thead><tr><th>Factor Type</th><th>Factor</th><th>Exposure</th></tr></thead>
-            <tbody>{% for row in risk_macro.exposures %}<tr><td>{{ row.factor_type }}</td><td>{{ row.factor_name }}</td><td>{{ fmt_number(row.exposure) }}</td></tr>{% endfor %}</tbody>
-          </table>
-        </div>
-        {% else %}<p class="detail-muted quiet-empty">No factor exposures yet.</p>{% endif %}
-      </details>
     </section>
 
     {% elif selected_tab == "candidates" %}
@@ -918,7 +899,6 @@
         {% if decision_readout %}
         <div class="candidate-decision-list scroll-rail">
           {% for row in decision_readout %}
-          {% set internal_ids = row.detail_internal_ids or {} %}
           <article class="candidate-decision-card" data-testid="candidate-group-{{ row.ticker }}">
             <div class="candidate-card-head">
               <div>
@@ -963,39 +943,11 @@
               </div>
             </details>
             {% endif %}
-            {% if internal_ids %}
-            <details>
-              <summary>Advanced</summary>
-              <div class="detail-muted">Source ID: {{ internal_ids.selection_source or "Unavailable" }}</div>
-              <div class="detail-muted">Outcome ID: {{ internal_ids.result_status or "Unavailable" }}</div>
-              <div class="detail-muted">Trade Identity ID: {{ internal_ids.trade_identity or "Unavailable" }}</div>
-              <div class="detail-muted">Strategy ID: {{ internal_ids.strategy_match or "Unavailable" }}</div>
-            </details>
-            {% endif %}
           </article>
           {% endfor %}
         </div>
         {% else %}<p class="detail-muted quiet-empty">No candidates in the active universe.</p>{% endif %}
       </section>
-      <details class="surface-block">
-        <summary>Advanced Universe Context</summary>
-        <div class="candidate-summary-row">
-          <div class="input-pill"><span class="input-pill-label">Min Price</span><span class="input-pill-value">{{ candidates.active_universe_filter.min_price if candidates.active_universe_filter else "Unavailable" }}</span></div>
-          <div class="input-pill"><span class="input-pill-label">Min ADV</span><span class="input-pill-value">{{ candidates.active_universe_filter.min_avg_dollar_volume if candidates.active_universe_filter else "Unavailable" }}</span></div>
-        </div>
-        {% if candidates.portfolio_intents %}
-        <div class="section-label">Portfolio Intents</div>
-        <ul class="output-list">{% for row in candidates.portfolio_intents %}<li>{{ row.ticker }}: {{ row.intent_type_label or row.intent_type }} / {{ row.lifecycle_status_label or row.lifecycle_status }}</li>{% endfor %}</ul>
-        {% endif %}
-        {% if candidates.relationships %}
-        <div class="section-label">Relationships</div>
-        <ul class="output-list">{% for row in candidates.relationships %}<li>{{ row.source_ticker }} -> {{ row.target_ticker }} ({{ row.relationship_type }})</li>{% endfor %}</ul>
-        {% endif %}
-        {% if candidates.peer_baskets %}
-        <div class="section-label">Peer Baskets</div>
-        <ul class="output-list">{% for row in candidates.peer_baskets %}<li>{{ row.basket_key }} {{ row.version }} ({{ row.member_count }} members)</li>{% endfor %}</ul>
-        {% endif %}
-      </details>
       <section class="surface-block">
         <div class="section-label">Themes</div>
         {% if candidates.themes %}

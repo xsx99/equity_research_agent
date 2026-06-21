@@ -893,7 +893,7 @@ class TestTodayDashboard:
         assert "Risk Status" in response.text
         assert "Top Risk Sources" in response.text
         assert "Data / Model Availability" in response.text
-        assert "Advanced Risk Audit" in response.text
+        assert "Advanced Risk Audit" not in response.text
         assert "Within Limits" in response.text
         assert "Technology concentration" in response.text
         assert "Macro regime unavailable" in response.text
@@ -1029,10 +1029,13 @@ class TestTodayDashboard:
         assert "Strategy alternatives" in response.text
         assert "Pullback reclaim" in response.text
         assert "Awaiting fresh event-risk snapshot" in response.text
-        assert "Advanced Universe Context" in response.text
-        assert "Advanced" in response.text
-        assert "Core Index / Active" in response.text
-        assert "core_index" not in response.text
+        assert "Advanced Universe Context" not in response.text
+        assert "Source ID:" not in response.text
+        assert "Outcome ID:" not in response.text
+        assert "Trade Identity ID:" not in response.text
+        assert "Strategy ID:" not in response.text
+        assert "Core Index / Active" not in response.text
+        assert "AI Infrastructure" in response.text
         assert "theme-chip-list" in response.text
         assert "scroll-panel" in response.text
         assert "scroll-rail" in response.text
@@ -1378,8 +1381,8 @@ class TestTodayDashboard:
                 "risk_summary": {},
                 "position_execution": {},
             },
-            "tabs": {
-                "timeline": (
+                "tabs": {
+                    "timeline": (
                     {
                         "title": "Decision submitted",
                         "summary": "Trading decision entered long",
@@ -1390,13 +1393,12 @@ class TestTodayDashboard:
                         "summary": "Relative strength improved",
                         "detail": "Secondary timeline detail",
                     },
-                ),
-                "trend": {"technical": (), "news": (), "fundamental": ()},
-                "decisions": (),
-                "risk": {"history": (), "raw_json": None},
-                "raw_json": {},
-            },
-        }
+                    ),
+                    "trend": {"technical": (), "news": (), "fundamental": ()},
+                    "decisions": (),
+                    "risk": {"history": ()},
+                },
+            }
 
         with (
             patch("src.web.routers.today._load_trade_rows", return_value=trade_rows),

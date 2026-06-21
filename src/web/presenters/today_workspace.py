@@ -359,7 +359,6 @@ def _build_detail(
             "current_stance": latest_conclusion["risk_summary"],
             "position_state": position,
             "history": risk_history,
-            "raw_json": risk.get("raw_json"),
         },
     }
 
