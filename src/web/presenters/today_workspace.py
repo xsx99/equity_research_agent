@@ -92,6 +92,9 @@ def build_ticker_workspace(
             item["primary_state"] = "watch"
             buckets["watch"].append(item)
         item["attention_flags"] = _attention_flags(item)
+        item["latest_decision"] = _humanize_label(item.get("decision"))
+        item["card_label"] = _card_label(item)
+        item["card_detail"] = _card_detail(item)
 
     buckets["in_position"] = buckets["open_positions"]
 
@@ -264,6 +267,21 @@ def _attention_flags(row: dict[str, Any]) -> list[str]:
         flags.append("risk_attention")
 
     return flags
+
+
+def _card_label(row: dict[str, Any]) -> str:
+    primary_state = str(row.get("primary_state") or "").strip().lower()
+    if primary_state == "open_position":
+        return lifecycle_label("open_position") or _EMPTY_MARKER
+    return _humanize_label(row.get("decision")) or "No Decision"
+
+
+def _card_detail(row: dict[str, Any]) -> str | None:
+    primary_state = str(row.get("primary_state") or "").strip().lower()
+    latest_decision = row.get("latest_decision")
+    if primary_state == "open_position" and latest_decision:
+        return f"Latest decision: {latest_decision}"
+    return None
 
 
 def _build_detail(

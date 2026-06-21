@@ -94,7 +94,10 @@
                     <span>{{ item.attention_badge }}</span>
                     {% endif %}
                   </div>
-                  <div class="ticker-card-decision">{{ item.latest_decision or item.decision or "No Decision" }}</div>
+                  <div class="ticker-card-decision">{{ item.card_label or item.latest_decision or item.decision or "No Decision" }}</div>
+                  {% if item.card_detail %}
+                  <div class="detail-muted">{{ item.card_detail }}</div>
+                  {% endif %}
                   <div class="detail-muted">{{ item.why_now or "No material update." }}</div>
                   <div class="ticker-card-meta ticker-card-footer">
                     {% if item.position_risk_line %}

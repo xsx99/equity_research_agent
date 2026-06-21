@@ -214,7 +214,9 @@ def _dashboard_payload() -> dict:
                         "primary_state": "open_position",
                         "attention_flags": (),
                         "attention_badge": "In Position",
-                        "latest_decision": "Hold",
+                        "latest_decision": "No Trade",
+                        "card_label": "Open Position",
+                        "card_detail": "Latest decision: No Trade",
                         "why_now": "Monitoring after guidance follow-through",
                         "recency_label": "25m ago",
                         "position_risk_line": "Long 20 shares / risk approved",
@@ -835,6 +837,7 @@ class TestTodayDashboard:
         assert "Latest Conclusion" in response.text
         assert "Lifecycle" in response.text
         assert "Open Position" in response.text
+        assert "Latest decision: No Trade" in response.text
         assert 'data-panel="timeline"' in response.text
         assert "Trade Decision" in response.text
         assert "Signal Summary" in response.text

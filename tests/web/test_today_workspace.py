@@ -110,6 +110,32 @@ def test_build_ticker_workspace_prefers_action_now_then_in_position_then_watch()
     assert workspace["selected_ticker"] == "TSLA"
 
 
+def test_build_ticker_workspace_uses_lifecycle_label_for_open_position_cards():
+    workspace = build_ticker_workspace(
+        trade_rows=[
+            {
+                "ticker": "tsla",
+                "decision": "no_trade",
+                "risk_status": "approved",
+                "order_status": None,
+                "material_signal_change": False,
+            },
+        ],
+        selected_ticker=None,
+        positions_by_ticker={"tsla": {"quantity": 5}},
+        risk_by_ticker={},
+        signal_history_by_ticker={},
+        news_by_ticker={},
+        fundamentals_by_ticker={},
+    )
+
+    item = workspace["buckets"]["in_position"][0]
+
+    assert item["latest_decision"] == "No Trade"
+    assert item["card_label"] == "Open Position"
+    assert item["card_detail"] == "Latest decision: No Trade"
+
+
 def test_build_ticker_workspace_includes_position_only_ticker():
     workspace = build_ticker_workspace(
         trade_rows=[],
@@ -267,6 +293,9 @@ def test_build_ticker_workspace_uses_newer_row_when_duplicate_priorities_tie():
             "created_at": "2026-06-03T14:35:00Z",
             "primary_state": "watch",
             "attention_flags": [],
+            "latest_decision": "No Trade",
+            "card_label": "No Trade",
+            "card_detail": None,
         }
     ]
 
@@ -313,6 +342,9 @@ def test_build_ticker_workspace_uses_latest_row_for_current_bucket_state():
             "created_at": "2026-06-03T14:35:00Z",
             "primary_state": "watch",
             "attention_flags": [],
+            "latest_decision": "No Trade",
+            "card_label": "No Trade",
+            "card_detail": None,
         }
     ]
     assert workspace["selected_ticker"] == "NVDA"
