@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
 
+from src.web.presenters.today_copy import strategy_label
+
 
 def pct(value: Optional[float]) -> str:
     if value is None:
@@ -86,5 +88,6 @@ def register(templates) -> None:
     templates.env.globals["fmt_conf"] = fmt_conf
     templates.env.globals["fmt_currency"] = fmt_currency
     templates.env.globals["fmt_number"] = fmt_number
+    templates.env.globals["strategy_label"] = strategy_label
     templates.env.filters["iso_datetime"] = iso_datetime
     templates.env.filters["local_time"] = local_time

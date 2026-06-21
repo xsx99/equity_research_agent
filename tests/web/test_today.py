@@ -969,6 +969,37 @@ class TestTodayDashboard:
         assert "surface-block-count" in response.text
         assert "trades-canvas" not in response.text
 
+    def test_portfolio_tab_formats_stock_position_strategy_labels_and_unknowns(self, client):
+        payload = _dashboard_payload()
+        payload["selected_tab"] = "portfolio"
+        payload["portfolio"]["positions"] = (
+            {
+                "ticker": "AAPL",
+                "trade_identity": "tactical_stock_trade",
+                "trade_identity_label": "Tactical Stock Trade",
+                "strategy_id": "relative_strength_breakout_v1",
+                "quantity": Decimal("10"),
+                "market_value": Decimal("2145.20"),
+                "unrealized_pnl": Decimal("325.10"),
+            },
+            {
+                "ticker": "NVDA",
+                "trade_identity": "tactical_stock_trade",
+                "trade_identity_label": "Tactical Stock Trade",
+                "strategy_id": None,
+                "quantity": Decimal("5"),
+                "market_value": Decimal("1550.80"),
+                "unrealized_pnl": Decimal("-25.10"),
+            },
+        )
+        with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
+            response = client.get("/today?tab=portfolio")
+
+        assert response.status_code == 200
+        assert "Relative Strength Breakout V1" in response.text
+        assert ">None<" not in response.text
+        assert "<td>—</td>" in response.text
+
     def test_candidates_tab_renders_summary_and_operations_modules(self, client):
         payload = _dashboard_payload()
         payload["selected_tab"] = "candidates"
@@ -1930,6 +1961,7 @@ class TestTodayDashboard:
                 "trade_identity": "tactical_stock_trade",
                 "trade_identity_label": "Tactical Stock Trade",
                 "strategy_id": "breakout_v1",
+                "strategy_label": "Breakout V1",
                 "quantity": Decimal("0"),
                 "market_value": Decimal("0"),
                 "opened_at": datetime(2026, 6, 5, 14, 31, tzinfo=timezone.utc),

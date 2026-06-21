@@ -564,7 +564,7 @@
         <div class="surface-table-wrap">
           <table class="compact-table">
             <thead><tr><th>Ticker</th><th>Identity</th><th>Strategy</th><th>Qty</th><th>Market Value</th></tr></thead>
-            <tbody>{% for row in portfolio.positions %}<tr><td>{{ row.ticker }}</td><td>{{ row.trade_identity_label or row.trade_identity }}</td><td>{{ row.strategy_id }}</td><td>{{ fmt_number(row.quantity) }}</td><td>{{ fmt_currency(row.market_value) }}</td></tr>{% endfor %}</tbody>
+            <tbody>{% for row in portfolio.positions %}<tr><td>{{ row.ticker }}</td><td>{{ row.trade_identity_label or row.trade_identity }}</td><td>{{ row.strategy_label or strategy_label(row.strategy_id) or "—" }}</td><td>{{ fmt_number(row.quantity) }}</td><td>{{ fmt_currency(row.market_value) }}</td></tr>{% endfor %}</tbody>
           </table>
         </div>
         {% else %}<p class="detail-muted quiet-empty">No open stock positions.</p>{% endif %}
