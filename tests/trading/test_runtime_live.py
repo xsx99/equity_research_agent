@@ -32,7 +32,7 @@ from src.trading.runtime.support import (
     build_runtime_report,
     seed_initial_strategy_definitions,
 )
-from src.trading.strategies.catalog import get_initial_strategy_definitions
+from src.trading.strategies.definitions import load_all_trading_definitions
 from src.trading.strategies.matching import StrategyDefinitionRecord
 
 
@@ -176,6 +176,13 @@ class _PaperExecutionWorkflow:
         assert trade_date.tzinfo is not None
         self.recorder.record("paper_execution")
         return self.result
+
+
+def _catalog_row(strategy_id: str) -> dict[str, object]:
+    return next(
+        row for row in load_all_trading_definitions()
+        if row["strategy_id"] == strategy_id
+    )
 
 
 def _build_runtime(
@@ -637,43 +644,118 @@ def test_bootstrap_seed_strategy_definitions_populates_empty_repository_once():
     seed_initial_strategy_definitions(repository)
     seed_initial_strategy_definitions(repository)
 
-    expected_ids = {row["strategy_id"] for row in get_initial_strategy_definitions()}
-    assert len(repository.rows) == len(expected_ids)
+    expected_rows = load_all_trading_definitions()
+    expected_ids = {row["strategy_id"] for row in expected_rows}
+    assert len(repository.rows) == len(expected_rows)
     assert {row.strategy_id for row in repository.rows} == expected_ids
 
 
-def test_bootstrap_seed_strategy_definitions_preserves_existing_repository_rows():
-    existing = StrategyDefinitionRecord(
-        strategy_definition_id="existing-definition",
-        strategy_id="existing_strategy_v1",
-        version="v1",
-        display_name="Existing Strategy",
-        strategy_layer="tactical_pattern",
-        typical_horizon="1d-1w",
-        config_json={},
-        lifecycle_status="active",
-        is_active=True,
-        source="seed",
+def test_bootstrap_seed_strategy_definitions_patches_legacy_seed_rows_missing_selection_policy():
+    legacy = StrategyDefinitionRecord.from_mapping(
+        {
+            **_catalog_row("oversold_bounce_v1"),
+            "strategy_definition_id": "legacy-oversold",
+            "config_json": {"required_signals": ["rsi_oversold"]},
+            "source": "seed",
+        }
     )
 
     class _Repository:
         def __init__(self) -> None:
-            self.rows = [existing]
-            self.save_calls = 0
+            self.rows = [legacy]
 
         def load_strategy_definitions(self) -> list[StrategyDefinitionRecord]:
             return list(self.rows)
 
         def save_strategy_definition(self, definition: StrategyDefinitionRecord) -> None:
-            self.save_calls += 1
+            self.rows = [
+                item for item in self.rows
+                if item.strategy_definition_id != definition.strategy_definition_id
+            ]
             self.rows.append(definition)
 
     repository = _Repository()
 
     seed_initial_strategy_definitions(repository)
 
-    assert repository.rows == [existing]
-    assert repository.save_calls == 0
+    repaired = next(row for row in repository.rows if row.strategy_id == "oversold_bounce_v1")
+    assert repaired.strategy_definition_id == "legacy-oversold"
+    assert repaired.config_json["selection_policy"]["eligible_expression_bucket_ids"] == ["long_stock"]
+    assert repaired.config_json["required_signals"] == ["rsi_oversold"]
+
+
+def test_bootstrap_seed_strategy_definitions_inserts_missing_expression_buckets_for_partial_catalog():
+    legacy_tactical_row = StrategyDefinitionRecord.from_mapping(
+        {
+            **_catalog_row("oversold_bounce_v1"),
+            "strategy_definition_id": "legacy-oversold",
+            "config_json": {"required_signals": ["rsi_oversold"]},
+            "source": "seed",
+        }
+    )
+
+    class _Repository:
+        def __init__(self) -> None:
+            self.rows = [legacy_tactical_row]
+
+        def load_strategy_definitions(self) -> list[StrategyDefinitionRecord]:
+            return list(self.rows)
+
+        def save_strategy_definition(self, definition: StrategyDefinitionRecord) -> None:
+            self.rows = [
+                item for item in self.rows
+                if item.strategy_definition_id != definition.strategy_definition_id
+            ]
+            self.rows.append(definition)
+
+    repository = _Repository()
+
+    seed_initial_strategy_definitions(repository)
+
+    assert "long_stock" in {row.strategy_id for row in repository.rows}
+    assert "defined_risk_directional_option" in {row.strategy_id for row in repository.rows}
+
+
+def test_bootstrap_seed_strategy_definitions_does_not_overwrite_existing_selection_policy():
+    catalog_row = _catalog_row("strong_theme_catalyst_continuation_v1")
+    legacy = StrategyDefinitionRecord.from_mapping(
+        {
+            **catalog_row,
+            "strategy_definition_id": "custom-catalyst",
+            "config_json": {
+                **catalog_row["config_json"],
+                "selection_policy": {
+                    "actionable_score_threshold": 0.72,
+                    "eligible_expression_bucket_ids": ["defined_risk_directional_option"],
+                },
+            },
+            "source": "seed",
+        }
+    )
+
+    class _Repository:
+        def __init__(self) -> None:
+            self.rows = [legacy]
+
+        def load_strategy_definitions(self) -> list[StrategyDefinitionRecord]:
+            return list(self.rows)
+
+        def save_strategy_definition(self, definition: StrategyDefinitionRecord) -> None:
+            self.rows = [
+                item for item in self.rows
+                if item.strategy_definition_id != definition.strategy_definition_id
+            ]
+            self.rows.append(definition)
+
+    repository = _Repository()
+
+    seed_initial_strategy_definitions(repository)
+
+    repaired = next(row for row in repository.rows if row.strategy_id == legacy.strategy_id)
+    assert repaired.config_json["selection_policy"]["actionable_score_threshold"] == 0.72
+    assert repaired.config_json["selection_policy"]["eligible_expression_bucket_ids"] == [
+        "defined_risk_directional_option"
+    ]
 
 
 def test_build_runtime_report_produces_normalized_contract():

@@ -2,19 +2,53 @@
 from __future__ import annotations
 
 import os
+from dataclasses import replace
 from datetime import datetime
 from typing import Any
 
-from src.trading.strategies.catalog import get_initial_strategy_definitions
+from src.trading.strategies.definitions import load_all_trading_definitions
 from src.trading.strategies.matching import StrategyDefinitionRecord
 
 
+_PATCHABLE_SEED_CONFIG_KEYS = (
+    "selection_policy",
+    "default_trade_identity",
+    "allowed_trade_identities",
+    "allowed_instruments",
+    "allowed_option_strategy_types",
+    "required_option_leg_fields",
+    "required_assignment_fields",
+    "option_policy",
+    "earnings_policy",
+    "default_exit_policy",
+)
+
+
 def seed_initial_strategy_definitions(repository: Any) -> None:
-    """Seed the initial strategy catalog only when the repository is empty."""
-    if repository.load_strategy_definitions():
-        return
-    for row in get_initial_strategy_definitions():
-        repository.save_strategy_definition(StrategyDefinitionRecord.from_mapping(row))
+    """Insert missing seed definitions and patch missing seed config metadata."""
+    existing = {
+        (definition.strategy_id, definition.version): definition
+        for definition in repository.load_strategy_definitions()
+    }
+    for row in load_all_trading_definitions():
+        expected = StrategyDefinitionRecord.from_mapping(row)
+        key = (expected.strategy_id, expected.version)
+        current = existing.get(key)
+        if current is None:
+            repository.save_strategy_definition(expected)
+            existing[key] = expected
+            continue
+        if current.source != "seed":
+            continue
+        repaired_config = _merge_missing_seed_config(
+            current=current.config_json,
+            expected=expected.config_json,
+        )
+        if repaired_config == current.config_json:
+            continue
+        repaired_definition = replace(current, config_json=repaired_config)
+        repository.save_strategy_definition(repaired_definition)
+        existing[key] = repaired_definition
 
 
 def seed_default_universe_filter_config(session: Any) -> None:
@@ -94,3 +128,33 @@ def build_default_news_provider() -> Any | None:
         return AlpacaNewsProvider()
     except Exception:
         return None
+
+
+def _merge_missing_seed_config(
+    *,
+    current: dict[str, Any],
+    expected: dict[str, Any],
+) -> dict[str, Any]:
+    merged = dict(current or {})
+    changed = False
+    for key in _PATCHABLE_SEED_CONFIG_KEYS:
+        if _has_non_empty_value(merged.get(key)):
+            continue
+        expected_value = expected.get(key)
+        if not _has_non_empty_value(expected_value):
+            continue
+        merged[key] = expected_value
+        changed = True
+    return merged if changed else dict(current or {})
+
+
+def _has_non_empty_value(value: Any) -> bool:
+    if value is None:
+        return False
+    if value == "":
+        return False
+    if value == []:
+        return False
+    if value == {}:
+        return False
+    return True
