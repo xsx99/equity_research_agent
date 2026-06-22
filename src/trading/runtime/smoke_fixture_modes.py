@@ -11,7 +11,7 @@ from src.db.models.trading import SignalSnapshot as SignalSnapshotModel
 from src.db.models.trading import UniverseFilterConfig as UniverseFilterConfigModel
 from src.db.models.trading import UniverseSnapshot as UniverseSnapshotModel
 from src.db.models.trading import UniverseSymbol as UniverseSymbolModel
-from src.trading.intraday.news_alerts import NewsAlertService
+from src.trading.intraday.news_alerts import AlertSourceItem, NewsAlertService
 from src.trading.intraday.signals import build_intraday_signal_snapshot
 from src.trading.options.strategy import (
     OptionLegDefinition,
@@ -26,7 +26,6 @@ from src.trading.repositories.in_memory import InMemoryTradingRepository
 from src.trading.risk import HedgeActionRecord, PortfolioRiskIntentRecord, RiskDecisionRecord
 from src.trading.risk.config import RiskConfigResolver
 from src.trading.risk.options import OptionLegRiskInput, OptionRiskInput, OptionRiskManager
-from src.trading.signals.sources import EventNewsItemRecord
 from src.trading.workflows.paper_execution import PaperExecutionWorkflow
 from src.trading.workflows.trading_decision import TradingDecisionRecord
 
@@ -702,28 +701,26 @@ def _run_intraday_refresh_fixture() -> dict[str, Any]:
             "events_news": "fresh",
         },
     )
-    event_item = EventNewsItemRecord(
-        event_news_item_id=str(uuid.uuid4()),
+    alert_item = AlertSourceItem(
+        alert_item_id=str(uuid.uuid4()),
         ticker="NVDA",
         source_ticker="NVDA",
-        event_type="analyst_upgrade",
+        source_family="events_news",
+        alert_type="analyst_upgrade",
         direction="positive",
         sentiment="positive",
         importance="high",
+        importance_score=0.9,
         headline="NVDA raised after analyst upgrade",
         summary="Fresh high-signal positive catalyst.",
         provider="fixture",
-        source_refs_json=[],
         dedupe_key="NVDA|analyst_upgrade|2026-06-02T14:00:00+00:00",
-        event_time=decision_time + timedelta(minutes=30),
         published_at=decision_time + timedelta(minutes=30),
-        ingested_at=decision_time + timedelta(minutes=30),
         available_for_decision_at=decision_time + timedelta(minutes=30),
-        raw_payload_ref=None,
         metadata_json={"strategy_relevance": ["relative_strength_rotation_v1"]},
     )
     alerts = NewsAlertService().build_alerts(
-        event_items=(event_item,),
+        source_items=(alert_item,),
         existing_dedupe_keys=frozenset(),
         affected_positions_by_ticker={},
         affected_candidates_by_ticker={"NVDA": ("NVDA",)},

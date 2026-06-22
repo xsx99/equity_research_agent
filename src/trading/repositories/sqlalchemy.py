@@ -1636,13 +1636,24 @@ class SQLAlchemyTradingRepository:
                         else None
                     ),
                 }
+            selection_source = (
+                "manual_request"
+                if manual_request is not None
+                else (
+                    decision.selection_source
+                    if decision is not None
+                    else (
+                        candidate.selection_source
+                        if candidate is not None
+                        else ("risk_manager" if position is not None else "scanner")
+                    )
+                )
+            )
+            if selection_source not in {"scanner", "manual_request", "watchlist_pin", "risk_manager"}:
+                selection_source = "risk_manager" if position is not None else "scanner"
             instrument_type = "option" if option_position is not None else (decision.instrument_type if decision is not None else "stock")
             contexts[ticker] = SimpleNamespace(
-                selection_source=(
-                    "portfolio"
-                    if position is not None
-                    else (decision.selection_source if decision is not None else (candidate.selection_source if candidate is not None else "manual_request"))
-                ),
+                selection_source=selection_source,
                 strategy_id=(
                     decision.strategy_id
                     if decision is not None

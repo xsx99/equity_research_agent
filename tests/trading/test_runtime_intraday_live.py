@@ -472,7 +472,7 @@ def _build_runtime() -> tuple[
             recorder,
             {
                 "AAPL": SimpleNamespace(
-                    selection_source="portfolio",
+                    selection_source="risk_manager",
                     strategy_id="relative_strength_rotation_v1",
                     strategy_version="v1",
                     expression_bucket_id="long_stock",
@@ -911,7 +911,7 @@ def test_live_intraday_refresh_runtime_keeps_readthrough_and_theme_fields_on_reb
                 "load_request_context",
                 {
                     "AAPL": SimpleNamespace(
-                        selection_source="portfolio",
+                        selection_source="risk_manager",
                         strategy_id="relative_strength_rotation_v1",
                         strategy_version="v1",
                         expression_bucket_id="long_stock",
@@ -1069,7 +1069,7 @@ def test_live_intraday_refresh_runtime_refreshes_open_option_position_marks_and_
                 "load_request_context",
                 {
                     "QQQ": SimpleNamespace(
-                        selection_source="portfolio",
+                        selection_source="risk_manager",
                         strategy_id="risk_manager_hedge_overlay_v1",
                         strategy_version="v1",
                         expression_bucket_id="defined_risk_directional_option",

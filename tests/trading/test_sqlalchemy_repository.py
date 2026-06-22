@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from src.db.models.trading import (
+    CandidateScore,
     CalendarEvent,
     DailyReflection,
     LearningFactor,
@@ -15,6 +16,7 @@ from src.db.models.trading import (
     OptionStrategyLeg,
     PaperExecution,
     PaperOrder,
+    PaperPosition,
     PaperOptionExecution,
     PaperOptionOrder,
     PortfolioEventRiskAssessment,
@@ -215,6 +217,35 @@ def test_sqlalchemy_repository_saves_and_loads_latest_runtime_run_by_phase_and_t
     assert latest_same_day["execution_json"]["mode"] == "execute"
     assert latest_any_day == latest_same_day
     assert len(session.query(TradingRuntimeRun).all()) == 3
+
+
+def test_sqlalchemy_repository_loads_intraday_request_contexts_with_schema_valid_selection_source():
+    session = _FakeSession()
+    repository = SqlAlchemyTradingRepository(session)
+    decision_time = datetime(2026, 6, 20, 15, 30, tzinfo=timezone.utc)
+    session.rows_by_type[PaperPosition] = [
+        SimpleNamespace(
+            status="open",
+            ticker="AAPL",
+            quantity=10,
+            average_cost=190.0,
+            market_price=200.0,
+            market_value=2000.0,
+            trade_identity="tactical_stock_trade",
+            strategy_id="relative_strength_rotation_v1",
+            opened_at=decision_time,
+            updated_at=decision_time,
+            direction="long",
+        )
+    ]
+
+    contexts = repository.load_intraday_request_contexts(
+        tickers=("AAPL",),
+        trade_date=decision_time.date(),
+    )
+
+    assert contexts["AAPL"].selection_source == "risk_manager"
+    assert contexts["AAPL"].trade_identity == "tactical_stock_trade"
 
 
 def test_trading_decision_payload_includes_rationale_fields_for_reflection_consumers():

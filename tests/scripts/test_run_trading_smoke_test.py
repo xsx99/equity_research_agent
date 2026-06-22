@@ -33,6 +33,15 @@ def test_run_smoke_mode_supports_replay_fixture():
     assert result["summary"]["outcome_count"] >= 1
 
 
+def test_run_smoke_mode_supports_intraday_refresh_fixture():
+    result = run_trading_smoke_test.run_smoke_mode("intraday_refresh_fixture")
+
+    assert result["status"] == "passed"
+    assert result["mode"] == "intraday_refresh_fixture"
+    assert result["summary"]["ticker"] == "NVDA"
+    assert result["summary"]["alert_count"] == 1
+
+
 def test_run_smoke_mode_covers_option_open_rejection_and_hedge_overlay():
     result = run_trading_smoke_test.run_smoke_mode("paper_option_lifecycle_fixture")
 
