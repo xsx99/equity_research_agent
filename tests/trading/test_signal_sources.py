@@ -259,6 +259,37 @@ def test_source_ingestion_service_preserves_legacy_event_typing_when_condenser_d
     assert result.ingestion_run.metadata_json["news_condensation"]["kept_news_item_count"] == 1
 
 
+def test_source_ingestion_service_serializes_date_fields_in_fundamental_metrics():
+    now = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+    source_repository = InMemorySignalSourceRepository()
+    artifact_repository = InMemoryTradingRepository()
+
+    class _DateContextMarketProvider(_FakeMarketProvider):
+        def fetch_context(self, ticker: str):
+            payload = super().fetch_context(ticker)
+            payload["earnings_date"] = date(2026, 6, 20)
+            payload["known_event_date"] = date(2026, 6, 18)
+            return payload
+
+    result = SourceIngestionService(
+        market_provider=_DateContextMarketProvider(),
+        news_provider=None,
+        source_repository=source_repository,
+        artifact_repository=artifact_repository,
+        provider_name="fixture",
+        now=lambda: now,
+        sleeper=lambda seconds: None,
+    ).refresh_tickers(("AAPL",), as_of=now, run_type="targeted", source_families=("fundamental",))
+
+    snapshot = result.fundamental_snapshots[0]
+    record = source_repository.records_for_ticker("AAPL")[0]
+
+    assert snapshot.normalized_metrics_json["earnings_date"] == "2026-06-20"
+    assert snapshot.normalized_metrics_json["known_event_date"] == "2026-06-18"
+    assert record.payload["earnings_date"] == "2026-06-20"
+    assert record.payload["known_event_date"] == "2026-06-18"
+
+
 def test_source_ingestion_service_adapts_option_chain_rows_when_provider_supports_it():
     now = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
     market_provider = _FakeMarketProvider()

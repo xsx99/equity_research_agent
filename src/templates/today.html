@@ -132,10 +132,10 @@
               <div class="hero-meta-row hero-meta-pills">
                 <span class="meta-pill"><span class="meta-pill-label">State</span><strong>{{ detail.lifecycle.state_label }}</strong></span>
                 {% if detail.lifecycle.opened_at %}
-                <span class="meta-pill"><span class="meta-pill-label">Opened</span><strong>{{ detail.lifecycle.opened_at }}</strong></span>
+                <span class="meta-pill"><span class="meta-pill-label">Opened</span><strong><time datetime="{{ detail.lifecycle.opened_at | iso_datetime }}" data-local-time-format="datetime">{{ detail.lifecycle.opened_at | local_time('datetime') }}</time></strong></span>
                 {% endif %}
                 {% if detail.lifecycle.closed_at %}
-                <span class="meta-pill"><span class="meta-pill-label">Closed</span><strong>{{ detail.lifecycle.closed_at }}</strong></span>
+                <span class="meta-pill"><span class="meta-pill-label">Closed</span><strong><time datetime="{{ detail.lifecycle.closed_at | iso_datetime }}" data-local-time-format="datetime">{{ detail.lifecycle.closed_at | local_time('datetime') }}</time></strong></span>
                 {% endif %}
               </div>
               {% if detail.lifecycle.entry_summary and detail.lifecycle.entry_summary != "No material update" %}

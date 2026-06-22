@@ -856,6 +856,20 @@ class TestTodayDashboard:
         assert "Workspace Detail JSON" not in response.text
         assert "Risk JSON" not in response.text
 
+    def test_trades_workspace_formats_lifecycle_timestamps_without_raw_iso_seconds(self, client):
+        payload = _dashboard_payload()
+        payload["selected_tab"] = "trades"
+        payload["ticker_workspace"]["detail"]["lifecycle"]["closed_at"] = "2026-06-05T20:02:00Z"
+        with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
+            response = client.get("/today?tab=trades&ticker=AAPL")
+
+        assert response.status_code == 200
+        assert 'datetime="2026-06-05T14:32:00Z"' in response.text
+        assert 'datetime="2026-06-05T20:02:00Z"' in response.text
+        assert 'data-local-time-format="datetime"' in response.text
+        assert ">2026-06-05T14:32:00Z<" not in response.text
+        assert ">2026-06-05T20:02:00Z<" not in response.text
+
     def test_trades_workspace_renders_timeline_as_only_detail_section(self, client):
         payload = _dashboard_payload()
         payload["selected_tab"] = "trades"

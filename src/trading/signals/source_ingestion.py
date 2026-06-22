@@ -321,7 +321,7 @@ class SourceIngestionService:
             return None
         snapshot_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"fundamental:{ticker}:{as_of.isoformat()}"))
         metrics = {
-            key: value
+            key: _json_safe_value(value)
             for key, value in context.items()
             if key
             in {
@@ -714,6 +714,13 @@ def _social_macro_importance(
         return 0.7, "medium"
     return 0.6, "medium"
 
+
+def _ensure_aware(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 def _empty_news_condensation_summary() -> dict[str, int]:
     return {
         "raw_news_item_count": 0,
@@ -727,3 +734,17 @@ def _empty_news_condensation_summary() -> dict[str, int]:
 def _news_condenser_enabled() -> bool:
     raw = os.getenv("TRADING_NEWS_CONDENSER_ENABLED", "1").strip().casefold()
     return raw not in {"0", "false", "off", "no"}
+
+
+def _json_safe_value(value: Any) -> Any:
+    if isinstance(value, datetime):
+        return _ensure_aware(value).isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(key): _json_safe_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_json_safe_value(item) for item in value]
+    if isinstance(value, tuple):
+        return [_json_safe_value(item) for item in value]
+    return value
