@@ -17,6 +17,7 @@ from src.web.flash import get_flash
 
 router = APIRouter()
 _templates: Jinja2Templates | None = None
+_RESEARCH_LIST_RECENT_RUN_LIMIT = 10
 
 
 def init(templates: Jinja2Templates) -> None:
@@ -190,7 +191,7 @@ def research_list(request: Request):
                 groups[run.ticker] = []
             groups[run.ticker].append(row)
 
-        grouped = [(t, groups[t]) for t in ticker_order]
+        grouped = [(ticker, groups[ticker][:_RESEARCH_LIST_RECENT_RUN_LIMIT]) for ticker in ticker_order]
         total = sum(len(v) for v in groups.values())
         total_evaled = sum(outcome_counts.values())
         correct = outcome_counts.get("correct", 0) + outcome_counts.get("partially_correct", 0)

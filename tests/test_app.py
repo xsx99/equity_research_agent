@@ -37,17 +37,20 @@ def _make_run(
     ticker=_TICKER,
     outcome_label="correct",
     price_window="open_to_close",
+    run_id=_RUN_ID,
+    as_of=_AS_OF,
+    thesis_summary="Strong momentum",
 ):
     run = MagicMock()
-    run.run_id = _RUN_ID
+    run.run_id = run_id
     run.ticker = ticker
-    run.as_of = _AS_OF
+    run.as_of = as_of
     run.status = status
     run.prompt_version = "v1"
     run.model_name = "gemini-2.5-flash-lite"
     run.input_json = {
         "ticker": ticker,
-        "as_of": _AS_OF.isoformat(),
+        "as_of": as_of.isoformat(),
         "price_snapshot": {
             "last_price": 187.42,
             "return_1d": 0.012,
@@ -137,7 +140,7 @@ def _make_run(
                     "source": "whitehouse.gov",
                     "title": "Official White House statement",
                     "summary": "The administration issued a policy update.",
-                    "published_at": _AS_OF.isoformat(),
+                    "published_at": as_of.isoformat(),
                     "url": "https://www.whitehouse.gov/example",
                 }
             ],
@@ -146,7 +149,7 @@ def _make_run(
                     "source": "whitehouse.gov",
                     "title": "President Donald J. Trump delivers remarks",
                     "summary": "The President delivered remarks.",
-                    "published_at": _AS_OF.isoformat(),
+                    "published_at": as_of.isoformat(),
                     "url": "https://www.whitehouse.gov/remarks/example",
                 }
             ],
@@ -155,23 +158,23 @@ def _make_run(
                     "source": "AP News",
                     "title": "AP geopolitical update",
                     "summary": "Regional tensions remained elevated.",
-                    "published_at": _AS_OF.isoformat(),
+                    "published_at": as_of.isoformat(),
                     "url": "https://apnews.com/article/example",
                 }
             ],
         },
     }
     run.error_message = None
-    run.started_at = _AS_OF
-    run.finished_at = _AS_OF
-    run.created_at = _AS_OF
+    run.started_at = as_of
+    run.finished_at = as_of
+    run.created_at = as_of
 
     out = MagicMock()
     out.decision = "bullish"
     out.confidence = 0.8
     out.time_horizon = "1d"
     out.actionability = "actionable"
-    out.thesis_summary = "Strong momentum"
+    out.thesis_summary = thesis_summary
     out.output_json = {"decision": "bullish"}
     run.output = out
 
@@ -357,6 +360,48 @@ class TestResearchList:
 
         assert resp.status_code == 200
         assert "No research runs yet" in resp.text
+
+    def test_get_limits_each_ticker_to_recent_ten_rows(self, client):
+        runs = []
+        for idx in range(12):
+            runs.append(
+                _make_run(
+                    ticker="AAPL",
+                    run_id=uuid.uuid4(),
+                    as_of=datetime(2026, 3, 22, 21 - idx, 0, tzinfo=timezone.utc),
+                    thesis_summary=f"AAPL thesis {idx}",
+                )
+            )
+        runs.append(
+            _make_run(
+                ticker="MSFT",
+                run_id=uuid.uuid4(),
+                thesis_summary="MSFT thesis 0",
+            )
+        )
+
+        with patch("src.web.routers.research.get_session") as gs:
+            session = MagicMock()
+            gs.return_value.__enter__ = MagicMock(return_value=session)
+            gs.return_value.__exit__ = MagicMock(return_value=False)
+            q = MagicMock()
+            q.join.return_value = q
+            q.outerjoin.return_value = q
+            q.filter.return_value = q
+            q.order_by.return_value = q
+            q.all.return_value = runs
+            session.query.return_value = q
+
+            resp = client.get("/research")
+
+        assert resp.status_code == 200
+        assert "Total Runs" in resp.text
+        assert ">13<" in resp.text
+        for idx in range(10):
+            assert f"AAPL thesis {idx}" in resp.text
+        assert "AAPL thesis 10" not in resp.text
+        assert "AAPL thesis 11" not in resp.text
+        assert "MSFT thesis 0" in resp.text
 
 
 # ---------------------------------------------------------------------------
