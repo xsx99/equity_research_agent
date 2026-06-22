@@ -242,6 +242,53 @@ def test_fetch_context_enriches_fundamental_scores_from_finnhub_payloads():
     assert context["short_interest_pct_float"] == pytest.approx(1.2)
 
 
+def test_fetch_context_caches_finnhub_payloads_per_ticker():
+    client = _RoutingClient(
+        {
+            "stock/profile2": {
+                "name": "Apple Inc.",
+                "finnhubIndustry": "Technology",
+                "marketCapitalization": 3000000,
+            },
+            "stock/metric": {
+                "metric": {
+                    "revenueGrowthTTMYoy": 18.0,
+                    "operatingMarginTTM": 31.0,
+                    "roeTTM": 145.0,
+                    "evSalesTTM": 7.5,
+                    "freeCashFlowMarginTTM": 24.0,
+                    "shortPercentOfFloat": 1.2,
+                    "peTTM": 29.0,
+                    "psTTM": 7.0,
+                }
+            },
+            "calendar/earnings": {
+                "earningsCalendar": [
+                    {"date": "2026-07-10"},
+                ]
+            },
+        }
+    )
+    provider = AlpacaMarketDataProvider(
+        api_key="test-key",
+        secret_key="test-secret",
+        finnhub_api_key="finnhub-key",
+        client=client,
+    )
+
+    first = provider.fetch_context("AAPL")
+    second = provider.fetch_context("aapl")
+
+    assert first == second
+    assert len(client.calls) == 3
+
+    first["company_name"] = "mutated"
+    third = provider.fetch_context("AAPL")
+
+    assert third["company_name"] == "Apple Inc."
+    assert len(client.calls) == 3
+
+
 def test_fetch_daily_closes_range_returns_chronological_closes():
     client = _CapturingClient(
         {

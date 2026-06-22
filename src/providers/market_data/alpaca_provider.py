@@ -46,6 +46,7 @@ class AlpacaMarketDataProvider:
         self.finnhub_api_key = finnhub_api_key or os.getenv("FINNHUB_API_KEY")
         self._client = client or httpx.Client(timeout=timeout)
         self._owns_client = client is None
+        self._context_cache: dict[str, dict[str, Any]] = {}
 
     def _auth_headers(self) -> dict[str, str]:
         if not self.api_key or not self.secret_key:
@@ -221,20 +222,25 @@ class AlpacaMarketDataProvider:
         return latest_price
 
     def fetch_context(self, ticker: str) -> dict[str, Any]:
+        symbol = ticker.upper()
+        cached = self._context_cache.get(symbol)
+        if cached is not None:
+            return dict(cached)
+
         sector: Optional[str] = None
         company_name: Optional[str] = None
         market_cap: Optional[float] = None
         metrics: dict[str, Any] = {}
         earnings_calendar: dict[str, Any] = {"earnings_in_days": None, "earnings_date": None}
         if self.finnhub_api_key:
-            profile = self._fetch_profile_from_finnhub(ticker)
+            profile = self._fetch_profile_from_finnhub(symbol)
             sector = self._extract_sector_from_profile(profile)
             raw_name = profile.get("name")
             if isinstance(raw_name, str) and raw_name.strip():
                 company_name = raw_name.strip()
             market_cap = self._extract_market_cap_from_profile(profile)
-            metrics = self._fetch_metrics_from_finnhub(ticker)
-            earnings_calendar = self._fetch_earnings_in_days_from_finnhub(ticker)
+            metrics = self._fetch_metrics_from_finnhub(symbol)
+            earnings_calendar = self._fetch_earnings_in_days_from_finnhub(symbol)
         pe_ratio = self._extract_metric_value(metrics, "peBasicExclExtraTTM", "peTTM", "peNormalizedAnnual")
         ps_ratio = self._extract_metric_value(metrics, "psTTM", "psAnnual", "priceToSalesAnnual")
         short_interest_pct_float = self._extract_metric_value(
@@ -243,7 +249,7 @@ class AlpacaMarketDataProvider:
             "shortInterestPercent",
             "shortRatio",
         )
-        return {
+        context_payload = {
             "sector": sector,
             "company_name": company_name,
             "market_cap": market_cap,
@@ -294,6 +300,8 @@ class AlpacaMarketDataProvider:
                 ceiling=25.0,
             ),
         }
+        self._context_cache[symbol] = dict(context_payload)
+        return dict(context_payload)
 
     def fetch_option_chain(self, ticker: str) -> list[dict[str, Any]]:
         symbol = ticker.upper()
