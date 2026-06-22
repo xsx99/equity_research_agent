@@ -35,6 +35,14 @@ class FredMacroDataProvider:
     def fetch_indicators(self, as_of: datetime) -> dict[str, MacroIndicatorValue]:
         indicators: dict[str, MacroIndicatorValue] = {}
         for key, metadata in _FRED_SERIES.items():
+            if key == "gold_price":
+                # FRED removed the historical IBA gold series upstream, so use the
+                # existing GLD proxy path instead of logging a guaranteed 404 each run.
+                indicators[key] = _empty_indicator("Gold Proxy (GLD ETF)", "ALPACA:GLD_PROXY", "USD/share")
+                value, observed_on = self._fetch_gold_proxy_from_market_data()
+                indicators[key]["value"] = value
+                indicators[key]["observed_on"] = observed_on
+                continue
             indicators[key] = _empty_indicator(
                 metadata["label"], f"FRED:{metadata['series_id']}", metadata["unit"]
             )
@@ -51,12 +59,6 @@ class FredMacroDataProvider:
                     default_source=indicators[key]["source"],
                 )
                 indicators[key]["source"] = source
-            if value is None and key == "gold_price":
-                value, observed_on = self._fetch_gold_proxy_from_market_data()
-                if value is not None:
-                    indicators[key]["label"] = "Gold Proxy (GLD ETF)"
-                    indicators[key]["source"] = "ALPACA:GLD_PROXY"
-                    indicators[key]["unit"] = "USD/share"
             indicators[key]["value"] = value
             indicators[key]["observed_on"] = observed_on
         return indicators

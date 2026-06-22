@@ -61,3 +61,23 @@ def test_fetch_indicators_keeps_fred_vix_when_live_fallback_missing():
     assert indicators["vix"]["value"] == 25.33
     assert indicators["vix"]["observed_on"] == "2026-03-25"
     assert indicators["vix"]["source"] == "FRED:VIXCLS"
+
+
+def test_fetch_indicators_uses_gold_proxy_for_gold_without_querying_removed_fred_series():
+    provider = FredMacroDataProvider(client=MagicMock())
+    provider._fetch_latest_observation = MagicMock(return_value=(1.23, "2026-03-26"))
+    provider._fetch_gold_proxy_from_market_data = MagicMock(return_value=(313.12, "2026-03-26"))
+    provider._fetch_live_vix_from_yahoo = MagicMock(return_value=(27.44, "2026-03-26"))
+
+    indicators = provider.fetch_indicators(datetime(2026, 3, 26, 21, 59, tzinfo=timezone.utc))
+
+    queried_series = [call.args[0] for call in provider._fetch_latest_observation.call_args_list]
+
+    assert indicators["gold_price"] == {
+        "label": "Gold Proxy (GLD ETF)",
+        "source": "ALPACA:GLD_PROXY",
+        "unit": "USD/share",
+        "value": 313.12,
+        "observed_on": "2026-03-26",
+    }
+    assert "GOLDAMGBD228NLBM" not in queried_series
