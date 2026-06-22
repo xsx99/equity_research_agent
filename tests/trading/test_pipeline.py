@@ -9,12 +9,14 @@ from src.trading.signals.sources import InMemorySignalSourceRepository, SourceRe
 from src.trading.signals.source_ingestion import SourceIngestionService
 from src.trading.data_sources.universe import UniverseAsset, UniverseFilterConfig
 from src.trading.strategies.classifier import TradeClassificationRecord
-from src.trading.strategies.matching import CandidateScoreRecord, StrategyRunRecord
+from src.trading.strategies.definitions import load_all_trading_definitions
+from src.trading.strategies.matching import CandidateScoreRecord, StrategyDefinitionRecord, StrategyRunRecord
 from src.trading.strategies.selector import (
     PrimarySelectionResult,
     SelectedTradeRecord,
     WatchCandidateRecord,
 )
+from src.trading.runtime.support import seed_initial_strategy_definitions
 
 
 class _FakeUniverseProvider:
@@ -479,3 +481,63 @@ def test_strategy_pipeline_persists_watch_candidates_separately():
     assert repository.saved_classifications == []
     assert repository.saved_watch_candidates == [watch]
     assert manual_service.load_active()[0].latest_result_status == "catalyst_watch"
+
+
+def test_strategy_pipeline_classifies_actionable_candidate_after_seed_policy_repair():
+    now = datetime(2026, 6, 22, 13, 45, tzinfo=timezone.utc)
+    repository = InMemoryTradingRepository()
+    legacy_row = next(
+        row for row in load_all_trading_definitions()
+        if row["strategy_id"] == "oversold_bounce_v1"
+    )
+    repository.save_strategy_definition(
+        StrategyDefinitionRecord.from_mapping(
+            {
+                **legacy_row,
+                "strategy_definition_id": "legacy-oversold",
+                "config_json": {"required_signals": legacy_row["config_json"]["required_signals"]},
+                "source": "seed",
+            }
+        )
+    )
+
+    seed_initial_strategy_definitions(repository)
+    candidate = CandidateScoreRecord(
+        candidate_score_id="candidate-1",
+        strategy_run_id="ignored-by-fake-matcher",
+        signal_snapshot_id="snapshot-1",
+        ticker="APP",
+        strategy_id="oversold_bounce_v1",
+        strategy_version="v1",
+        strategy_definition_id="legacy-oversold",
+        candidate_score=1.0,
+        direction="bullish",
+        action="enter_long",
+        typical_horizon="2w-3m",
+        core_signal_evidence={"technical.rsi_14": 24.0},
+        missing_required_signals=[],
+        unsupported_missing_signal_families=[],
+        invalidators=["support breaks"],
+        risk_tags=["mean_reversion"],
+        macro_compatibility="allowed",
+        selection_source="scanner",
+        manual_request_id=None,
+        selection_reason="deterministic signals matched strategy",
+        rejection_reason=None,
+        benchmark_context={"primary_benchmark": "QQQ"},
+        decision_time=now,
+        available_for_decision_at=now,
+        source_record_refs_json=[],
+        candidate_status="actionable",
+    )
+
+    result = StrategyPipeline(
+        repository=repository,
+        matcher=_FakeMatcher(candidate),
+    ).run(snapshots=(), decision_time=now)
+
+    assert len(result.selected_trades) == 1
+    assert result.selected_trades[0].expression_bucket_id == "long_stock"
+    assert len(result.classifications) == 1
+    assert result.classifications[0].ticker == "APP"
+    assert result.classifications[0].expression_bucket_id == "long_stock"
