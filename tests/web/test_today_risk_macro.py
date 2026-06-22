@@ -131,6 +131,66 @@ def test_today_risk_macro_presenter_formats_event_dates_without_raw_timestamps()
     assert payload["events"][0]["scheduled_at"] == "Jul 31, 2026"
 
 
+def test_today_risk_macro_presenter_hides_past_events_when_as_of_is_provided():
+    as_of = datetime(2026, 6, 16, 13, 0, tzinfo=timezone.utc)
+    past_event = CalendarEventRecord(
+        calendar_event_id="event-past",
+        event_key="macro:cpi:2026-06-16",
+        event_type="macro",
+        ticker=None,
+        event_time=datetime(2026, 6, 16, 12, 0, tzinfo=timezone.utc),
+        published_at=as_of,
+        available_for_decision_at=as_of,
+        title="US CPI",
+        severity_hint="high",
+        source="fixture",
+        metadata_json={},
+    )
+    current_event = CalendarEventRecord(
+        calendar_event_id="event-now",
+        event_key="macro:fomc:2026-06-16",
+        event_type="macro",
+        ticker=None,
+        event_time=as_of,
+        published_at=as_of,
+        available_for_decision_at=as_of,
+        title="FOMC",
+        severity_hint="high",
+        source="fixture",
+        metadata_json={},
+    )
+    future_event = CalendarEventRecord(
+        calendar_event_id="event-future",
+        event_key="earnings:MU:2026-06-23",
+        event_type="earnings",
+        ticker="MU",
+        event_time=datetime(2026, 6, 23, 20, 0, tzinfo=timezone.utc),
+        published_at=as_of,
+        available_for_decision_at=as_of,
+        title="MU earnings",
+        severity_hint="high",
+        source="fixture",
+        metadata_json={},
+    )
+
+    payload = build_today_risk_macro_payload(
+        latest_risk=None,
+        latest_intent=None,
+        risk_macro_context={"calendar_events": (past_event, current_event, future_event)},
+        exposures=(),
+        as_of=as_of,
+    )
+    legacy_payload = build_today_risk_macro_payload(
+        latest_risk=None,
+        latest_intent=None,
+        risk_macro_context={"calendar_events": (past_event, current_event, future_event)},
+        exposures=(),
+    )
+
+    assert [event["risk_mechanism"] for event in payload["events"]] == ["FOMC", "MU earnings"]
+    assert [event["risk_mechanism"] for event in legacy_payload["events"]] == ["US CPI", "FOMC", "MU earnings"]
+
+
 def test_today_risk_macro_presenter_converts_notional_gross_exposure_to_equity_percentage():
     decision_time = datetime(2026, 6, 16, 13, 0, tzinfo=timezone.utc)
     latest_risk = SimpleNamespace(

@@ -757,6 +757,7 @@ def _load_today_risk_macro(
     exposures = _load_risk_exposures(session)
     latest_intent = None
     risk_macro_context: dict[str, object] = {"macro_snapshot": latest_macro_snapshot}
+    decision_time = latest_risk.decision_time if latest_risk is not None else None
     if isinstance(session, SQLAlchemySession):
         repository = SqlAlchemyTradingRepository(session)
         trade_date = (
@@ -764,7 +765,6 @@ def _load_today_risk_macro(
             if latest_risk is not None
             else None
         )
-        decision_time = latest_risk.decision_time if latest_risk is not None else None
         if trade_date is not None and decision_time is not None:
             intents = repository.load_portfolio_risk_intents(trade_date=trade_date)
             latest_intent = intents[-1] if intents else None
@@ -782,6 +782,7 @@ def _load_today_risk_macro(
         latest_intent=latest_intent,
         risk_macro_context=risk_macro_context,
         exposures=exposures,
+        as_of=decision_time,
     )
 
 
@@ -1065,6 +1066,7 @@ def _load_trade_detail(session: Any, decision_id: str) -> dict[str, Any] | None:
             "reason_code": row.risk_decision.reason_code,
             "generated_hedge_action": getattr(row.risk_decision, "generated_hedge_action_json", None),
             "lookahead_risk_source": _risk_decision_lookahead_source(row.risk_decision),
+            "applied_rules": _risk_applied_rules(getattr(row.risk_decision, "applied_rules_json", None)),
         }
     return {
         "trading_decision_id": str(row.trading_decision_id),
@@ -1503,6 +1505,8 @@ def _merge_audit_detail_into_workspace_detail(
         generated_hedge_action = audit_detail["risk_decision"].get("generated_hedge_action")
         if isinstance(generated_hedge_action, dict):
             risk_summary["hedge_overlay_reason"] = generated_hedge_action.get("reason_code")
+    if not risk_summary.get("applied_rules") and isinstance(audit_detail.get("risk_decision"), dict):
+        risk_summary["applied_rules"] = audit_detail["risk_decision"].get("applied_rules") or ()
 
     latest_conclusion["trade_decision"] = trade_decision
     latest_conclusion["risk_summary"] = risk_summary
@@ -1608,6 +1612,7 @@ def _load_risk_by_ticker(session: Any) -> dict[str, dict[str, Any]]:
             "reason": row.reason_code,
             "lookahead_risk_source": lookahead_risk_source,
             "generated_hedge_action": generated_hedge_action,
+            "applied_rules": _risk_applied_rules(getattr(row, "applied_rules_json", None)),
             "history": [
                 {
                     "time": row.decision_time or row.created_at,
@@ -1631,6 +1636,32 @@ def _risk_decision_lookahead_source(row: Any) -> str | None:
         return None
     value = str(metadata_value).strip()
     return value or None
+
+
+def _risk_applied_rules(value: Any) -> tuple[str, ...]:
+    """Normalize ``applied_rules_json`` into readable rule labels.
+
+    The risk manager is deterministic, so its "reasoning" is the set of rules it
+    evaluated. Entries may be plain strings or dicts carrying a rule id / reason.
+    """
+    if not isinstance(value, (list, tuple)):
+        return ()
+    labels: list[str] = []
+    for item in value:
+        if isinstance(item, dict):
+            label = str(
+                item.get("label")
+                or item.get("rule")
+                or item.get("rule_id")
+                or item.get("name")
+                or item.get("reason_code")
+                or ""
+            ).strip()
+        else:
+            label = str(item or "").strip()
+        if label and label not in labels:
+            labels.append(label)
+    return tuple(labels)
 
 
 def _risk_decision_binding_constraint(row: Any) -> str | None:

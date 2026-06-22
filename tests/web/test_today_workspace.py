@@ -58,6 +58,29 @@ def test_build_ticker_workspace_keeps_closed_ticker_visible_in_closed_today_buck
     assert workspace["selected_ticker"] == "AAPL"
 
 
+def test_build_ticker_workspace_prefers_open_position_over_closed_today_when_ticker_is_in_both():
+    workspace = build_ticker_workspace(
+        trade_rows=[
+            {"ticker": "NVDA", "decision": "enter_long", "order_status": "filled", "created_at": "2026-06-05T20:10:00Z"},
+            {"ticker": "AAPL", "decision": "exit", "order_status": "filled", "created_at": "2026-06-05T19:58:00Z"},
+        ],
+        selected_ticker=None,
+        positions_by_ticker={"NVDA": {"status": "open"}},
+        closed_positions_by_ticker={
+            "NVDA": {"status": "closed", "closed_at": "2026-06-05T18:05:00Z"},
+            "AAPL": {"status": "closed", "closed_at": "2026-06-05T20:05:00Z"},
+        },
+        risk_by_ticker={},
+        signal_history_by_ticker={},
+        news_by_ticker={},
+        fundamentals_by_ticker={},
+    )
+
+    assert [item["ticker"] for item in workspace["buckets"]["open_positions"]] == ["NVDA"]
+    assert workspace["buckets"]["open_positions"][0]["primary_state"] == "open_position"
+    assert [item["ticker"] for item in workspace["buckets"]["closed_today"]] == ["AAPL"]
+
+
 def test_build_ticker_workspace_assigns_primary_lifecycle_state_and_attention_flags():
     workspace = build_ticker_workspace(
         trade_rows=[{"ticker": "MSFT", "decision": "no_trade", "risk_status": "approved", "material_signal_change": True}],
@@ -555,6 +578,7 @@ def test_build_ticker_workspace_surfaces_lookahead_risk_source_and_hedge_overlay
                 "reason": "own_event_force_reduce",
                 "lookahead_risk_source": "own_event",
                 "generated_hedge_action": {"reason_code": "macro_high_overlay"},
+                "applied_rules": ("single_name_limit", "event_window_check"),
                 "raw_json": {
                     "status": "approved",
                     "reason_code": "own_event_force_reduce",
@@ -573,6 +597,7 @@ def test_build_ticker_workspace_surfaces_lookahead_risk_source_and_hedge_overlay
 
     assert risk_summary["lookahead_risk_source"] == "own_event"
     assert risk_summary["hedge_overlay_reason"] == "macro_high_overlay"
+    assert risk_summary["applied_rules"] == ("single_name_limit", "event_window_check")
     assert "raw_json" not in workspace["detail"]["tabs"]["risk"]
 
 
@@ -991,6 +1016,7 @@ def test_build_ticker_workspace_uses_empty_state_markers_when_detail_inputs_are_
         }
     ]
     assert latest_conclusion["risk_summary"]["status"] == "No material update"
+    assert latest_conclusion["risk_summary"]["applied_rules"] == ()
     assert latest_conclusion["position_execution"]["position"]["summary"] == "No material update"
     assert detail["tabs"]["timeline"] == [
         {

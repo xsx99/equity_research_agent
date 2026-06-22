@@ -210,15 +210,35 @@
                 {% endif %}
               </section>
 
-              <section class="card subcard">
-                <h4>Risk Manager Summary</h4>
-                <div class="support-kv-list">
-                  <div class="support-kv-row">
-                    <span class="metric-label">Status</span>
-                    <strong>{{ detail.latest_conclusion.risk_summary.status_label or "Unavailable" }}</strong>
-                  </div>
+              {% set risk = detail.latest_conclusion.risk_summary %}
+              <section class="card subcard risk-manager-subcard">
+                <div class="risk-manager-head">
+                  <h4>Risk Manager</h4>
+                  {% set risk_status = risk.status_label if risk.status_label and risk.status_label != "No material update" else "Unavailable" %}
+                  <span class="detail-chip risk-status-chip risk-status-{{ (risk.status or 'unknown') | lower }}">{{ risk_status }}</span>
                 </div>
-                <div class="detail-muted">{{ detail.latest_conclusion.risk_summary.reason or detail.latest_conclusion.risk_summary.summary or "No material update." }}</div>
+                {% set has_risk_detail = (risk.reason and risk.reason != "No material update") or risk.lookahead_risk_source or risk.hedge_overlay_reason or risk.applied_rules %}
+                {% if has_risk_detail %}
+                {% if risk.reason and risk.reason != "No material update" %}
+                <p class="detail-muted">{{ risk.reason }}</p>
+                {% endif %}
+                {% if risk.lookahead_risk_source %}
+                <p class="detail-muted"><span class="metric-label">Lookahead risk</span> {{ risk.lookahead_risk_source }}</p>
+                {% endif %}
+                {% if risk.hedge_overlay_reason %}
+                <p class="detail-muted"><span class="metric-label">Hedge overlay</span> {{ risk.hedge_overlay_reason }}</p>
+                {% endif %}
+                {% if risk.applied_rules %}
+                <details class="risk-applied-rules">
+                  <summary>Applied rules ({{ risk.applied_rules | length }})</summary>
+                  <ul class="output-list">
+                    {% for rule in risk.applied_rules %}<li>{{ rule }}</li>{% endfor %}
+                  </ul>
+                </details>
+                {% endif %}
+                {% else %}
+                <p class="detail-muted quiet-empty">No additional risk notes.</p>
+                {% endif %}
               </section>
 
               <section class="card subcard">
@@ -936,11 +956,14 @@
                 <strong>{{ row.duplicate_count or 1 }}</strong>
               </div>
             </div>
+            {% if row.selection_reason %}
+            <div>
+              <span class="metric-label">Decision Thesis</span>
+              <p class="hero-summary">{{ row.selection_reason }}</p>
+            </div>
+            {% endif %}
             <div>
               <span class="metric-label">Signals Used</span>
-              {% if row.selection_reason %}
-              <div class="detail-muted">{{ row.selection_reason }}</div>
-              {% endif %}
               <ul class="history-card-listing">
                 {% for bullet in row.signal_bullets %}
                 <li>{{ bullet }}</li>

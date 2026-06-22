@@ -324,7 +324,14 @@ def _dashboard_payload() -> dict:
                             {"title": "Margin outlook", "summary": "Gross margin remains stable"},
                         ),
                     },
-                    "risk_summary": {"status": "approved", "status_label": "Approved", "reason": "Within Limits"},
+                    "risk_summary": {
+                        "status": "approved",
+                        "status_label": "Approved",
+                        "reason": "Within Limits",
+                        "lookahead_risk_source": "own_event",
+                        "hedge_overlay_reason": "macro_high_overlay",
+                        "applied_rules": ("single_name_limit", "event_window_check"),
+                    },
                     "position_execution": {
                         "position_label": "Long 10 shares",
                         "order_status": "filled",
@@ -843,7 +850,10 @@ class TestTodayDashboard:
         assert "Signal Summary" in response.text
         assert "Event / News Summary" in response.text
         assert "Raised guidance: Demand improved across core products." in response.text
-        assert "Risk Manager Summary" in response.text
+        assert "Risk Manager" in response.text
+        assert "Applied rules (2)" in response.text
+        assert "Lookahead risk" in response.text
+        assert "Hedge overlay" in response.text
         assert "Position / Execution State" in response.text
         assert 'data-testid="signal-summary"' in response.text
         assert 'data-testid="history-cards"' in response.text
@@ -1099,6 +1109,7 @@ class TestTodayDashboard:
         assert "Still on watch" in response.text
         assert "Candidate Decisions" in response.text
         assert "Momentum setup with clean catalyst." in response.text
+        assert "Decision Thesis" in response.text
         assert "Signals Used" in response.text
         assert "Confidence" in response.text
         assert "0.91" in response.text
@@ -1838,6 +1849,7 @@ class TestTodayDashboard:
             "reason_code": "own_event_force_reduce",
             "generated_hedge_action": {"reason_code": "macro_high_overlay"},
             "lookahead_risk_source": "own_event",
+            "applied_rules": (),
         }
 
     def test_load_candidate_rows_translates_operator_facing_labels(self):

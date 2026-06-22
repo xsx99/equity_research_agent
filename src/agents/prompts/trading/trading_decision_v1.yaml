@@ -23,6 +23,16 @@ template: |
   - `key_drivers`, `counterarguments`, and `invalidators` must come only from provided evidence.
   - If you choose `no_trade` or `hold`, you must still fill every required field with conservative values.
 
+  Thesis writing rules:
+
+  - `thesis` is the human-readable narrative an operator reads first. Write it to the same bar as a sharp sell-side strategist note: clear, specific, and evidence-bound.
+  - Write 2 to 4 plain-English sentences. Do not return a single terse fragment, a restatement of field names, or boilerplate.
+  - Sentence 1: state the directional decision and the chosen strategy / expression in plain language (e.g., "Enter a tactical long via the momentum-breakout expression").
+  - Then connect the decision to the 1 or 2 strongest concrete datapoints from `signal_snapshot` that actually drive it (name the metric, trend, catalyst, or news item, not the raw field key).
+  - When macro / regime context is a dominant factor, state how it aligns with or pressures the setup, mirroring the top-down logic the research view uses.
+  - Close with the single most important risk or invalidation condition in one clause, so the reader knows what would break the thesis.
+  - Keep it self-contained and readable on its own; do not rely on `key_drivers`/`counterarguments` to make the thesis make sense. Never invent facts that are not in the input.
+
   Field interpretation rules:
 
   - `key_drivers` must contain the strongest provided evidence supporting the selected decision.

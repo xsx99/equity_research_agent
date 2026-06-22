@@ -20,6 +20,7 @@ def build_today_risk_macro_payload(
     latest_intent: object | None,
     risk_macro_context: dict[str, object] | None,
     exposures: tuple[dict[str, Any], ...],
+    as_of: datetime | None = None,
 ) -> dict[str, Any]:
     context = risk_macro_context or {}
     macro_snapshot = context.get("macro_snapshot")
@@ -80,7 +81,11 @@ def build_today_risk_macro_payload(
             "updated_at": getattr(macro_snapshot, "snapshot_time", None),
             "basis_note": _basis_note(macro_snapshot),
         },
-        "events": tuple(_event_row(event) for event in calendar_events if _default_visible_event(event)),
+        "events": tuple(
+            _event_row(event)
+            for event in calendar_events
+            if _default_visible_event(event) and _is_upcoming_event(event, as_of)
+        ),
         "risk_sources": tuple(_risk_source_row(assessment) for assessment in event_assessments if _default_visible_assessment(assessment)),
         "exposures": exposures,
         "binding_constraints": binding_constraints,
@@ -180,6 +185,32 @@ def _risk_source_row(assessment: object) -> dict[str, Any]:
 def _default_visible_event(event: object) -> bool:
     metadata_json = dict(getattr(event, "metadata_json", {}) or {})
     return metadata_json.get("default_visibility", "show") != "hide"
+
+
+def _is_upcoming_event(event: object, as_of: datetime | None) -> bool:
+    """Hide events whose scheduled time is already in the past.
+
+    The risk surface is forward-looking: a CPI print or earnings date that has
+    already happened should not be presented as a pending catalyst. We compare
+    against ``as_of`` (the decision-snapshot time) when available, otherwise the
+    event date alone cannot be classified and we keep it visible.
+    """
+    if as_of is None:
+        return True
+    event_time = getattr(event, "event_time", None)
+    if not isinstance(event_time, (datetime, date)):
+        return True
+    cutoff: date | datetime = as_of
+    if isinstance(event_time, datetime):
+        reference = as_of
+        if event_time.tzinfo is None and as_of.tzinfo is not None:
+            reference = as_of.replace(tzinfo=None)
+        elif event_time.tzinfo is not None and as_of.tzinfo is None:
+            reference = as_of.replace(tzinfo=timezone.utc)
+        return event_time >= reference
+    if isinstance(cutoff, datetime):
+        cutoff = cutoff.date()
+    return event_time >= cutoff
 
 
 def _default_visible_assessment(assessment: object) -> bool:

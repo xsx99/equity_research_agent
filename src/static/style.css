@@ -1370,6 +1370,49 @@ a:hover { text-decoration: underline; }
   letter-spacing: 0.01em;
 }
 
+/* Compact risk manager subcard */
+.risk-manager-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.risk-manager-head h4 {
+  margin: 0;
+}
+
+.risk-status-chip {
+  text-transform: capitalize;
+}
+
+.risk-status-approved,
+.risk-status-approve {
+  background: #e3f4e8;
+  color: #1f6b3a;
+}
+
+.risk-status-rejected,
+.risk-status-blocked,
+.risk-status-reject {
+  background: #fbe6e6;
+  color: #9b2c2c;
+}
+
+.risk-applied-rules {
+  margin-top: 0.4rem;
+}
+
+.risk-applied-rules summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: #37506e;
+}
+
+.risk-applied-rules .output-list {
+  margin-top: 0.35rem;
+}
+
 @media (max-width: 1100px) {
   .today-workspace,
   .operator-strip,

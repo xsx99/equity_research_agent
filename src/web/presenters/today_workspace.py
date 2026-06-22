@@ -79,12 +79,16 @@ def build_ticker_workspace(
         if _is_action_now(item):
             item["primary_state"] = "action_now"
             buckets["action_now"].append(item)
+        elif ticker in normalized_positions:
+            # An open position always wins over a historical closed one for the
+            # same ticker (e.g. a prior trade closed earlier, then re-entered).
+            # Otherwise the position shows in the portfolio but vanishes from the
+            # Open Positions bucket here.
+            item["primary_state"] = "open_position"
+            buckets["open_positions"].append(item)
         elif ticker in normalized_closed_positions:
             item["primary_state"] = "closed"
             buckets["closed_today"].append(item)
-        elif ticker in normalized_positions:
-            item["primary_state"] = "open_position"
-            buckets["open_positions"].append(item)
         elif _is_reviewing(item):
             item["primary_state"] = "reviewing"
             buckets["reviewing"].append(item)
@@ -326,6 +330,7 @@ def _build_detail(
         "reason": risk_reason_label(risk.get("reason")) or operator_text(risk.get("reason")) or _EMPTY_MARKER,
         "lookahead_risk_source": risk.get("lookahead_risk_source"),
         "hedge_overlay_reason": _hedge_overlay_reason(risk.get("generated_hedge_action")),
+        "applied_rules": tuple(risk.get("applied_rules") or ()),
     }
 
     latest_conclusion = {
