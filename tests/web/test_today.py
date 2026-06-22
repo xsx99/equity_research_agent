@@ -1550,6 +1550,56 @@ class TestTodayDashboard:
         assert dashboard["trades"]["selected_detail"] is None
         load_trade_detail.assert_not_called()
 
+    def test_load_today_dashboard_populates_trade_bucket_recency_labels(self):
+        from src.web.routers.today import load_today_dashboard
+
+        session = _query_stub_session()
+        recent_trade_time = datetime.now(timezone.utc).replace(microsecond=0)
+        trade_rows = [
+            {
+                "trading_decision_id": "decision-action",
+                "ticker": "NVDA",
+                "decision": "no_trade",
+                "risk_status": "approved",
+                "order_status": None,
+                "material_signal_change": False,
+                "created_at": recent_trade_time.isoformat().replace("+00:00", "Z"),
+            }
+        ]
+
+        with (
+            patch("src.web.routers.today._load_trade_rows", return_value=trade_rows),
+            patch("src.web.routers.today._load_positions", return_value=()),
+            patch("src.web.routers.today._load_option_positions", return_value=()),
+            patch("src.web.routers.today._load_hedge_overlays", return_value=()),
+            patch("src.web.routers.today._load_live_alerts", return_value=()),
+            patch("src.web.routers.today._load_material_changes", return_value=()),
+            patch("src.web.routers.today._load_risk_exposures", return_value=()),
+            patch("src.web.routers.today._load_candidate_rows", return_value=()),
+            patch("src.web.routers.today._load_manual_requests", return_value=()),
+            patch("src.web.routers.today._load_portfolio_intents", return_value=()),
+            patch("src.web.routers.today._load_relationships", return_value=()),
+            patch("src.web.routers.today._load_peer_baskets", return_value=()),
+            patch("src.web.routers.today._load_themes", return_value=()),
+            patch("src.web.routers.today._load_learning_factors", return_value=()),
+            patch("src.web.routers.today._load_strategy_performance", return_value=()),
+            patch("src.web.routers.today._load_strategy_proposals", return_value=()),
+            patch("src.web.routers.today._load_strategy_definitions", return_value=()),
+            patch("src.web.routers.today._load_strategy_evaluation_results", return_value=()),
+            patch("src.web.routers.today._load_llm_usage", return_value=()),
+            patch("src.web.routers.today._load_trade_detail", return_value=_selected_trade_detail("NVDA")),
+        ):
+            dashboard = load_today_dashboard(
+                session,
+                selected_tab="trades",
+                decision_id=None,
+                selected_ticker="NVDA",
+            )
+
+        item = dashboard["ticker_workspace"]["buckets"]["watch"][0]
+        assert item["recency_label"] == "just now"
+        assert item["last_updated_label"] is not None
+
     def test_load_today_dashboard_normalizes_invalid_tab_and_detail_query_state(self):
         from src.web.routers.today import load_today_dashboard
 

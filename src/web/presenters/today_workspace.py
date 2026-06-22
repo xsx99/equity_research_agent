@@ -43,7 +43,9 @@ def build_ticker_workspace(
     signal_history_by_ticker,
     news_by_ticker,
     fundamentals_by_ticker,
+    as_of: datetime | None = None,
 ):
+    reference_time = _normalize_datetime(as_of) or datetime.now(timezone.utc)
     normalized_positions = {_normalize_ticker(ticker): payload for ticker, payload in positions_by_ticker.items()}
     normalized_closed_positions = {
         _normalize_ticker(ticker): payload for ticker, payload in (closed_positions_by_ticker or {}).items()
@@ -99,6 +101,18 @@ def build_ticker_workspace(
         item["latest_decision"] = _humanize_label(item.get("decision"))
         item["card_label"] = _card_label(item)
         item["card_detail"] = _card_detail(item)
+        last_updated_at = _item_last_updated_at(
+            item,
+            position=normalized_positions.get(ticker),
+            closed_position=normalized_closed_positions.get(ticker),
+            risk=normalized_risk.get(ticker),
+            signal_history=normalized_signal_history.get(ticker),
+            news_items=normalized_news.get(ticker),
+            fundamental_items=normalized_fundamentals.get(ticker),
+        )
+        if last_updated_at is not None:
+            item["last_updated_label"] = _format_timestamp_label(last_updated_at)
+            item["recency_label"] = _format_recency_label(last_updated_at, as_of=reference_time)
 
     buckets["in_position"] = buckets["open_positions"]
 
@@ -563,6 +577,84 @@ def _build_event_news_summary(news_snippets: list[dict[str, Any]]) -> str | None
     if title:
         return _with_terminal_period(title)
     return None
+
+
+def _item_last_updated_at(
+    row: dict[str, Any],
+    *,
+    position: Any,
+    closed_position: Any,
+    risk: Any,
+    signal_history: Any,
+    news_items: Any,
+    fundamental_items: Any,
+) -> datetime | None:
+    candidates: list[datetime] = []
+    _append_candidate_times(candidates, row)
+    _append_candidate_times(candidates, position)
+    _append_candidate_times(candidates, closed_position)
+    _append_candidate_times(candidates, risk)
+
+    if isinstance(signal_history, dict):
+        _append_candidate_times(candidates, signal_history)
+        for item in signal_history.get("timeline") or ():
+            _append_candidate_times(candidates, item)
+
+    for item in news_items or ():
+        _append_candidate_times(candidates, item)
+    for item in fundamental_items or ():
+        _append_candidate_times(candidates, item)
+
+    return max(candidates) if candidates else None
+
+
+def _append_candidate_times(candidates: list[datetime], payload: Any) -> None:
+    if not isinstance(payload, dict):
+        return
+
+    for key in (
+        "created_at",
+        "decision_time",
+        "time",
+        "published_at",
+        "as_of",
+        "updated_at",
+        "opened_at",
+        "closed_at",
+        "snapshot_time",
+    ):
+        parsed = _parse_timestamp(payload.get(key))
+        if parsed is not None:
+            candidates.append(parsed)
+
+
+def _format_recency_label(value: Any, *, as_of: datetime | None = None) -> str | None:
+    parsed = _parse_timestamp(value)
+    reference_time = _normalize_datetime(as_of)
+    if parsed is None or reference_time is None:
+        return None
+
+    elapsed_seconds = int((reference_time - parsed).total_seconds())
+    if elapsed_seconds < 60:
+        return "just now"
+
+    elapsed_minutes = elapsed_seconds // 60
+    if elapsed_minutes < 60:
+        return f"{elapsed_minutes}m ago"
+
+    elapsed_hours = elapsed_seconds // 3600
+    if elapsed_hours < 24:
+        return f"{elapsed_hours}h ago"
+
+    elapsed_days = elapsed_seconds // 86400
+    if elapsed_days < 7:
+        return f"{elapsed_days}d ago"
+
+    elapsed_weeks = elapsed_days // 7
+    if elapsed_weeks < 5:
+        return f"{elapsed_weeks}w ago"
+
+    return _format_timestamp_label(parsed)
 
 
 def _is_material_news_snippet(item: dict[str, Any]) -> bool:
@@ -1165,3 +1257,11 @@ def _parse_timestamp(value: Any) -> datetime | None:
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=timezone.utc)
     return parsed
+
+
+def _normalize_datetime(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)

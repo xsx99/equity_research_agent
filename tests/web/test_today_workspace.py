@@ -1,6 +1,8 @@
 """Tests for the ticker-first today workspace presenter."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from src.web.presenters.today_workspace import build_ticker_workspace
 
 
@@ -303,6 +305,7 @@ def test_build_ticker_workspace_uses_newer_row_when_duplicate_priorities_tie():
         signal_history_by_ticker={},
         news_by_ticker={},
         fundamentals_by_ticker={},
+        as_of=datetime(2026, 6, 3, 14, 40, tzinfo=timezone.utc),
     )
 
     assert workspace["buckets"]["watch"] == [
@@ -319,6 +322,8 @@ def test_build_ticker_workspace_uses_newer_row_when_duplicate_priorities_tie():
             "latest_decision": "No Trade",
             "card_label": "No Trade",
             "card_detail": None,
+            "last_updated_label": "2026-06-03 14:35 UTC",
+            "recency_label": "5m ago",
         }
     ]
 
@@ -351,6 +356,7 @@ def test_build_ticker_workspace_uses_latest_row_for_current_bucket_state():
         signal_history_by_ticker={},
         news_by_ticker={},
         fundamentals_by_ticker={},
+        as_of=datetime(2026, 6, 3, 14, 40, tzinfo=timezone.utc),
     )
 
     assert [item["ticker"] for item in workspace["buckets"]["action_now"]] == []
@@ -368,9 +374,38 @@ def test_build_ticker_workspace_uses_latest_row_for_current_bucket_state():
             "latest_decision": "No Trade",
             "card_label": "No Trade",
             "card_detail": None,
+            "last_updated_label": "2026-06-03 14:35 UTC",
+            "recency_label": "5m ago",
         }
     ]
     assert workspace["selected_ticker"] == "NVDA"
+
+
+def test_build_ticker_workspace_derives_recency_from_latest_trade_timestamp():
+    workspace = build_ticker_workspace(
+        trade_rows=[
+            {
+                "ticker": "qqq",
+                "decision": "no_trade",
+                "risk_status": "approved",
+                "order_status": None,
+                "material_signal_change": False,
+                "created_at": "2026-06-03T14:35:00Z",
+            },
+        ],
+        selected_ticker=None,
+        positions_by_ticker={},
+        risk_by_ticker={},
+        signal_history_by_ticker={},
+        news_by_ticker={},
+        fundamentals_by_ticker={},
+        as_of=datetime(2026, 6, 3, 14, 40, tzinfo=timezone.utc),
+    )
+
+    item = workspace["buckets"]["watch"][0]
+
+    assert item["recency_label"] == "5m ago"
+    assert item["last_updated_label"] == "2026-06-03 14:35 UTC"
 
 
 def test_build_ticker_workspace_falls_back_when_selected_ticker_is_missing():
