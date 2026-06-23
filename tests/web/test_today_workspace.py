@@ -41,6 +41,111 @@ def test_build_ticker_workspace_groups_attention_buckets():
     assert workspace["selected_ticker"] == "NVDA"
 
 
+def test_build_ticker_workspace_builds_trade_plan_bull_bear_and_signal_groups():
+    workspace = build_ticker_workspace(
+        trade_rows=[
+            {
+                "ticker": "AAPL",
+                "decision": "enter_long",
+                "confidence": 0.82,
+                "approved_weight": 0.05,
+                "target_weight": 0.08,
+                "max_loss_pct": 0.03,
+                "time_horizon": "swing",
+                "thesis": "Breakout remains valid after the catalyst.",
+                "key_drivers": ["relative strength is improving"],
+                "counterarguments": ["macro could fade"],
+                "invalidators": ["loses VWAP"],
+                "metadata_json": {
+                    "entry_plan": "Add on closing strength.",
+                    "exit_plan": "Trim on failed breakout.",
+                },
+                "core_signal_evidence": {
+                    "technical": {
+                        "return_20d": 0.0826,
+                        "relative_volume": 0.78,
+                    },
+                    "fundamental": {
+                        "quality_score": 0.98,
+                    },
+                    "events_news": {
+                        "sentiment_direction": "positive",
+                    },
+                    "insider": {
+                        "officer_buy_flag": True,
+                    },
+                },
+            },
+        ],
+        selected_ticker=None,
+        positions_by_ticker={},
+        risk_by_ticker={},
+        signal_history_by_ticker={},
+        news_by_ticker={},
+        fundamentals_by_ticker={},
+    )
+
+    detail = workspace["detail"]
+    assert detail["latest_conclusion"]["trade_decision"]["approved_weight"] == 0.05
+    assert detail["latest_conclusion"]["trade_plan"] == {
+        "thesis": "Breakout remains valid after the catalyst.",
+        "time_horizon": "swing",
+        "target_weight": 0.08,
+        "approved_weight": 0.05,
+        "max_loss_pct": 0.03,
+        "entry_plan": "Add on closing strength.",
+        "exit_plan": "Trim on failed breakout.",
+        "edge": ("relative strength is improving",),
+        "invalidators": ("loses VWAP",),
+    }
+    assert detail["latest_conclusion"]["bull_bear"] == {
+        "confidence": 0.82,
+        "bull_points": ("relative strength is improving",),
+        "bear_points": ("macro could fade",),
+    }
+    assert detail["latest_conclusion"]["signal_groups"] == (
+        {"key": "technical", "label": "Technical", "bullets": ("20d return 8.26%", "relative volume 0.78")},
+        {"key": "fundamental", "label": "Fundamental", "bullets": ("quality 0.98",)},
+        {"key": "news_events", "label": "News & Events", "bullets": ("sentiment positive",)},
+        {"key": "insider", "label": "Insider", "bullets": ("officer buying",)},
+    )
+    assert detail["tabs"]["timeline"][0]["trade_decision"]["thesis"] == "Breakout remains valid after the catalyst."
+
+
+def test_build_ticker_workspace_truncates_event_news_summary():
+    workspace = build_ticker_workspace(
+        trade_rows=[
+            {
+                "ticker": "AAPL",
+                "decision": "no_trade",
+                "confidence": 0.4,
+                "risk_status": "approved",
+            },
+        ],
+        selected_ticker=None,
+        positions_by_ticker={},
+        risk_by_ticker={},
+        signal_history_by_ticker={},
+        news_by_ticker={
+            "AAPL": [
+                {
+                    "title": "Guidance update",
+                    "summary": "{}. {}".format("A" * 150, "B " * 120),
+                    "published_at": "2026-06-16T13:10:00Z",
+                    "event_type": "earnings",
+                    "importance": "high",
+                }
+            ]
+        },
+        fundamentals_by_ticker={},
+    )
+
+    summary = workspace["detail"]["latest_conclusion"]["signal_summary"]["event_news_summary"]
+    assert summary.startswith("Guidance update: " + "A" * 150)
+    assert summary.endswith("…")
+    assert "B" not in summary
+
+
 def test_build_ticker_workspace_keeps_closed_ticker_visible_in_closed_today_bucket():
     workspace = build_ticker_workspace(
         trade_rows=[

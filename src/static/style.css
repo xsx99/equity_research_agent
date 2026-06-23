@@ -1304,6 +1304,257 @@ a:hover { text-decoration: underline; }
   gap: 0.9rem;
 }
 
+.attention-feed {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.attention-feed-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.attention-feed-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.85rem 0.95rem;
+  border-radius: 14px;
+  border: 1px solid #dfe6ef;
+  background:
+    radial-gradient(circle at top right, rgba(194, 209, 229, 0.12), transparent 34%),
+    linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  box-shadow: 0 8px 18px rgba(36, 50, 65, 0.04);
+  color: #1f2937;
+  text-decoration: none;
+}
+
+.attention-feed-row:hover {
+  border-color: #bfd0e2;
+  background: #f7faff;
+}
+
+.attention-feed-body {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.attention-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 5.4rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid #d7e0ea;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.attention-badge-review {
+  background: #eef5ea;
+  color: #2f6f37;
+  border-color: #c9ddc9;
+}
+
+.attention-badge-alert {
+  background: #fff2e8;
+  color: #b84318;
+  border-color: #f2ccb0;
+}
+
+.attention-badge-signal {
+  background: #eef4fd;
+  color: #35516f;
+  border-color: #cfdcec;
+}
+
+.portfolio-charts {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(280px, 0.75fr);
+  gap: 0.85rem;
+}
+
+.portfolio-chart-card {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.9rem;
+  border: 1px solid #dfe6ef;
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at top left, rgba(194, 209, 229, 0.12), transparent 34%),
+    linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  box-shadow: 0 10px 22px rgba(36, 50, 65, 0.05);
+  overflow: hidden;
+}
+
+.portfolio-chart {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.portfolio-chart .equity-line {
+  fill: none;
+  stroke: #35516f;
+  stroke-width: 3.25;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.portfolio-chart .pnl-baseline {
+  stroke: #d7e0ea;
+  stroke-width: 1.5;
+  stroke-dasharray: 4 4;
+}
+
+.portfolio-chart .pnl-bar-pos {
+  fill: #1a7f37;
+}
+
+.portfolio-chart .pnl-bar-neg {
+  fill: #b42318;
+}
+
+.portfolio-chart-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  gap: 0.65rem;
+}
+
+.trade-plan-card {
+  display: grid;
+  gap: 0.55rem;
+  margin-top: 1rem;
+}
+
+.trade-plan-grid {
+  gap: 0.55rem;
+}
+
+.bull-bear-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.signal-group-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 0.75rem;
+}
+
+.signal-group-card {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.8rem 0.9rem;
+  border-radius: 14px;
+  border: 1px solid #dfe6ef;
+  background:
+    radial-gradient(circle at top left, rgba(194, 209, 229, 0.12), transparent 34%),
+    linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  box-shadow: 0 8px 18px rgba(36, 50, 65, 0.04);
+}
+
+.candidate-timeline-list {
+  display: grid;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.candidate-timeline-item {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.75rem 0.8rem;
+  border-radius: 12px;
+  border: 1px solid #e3e9f1;
+  background: rgba(255, 255, 255, 0.84);
+}
+
+.candidate-timeline-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.risk-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 0.75rem;
+}
+
+.risk-calendar-section {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.9rem;
+  border-radius: 14px;
+  border: 1px solid #dfe6ef;
+  background:
+    radial-gradient(circle at top left, rgba(194, 209, 229, 0.12), transparent 34%),
+    linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+}
+
+.calendar-list,
+.earnings-card-list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.calendar-row,
+.earnings-chip {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.72rem 0.8rem;
+  border-radius: 12px;
+  border: 1px solid #e3e9f1;
+  background: rgba(255, 255, 255, 0.84);
+}
+
+.calendar-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+}
+
+.calendar-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  justify-content: flex-end;
+}
+
+.earnings-chip-head {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.impact-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.18rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid #d7e0ea;
+  background: #eef3f9;
+  color: #35516f;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.impact-badge-muted {
+  background: #f3f5f7;
+  color: #667085;
+  border-color: #dde3ea;
+}
+
 .surface-block {
   display: grid;
   gap: 0.45rem;
@@ -1355,6 +1606,11 @@ a:hover { text-decoration: underline; }
   color: #1f2937;
   font-size: 0.98rem;
   line-height: 1.25;
+}
+
+.portfolio-pnl-row .summary-tile strong.kpi-pos,
+.portfolio-pnl-row .summary-tile strong.kpi-neg {
+  font-size: 1.05rem;
 }
 
 .summary-tile .metric-label {
