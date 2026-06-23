@@ -67,8 +67,10 @@ from src.web.presenters.today_copy import (
 from src.web.presenters.today_candidates import build_today_candidates_view
 from src.web.presenters.today_learning_strategies import build_today_learning_strategies
 from src.web.presenters.today_overview import build_today_overview
+from src.web.presenters.today_portfolio_analytics import build_portfolio_analytics
 from src.web.presenters.today_risk_macro import build_today_risk_macro_payload
 from src.web.presenters.today_workspace import build_ticker_workspace
+from src.web.presenters.signal_evidence import signal_groups
 
 router = APIRouter()
 _templates: Jinja2Templates | None = None
@@ -315,12 +317,14 @@ def load_today_dashboard(
         relationships=relationships,
         peer_baskets=peer_baskets,
     )
+    portfolio_history = _load_portfolio_history(session)
     portfolio = _build_portfolio_view(
         header=header,
         positions=positions,
         option_positions=option_positions,
         hedge_overlays=_load_hedge_overlays(session),
         overview=overview,
+        portfolio_history=portfolio_history,
     )
     learning_strategies = build_today_learning_strategies(
         reflection=_serialize_reflection(latest_reflection),
@@ -547,6 +551,7 @@ def _build_portfolio_view(
     option_positions: tuple[dict[str, Any], ...],
     hedge_overlays: tuple[dict[str, Any], ...],
     overview: dict[str, Any],
+    portfolio_history: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     return {
         "positions": positions,
@@ -576,6 +581,7 @@ def _build_portfolio_view(
             "cash_balance": header.get("cash_balance"),
             "buying_power": header.get("buying_power"),
         },
+        "analytics": build_portfolio_analytics(portfolio_history or []),
         "needs_attention": {
             "needs_review": tuple(overview.get("command_center", {}).get("needs_review") or ()),
             "live_alerts": tuple(overview.get("live_alerts") or ()),
@@ -937,6 +943,23 @@ def _load_hedge_overlays(session: Any) -> tuple[dict[str, Any], ...]:
     )
 
 
+def _load_portfolio_history(session: Any, *, limit: int = 180) -> list[dict[str, Any]]:
+    rows = (
+        session.query(PortfolioSnapshot)
+        .order_by(PortfolioSnapshot.snapshot_time.desc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        {
+            "time": row.snapshot_time,
+            "equity": row.account_equity,
+            "day_pnl": row.day_pnl,
+        }
+        for row in reversed(rows)
+    ]
+
+
 def _load_trade_rows(session: Any) -> list[dict[str, Any]]:
     material_change_tickers = _load_material_signal_change_tickers(session)
     rows = (
@@ -958,6 +981,7 @@ def _serialize_trade_row(
     counterarguments = list(
         getattr(row, "counterarguments_json", None) or metadata_json.get("counterarguments") or []
     )
+    candidate_score = getattr(row, "candidate_score", None)
     return {
         "trading_decision_id": str(row.trading_decision_id),
         "decision_time": row.decision_time,
@@ -968,16 +992,24 @@ def _serialize_trade_row(
         "trade_identity": row.trade_identity,
         "selected_strategy_id": row.strategy_id,
         "expression_bucket_id": row.expression_bucket_id,
-        "approved_weight": row.approved_weight,
+        "approved_weight": getattr(row, "approved_weight", None),
+        "target_weight": getattr(row, "target_weight", None),
+        "time_horizon": getattr(row, "time_horizon", None),
+        "max_loss_pct": getattr(row, "max_loss_pct", None),
+        "entry_plan": metadata_json.get("entry_plan"),
+        "exit_plan": metadata_json.get("exit_plan"),
         "confidence": row.confidence,
         "risk_status": row.risk_decision.status if row.risk_decision else None,
         "order_status": _load_order_status(session, row.trading_decision_id),
         "material_signal_change": str(row.ticker).upper() in material_change_tickers,
-        "thesis": row.thesis,
+        "thesis": getattr(row, "thesis", None),
         "key_drivers": key_drivers,
         "counterarguments": counterarguments,
         "invalidators": list(getattr(row, "invalidators_json", None) or []),
         "metadata_json": metadata_json,
+        "core_signal_evidence": dict(getattr(candidate_score, "core_signal_evidence_json", None) or {})
+        if candidate_score
+        else {},
     }
 
 
@@ -1038,13 +1070,14 @@ def _load_trade_detail(session: Any, decision_id: str) -> dict[str, Any] | None:
     row = session.query(TradingDecision).filter_by(trading_decision_id=rid).first()
     if row is None:
         return None
-    signal_snapshot = row.candidate_score.signal_snapshot if row.candidate_score else None
+    candidate_score = getattr(row, "candidate_score", None)
+    signal_snapshot = candidate_score.signal_snapshot if candidate_score else None
     metadata_json = dict(getattr(row, "metadata_json", {}) or {})
     score_rows = []
-    if row.candidate_score:
+    if candidate_score:
         related_scores = (
             session.query(CandidateScore)
-            .filter(CandidateScore.signal_snapshot_id == row.candidate_score.signal_snapshot_id)
+            .filter(CandidateScore.signal_snapshot_id == candidate_score.signal_snapshot_id)
             .order_by(CandidateScore.candidate_score.desc())
             .all()
         )
@@ -1060,14 +1093,16 @@ def _load_trade_detail(session: Any, decision_id: str) -> dict[str, Any] | None:
         .all()
     )
     risk_decision = None
-    if row.risk_decision:
+    risk_decision_obj = getattr(row, "risk_decision", None)
+    if risk_decision_obj:
         risk_decision = {
-            "status": row.risk_decision.status,
-            "reason_code": row.risk_decision.reason_code,
-            "generated_hedge_action": getattr(row.risk_decision, "generated_hedge_action_json", None),
-            "lookahead_risk_source": _risk_decision_lookahead_source(row.risk_decision),
-            "applied_rules": _risk_applied_rules(getattr(row.risk_decision, "applied_rules_json", None)),
+            "status": risk_decision_obj.status,
+            "reason_code": risk_decision_obj.reason_code,
+            "generated_hedge_action": getattr(risk_decision_obj, "generated_hedge_action_json", None),
+            "lookahead_risk_source": _risk_decision_lookahead_source(risk_decision_obj),
+            "applied_rules": _risk_applied_rules(getattr(risk_decision_obj, "applied_rules_json", None)),
         }
+    prompt_run = getattr(row, "prompt_run", None)
     return {
         "trading_decision_id": str(row.trading_decision_id),
         "ticker": row.ticker,
@@ -1077,15 +1112,24 @@ def _load_trade_detail(session: Any, decision_id: str) -> dict[str, Any] | None:
         "expression_bucket_id": row.expression_bucket_id,
         "trade_identity": row.trade_identity,
         "confidence": row.confidence,
-        "thesis": row.thesis,
+        "approved_weight": getattr(row, "approved_weight", None),
+        "target_weight": getattr(row, "target_weight", None),
+        "time_horizon": getattr(row, "time_horizon", None),
+        "max_loss_pct": getattr(row, "max_loss_pct", None),
+        "thesis": getattr(row, "thesis", None),
+        "entry_plan": metadata_json.get("entry_plan"),
+        "exit_plan": metadata_json.get("exit_plan"),
         "key_drivers": list(getattr(row, "key_drivers_json", None) or metadata_json.get("key_drivers") or []),
         "counterarguments": list(
             getattr(row, "counterarguments_json", None) or metadata_json.get("counterarguments") or []
         ),
         "invalidators": list(getattr(row, "invalidators_json", None) or []),
         "metadata_json": metadata_json,
-        "llm_decision_json": row.prompt_run.parsed_output_json if row.prompt_run else {},
-        "validation_status": row.prompt_run.parse_status if row.prompt_run else "unavailable",
+        "core_signal_evidence": dict(getattr(candidate_score, "core_signal_evidence_json", None) or {})
+        if candidate_score
+        else {},
+        "llm_decision_json": prompt_run.parsed_output_json if prompt_run else {},
+        "validation_status": prompt_run.parse_status if prompt_run else "unavailable",
         "signal_snapshot": signal_snapshot.signal_json if signal_snapshot else {},
         "strategy_scores": tuple(score_rows),
         "risk_decision": risk_decision,
@@ -1493,6 +1537,40 @@ def _merge_audit_detail_into_workspace_detail(
         )
     if audit_detail.get("confidence") is not None:
         trade_decision["confidence"] = audit_detail.get("confidence")
+    if audit_detail.get("approved_weight") is not None:
+        trade_decision["approved_weight"] = audit_detail.get("approved_weight")
+
+    trade_plan = dict(latest_conclusion.get("trade_plan") or {})
+    if audit_detail.get("thesis"):
+        trade_plan["thesis"] = _audit_trade_summary(audit_detail)
+    if audit_detail.get("time_horizon") is not None:
+        trade_plan["time_horizon"] = audit_detail.get("time_horizon")
+    if audit_detail.get("target_weight") is not None:
+        trade_plan["target_weight"] = audit_detail.get("target_weight")
+    if audit_detail.get("approved_weight") is not None:
+        trade_plan["approved_weight"] = audit_detail.get("approved_weight")
+    if audit_detail.get("max_loss_pct") is not None:
+        trade_plan["max_loss_pct"] = audit_detail.get("max_loss_pct")
+    if audit_detail.get("entry_plan") is not None:
+        trade_plan["entry_plan"] = audit_detail.get("entry_plan")
+    if audit_detail.get("exit_plan") is not None:
+        trade_plan["exit_plan"] = audit_detail.get("exit_plan")
+    if audit_detail.get("key_drivers"):
+        trade_plan["edge"] = tuple(audit_detail.get("key_drivers") or ())
+    if audit_detail.get("invalidators"):
+        trade_plan["invalidators"] = tuple(audit_detail.get("invalidators") or ())
+
+    bull_bear = dict(latest_conclusion.get("bull_bear") or {})
+    if audit_detail.get("confidence") is not None:
+        bull_bear["confidence"] = audit_detail.get("confidence")
+    if audit_detail.get("key_drivers"):
+        bull_bear["bull_points"] = tuple(audit_detail.get("key_drivers") or ())
+    if audit_detail.get("counterarguments"):
+        bull_bear["bear_points"] = tuple(audit_detail.get("counterarguments") or ())
+
+    signal_groups_value = signal_groups(audit_detail.get("core_signal_evidence"))
+    if signal_groups_value:
+        latest_conclusion["signal_groups"] = signal_groups_value
 
     if (
         not risk_summary.get("reason")
@@ -1509,6 +1587,8 @@ def _merge_audit_detail_into_workspace_detail(
         risk_summary["applied_rules"] = audit_detail["risk_decision"].get("applied_rules") or ()
 
     latest_conclusion["trade_decision"] = trade_decision
+    latest_conclusion["trade_plan"] = trade_plan
+    latest_conclusion["bull_bear"] = bull_bear
     latest_conclusion["risk_summary"] = risk_summary
 
     tabs["risk"] = risk_tab

@@ -13,11 +13,13 @@ from src.web.presenters.today_copy import (
     risk_status_label,
     strategy_label,
 )
+from src.web.presenters.signal_evidence import signal_groups
 
 _ACTIONABLE_DECISIONS = {"enter_long", "enter_short", "trim", "exit"}
 _ACTIONABLE_ORDER_STATUSES = {"pending", "accepted", "partial_fill"}
 _EMPTY_MARKER = "No material update"
 _NO_MATERIAL_TICKER_NEWS = "No material ticker-specific news."
+_NEWS_SUMMARY_MAX_CHARS = 280
 _TECHNICAL_CHART_SPECS = (
     ("price / key level trend", {"price", "price_trend", "key_levels"}),
     ("relative strength trend", {"relative_strength", "relative_strength_trend", "rs"}),
@@ -331,6 +333,7 @@ def _build_detail(
     key_drivers = _decision_rationale_items(latest_decision, "key_drivers")
     counterarguments = _decision_rationale_items(latest_decision, "counterarguments")
     invalidators = _decision_invalidators(latest_decision)
+    metadata_json = dict(latest_decision.get("metadata_json") or {})
     signal_summary = {
         **_build_signal_summary(signal_history),
         "technical_charts": technical_charts,
@@ -357,9 +360,27 @@ def _build_detail(
             "expression_bucket_id": latest_decision.get("expression_bucket_id") or _EMPTY_MARKER,
             "expression_bucket_label": expression_bucket_label(latest_decision.get("expression_bucket_id")) or _EMPTY_MARKER,
             "confidence": latest_decision.get("confidence"),
+            "approved_weight": latest_decision.get("approved_weight"),
         },
         "signal_summary": signal_summary,
         "risk_summary": latest_risk_summary,
+        "trade_plan": {
+            "thesis": trade_summary,
+            "time_horizon": str(latest_decision.get("time_horizon") or "").strip() or _EMPTY_MARKER,
+            "target_weight": latest_decision.get("target_weight"),
+            "approved_weight": latest_decision.get("approved_weight"),
+            "max_loss_pct": latest_decision.get("max_loss_pct"),
+            "entry_plan": operator_text(metadata_json.get("entry_plan")) or None,
+            "exit_plan": operator_text(metadata_json.get("exit_plan")) or None,
+            "edge": tuple(key_drivers),
+            "invalidators": tuple(invalidators),
+        },
+        "bull_bear": {
+            "confidence": latest_decision.get("confidence"),
+            "bull_points": tuple(key_drivers),
+            "bear_points": tuple(counterarguments),
+        },
+        "signal_groups": signal_groups(latest_decision.get("core_signal_evidence")),
         "position_execution": {
             "position": position,
             "position_label": position.get("position_label"),
@@ -377,6 +398,10 @@ def _build_detail(
         latest_conclusion["trade_decision"]["counterarguments"] = counterarguments
     if invalidators:
         latest_conclusion["trade_decision"]["invalidators"] = invalidators
+    if not latest_conclusion["trade_plan"]["entry_plan"]:
+        latest_conclusion["trade_plan"]["entry_plan"] = operator_text(metadata_json.get("entry_plan")) or None
+    if not latest_conclusion["trade_plan"]["exit_plan"]:
+        latest_conclusion["trade_plan"]["exit_plan"] = operator_text(metadata_json.get("exit_plan")) or None
 
     tabs = {
         "timeline": _build_timeline(
@@ -569,7 +594,7 @@ def _build_event_news_summary(news_snippets: list[dict[str, Any]]) -> str | None
         return _NO_MATERIAL_TICKER_NEWS if has_non_empty_news else None
 
     title = str(primary_snippet.get("title") or "").strip()
-    summary = str(primary_snippet.get("summary") or "").strip()
+    summary = _truncate_news_text(str(primary_snippet.get("summary") or "").strip())
     if title and summary and summary != title:
         return f"{title}: {_with_terminal_period(summary)}"
     if summary:
@@ -577,6 +602,23 @@ def _build_event_news_summary(news_snippets: list[dict[str, Any]]) -> str | None
     if title:
         return _with_terminal_period(title)
     return None
+
+
+def _truncate_news_text(value: str, *, limit: int = _NEWS_SUMMARY_MAX_CHARS) -> str:
+    compact = " ".join(value.split())
+    if len(compact) <= limit:
+        return compact
+
+    for marker in (". ", "! ", "? "):
+        boundary = compact.rfind(marker, 0, limit)
+        if boundary >= limit // 2:
+            return compact[:boundary].rstrip() + "…"
+
+    boundary = compact.rfind(" ", 0, limit)
+    if boundary >= limit // 2:
+        return compact[:boundary].rstrip() + "…"
+
+    return compact[:limit].rstrip() + "…"
 
 
 def _item_last_updated_at(
@@ -675,7 +717,7 @@ def _with_terminal_period(value: str) -> str:
     stripped = value.rstrip()
     if not stripped:
         return stripped
-    if stripped.endswith((".", "!", "?")):
+    if stripped.endswith((".", "!", "?", "…")):
         return stripped
     return f"{stripped}."
 
@@ -959,11 +1001,18 @@ def _history_signal_bullets(summary: Any) -> list[str]:
 
 def _history_trade_decision_view(item: dict[str, Any] | None) -> dict[str, Any]:
     row = item or {}
-    return {
+    trade_decision = {
         "label": _humanize_label(row.get("decision")) or _EMPTY_MARKER,
         "strategy_label": strategy_label(row.get("selected_strategy_id")) or _EMPTY_MARKER,
         "summary": _decision_summary(row),
     }
+    thesis = operator_text(row.get("thesis")) or None
+    approved_weight = row.get("approved_weight")
+    if thesis is not None:
+        trade_decision["thesis"] = thesis
+    if approved_weight is not None:
+        trade_decision["approved_weight"] = approved_weight
+    return trade_decision
 
 
 def _history_risk_view(item: dict[str, Any] | None, *, latest_risk_summary: dict[str, Any]) -> dict[str, Any]:
