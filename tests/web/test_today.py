@@ -189,7 +189,11 @@ def _dashboard_payload() -> dict:
                 "time_label": "2026-06-02 14:20 UTC",
                 "change_type": "baseline",
                 "signal_summary": ("Relative strength improved vs QQQ",),
-                "trade_decision": {"label": "Watch", "summary": "Waiting for confirmation"},
+                "trade_decision": {
+                    "label": "Watch",
+                    "summary": "Waiting for confirmation",
+                    "thesis": "Breakout confirmation is still pending.",
+                },
                 "risk": {"status_label": "Approved", "summary": "Within limits"},
                 "change_summary": (),
             },
@@ -294,8 +298,31 @@ def _dashboard_payload() -> dict:
                         "expression_bucket_id": "long_stock",
                         "expression_bucket_label": "Long Stock",
                         "confidence": Decimal("0.72"),
+                        "approved_weight": Decimal("0.05"),
                         "summary": "Changed from watch to Enter Long",
                     },
+                    "trade_plan": {
+                        "thesis": "Breakout remains valid after the catalyst.",
+                        "time_horizon": "swing",
+                        "target_weight": Decimal("0.08"),
+                        "approved_weight": Decimal("0.05"),
+                        "max_loss_pct": Decimal("0.03"),
+                        "entry_plan": "Add on closing strength.",
+                        "exit_plan": "Trim on failed breakout.",
+                        "edge": ("relative strength is improving",),
+                        "invalidators": ("loses VWAP",),
+                    },
+                    "bull_bear": {
+                        "confidence": Decimal("0.82"),
+                        "bull_points": ("relative strength is improving",),
+                        "bear_points": ("macro could fade",),
+                    },
+                    "signal_groups": (
+                        {"key": "technical", "label": "Technical", "bullets": ("20d return 8.26%", "relative volume 0.78")},
+                        {"key": "fundamental", "label": "Fundamental", "bullets": ("quality 0.98",)},
+                        {"key": "news_events", "label": "News & Events", "bullets": ("sentiment positive",)},
+                        {"key": "insider", "label": "Insider", "bullets": ("officer buying",)},
+                    ),
                     "signal_summary": {
                         "summary_bullets": (
                             "Relative strength improved vs QQQ",
@@ -349,7 +376,11 @@ def _dashboard_payload() -> dict:
                                 "Relative strength improved vs QQQ",
                                 "Price held above preopen resistance",
                             ),
-                            "trade_decision": {"label": "Watch", "summary": "Waiting for confirmation"},
+                            "trade_decision": {
+                                "label": "Watch",
+                                "summary": "Waiting for confirmation",
+                                "thesis": "Breakout confirmation is still pending.",
+                            },
                             "risk": {"status_label": "Approved", "summary": "Within limits"},
                             "change_summary": (),
                         },
@@ -427,6 +458,15 @@ def _dashboard_payload() -> dict:
                     "portfolio_risk_level": "high",
                     "affected_ticker": "AAPL",
                     "risk_mechanism": "direct earnings gap risk",
+                },
+                {
+                    "scheduled_at": datetime(2026, 6, 3, 13, 30, tzinfo=timezone.utc),
+                    "event_type": "macro",
+                    "event_type_label": "Macro Event",
+                    "importance": "medium",
+                    "portfolio_risk_level": "medium",
+                    "affected_ticker": None,
+                    "risk_mechanism": "US CPI",
                 },
             ),
             "risk_sources": (
@@ -766,6 +806,7 @@ class TestTodayDashboard:
         assert "Account Equity" in response.text
         assert "Day P&amp;L" in response.text
         assert "Unrealized P&amp;L" in response.text
+        assert "Realized P&amp;L" in response.text
         assert "Net / Gross Exp." in response.text
         assert "Buying Power" in response.text
         assert "Margin Util." in response.text
@@ -774,7 +815,8 @@ class TestTodayDashboard:
         assert "$1,000,000.00" in response.text
         assert "$1,250.50" in response.text
         assert "$820.25" in response.text
-        assert "Needs Review" in response.text
+        assert "Ready for Review" in response.text
+        assert "Needs Review" not in response.text
         assert "trades-canvas" not in response.text
         assert "TSLA" not in response.text
         assert "AI Infrastructure" not in response.text
@@ -796,12 +838,16 @@ class TestTodayDashboard:
         assert "trades-canvas" in response.text
         assert "Signal Summary" in response.text
         assert "Breakout confirmed + risk approved" in response.text
+        assert 'data-testid="trade-plan"' in response.text
+        assert 'data-testid="bull-bear"' in response.text
+        assert 'data-testid="signal-groups"' in response.text
         assert "ticker-card-meta" in response.text
         assert "meta-pill" in response.text
         assert "support-kv-row" in response.text
         assert "AI Infrastructure" not in response.text
         assert "gpt-5" not in response.text
         assert "Stock Positions" not in response.text
+        assert 'data-bucket="watch"' not in response.text
 
     def test_trade_detail_drilldown_renders_when_decision_selected(self, client):
         payload = _dashboard_payload()
@@ -815,6 +861,13 @@ class TestTodayDashboard:
         assert "Breakout confirmed + risk approved" in response.text
         assert "Within Limits" in response.text
         assert "within_limits" not in response.text
+        assert 'data-testid="trade-plan"' in response.text
+        assert 'data-testid="bull-bear"' in response.text
+        assert 'data-testid="signal-groups"' in response.text
+        assert "Breakout remains valid after the catalyst." in response.text
+        assert "Add on closing strength." in response.text
+        assert "relative strength is improving" in response.text
+        assert "5.0%" in response.text
         assert "History" in response.text
         assert 'data-panel="timeline"' in response.text
         assert 'href="/today?tab=trades&ticker=AAPL&detail_tab=trend"' not in response.text
@@ -929,9 +982,12 @@ class TestTodayDashboard:
         assert "Technology concentration" in response.text
         assert "Macro regime unavailable" in response.text
         assert "macro-strip" in response.text
-        assert 'data-testid="event-risk-list"' in response.text
+        assert 'data-testid="economic-calendar"' in response.text
+        assert 'data-testid="upcoming-earnings"' in response.text
         assert "direct earnings gap risk" in response.text
-        assert "AAPL / high" in response.text
+        assert "AAPL" in response.text
+        assert "HIGH" in response.text
+        assert "US CPI" in response.text
         assert "Block New Entry" in response.text
         assert "block_open" not in response.text
         assert "trades-canvas" not in response.text
@@ -944,9 +1000,12 @@ class TestTodayDashboard:
             response = client.get("/today?tab=portfolio")
 
         assert response.status_code == 200
-        assert "Needs Review" in response.text
-        assert "Live Alerts" in response.text
-        assert "Material Changes" in response.text
+        assert "Ready for Review" in response.text
+        assert "Needs Review" not in response.text
+        assert "attention-feed" in response.text
+        assert "Alert" in response.text
+        assert "Signal Change" in response.text
+        assert "Review" in response.text
         assert "Closed recently and ready for review" in response.text
         assert "Relative strength improved vs QQQ" in response.text
         assert "Raised guidance" in response.text
@@ -967,6 +1026,7 @@ class TestTodayDashboard:
 
         assert response.status_code == 200
         assert "Nothing needs attention" in response.text
+        assert "attention-feed" not in response.text
 
     def test_portfolio_tab_renders_summary_first_structure(self, client):
         payload = _dashboard_payload()
@@ -995,6 +1055,49 @@ class TestTodayDashboard:
         assert "surface-block" in response.text
         assert "surface-block-count" in response.text
         assert "trades-canvas" not in response.text
+
+    def test_portfolio_tab_renders_portfolio_analytics_when_available(self, client):
+        payload = _dashboard_payload()
+        payload["selected_tab"] = "portfolio"
+        payload["portfolio"]["analytics"] = {
+            "point_count": 4,
+            "equity_points": "0,100 10,120 20,114 30,126",
+            "daily_bars": (
+                {"x": 0, "y": 80, "w": 8, "h": 0, "positive": True},
+                {"x": 12, "y": 40, "w": 8, "h": 40, "positive": True},
+                {"x": 24, "y": 90, "w": 8, "h": 10, "positive": False},
+                {"x": 36, "y": 50, "w": 8, "h": 30, "positive": True},
+            ),
+            "baseline_y": 80,
+            "equity_start": 100.0,
+            "equity_end": 126.0,
+            "equity_min": 100.0,
+            "equity_max": 126.0,
+            "metrics": {
+                "total_return": 0.26,
+                "max_drawdown": 0.05,
+                "win_days": 2,
+                "loss_days": 1,
+                "profitable_days_pct": 0.6666666667,
+                "best_day": 20.0,
+                "worst_day": -6.0,
+                "avg_day_pnl": 8.6666666667,
+                "daily_profit_factor": 5.3333333333,
+            },
+        }
+        with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
+            response = client.get("/today?tab=portfolio")
+
+        assert response.status_code == 200
+        assert 'data-testid="portfolio-analytics"' in response.text
+        assert "Portfolio Value Over Time" in response.text
+        assert "Daily P&amp;L" in response.text
+        assert "Total Return" in response.text
+        assert "Max Drawdown" in response.text
+        assert "Best Day" in response.text
+        assert "Worst Day" in response.text
+        assert "equity-line" in response.text
+        assert "pnl-bar-pos" in response.text or "pnl-bar-neg" in response.text
 
     def test_portfolio_tab_formats_stock_position_strategy_labels_and_unknowns(self, client):
         payload = _dashboard_payload()
@@ -1075,6 +1178,22 @@ class TestTodayDashboard:
                 "risk_tags": ("Risk tags: gap risk, momentum.",),
                 "invalidators": ("Invalidators: loses VWAP.",),
                 "duplicate_count": 4,
+                "evaluations": (
+                    {
+                        "decision_time": "2026-06-16T13:35:00Z",
+                        "outcome": "Ready for review",
+                        "strategy_label": "Gap continuation",
+                        "confidence": 0.91,
+                        "summary": "Momentum setup with clean catalyst.",
+                    },
+                    {
+                        "decision_time": "2026-06-16T13:34:00Z",
+                        "outcome": "Ready for review",
+                        "strategy_label": "Pullback reclaim",
+                        "confidence": 0.77,
+                        "summary": "Alternative pullback setup.",
+                    },
+                ),
                 "alternatives": (
                     {
                         "strategy_label": "Pullback reclaim",
@@ -1114,6 +1233,8 @@ class TestTodayDashboard:
         assert "Confidence" in response.text
         assert "0.91" in response.text
         assert "relative strength and catalyst quality remain aligned" in response.text
+        assert "Evaluation timeline" in response.text
+        assert "2026-06-16T13:35:00Z" in response.text
         assert "Technical: 20d return 8.26%, relative volume 0.78." in response.text
         assert "Risk tags: gap risk, momentum." in response.text
         assert "Invalidators: loses VWAP." in response.text
@@ -1303,6 +1424,7 @@ class TestTodayDashboard:
         assert "Pre Open Rerun" in response.text
         assert "Trade Decision" in response.text
         assert "Risk" in response.text
+        assert "Breakout confirmation is still pending." in response.text
         assert "sentiment neutral -&gt; negative" in response.text
         assert "Timeline Detail Sheet" not in response.text
         assert 'data-panel="trend"' not in response.text
