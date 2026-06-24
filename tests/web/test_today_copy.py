@@ -24,6 +24,7 @@ def test_strategy_label_translates_internal_ids_to_operator_copy():
     assert strategy_label("direct_negative_catalyst") == "Negative catalyst detected"
     assert strategy_label("valuation_repair_quality_software_v1") == "Valuation repair setup"
     assert strategy_label("lpsmoke_181857") == "Live pre-open verification"
+    assert strategy_label("codex-smoke-58f3aa39-20a4-44b5-91dc-bc2a7b98b463-option-trade") == "Live pre-open verification"
 
 
 def test_candidate_result_label_translates_rejection_like_results():
@@ -69,3 +70,4 @@ def test_operator_text_humanizes_embedded_snake_case_copy_without_touching_model
 
 def test_operator_text_rewrites_internal_smoke_copy():
     assert operator_text("codex live preopen verification") == "Live pre-open verification"
+    assert operator_text("codex-smoke-58f3aa39-20a4-44b5-91dc-bc2a7b98b463-option-trade") == "Live pre-open verification"

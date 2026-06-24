@@ -366,7 +366,7 @@ def _build_detail(
         "risk_summary": latest_risk_summary,
         "trade_plan": {
             "thesis": trade_summary,
-            "time_horizon": str(latest_decision.get("time_horizon") or "").strip() or _EMPTY_MARKER,
+            "time_horizon": _humanize_label(latest_decision.get("time_horizon")),
             "target_weight": latest_decision.get("target_weight"),
             "approved_weight": latest_decision.get("approved_weight"),
             "max_loss_pct": latest_decision.get("max_loss_pct"),
@@ -1206,14 +1206,16 @@ def _decision_list_summary(row: dict[str, Any]) -> str:
 def _decision_invalidators(row: dict[str, Any]) -> list[str]:
     invalidators = row.get("invalidators")
     if isinstance(invalidators, list):
-        return [str(item).strip() for item in invalidators if str(item).strip()]
+        cleaned = [operator_text(str(item).strip()) for item in invalidators if str(item).strip()]
+        return [item for item in cleaned if item]
     return []
 
 
 def _decision_rationale_items(row: dict[str, Any], key: str) -> list[str]:
     values = row.get(key)
     if isinstance(values, list):
-        return [str(item).strip() for item in values if str(item).strip()]
+        cleaned = [operator_text(str(item).strip()) for item in values if str(item).strip()]
+        return [item for item in cleaned if item]
     return []
 
 

@@ -294,3 +294,53 @@ def test_build_today_candidates_view_adds_evaluation_timeline_in_decision_order(
     assert [item["strategy_label"] for item in row["evaluations"]] == ["Gap continuation", "Pullback reclaim"]
     assert row["evaluations"][0]["decision_time"] == "2026-06-16T13:35:00Z"
     assert row["evaluations"][0]["summary"] == "Momentum setup with clean catalyst."
+
+
+def test_build_today_candidates_view_dedupes_identical_evaluation_rows():
+    payload = build_today_candidates_view(
+        rows=(
+            {
+                "ticker": "AAPL",
+                "decision_time": "2026-06-16T13:35:00Z",
+                "current_outcome_label": "Ready for review",
+                "operator_summary": "Momentum setup with clean catalyst.",
+                "trade_identity_label": "Action Now",
+                "strategy_label": "Gap continuation",
+                "strategy_match": "gap_continuation_v1",
+                "candidate_score": 0.91,
+                "detail_internal_ids": {"strategy_match": "gap_continuation_v1"},
+            },
+            {
+                "ticker": "AAPL",
+                "decision_time": "2026-06-16T13:35:00Z",
+                "current_outcome_label": "Ready for review",
+                "operator_summary": "Momentum setup with clean catalyst.",
+                "trade_identity_label": "Action Now",
+                "strategy_label": "Gap continuation",
+                "strategy_match": "gap_continuation_v1",
+                "candidate_score": 0.91,
+                "detail_internal_ids": {"strategy_match": "gap_continuation_v1"},
+            },
+            {
+                "ticker": "AAPL",
+                "decision_time": "2026-06-16T13:10:00Z",
+                "current_outcome_label": "Still on watch",
+                "operator_summary": "Alternative pullback setup.",
+                "trade_identity_label": "Watch Only",
+                "strategy_label": "Pullback reclaim",
+                "strategy_match": "pullback_reclaim_v1",
+                "candidate_score": 0.77,
+                "detail_internal_ids": {"strategy_match": "pullback_reclaim_v1"},
+            },
+        ),
+        manual_requests=(),
+        themes=(),
+        active_universe_filter=None,
+        portfolio_intents=(),
+        relationships=(),
+        peer_baskets=(),
+    )
+
+    row = payload["decision_readout"][0]
+    assert [item["strategy_label"] for item in row["evaluations"]] == ["Gap continuation", "Pullback reclaim"]
+    assert row["evaluation_count"] == 2

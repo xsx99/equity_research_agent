@@ -46,7 +46,7 @@ def build_portfolio_analytics(
         baseline_y = plot_top + (plot_height * (positive_max / scale_denom)) if scale_denom else plot_top
         day_scale = plot_height / scale_denom if scale_denom else 0.0
 
-    daily_bars = _build_daily_bars(
+    daily_bars, bar_width = _build_daily_bars(
         day_pnls,
         left=plot_left,
         baseline_y=baseline_y,
@@ -74,9 +74,16 @@ def build_portfolio_analytics(
 
     return {
         "point_count": point_count,
-        "equity_points": equity_points,
-        "daily_bars": tuple(daily_bars),
-        "baseline_y": round(baseline_y, 1),
+        "equity_chart": {
+            "points": equity_points,
+            "min": equity_min,
+            "max": equity_max,
+        },
+        "pnl_chart": {
+            "bars": tuple(daily_bars),
+            "baseline_y": round(baseline_y, 1),
+            "bar_width": round(bar_width, 1),
+        },
         "equity_start": equity_values[0],
         "equity_end": equity_values[-1],
         "equity_min": equity_min,
@@ -137,13 +144,13 @@ def _build_daily_bars(
     width: float,
     plot_height: float,
     scale: float,
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], float]:
     if not day_pnls:
-        return []
+        return [], 0.0
 
     count = len(day_pnls)
     bar_slot = width / max(count, 1)
-    bar_width = max(min(bar_slot * 0.55, 24.0), 8.0)
+    bar_width = max(min(bar_slot * 0.62, 24.0), 2.0)
     bars: list[dict[str, Any]] = []
     for index, value in enumerate(day_pnls):
         center_x = left + (bar_slot * index) + (bar_slot / 2.0)
@@ -159,7 +166,7 @@ def _build_daily_bars(
                 "positive": positive,
             }
         )
-    return bars
+    return bars, bar_width
 
 
 def _max_drawdown(equity_values: list[float]) -> float:
