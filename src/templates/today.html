@@ -745,60 +745,65 @@
       {% if portfolio.analytics %}
       <section class="surface-block portfolio-analytics-block" data-testid="portfolio-analytics">
         <div class="surface-block-head">
-          <div class="section-label">Portfolio Value Over Time</div>
+          <div class="section-label">Portfolio Analytics</div>
           <span class="surface-block-count">{{ portfolio.analytics.point_count }}</span>
         </div>
-        <div class="portfolio-charts">
-          <article class="portfolio-chart-card">
-            <svg class="portfolio-chart" viewBox="0 0 720 180" role="img" aria-label="Portfolio Value Over Time">
-              <line class="pnl-baseline" x1="0" y1="{{ portfolio.analytics.baseline_y }}" x2="720" y2="{{ portfolio.analytics.baseline_y }}"></line>
-              <polyline class="equity-line" points="{{ portfolio.analytics.equity_points }}"></polyline>
-              {% for bar in portfolio.analytics.daily_bars %}
-              <rect class="{% if bar.positive %}pnl-bar-pos{% else %}pnl-bar-neg{% endif %}" x="{{ bar.x }}" y="{{ bar.y }}" width="{{ bar.w }}" height="{{ bar.h }}" rx="2" ry="2"></rect>
-              {% endfor %}
-            </svg>
-          </article>
-          <article class="portfolio-chart-card">
-            <div class="section-label">Daily P&amp;L</div>
-            <div class="portfolio-chart-metrics">
-              <article class="summary-tile">
-                <span class="metric-label">Total Return</span>
-                <strong>{% if portfolio.analytics.metrics.total_return is not none %}{{ fmt_number(portfolio.analytics.metrics.total_return * 100, 1) }}%{% else %}—{% endif %}</strong>
-              </article>
-              <article class="summary-tile">
-                <span class="metric-label">Max Drawdown</span>
-                <strong>{% if portfolio.analytics.metrics.max_drawdown is not none %}{{ fmt_number(portfolio.analytics.metrics.max_drawdown * 100, 1) }}%{% else %}—{% endif %}</strong>
-              </article>
-              <article class="summary-tile">
-                <span class="metric-label">Best Day</span>
-                <strong>{{ fmt_currency(portfolio.analytics.metrics.best_day) if portfolio.analytics.metrics.best_day is not none else "—" }}</strong>
-              </article>
-              <article class="summary-tile">
-                <span class="metric-label">Worst Day</span>
-                <strong>{{ fmt_currency(portfolio.analytics.metrics.worst_day) if portfolio.analytics.metrics.worst_day is not none else "—" }}</strong>
-              </article>
-              <article class="summary-tile">
-                <span class="metric-label">Win Days</span>
-                <strong>{{ portfolio.analytics.metrics.win_days }}</strong>
-              </article>
-              <article class="summary-tile">
-                <span class="metric-label">Loss Days</span>
-                <strong>{{ portfolio.analytics.metrics.loss_days }}</strong>
-              </article>
-              <article class="summary-tile">
-                <span class="metric-label">Profitable Days</span>
-                <strong>{% if portfolio.analytics.metrics.profitable_days_pct is not none %}{{ fmt_number(portfolio.analytics.metrics.profitable_days_pct * 100, 1) }}%{% else %}—{% endif %}</strong>
-              </article>
-              <article class="summary-tile">
-                <span class="metric-label">Avg Day P&amp;L</span>
-                <strong>{{ fmt_currency(portfolio.analytics.metrics.avg_day_pnl) if portfolio.analytics.metrics.avg_day_pnl is not none else "—" }}</strong>
-              </article>
-              <article class="summary-tile">
-                <span class="metric-label">Profit Factor</span>
-                <strong>{% if portfolio.analytics.metrics.daily_profit_factor is not none %}{{ fmt_number(portfolio.analytics.metrics.daily_profit_factor, 1) }}{% else %}—{% endif %}</strong>
-              </article>
-            </div>
-          </article>
+        <div class="portfolio-chart-stack">
+          <div class="portfolio-charts">
+            <article class="portfolio-chart-card">
+              <div class="section-label">Account Equity</div>
+              <svg class="portfolio-chart equity-chart" viewBox="0 0 720 180" role="img" aria-label="Account Equity Over Time">
+                <polyline class="equity-line" points="{{ portfolio.analytics.equity_chart.points }}"></polyline>
+              </svg>
+            </article>
+            <article class="portfolio-chart-card">
+              <div class="section-label">Daily P&amp;L</div>
+              <svg class="portfolio-chart pnl-chart" viewBox="0 0 720 180" role="img" aria-label="Daily Profit and Loss">
+                <line class="pnl-baseline" x1="0" y1="{{ portfolio.analytics.pnl_chart.baseline_y }}" x2="720" y2="{{ portfolio.analytics.pnl_chart.baseline_y }}"></line>
+                {% for bar in portfolio.analytics.pnl_chart.bars %}
+                <rect class="{% if bar.positive %}pnl-bar-pos{% else %}pnl-bar-neg{% endif %}" x="{{ bar.x }}" y="{{ bar.y }}" width="{{ bar.w }}" height="{{ bar.h }}" rx="2" ry="2"></rect>
+                {% endfor %}
+              </svg>
+            </article>
+          </div>
+          <div class="portfolio-chart-metrics">
+            <article class="summary-tile">
+              <span class="metric-label">Total Return</span>
+              <strong>{% if portfolio.analytics.metrics.total_return is not none %}{{ fmt_number(portfolio.analytics.metrics.total_return * 100, 1) }}%{% else %}—{% endif %}</strong>
+            </article>
+            <article class="summary-tile">
+              <span class="metric-label">Max Drawdown</span>
+              <strong>{% if portfolio.analytics.metrics.max_drawdown is not none %}{{ fmt_number(portfolio.analytics.metrics.max_drawdown * 100, 1) }}%{% else %}—{% endif %}</strong>
+            </article>
+            <article class="summary-tile">
+              <span class="metric-label">Best Day</span>
+              <strong>{{ fmt_currency(portfolio.analytics.metrics.best_day) if portfolio.analytics.metrics.best_day is not none else "—" }}</strong>
+            </article>
+            <article class="summary-tile">
+              <span class="metric-label">Worst Day</span>
+              <strong>{{ fmt_currency(portfolio.analytics.metrics.worst_day) if portfolio.analytics.metrics.worst_day is not none else "—" }}</strong>
+            </article>
+            <article class="summary-tile">
+              <span class="metric-label">Win Days</span>
+              <strong>{{ portfolio.analytics.metrics.win_days }}</strong>
+            </article>
+            <article class="summary-tile">
+              <span class="metric-label">Loss Days</span>
+              <strong>{{ portfolio.analytics.metrics.loss_days }}</strong>
+            </article>
+            <article class="summary-tile">
+              <span class="metric-label">Profitable Days</span>
+              <strong>{% if portfolio.analytics.metrics.profitable_days_pct is not none %}{{ fmt_number(portfolio.analytics.metrics.profitable_days_pct * 100, 1) }}%{% else %}—{% endif %}</strong>
+            </article>
+            <article class="summary-tile">
+              <span class="metric-label">Avg Day P&amp;L</span>
+              <strong>{{ fmt_currency(portfolio.analytics.metrics.avg_day_pnl) if portfolio.analytics.metrics.avg_day_pnl is not none else "—" }}</strong>
+            </article>
+            <article class="summary-tile">
+              <span class="metric-label">Profit Factor</span>
+              <strong>{% if portfolio.analytics.metrics.daily_profit_factor is not none %}{{ fmt_number(portfolio.analytics.metrics.daily_profit_factor, 1) }}{% else %}—{% endif %}</strong>
+            </article>
+          </div>
         </div>
       </section>
       {% endif %}
@@ -1010,6 +1015,9 @@
                 <div>
                   <strong>{{ row.risk_mechanism or row.event_type_label or row.event_type }}</strong>
                   <div class="detail-muted">{{ row.affected_ticker or "Portfolio" }}</div>
+                  {% if row.scheduled_at %}
+                  <div class="detail-muted"><time datetime="{{ row.scheduled_at | iso_datetime }}" data-local-time-format="datetime">{{ row.scheduled_at | local_time('datetime') }}</time></div>
+                  {% endif %}
                 </div>
                 <div class="calendar-meta">
                   {% if row.importance %}
@@ -1039,6 +1047,9 @@
                   {% endif %}
                 </div>
                 <div class="detail-muted">{{ row.risk_mechanism or row.event_type_label or row.event_type }}</div>
+                {% if row.scheduled_at %}
+                <div class="detail-muted"><time datetime="{{ row.scheduled_at | iso_datetime }}" data-local-time-format="datetime">{{ row.scheduled_at | local_time('datetime') }}</time></div>
+                {% endif %}
               </article>
               {% endfor %}
             </div>
@@ -1240,8 +1251,8 @@
                 <strong>{{ fmt_number(row.confidence) if row.confidence is not none else "—" }}</strong>
               </div>
               <div>
-                <span class="metric-label">Duplicate Rows</span>
-                <strong>{{ row.duplicate_count or 1 }}</strong>
+                <span class="metric-label">Evaluation History</span>
+                <strong>{{ row.evaluation_history_label or "Latest review" }}</strong>
               </div>
             </div>
             {% if row.selection_reason %}
@@ -1264,14 +1275,14 @@
                 {% endfor %}
               </ul>
             </div>
-            {% if row.evaluations %}
+            {% if row.evaluation_count and row.evaluation_count > 1 %}
             <div>
               <span class="metric-label">Evaluation timeline</span>
               <ul class="candidate-timeline-list">
                 {% for evaluation in row.evaluations %}
                 <li class="candidate-timeline-item">
                   <div class="candidate-timeline-head">
-                    <strong>{{ evaluation.decision_time }}</strong>
+                    <strong><time datetime="{{ evaluation.decision_time | iso_datetime }}" data-local-time-format="datetime">{{ evaluation.decision_time | local_time('datetime') }}</time></strong>
                     <span class="detail-chip">{{ evaluation.outcome }}</span>
                   </div>
                   <div class="detail-muted">{{ evaluation.strategy_label }}</div>

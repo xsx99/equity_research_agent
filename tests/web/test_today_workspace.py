@@ -89,7 +89,7 @@ def test_build_ticker_workspace_builds_trade_plan_bull_bear_and_signal_groups():
     assert detail["latest_conclusion"]["trade_decision"]["approved_weight"] == 0.05
     assert detail["latest_conclusion"]["trade_plan"] == {
         "thesis": "Breakout remains valid after the catalyst.",
-        "time_horizon": "swing",
+        "time_horizon": "Swing",
         "target_weight": 0.08,
         "approved_weight": 0.05,
         "max_loss_pct": 0.03,
@@ -1383,12 +1383,56 @@ def test_build_ticker_workspace_surfaces_key_drivers_and_counterarguments():
     detail = workspace["detail"]
 
     assert detail["latest_conclusion"]["trade_decision"]["key_drivers"] == [
-        "sector_relative_strength",
-        "relative_volume",
+        "Sector Relative Strength",
+        "Relative Volume",
     ]
     assert detail["latest_conclusion"]["trade_decision"]["counterarguments"] == [
         "valuation is elevated versus peers"
     ]
+
+
+def test_build_ticker_workspace_cleans_trade_plan_copy_and_rationale():
+    workspace = build_ticker_workspace(
+        trade_rows=[
+            {
+                "ticker": "NVDA",
+                "decision": "enter_long",
+                "selected_strategy_id": "codex-smoke-58f3aa39-20a4-44b5-91dc-bc2a7b98b463-option-trade",
+                "expression_bucket_id": "long_stock",
+                "confidence": 0.74,
+                "risk_status": "approved",
+                "thesis": "codex-smoke-58f3aa39-20a4-44b5-91dc-bc2a7b98b463-option-trade",
+                "time_horizon": "swing_trade",
+                "key_drivers": ["sector_relative_strength", "relative_volume"],
+                "counterarguments": ["valuation_is_elevated"],
+                "invalidators": ["relative_strength_breaks"],
+                "metadata_json": {
+                    "entry_plan": "add_on_closing_strength",
+                    "exit_plan": "trim_on_failed_breakout",
+                },
+                "created_at": "2026-06-05T14:35:00Z",
+            },
+        ],
+        selected_ticker="NVDA",
+        positions_by_ticker={},
+        risk_by_ticker={"NVDA": {"status": "approved", "reason": "within_limits"}},
+        signal_history_by_ticker={},
+        news_by_ticker={},
+        fundamentals_by_ticker={},
+    )
+
+    detail = workspace["detail"]
+    assert detail["latest_conclusion"]["trade_decision"]["strategy_label"] == "Live pre-open verification"
+    assert detail["latest_conclusion"]["trade_plan"]["thesis"] == "Live pre-open verification"
+    assert detail["latest_conclusion"]["trade_plan"]["time_horizon"] == "Swing Trade"
+    assert detail["latest_conclusion"]["trade_plan"]["entry_plan"] == "Add On Closing Strength"
+    assert detail["latest_conclusion"]["trade_plan"]["exit_plan"] == "Trim On Failed Breakout"
+    assert detail["latest_conclusion"]["trade_plan"]["edge"] == (
+        "Sector Relative Strength",
+        "Relative Volume",
+    )
+    assert detail["latest_conclusion"]["trade_plan"]["invalidators"] == ("Relative Strength Breaks",)
+    assert detail["latest_conclusion"]["bull_bear"]["bear_points"] == ("Valuation Is Elevated",)
 
 
 def test_build_ticker_workspace_computes_history_cards_for_repeated_phase_runs():
