@@ -14,7 +14,6 @@ from src.db.models.trading import (
     FundamentalSnapshot,
     HistoricalReplayRun,
     LearningFactor,
-    LearningFactorApplication,
     LearningFactorStatus,
     LlmParseStatus,
     LlmPromptLifecycleStatus,
@@ -25,7 +24,6 @@ from src.db.models.trading import (
     ManualTickerRequest,
     ManualTickerRequestMode,
     ManualTickerRequestStatus,
-    MacroReadthroughEvent,
     MacroSnapshot,
     PaperExecution,
     PaperOrder,
@@ -264,16 +262,9 @@ def test_reflection_models_can_be_instantiated():
         decision_time=datetime(2026, 6, 2, 13, 0, tzinfo=timezone.utc),
         available_for_decision_at=datetime(2026, 6, 2, 13, 0, tzinfo=timezone.utc),
     )
-    application = LearningFactorApplication(
-        learning_factor=factor,
-        trading_decision=decision,
-        application_scope="trading_decision",
-        metadata_json={},
-    )
-
     assert reflection.status == "succeeded"
     assert factor.status == "active"
-    assert application.learning_factor is factor
+    assert factor.daily_reflection is reflection
 
 
 def test_option_strategy_leg_model_exposes_implied_volatility_column():
@@ -1021,21 +1012,6 @@ def test_risk_macro_event_models_can_be_instantiated():
         source_freshness_json={"macro_indicator_provider": {"status": "fresh"}},
         metadata_json={"basis_note": "macro and rates both restrictive"},
     )
-    readthrough_event = MacroReadthroughEvent(
-        event_key="readthrough:NVDA:AVGO:2026-06-16",
-        source_ticker="NVDA",
-        affected_ticker="AVGO",
-        scope="peer",
-        mechanism="earnings_readthrough",
-        direction="negative",
-        title="NVDA guidance pressures peer basket",
-        source="fixture",
-        event_time=now,
-        published_at=now,
-        available_for_decision_at=now,
-        valid_until=now,
-        metadata_json={"relationship_context": "semiconductor_peer"},
-    )
     calendar_event = CalendarEvent(
         event_key="macro:fomc:2026-06-17",
         event_type="macro",
@@ -1067,7 +1043,6 @@ def test_risk_macro_event_models_can_be_instantiated():
     )
 
     assert macro_snapshot.source_set_key == "macro_indicator_provider|vol_surface"
-    assert readthrough_event.affected_ticker == "AVGO"
     assert calendar_event.event_key == "macro:fomc:2026-06-17"
     assert event_risk.assessment_key == "macro:fomc:2026-06-17|QQQ|macro"
 
@@ -1416,3 +1391,19 @@ def test_trading_migration_contains_strategy_proposal_reflection_link():
     assert '"strategy_proposals"' in text
     assert '"daily_reflection_id"' in text
     assert '"daily_reflections"' in text
+
+
+def test_dead_persistence_cleanup_scope_keeps_replay_and_removes_half_wired_models():
+    assert hasattr(trading_models, "HistoricalReplayRun")
+    assert not hasattr(trading_models, "LearningFactorApplication")
+    assert not hasattr(trading_models, "MacroReadthroughEvent")
+
+
+def test_dead_persistence_cleanup_migration_drops_only_target_tables():
+    migration_path = Path("alembic/versions/028_drop_dead_tables.py")
+    text = migration_path.read_text(encoding="utf-8")
+
+    assert 'down_revision: Union[str, None] = "027"' in text
+    assert '"learning_factor_applications"' in text
+    assert '"macro_readthrough_events"' in text
+    assert '"historical_replay_runs"' not in text
