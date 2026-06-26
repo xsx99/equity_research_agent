@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -33,8 +33,9 @@ def test_build_portfolio_analytics_handles_single_point_series():
     assert payload["metrics"]["loss_days"] == 0
     assert payload["metrics"]["profitable_days_pct"] == 0.0
     assert payload["metrics"]["daily_profit_factor"] is None
-    assert len(payload["equity_points"].split()) == 1
-    assert len(payload["daily_bars"]) == 1
+    assert len(payload["equity_chart"]["points"].split()) == 1
+    assert len(payload["pnl_chart"]["bars"]) == 1
+    assert payload["pnl_chart"]["bar_width"] > 0
 
 
 def test_build_portfolio_analytics_computes_series_geometry_and_metrics():
@@ -69,8 +70,9 @@ def test_build_portfolio_analytics_computes_series_geometry_and_metrics():
     assert payload["equity_end"] == 126.0
     assert payload["equity_min"] == 100.0
     assert payload["equity_max"] == 126.0
-    assert len(payload["equity_points"].split()) == 4
-    assert len(payload["daily_bars"]) == 4
+    assert len(payload["equity_chart"]["points"].split()) == 4
+    assert len(payload["pnl_chart"]["bars"]) == 4
+    assert payload["pnl_chart"]["bar_width"] == pytest.approx(24.0)
     assert payload["metrics"]["total_return"] == pytest.approx(0.26)
     assert payload["metrics"]["max_drawdown"] == pytest.approx(0.05)
     assert payload["metrics"]["win_days"] == 2
@@ -80,3 +82,21 @@ def test_build_portfolio_analytics_computes_series_geometry_and_metrics():
     assert payload["metrics"]["worst_day"] == pytest.approx(-6.0)
     assert payload["metrics"]["avg_day_pnl"] == pytest.approx(26.0 / 3.0)
     assert payload["metrics"]["daily_profit_factor"] == pytest.approx(32.0 / 6.0)
+
+
+def test_build_portfolio_analytics_scales_bar_width_for_dense_series():
+    payload = build_portfolio_analytics(
+        [
+            {
+                "time": datetime(2026, 6, 1, 13, 0, tzinfo=timezone.utc) + timedelta(days=offset),
+                "equity": 101.0 + offset,
+                "day_pnl": (-1.0) ** offset * float(offset + 1),
+            }
+            for offset in range(85)
+        ]
+    )
+
+    assert payload is not None
+    assert payload["point_count"] == 85
+    assert len(payload["pnl_chart"]["bars"]) == 85
+    assert payload["pnl_chart"]["bar_width"] < 8.0

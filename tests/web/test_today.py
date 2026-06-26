@@ -984,10 +984,12 @@ class TestTodayDashboard:
         assert "macro-strip" in response.text
         assert 'data-testid="economic-calendar"' in response.text
         assert 'data-testid="upcoming-earnings"' in response.text
+        assert 'data-local-time-format="datetime"' in response.text
         assert "direct earnings gap risk" in response.text
         assert "AAPL" in response.text
         assert "HIGH" in response.text
         assert "US CPI" in response.text
+        assert ">2026-06-03T18:00:00Z<" not in response.text
         assert "Block New Entry" in response.text
         assert "block_open" not in response.text
         assert "trades-canvas" not in response.text
@@ -1061,14 +1063,19 @@ class TestTodayDashboard:
         payload["selected_tab"] = "portfolio"
         payload["portfolio"]["analytics"] = {
             "point_count": 4,
-            "equity_points": "0,100 10,120 20,114 30,126",
-            "daily_bars": (
-                {"x": 0, "y": 80, "w": 8, "h": 0, "positive": True},
-                {"x": 12, "y": 40, "w": 8, "h": 40, "positive": True},
-                {"x": 24, "y": 90, "w": 8, "h": 10, "positive": False},
-                {"x": 36, "y": 50, "w": 8, "h": 30, "positive": True},
-            ),
-            "baseline_y": 80,
+            "equity_chart": {
+                "points": "0,100 10,120 20,114 30,126",
+            },
+            "pnl_chart": {
+                "bars": (
+                    {"x": 0, "y": 80, "w": 8, "h": 0, "positive": True},
+                    {"x": 12, "y": 40, "w": 8, "h": 40, "positive": True},
+                    {"x": 24, "y": 90, "w": 8, "h": 10, "positive": False},
+                    {"x": 36, "y": 50, "w": 8, "h": 30, "positive": True},
+                ),
+                "baseline_y": 80,
+                "bar_width": 8,
+            },
             "equity_start": 100.0,
             "equity_end": 126.0,
             "equity_min": 100.0,
@@ -1090,12 +1097,14 @@ class TestTodayDashboard:
 
         assert response.status_code == 200
         assert 'data-testid="portfolio-analytics"' in response.text
-        assert "Portfolio Value Over Time" in response.text
+        assert "Account Equity" in response.text
         assert "Daily P&amp;L" in response.text
         assert "Total Return" in response.text
         assert "Max Drawdown" in response.text
         assert "Best Day" in response.text
         assert "Worst Day" in response.text
+        assert 'class="portfolio-chart equity-chart"' in response.text
+        assert 'class="portfolio-chart pnl-chart"' in response.text
         assert "equity-line" in response.text
         assert "pnl-bar-pos" in response.text or "pnl-bar-neg" in response.text
 
@@ -1177,7 +1186,7 @@ class TestTodayDashboard:
                 ),
                 "risk_tags": ("Risk tags: gap risk, momentum.",),
                 "invalidators": ("Invalidators: loses VWAP.",),
-                "duplicate_count": 4,
+                "evaluation_count": 2,
                 "evaluations": (
                     {
                         "decision_time": "2026-06-16T13:35:00Z",
@@ -1234,10 +1243,12 @@ class TestTodayDashboard:
         assert "0.91" in response.text
         assert "relative strength and catalyst quality remain aligned" in response.text
         assert "Evaluation timeline" in response.text
-        assert "2026-06-16T13:35:00Z" in response.text
+        assert 'data-local-time-format="datetime"' in response.text
+        assert ">2026-06-16T13:35:00Z<" not in response.text
         assert "Technical: 20d return 8.26%, relative volume 0.78." in response.text
         assert "Risk tags: gap risk, momentum." in response.text
         assert "Invalidators: loses VWAP." in response.text
+        assert "Duplicate Rows" not in response.text
         assert "Strategy alternatives" in response.text
         assert "Pullback reclaim" in response.text
         assert "0.77" in response.text

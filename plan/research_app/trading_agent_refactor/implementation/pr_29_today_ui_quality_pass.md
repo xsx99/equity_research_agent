@@ -16,11 +16,16 @@
 
 - Modify: `src/web/presenters/today_portfolio_analytics.py`
 - Modify: `src/web/presenters/today_candidates.py`
+<<<<<<< HEAD
+=======
+- Modify: `src/web/presenters/today_copy.py`
+>>>>>>> b19e55c6506606d9b67eb05024ec92245b666623
 - Modify: `src/web/presenters/today_workspace.py`
 - Modify: `src/templates/today.html`
 - Modify: `src/static/style.css`
 - Modify: `tests/web/test_today_portfolio_analytics.py`
 - Modify: `tests/web/test_today_candidates.py`
+<<<<<<< HEAD
 - Modify: `tests/web/test_today.py`
 - Modify after implementation: `plan/research_app/trading_agent_refactor/progress_tracker.md`
 
@@ -278,3 +283,17 @@ UI quality-pass implementation and the exact verification commands/results.
 git add plan/research_app/trading_agent_refactor/progress_tracker.md
 git commit -m "docs: record today ui quality pass"
 ```
+=======
+- Modify: `tests/web/test_today_copy.py`
+- Modify: `tests/web/test_today_workspace.py`
+- Modify: `tests/web/test_today.py`
+- Modify after implementation: `plan/research_app/trading_agent_refactor/progress_tracker.md`
+
+## Tasks
+
+- [ ] Split Portfolio analytics into separate equity and daily P&L charts.
+- [ ] Collapse duplicate candidate history into a human review timeline.
+- [ ] Preserve Trades workflow while removing detail noise and smoke/internal leakage.
+- [ ] Normalize Risk & Macro and attention lists into calmer briefing rows.
+- [ ] Run focused verification, update the progress tracker, and capture visual follow-up.
+>>>>>>> b19e55c6506606d9b67eb05024ec92245b666623

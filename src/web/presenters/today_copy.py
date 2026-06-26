@@ -133,7 +133,7 @@ _INLINE_LABELS = {
 
 _INLINE_IDENTIFIER_PATTERN = re.compile(r"\b[a-z]+(?:_[a-z]+)+\b")
 _SMOKE_COPY_PATTERN = re.compile(
-    r"lpsmoke(?:[_\s-]?\d+)?|codex live preopen (?:verification|order smoke(?::[A-Za-z0-9._-]+)?)",
+    r"lpsmoke(?:[_\s-]?\d+)?|codex live preopen (?:verification|order smoke(?::[A-Za-z0-9._-]+)?)|codex-smoke(?:[-_:][A-Za-z0-9._-]+)+",
     re.IGNORECASE,
 )
 _DEGRADED_LINKAGE_PATTERN = re.compile(

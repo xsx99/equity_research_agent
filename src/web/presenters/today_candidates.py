@@ -51,15 +51,8 @@ def _group_candidate_rows(rows: tuple[dict[str, Any], ...]) -> tuple[dict[str, A
     groups: list[dict[str, Any]] = []
     for ticker, items in grouped.items():
         sorted_items = sorted(items, key=_candidate_sort_key)
-        evaluations = tuple(
-            {
-                "decision_time": item.get("decision_time"),
-                "outcome": item.get("current_outcome_label") or item.get("result_status") or "Unavailable",
-                "strategy_label": _display_strategy_label(item),
-                "confidence": _candidate_confidence(item),
-                "summary": operator_text(item.get("operator_summary")) or "No material update.",
-            }
-            for item in sorted(
+        evaluations = _dedupe_evaluations(
+            sorted(
                 sorted_items,
                 key=lambda row: (
                     _reverse_timestamp_key(row.get("decision_time")),
@@ -82,6 +75,8 @@ def _group_candidate_rows(rows: tuple[dict[str, Any], ...]) -> tuple[dict[str, A
                 "risk_tags": _labeled_bullets("Risk tags", primary.get("risk_tags")),
                 "invalidators": _labeled_bullets("Invalidators", primary.get("invalidators")),
                 "duplicate_count": len(sorted_items),
+                "evaluation_count": len(evaluations),
+                "evaluation_history_label": _evaluation_history_label(evaluations),
                 "evaluations": evaluations,
                 "alternatives": tuple(
                     {
@@ -101,6 +96,38 @@ def _group_candidate_rows(rows: tuple[dict[str, Any], ...]) -> tuple[dict[str, A
 
     groups.sort(key=_candidate_group_priority)
     return tuple(groups)
+
+
+def _dedupe_evaluations(rows: list[dict[str, Any]]) -> tuple[dict[str, Any], ...]:
+    evaluations: list[dict[str, Any]] = []
+    seen: set[tuple[Any, ...]] = set()
+    for item in rows:
+        evaluation = {
+            "decision_time": item.get("decision_time"),
+            "outcome": item.get("current_outcome_label") or item.get("result_status") or "Unavailable",
+            "strategy_label": _display_strategy_label(item),
+            "confidence": _candidate_confidence(item),
+            "summary": operator_text(item.get("operator_summary")) or "No material update.",
+        }
+        key = (
+            evaluation["decision_time"],
+            evaluation["outcome"],
+            evaluation["strategy_label"],
+            evaluation["confidence"],
+            evaluation["summary"],
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        evaluations.append(evaluation)
+    return tuple(evaluations)
+
+
+def _evaluation_history_label(evaluations: tuple[dict[str, Any], ...]) -> str:
+    count = len(evaluations)
+    if count <= 1:
+        return "Latest review"
+    return f"{count} reviews"
 
 
 def _normalize_manual_review_rows(rows: tuple[dict[str, Any], ...]) -> tuple[dict[str, Any], ...]:
