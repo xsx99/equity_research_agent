@@ -1,0 +1,1750 @@
+"""Loader and formatting helpers for the today router."""
+from __future__ import annotations
+
+import uuid
+from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
+from typing import Any
+
+from sqlalchemy.orm import Session as SQLAlchemySession
+
+from src.db.models.trading import (
+    CandidateOutcomeEvaluation,
+    CandidateScore,
+    DailyReflection,
+    EventNewsItem,
+    IntradaySignalSnapshot,
+    LearningFactor,
+    LlmUsageEvent,
+    NewsAlert,
+    PaperOptionOrder,
+    PaperOptionPosition,
+    PaperOrder,
+    PaperPosition,
+    PeerBasket,
+    PortfolioIntent,
+    PortfolioRiskSnapshot,
+    PortfolioSnapshot,
+    RiskDecision,
+    RiskFactorExposure,
+    RiskHedgeDecision,
+    SignalSnapshot,
+    StrategyDefinition,
+    StrategyEvaluationResult,
+    StrategyProposal,
+    ThemeTaxonomy,
+    TickerRelationship,
+    TradingDecision,
+    UniverseFilterConfig,
+)
+from src.trading.repositories.sqlalchemy import SqlAlchemyTradingRepository
+from src.web.presenters.signal_evidence import signal_groups
+from src.web.presenters.today_copy import (
+    candidate_result_label,
+    generic_status_label,
+    intent_type_label,
+    live_status_label,
+    macro_regime_label,
+    manual_request_mode_label,
+    manual_request_status_label,
+    option_strategy_type_label,
+    risk_appetite_label,
+    runtime_mode_label,
+    scope_label,
+    strategy_label,
+    trade_identity_label,
+)
+from src.web.presenters.today_portfolio_analytics import build_portfolio_analytics
+from src.web.presenters.today_risk_macro import build_today_risk_macro_payload
+
+_TAB_LABELS = (
+    ("portfolio", "Portfolio"),
+    ("trades", "Trades"),
+    ("candidates", "Candidates"),
+    ("risk-macro", "Risk & Macro"),
+    ("system", "System"),
+)
+
+def _build_header(
+    latest_portfolio: PortfolioSnapshot | None,
+    latest_risk: PortfolioRiskSnapshot | None,
+    trade_rows: list[dict[str, Any]],
+    latest_reflection: DailyReflection | None,
+    latest_macro_snapshot: object | None = None,
+) -> dict[str, Any]:
+    trade_date = None
+    if latest_portfolio:
+        trade_date = latest_portfolio.snapshot_time.date()
+    elif latest_risk:
+        trade_date = latest_risk.decision_time.date()
+    elif latest_reflection:
+        trade_date = latest_reflection.trade_date
+
+    return {
+        "trade_date": trade_date,
+        "macro_regime": getattr(latest_macro_snapshot, "regime", None) or "unavailable",
+        "macro_regime_label": macro_regime_label(getattr(latest_macro_snapshot, "regime", None) or "unavailable"),
+        "risk_appetite": latest_risk.risk_appetite if latest_risk else "unavailable",
+        "risk_appetite_label": risk_appetite_label(latest_risk.risk_appetite if latest_risk else "unavailable"),
+        "market_phase": "Pre-open" if trade_date else "Unavailable",
+        "runtime_mode": "live" if latest_risk else "dry_run",
+        "runtime_mode_label": runtime_mode_label("live" if latest_risk else "dry_run"),
+        "live_status": "degraded" if getattr(latest_macro_snapshot, "regime", None) is None else "live",
+        "live_status_label": live_status_label(
+            "degraded" if getattr(latest_macro_snapshot, "regime", None) is None else "live"
+        ),
+        "nav": latest_portfolio.net_liquidation_value if latest_portfolio else None,
+        "account_equity": latest_portfolio.account_equity if latest_portfolio else None,
+        "cash_balance": latest_portfolio.cash_balance if latest_portfolio else None,
+        "day_pnl": latest_portfolio.day_pnl if latest_portfolio else None,
+        "day_pnl_pct": _safe_pct(
+            latest_portfolio.day_pnl if latest_portfolio else None,
+            _safe_diff(
+                latest_portfolio.account_equity if latest_portfolio else None,
+                latest_portfolio.day_pnl if latest_portfolio else None,
+            ),
+        ),
+        "realized_pnl": latest_portfolio.realized_pnl if latest_portfolio else None,
+        "unrealized_pnl": latest_portfolio.unrealized_pnl if latest_portfolio else None,
+        "buying_power": latest_portfolio.buying_power if latest_portfolio else None,
+        "stock_market_value": latest_portfolio.stock_market_value if latest_portfolio else None,
+        "option_market_value": latest_portfolio.option_market_value if latest_portfolio else None,
+        "gross_exposure": _exposure_ratio(
+            getattr(latest_risk, "gross_exposure", None),
+            getattr(latest_risk, "account_equity", None),
+        ),
+        "net_exposure": _exposure_ratio(
+            getattr(latest_risk, "net_exposure", None),
+            getattr(latest_risk, "account_equity", None),
+        ),
+        "margin_util_pct": _safe_pct(
+            latest_portfolio.total_margin_requirement if latest_portfolio else None,
+            latest_portfolio.account_equity if latest_portfolio else None,
+        ),
+        "open_alert_count": len([row for row in trade_rows if row.get("order_status") in {"rejected", "pending_new"}]),
+        "material_signal_change_count": 0,
+        "llm_cost_estimate": None,
+    }
+
+
+def _exposure_ratio(exposure: object, account_equity: object) -> float | None:
+    exposure_value = _to_float(exposure)
+    if exposure_value is None:
+        return None
+    if abs(exposure_value) <= 1.0:
+        return exposure_value
+
+    equity_value = _to_float(account_equity)
+    if equity_value is None or equity_value == 0.0:
+        return None
+    return exposure_value / equity_value
+
+
+def _to_float(value: object) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _build_job_timeline(latest_reflection: DailyReflection | None) -> tuple[dict[str, Any], ...]:
+    rows = [{"label": "Workstation", "status": "available", "status_label": generic_status_label("available")}]
+    if latest_reflection:
+        rows.append(
+            {
+                "label": "Reflection",
+                "status": latest_reflection.status,
+                "status_label": generic_status_label(latest_reflection.status),
+            }
+        )
+    return tuple(rows)
+
+
+def _safe_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _safe_diff(a: Any, b: Any) -> float | None:
+    left = _safe_float(a)
+    right = _safe_float(b)
+    if left is None or right is None:
+        return None
+    return left - right
+
+
+def _safe_pct(numerator: Any, denominator: Any) -> float | None:
+    num = _safe_float(numerator)
+    den = _safe_float(denominator)
+    if num is None or den in (None, 0):
+        return None
+    return num / den
+
+
+def _safe_sum(rows: tuple[dict[str, Any], ...], key: str) -> float | None:
+    total = 0.0
+    found = False
+    for row in rows:
+        value = _safe_float(row.get(key))
+        if value is None:
+            continue
+        total += value
+        found = True
+    return total if found else None
+
+
+def _build_portfolio_view(
+    *,
+    header: dict[str, Any],
+    positions: tuple[dict[str, Any], ...],
+    option_positions: tuple[dict[str, Any], ...],
+    hedge_overlays: tuple[dict[str, Any], ...],
+    overview: dict[str, Any],
+    portfolio_history: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    return {
+        "positions": positions,
+        "option_positions": option_positions,
+        "hedge_overlays": hedge_overlays,
+        "position_summary": {
+            "count": len(positions),
+            "market_value": _safe_sum(positions, "market_value"),
+            "unrealized_pnl": _safe_sum(positions, "unrealized_pnl"),
+        },
+        "option_position_summary": {
+            "count": len(option_positions),
+            "market_value": _safe_sum(option_positions, "market_value"),
+            "max_loss": _safe_sum(option_positions, "max_loss"),
+        },
+        "hedge_overlay_summary": {
+            "count": len(hedge_overlays),
+            "protected_notional": _safe_sum(hedge_overlays, "protected_notional"),
+        },
+        "kpis": {
+            "account_equity": header.get("account_equity"),
+            "day_pnl": header.get("day_pnl"),
+            "realized_pnl": header.get("realized_pnl"),
+            "unrealized_pnl": header.get("unrealized_pnl"),
+            "gross_exposure": header.get("gross_exposure"),
+            "net_exposure": header.get("net_exposure"),
+            "cash_balance": header.get("cash_balance"),
+            "buying_power": header.get("buying_power"),
+        },
+        "analytics": build_portfolio_analytics(portfolio_history or []),
+        "needs_attention": {
+            "needs_review": tuple(overview.get("command_center", {}).get("needs_review") or ()),
+            "live_alerts": tuple(overview.get("live_alerts") or ()),
+            "material_changes": tuple(overview.get("material_changes") or ()),
+        },
+    }
+
+
+def _build_system_view(
+    *,
+    overview: dict[str, Any],
+    learning_strategies: dict[str, Any],
+    ops_cost: dict[str, Any],
+    risk_macro: dict[str, Any],
+) -> dict[str, Any]:
+    exposures = tuple(risk_macro.get("exposures") or ())
+    llm_usage = tuple(ops_cost.get("llm_usage") or ())
+    provider_usage = tuple(ops_cost.get("provider_usage") or ())
+    events = tuple(risk_macro.get("events") or ())
+    return {
+        "system_issues": tuple(overview.get("command_center", {}).get("system_issues") or ()),
+        "learning_strategies": learning_strategies,
+        "ops_cost": ops_cost,
+        "risk_macro": risk_macro,
+        "exposure_summary": {
+            "count": len(exposures),
+            "total_exposure": _safe_sum(exposures, "exposure"),
+        },
+        "event_summary": {
+            "count": len(events),
+        },
+        "llm_usage_summary": {
+            "count": len(llm_usage),
+            "estimated_cost": _safe_sum(llm_usage, "estimated_cost"),
+        },
+        "provider_usage_summary": {
+            "count": len(provider_usage),
+        },
+    }
+
+
+def _attach_candidate_summary(candidates: dict[str, Any]) -> dict[str, Any]:
+    decision_readout = tuple(candidates.get("decision_readout") or ())
+    actionable = sum(1 for row in decision_readout if row.get("action_required"))
+    watch = sum(
+        1
+        for row in decision_readout
+        if "watch" in str(row.get("current_outcome_label") or "").strip().lower()
+    )
+    blocked = sum(
+        1
+        for row in decision_readout
+        if "blocked" in str(row.get("current_outcome_label") or "").strip().lower()
+        or "no trade" in str(row.get("current_outcome_label") or "").strip().lower()
+    )
+    return {
+        **candidates,
+        "aggregate_summary": {
+            "scored": len(decision_readout),
+            "actionable": actionable,
+            "watch": watch,
+            "blocked": blocked,
+        },
+    }
+
+
+def _build_overview_command_center(
+    *,
+    header: dict[str, Any],
+    positions: tuple[dict[str, Any], ...],
+    closed_positions: tuple[dict[str, Any], ...],
+    ticker_workspace: dict[str, Any],
+) -> dict[str, tuple[dict[str, Any], ...]]:
+    needs_review = tuple(
+        {
+            "ticker": str(row.get("ticker") or "").strip().upper(),
+            "summary": row.get("summary") or "Closed recently and ready for review",
+        }
+        for row in closed_positions
+        if str(row.get("ticker") or "").strip()
+    )
+
+    open_positions = tuple(
+        {
+            "ticker": str(row.get("ticker") or "").strip().upper(),
+            "summary": row.get("summary") or "Open position, risk within limits",
+        }
+        for row in positions
+        if str(row.get("ticker") or "").strip()
+    )
+
+    system_issues: list[dict[str, Any]] = []
+    if str(header.get("macro_regime") or "").strip().lower() == "unavailable":
+        system_issues.append(
+            {
+                "label": "Macro regime unavailable",
+                "summary": "Global macro regime data is unavailable.",
+            }
+        )
+
+    if not system_issues and not needs_review and not open_positions:
+        system_issues.append(
+            {
+                "label": "No active issues",
+                "summary": "No command-center issues are currently active.",
+            }
+        )
+
+    return {
+        "needs_review": needs_review,
+        "open_positions": open_positions,
+        "system_issues": tuple(system_issues),
+    }
+
+
+def _load_latest_macro_snapshot_for_today(
+    session: Any,
+    *,
+    latest_portfolio: PortfolioSnapshot | None,
+    latest_risk: PortfolioRiskSnapshot | None,
+    latest_reflection: DailyReflection | None,
+) -> object | None:
+    if not isinstance(session, SQLAlchemySession):
+        return None
+    trade_date = (
+        latest_risk.decision_time.date()
+        if latest_risk is not None
+        else latest_portfolio.snapshot_time.date()
+        if latest_portfolio is not None
+        else latest_reflection.trade_date
+        if latest_reflection is not None
+        else None
+    )
+    if trade_date is None:
+        return None
+    decision_time = (
+        latest_risk.decision_time
+        if latest_risk is not None
+        else latest_portfolio.snapshot_time
+        if latest_portfolio is not None
+        else None
+    )
+    return SqlAlchemyTradingRepository(session).load_latest_macro_snapshot(
+        trade_date=trade_date,
+        decision_time=decision_time,
+    )
+
+
+def _load_latest_preopen_runtime_run_for_today(
+    session: Any,
+    *,
+    latest_portfolio: PortfolioSnapshot | None,
+    latest_risk: PortfolioRiskSnapshot | None,
+    latest_reflection: DailyReflection | None,
+) -> dict[str, Any] | None:
+    if not isinstance(session, SQLAlchemySession):
+        return None
+    trade_date = (
+        latest_risk.decision_time.date()
+        if latest_risk is not None
+        else latest_portfolio.snapshot_time.date()
+        if latest_portfolio is not None
+        else latest_reflection.trade_date
+        if latest_reflection is not None
+        else datetime.now(timezone.utc).date()
+    )
+    return SqlAlchemyTradingRepository(session).load_latest_runtime_run(
+        phase="preopen",
+        trade_date=trade_date,
+    )
+
+
+def _load_today_risk_macro(
+    session: Any,
+    *,
+    latest_risk: PortfolioRiskSnapshot | None,
+    latest_macro_snapshot: object | None,
+) -> dict[str, Any]:
+    exposures = _load_risk_exposures(session)
+    latest_intent = None
+    risk_macro_context: dict[str, object] = {"macro_snapshot": latest_macro_snapshot}
+    decision_time = latest_risk.decision_time if latest_risk is not None else None
+    if isinstance(session, SQLAlchemySession):
+        repository = SqlAlchemyTradingRepository(session)
+        trade_date = (
+            latest_risk.decision_time.date()
+            if latest_risk is not None
+            else None
+        )
+        if trade_date is not None and decision_time is not None:
+            intents = repository.load_portfolio_risk_intents(trade_date=trade_date)
+            latest_intent = intents[-1] if intents else None
+            risk_macro_context = repository.load_decision_available_risk_macro_context(
+                trade_date=trade_date,
+                decision_time=decision_time,
+            )
+    if latest_macro_snapshot is not None:
+        risk_macro_context = {
+            **risk_macro_context,
+            "macro_snapshot": risk_macro_context.get("macro_snapshot") or latest_macro_snapshot,
+        }
+    return build_today_risk_macro_payload(
+        latest_risk=latest_risk,
+        latest_intent=latest_intent,
+        risk_macro_context=risk_macro_context,
+        exposures=exposures,
+        as_of=decision_time,
+    )
+
+
+def _build_candidates_summary(
+    *,
+    rows: tuple[dict[str, Any], ...],
+    manual_requests: tuple[dict[str, Any], ...],
+    themes: tuple[dict[str, Any], ...],
+) -> dict[str, Any]:
+    action_queue: list[dict[str, Any]] = []
+    for row in manual_requests[:3]:
+        action_queue.append(
+            {
+                "ticker": row["ticker"],
+                "label": row["status_label"],
+                "summary": row["operator_summary"],
+            }
+        )
+    for row in rows[:4]:
+        action_queue.append(
+            {
+                "ticker": row["ticker"],
+                "label": row["current_outcome_label"],
+                "summary": row["operator_summary"],
+            }
+        )
+
+    return {
+        "action_queue": tuple(action_queue),
+        "theme_count": len(themes),
+    }
+
+
+def _load_live_alerts(session: Any) -> tuple[dict[str, Any], ...]:
+    rows = (
+        session.query(NewsAlert)
+        .order_by(NewsAlert.published_at.desc())
+        .limit(10)
+        .all()
+    )
+    return tuple(
+        {
+            "ticker": row.ticker,
+            "severity": row.severity,
+            "headline": row.headline,
+            "summary": row.summary,
+        }
+        for row in rows
+    )
+
+
+def _load_material_changes(session: Any) -> tuple[dict[str, Any], ...]:
+    rows = (
+        session.query(IntradaySignalSnapshot)
+        .order_by(IntradaySignalSnapshot.decision_time.desc())
+        .limit(10)
+        .all()
+    )
+    changes: list[dict[str, Any]] = []
+    for row in rows:
+        delta = row.delta_vs_baseline_json or {}
+        if not delta:
+            continue
+        changes.append({"ticker": row.ticker, "summary": ", ".join(delta.keys())})
+    return tuple(changes)
+
+
+def _load_positions(session: Any) -> tuple[dict[str, Any], ...]:
+    rows = (
+        session.query(PaperPosition)
+        .filter(PaperPosition.status == "open")
+        .order_by(PaperPosition.updated_at.desc())
+        .all()
+    )
+    return tuple(
+        {
+            "ticker": row.ticker,
+            "trade_identity": row.trade_identity,
+            "trade_identity_label": trade_identity_label(row.trade_identity),
+            "strategy_id": row.strategy_id,
+            "strategy_label": strategy_label(row.strategy_id),
+            "quantity": row.quantity,
+            "market_value": row.market_value,
+            "unrealized_pnl": getattr(row, "unrealized_pnl", None),
+        }
+        for row in rows
+    )
+
+
+def _load_recent_closed_positions(session: Any) -> tuple[dict[str, Any], ...]:
+    rows = (
+        session.query(PaperPosition)
+        .filter(PaperPosition.status == "closed")
+        .order_by(PaperPosition.closed_at.desc(), PaperPosition.updated_at.desc())
+        .limit(25)
+        .all()
+    )
+    return tuple(
+        {
+            "ticker": row.ticker,
+            "trade_identity": row.trade_identity,
+            "trade_identity_label": trade_identity_label(row.trade_identity),
+            "strategy_id": row.strategy_id,
+            "strategy_label": strategy_label(row.strategy_id),
+            "quantity": row.quantity,
+            "market_value": row.market_value,
+            "opened_at": row.opened_at,
+            "updated_at": row.updated_at,
+            "closed_at": row.closed_at,
+            "status": row.status,
+        }
+        for row in rows
+    )
+
+
+def _load_option_positions(session: Any) -> tuple[dict[str, Any], ...]:
+    rows = (
+        session.query(PaperOptionPosition)
+        .filter(PaperOptionPosition.status == "open")
+        .order_by(PaperOptionPosition.updated_at.desc())
+        .all()
+    )
+    return tuple(
+        {
+            "ticker": row.ticker,
+            "option_strategy_type": row.option_strategy_type,
+            "option_strategy_type_label": option_strategy_type_label(row.option_strategy_type),
+            "trade_identity": row.trade_identity,
+            "trade_identity_label": trade_identity_label(row.trade_identity),
+            "market_value": getattr(row, "market_value", None),
+            "max_loss": row.max_loss,
+        }
+        for row in rows
+    )
+
+
+def _load_hedge_overlays(session: Any) -> tuple[dict[str, Any], ...]:
+    rows = (
+        session.query(RiskHedgeDecision)
+        .order_by(RiskHedgeDecision.created_at.desc())
+        .limit(10)
+        .all()
+    )
+    return tuple(
+        {
+            "ticker": row.ticker,
+            "option_strategy_type": row.option_strategy_type,
+            "option_strategy_type_label": option_strategy_type_label(row.option_strategy_type),
+            "protected_notional": row.protected_notional,
+        }
+        for row in rows
+    )
+
+
+def _load_portfolio_history(session: Any, *, limit: int = 180) -> list[dict[str, Any]]:
+    rows = (
+        session.query(PortfolioSnapshot)
+        .order_by(PortfolioSnapshot.snapshot_time.desc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        {
+            "time": row.snapshot_time,
+            "equity": row.account_equity,
+            "day_pnl": row.day_pnl,
+        }
+        for row in reversed(rows)
+    ]
+
+
+def _load_trade_rows(session: Any) -> list[dict[str, Any]]:
+    material_change_tickers = _load_material_signal_change_tickers(session)
+    rows = (
+        session.query(TradingDecision)
+        .order_by(TradingDecision.decision_time.desc())
+        .limit(25)
+        .all()
+    )
+    return [_serialize_trade_row(session, row, material_change_tickers) for row in rows]
+
+
+def _serialize_trade_row(
+    session: Any,
+    row: TradingDecision,
+    material_change_tickers: set[str],
+) -> dict[str, Any]:
+    metadata_json = dict(getattr(row, "metadata_json", {}) or {})
+    key_drivers = list(getattr(row, "key_drivers_json", None) or metadata_json.get("key_drivers") or [])
+    counterarguments = list(
+        getattr(row, "counterarguments_json", None) or metadata_json.get("counterarguments") or []
+    )
+    candidate_score = getattr(row, "candidate_score", None)
+    return {
+        "trading_decision_id": str(row.trading_decision_id),
+        "decision_time": row.decision_time,
+        "created_at": row.created_at or row.decision_time,
+        "ticker": row.ticker,
+        "decision": row.decision,
+        "instrument_type": row.instrument_type,
+        "trade_identity": row.trade_identity,
+        "selected_strategy_id": row.strategy_id,
+        "expression_bucket_id": row.expression_bucket_id,
+        "approved_weight": getattr(row, "approved_weight", None),
+        "target_weight": getattr(row, "target_weight", None),
+        "time_horizon": getattr(row, "time_horizon", None),
+        "max_loss_pct": getattr(row, "max_loss_pct", None),
+        "entry_plan": metadata_json.get("entry_plan"),
+        "exit_plan": metadata_json.get("exit_plan"),
+        "confidence": row.confidence,
+        "risk_status": row.risk_decision.status if row.risk_decision else None,
+        "order_status": _load_order_status(session, row.trading_decision_id),
+        "material_signal_change": str(row.ticker).upper() in material_change_tickers,
+        "thesis": getattr(row, "thesis", None),
+        "key_drivers": key_drivers,
+        "counterarguments": counterarguments,
+        "invalidators": list(getattr(row, "invalidators_json", None) or []),
+        "metadata_json": metadata_json,
+        "core_signal_evidence": dict(getattr(candidate_score, "core_signal_evidence_json", None) or {})
+        if candidate_score
+        else {},
+    }
+
+
+def _ensure_trade_rows_include_ticker(
+    session: Any,
+    trade_rows: list[dict[str, Any]],
+    ticker: str | None,
+) -> list[dict[str, Any]]:
+    normalized_ticker = str(ticker or "").strip().upper()
+    if not normalized_ticker:
+        return trade_rows
+    if any(str(row.get("ticker") or "").strip().upper() == normalized_ticker for row in trade_rows):
+        return trade_rows
+
+    material_change_tickers = _load_material_signal_change_tickers(session)
+    latest_row = (
+        session.query(TradingDecision)
+        .filter(TradingDecision.ticker == normalized_ticker)
+        .order_by(TradingDecision.decision_time.desc())
+        .first()
+    )
+    if latest_row is None:
+        return trade_rows
+
+    return [*trade_rows, _serialize_trade_row(session, latest_row, material_change_tickers)]
+
+
+def _load_order_status(session: Any, trading_decision_id: uuid.UUID) -> str | None:
+    paper_order = session.query(PaperOrder).filter(PaperOrder.trading_decision_id == trading_decision_id).first()
+    if paper_order is not None:
+        return _normalize_order_status(paper_order.status)
+    option_order = (
+        session.query(PaperOptionOrder)
+        .filter(PaperOptionOrder.trading_decision_id == trading_decision_id)
+        .first()
+    )
+    if option_order is not None:
+        return _normalize_order_status(option_order.status)
+    return None
+
+
+def _normalize_order_status(status: str | None) -> str | None:
+    normalized = str(status or "").strip().lower()
+    if not normalized:
+        return None
+    mapping = {
+        "pending_new": "pending",
+        "partially_filled": "partial_fill",
+    }
+    return mapping.get(normalized, normalized)
+
+
+def _load_trade_detail(session: Any, decision_id: str) -> dict[str, Any] | None:
+    try:
+        rid = uuid.UUID(str(decision_id))
+    except ValueError:
+        return None
+    row = session.query(TradingDecision).filter_by(trading_decision_id=rid).first()
+    if row is None:
+        return None
+    candidate_score = getattr(row, "candidate_score", None)
+    signal_snapshot = candidate_score.signal_snapshot if candidate_score else None
+    metadata_json = dict(getattr(row, "metadata_json", {}) or {})
+    score_rows = []
+    if candidate_score:
+        related_scores = (
+            session.query(CandidateScore)
+            .filter(CandidateScore.signal_snapshot_id == candidate_score.signal_snapshot_id)
+            .order_by(CandidateScore.candidate_score.desc())
+            .all()
+        )
+        score_rows = [
+            {"strategy_id": score.strategy_id, "candidate_score": score.candidate_score}
+            for score in related_scores
+        ]
+    outcomes = (
+        session.query(CandidateOutcomeEvaluation)
+        .filter(CandidateOutcomeEvaluation.candidate_score_id == getattr(row, "candidate_score_id", None))
+        .order_by(CandidateOutcomeEvaluation.created_at.desc())
+        .limit(10)
+        .all()
+    )
+    risk_decision = None
+    risk_decision_obj = getattr(row, "risk_decision", None)
+    if risk_decision_obj:
+        risk_decision = {
+            "status": risk_decision_obj.status,
+            "reason_code": risk_decision_obj.reason_code,
+            "generated_hedge_action": getattr(risk_decision_obj, "generated_hedge_action_json", None),
+            "lookahead_risk_source": _risk_decision_lookahead_source(risk_decision_obj),
+            "applied_rules": _risk_applied_rules(getattr(risk_decision_obj, "applied_rules_json", None)),
+        }
+    prompt_run = getattr(row, "prompt_run", None)
+    return {
+        "trading_decision_id": str(row.trading_decision_id),
+        "ticker": row.ticker,
+        "decision": row.decision,
+        "decision_time": row.decision_time,
+        "strategy_id": row.strategy_id,
+        "expression_bucket_id": row.expression_bucket_id,
+        "trade_identity": row.trade_identity,
+        "confidence": row.confidence,
+        "approved_weight": getattr(row, "approved_weight", None),
+        "target_weight": getattr(row, "target_weight", None),
+        "time_horizon": getattr(row, "time_horizon", None),
+        "max_loss_pct": getattr(row, "max_loss_pct", None),
+        "thesis": getattr(row, "thesis", None),
+        "entry_plan": metadata_json.get("entry_plan"),
+        "exit_plan": metadata_json.get("exit_plan"),
+        "key_drivers": list(getattr(row, "key_drivers_json", None) or metadata_json.get("key_drivers") or []),
+        "counterarguments": list(
+            getattr(row, "counterarguments_json", None) or metadata_json.get("counterarguments") or []
+        ),
+        "invalidators": list(getattr(row, "invalidators_json", None) or []),
+        "metadata_json": metadata_json,
+        "core_signal_evidence": dict(getattr(candidate_score, "core_signal_evidence_json", None) or {})
+        if candidate_score
+        else {},
+        "llm_decision_json": prompt_run.parsed_output_json if prompt_run else {},
+        "validation_status": prompt_run.parse_status if prompt_run else "unavailable",
+        "signal_snapshot": signal_snapshot.signal_json if signal_snapshot else {},
+        "strategy_scores": tuple(score_rows),
+        "risk_decision": risk_decision,
+        "outcomes": tuple(
+            {
+                "evaluation_status": outcome.evaluation_status,
+                "alpha": outcome.alpha,
+            }
+            for outcome in outcomes
+        ),
+    }
+
+
+def _load_risk_exposures(session: Any) -> tuple[dict[str, Any], ...]:
+    rows = (
+        session.query(RiskFactorExposure)
+        .order_by(RiskFactorExposure.created_at.desc())
+        .limit(20)
+        .all()
+    )
+    return tuple(
+        {
+            "factor_type": row.factor_type,
+            "factor_name": row.factor_value,
+            "exposure": row.gross_exposure,
+        }
+        for row in rows
+    )
+
+
+def _load_candidate_rows(session: Any) -> tuple[dict[str, Any], ...]:
+    rows = (
+        session.query(CandidateScore)
+        .order_by(CandidateScore.decision_time.desc(), CandidateScore.candidate_score.desc())
+        .limit(25)
+        .all()
+    )
+    return tuple(
+        {
+            "ticker": row.ticker,
+            "candidate_score": float(row.candidate_score) if row.candidate_score is not None else None,
+            "confidence": float(row.candidate_score) if row.candidate_score is not None else None,
+            "decision_time": row.decision_time.isoformat() if row.decision_time is not None else None,
+            "selection_source": row.selection_source,
+            "why_reviewed_label": strategy_label(row.selection_source),
+            "result_status": _candidate_result_status(row),
+            "current_outcome_label": candidate_result_label(_candidate_result_status(row)),
+            "trade_identity": _candidate_trade_identity(row),
+            "trade_identity_label": trade_identity_label(
+                _candidate_trade_identity(row)
+            ),
+            "strategy_match": row.strategy_id,
+            "strategy_label": strategy_label(row.strategy_id),
+            "core_signal_evidence": dict(getattr(row, "core_signal_evidence_json", None) or {}),
+            "selection_reason": getattr(row, "selection_reason", None),
+            "risk_tags": list(getattr(row, "risk_tags_json", None) or []),
+            "invalidators": list(getattr(row, "invalidators_json", None) or []),
+            "missing_required_signals": list(getattr(row, "missing_required_signals_json", None) or []),
+            "operator_summary": _sentence_join(
+                strategy_label(row.selection_source),
+                candidate_result_label(_candidate_result_status(row)),
+                trade_identity_label(_candidate_trade_identity(row)),
+            ),
+            "detail_internal_ids": {
+                "selection_source": row.selection_source,
+                "result_status": _candidate_result_status(row),
+                "trade_identity": _candidate_trade_identity(row),
+                "strategy_match": row.strategy_id,
+            },
+        }
+        for row in rows
+    )
+
+
+def _load_manual_requests(session: Any) -> tuple[dict[str, Any], ...]:
+    rows = SqlAlchemyTradingRepository(session).load_manual_review_audit_rows()
+    return tuple(
+        {
+            "manual_ticker_request_id": row.manual_ticker_request_id,
+            "ticker": row.ticker,
+            "reason": row.reason,
+            "mode": row.mode,
+            "mode_label": manual_request_mode_label(row.mode),
+            "status": row.status,
+            "status_label": manual_request_status_label(row.status),
+            "latest_result_status": row.latest_result_status,
+            "latest_result_label": candidate_result_label(row.latest_result_status),
+            "last_evaluated_at": row.last_evaluated_at.isoformat() if row.last_evaluated_at is not None else None,
+            "latest_signal_snapshot_id": row.latest_signal_snapshot_id,
+            "latest_trading_decision_id": row.latest_trading_decision_id,
+            "latest_decision_action": row.latest_decision_action,
+            "latest_risk_outcome": row.latest_risk_outcome,
+            "latest_order_status": row.latest_order_status,
+            "latest_execution_status": row.latest_execution_status,
+            "latest_execution_time": row.latest_execution_time.isoformat() if row.latest_execution_time is not None else None,
+            "execution_path_state": row.execution_path_state,
+            "latest_block_reason": row.latest_block_reason,
+            "linkage_state": row.linkage_state,
+            "operator_summary": _sentence_join(
+                f"{manual_request_mode_label(row.mode)} because {row.reason}",
+                f"Latest result: {candidate_result_label(row.latest_result_status)}"
+                if row.latest_result_status
+                else None,
+            ),
+        }
+        for row in rows
+    )
+
+
+def _sentence_join(*parts: Any) -> str:
+    cleaned = [str(part).strip().rstrip(".") for part in parts if str(part or "").strip()]
+    if not cleaned:
+        return ""
+    return ". ".join(cleaned) + "."
+
+
+def _candidate_result_status(row: CandidateScore) -> str:
+    if row.trade_classifications:
+        return str(row.trade_classifications[0].result_status or "candidate")
+    if row.watch_candidates:
+        return str(row.watch_candidates[0].result_status or row.rejection_reason or row.candidate_status or "candidate")
+    return str(row.rejection_reason or row.candidate_status or "candidate")
+
+
+def _candidate_trade_identity(row: CandidateScore) -> str | None:
+    if row.trade_classifications:
+        return row.trade_classifications[0].trade_identity
+    if row.watch_candidates:
+        return "watch_only"
+    return None
+
+
+def _load_portfolio_intents(session: Any) -> tuple[dict[str, Any], ...]:
+    rows = session.query(PortfolioIntent).order_by(PortfolioIntent.created_at.desc()).limit(20).all()
+    return tuple(
+        {
+            "ticker": row.ticker,
+            "intent_type": row.intent_type,
+            "lifecycle_status": row.lifecycle_status,
+            "intent_type_label": intent_type_label(row.intent_type),
+            "lifecycle_status_label": generic_status_label(row.lifecycle_status),
+        }
+        for row in rows
+    )
+
+
+def _load_relationships(session: Any) -> tuple[dict[str, Any], ...]:
+    rows = session.query(TickerRelationship).order_by(TickerRelationship.created_at.desc()).limit(20).all()
+    return tuple(
+        {
+            "source_ticker": row.source_ticker,
+            "target_ticker": row.target_ticker,
+            "relationship_type": row.relationship_type,
+        }
+        for row in rows
+    )
+
+
+def _load_peer_baskets(session: Any) -> tuple[dict[str, Any], ...]:
+    rows = session.query(PeerBasket).order_by(PeerBasket.created_at.desc()).limit(10).all()
+    return tuple(
+        {
+            "basket_key": row.basket_key,
+            "version": row.version,
+            "member_count": len(row.members_json or []),
+        }
+        for row in rows
+    )
+
+
+def _load_themes(session: Any) -> tuple[dict[str, Any], ...]:
+    rows = session.query(ThemeTaxonomy).order_by(ThemeTaxonomy.created_at.desc()).limit(20).all()
+    return tuple(
+        {
+            "theme_id": row.theme_id,
+            "display_name": row.display_name,
+        }
+        for row in rows
+    )
+
+
+def _serialize_reflection(reflection: DailyReflection | None) -> dict[str, Any] | None:
+    if reflection is None:
+        return None
+    return {
+        "status": reflection.status,
+        "status_label": generic_status_label(reflection.status),
+        "what_worked": tuple((reflection.reflection_json or {}).get("what_worked") or []),
+    }
+
+
+def _load_learning_factors(session: Any) -> tuple[dict[str, Any], ...]:
+    rows = session.query(LearningFactor).order_by(LearningFactor.created_at.desc()).limit(20).all()
+    return tuple(
+        {
+            "factor_key": row.factor_key,
+            "title": row.title,
+            "status": row.status,
+            "scope": row.scope,
+            "effect_tags": tuple(row.effect_tags_json or ()),
+            "status_label": generic_status_label(row.status),
+            "scope_label": scope_label(row.scope),
+        }
+        for row in rows
+    )
+
+
+def _load_strategy_performance(session: Any) -> tuple[dict[str, Any], ...]:
+    rows = session.query(CandidateOutcomeEvaluation).order_by(CandidateOutcomeEvaluation.created_at.desc()).all()
+    grouped: dict[str, list[CandidateOutcomeEvaluation]] = {}
+    for row in rows:
+        grouped.setdefault(row.strategy_id, []).append(row)
+    performance = []
+    for strategy_id, items in grouped.items():
+        alpha_values = [item.alpha for item in items if item.alpha is not None]
+        winning_alpha_values = [alpha for alpha in alpha_values if alpha > 0]
+        win_rate = (
+            (Decimal(len(winning_alpha_values)) / Decimal(len(alpha_values)) * Decimal("100")).quantize(Decimal("0.1"))
+            if alpha_values
+            else None
+        )
+        performance.append(
+            {
+                "strategy_id": strategy_id,
+                "lifecycle_status": "observed",
+                "lifecycle_status_label": generic_status_label("observed"),
+                "win_rate": win_rate,
+                "total_pnl": sum(alpha_values, Decimal("0")) if alpha_values else None,
+            }
+        )
+    return tuple(performance[:20])
+
+
+def _load_strategy_proposals(session: Any) -> tuple[dict[str, Any], ...]:
+    rows = session.query(StrategyProposal).order_by(StrategyProposal.created_at.desc()).limit(20).all()
+    return tuple(
+        {
+            "proposed_strategy_id": row.proposed_strategy_id,
+            "proposal_status": row.proposal_status,
+            "proposal_status_label": generic_status_label(row.proposal_status),
+        }
+        for row in rows
+    )
+
+
+def _load_strategy_definitions(session: Any) -> tuple[dict[str, Any], ...]:
+    rows = (
+        session.query(StrategyDefinition)
+        .filter(StrategyDefinition.source == "reflection_learning")
+        .order_by(StrategyDefinition.created_at.desc())
+        .limit(20)
+        .all()
+    )
+    return tuple(
+        {
+            "strategy_id": row.strategy_id,
+            "lifecycle_status": row.lifecycle_status,
+            "lifecycle_status_label": generic_status_label(row.lifecycle_status),
+            "source": row.source,
+        }
+        for row in rows
+    )
+
+
+def _load_strategy_evaluation_results(session: Any) -> tuple[dict[str, Any], ...]:
+    rows = (
+        session.query(StrategyEvaluationResult)
+        .order_by(StrategyEvaluationResult.created_at.desc())
+        .limit(20)
+        .all()
+    )
+    return tuple(
+        {
+            "evaluation_status": row.evaluation_status,
+            "evaluation_status_label": generic_status_label(row.evaluation_status),
+            "new_lifecycle_status": row.new_lifecycle_status,
+            "new_lifecycle_status_label": generic_status_label(row.new_lifecycle_status),
+            "strategy_id": row.strategy_id,
+        }
+        for row in rows
+    )
+
+
+def _load_llm_usage(session: Any) -> tuple[dict[str, Any], ...]:
+    rows = session.query(LlmUsageEvent).order_by(LlmUsageEvent.created_at.desc()).limit(25).all()
+    return tuple(
+        {
+            "pipeline_name": getattr(row.prompt_run, "pipeline_name", None),
+            "provider": row.provider,
+            "model": row.model,
+            "estimated_cost": row.estimated_cost,
+        }
+        for row in rows
+    )
+
+
+def _serialize_universe_filter(config: UniverseFilterConfig | None) -> dict[str, Any] | None:
+    if config is None:
+        return None
+    return {
+        "universe_filter_config_id": str(config.universe_filter_config_id),
+        "min_price": config.min_price,
+        "min_avg_dollar_volume": config.min_avg_dollar_volume,
+        "included_sectors": tuple(config.included_sectors_json or []),
+        "excluded_sectors": tuple(config.excluded_sectors_json or []),
+        "included_industries": tuple(config.included_industries_json or []),
+        "excluded_industries": tuple(config.excluded_industries_json or []),
+        "exchanges": tuple(config.exchanges_json or []),
+        "asset_types": tuple(config.asset_types_json or []),
+        "manual_include": tuple(config.manual_include_json or []),
+        "manual_exclude": tuple(config.manual_exclude_json or []),
+    }
+
+
+def _normalize_tab(tab: str) -> str:
+    allowed = {tab_id for tab_id, _ in _TAB_LABELS}
+    return tab if tab in allowed else "portfolio"
+
+
+def _normalize_detail_tab(detail_tab: str) -> str:
+    allowed = {"timeline"}
+    return detail_tab if detail_tab in allowed else "timeline"
+
+
+def _normalize_detail_item_index(
+    *,
+    detail: dict[str, Any] | None,
+    detail_tab: str,
+    detail_item_index: int | None,
+) -> int | None:
+    items = _detail_tab_items(detail=detail, detail_tab=detail_tab)
+    if not items:
+        return None
+    if detail_item_index is None:
+        return 0
+    if 0 <= detail_item_index < len(items):
+        return detail_item_index
+    return 0
+
+
+def _select_detail_item(
+    *,
+    detail: dict[str, Any] | None,
+    detail_tab: str,
+    detail_item_index: int | None,
+) -> dict[str, Any] | None:
+    items = _detail_tab_items(detail=detail, detail_tab=detail_tab)
+    if not items or detail_item_index is None:
+        return None
+    return items[detail_item_index]
+
+
+def _detail_tab_items(
+    *,
+    detail: dict[str, Any] | None,
+    detail_tab: str,
+) -> list[dict[str, Any]]:
+    if not detail:
+        return []
+    tabs = detail.get("tabs") or {}
+    value = tabs.get(detail_tab)
+    if isinstance(value, tuple):
+        return [item for item in value if isinstance(item, dict)]
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, dict)]
+    return []
+
+
+def _merge_audit_detail_into_workspace_detail(
+    detail: dict[str, Any] | None,
+    audit_detail: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if detail is None:
+        return None
+    if audit_detail is None:
+        return detail
+    if "latest_conclusion" in audit_detail and "tabs" in audit_detail:
+        return audit_detail
+
+    latest_conclusion = dict(detail.get("latest_conclusion") or {})
+    trade_decision = dict(latest_conclusion.get("trade_decision") or {})
+    risk_summary = dict(latest_conclusion.get("risk_summary") or {})
+    tabs = dict(detail.get("tabs") or {})
+    risk_tab = dict(tabs.get("risk") or {})
+
+    trade_decision["summary"] = (
+        trade_decision.get("summary")
+        if str(trade_decision.get("summary") or "").strip() and trade_decision.get("summary") != "No material update"
+        else _audit_trade_summary(audit_detail)
+    )
+    if not trade_decision.get("key_drivers"):
+        trade_decision["key_drivers"] = list(audit_detail.get("key_drivers") or [])
+    if not trade_decision.get("counterarguments"):
+        trade_decision["counterarguments"] = list(audit_detail.get("counterarguments") or [])
+    if not trade_decision.get("invalidators"):
+        trade_decision["invalidators"] = list(audit_detail.get("invalidators") or [])
+    if not trade_decision.get("strategy_id") or trade_decision.get("strategy_id") == "No material update":
+        trade_decision["strategy_id"] = audit_detail.get("strategy_id") or trade_decision.get("strategy_id")
+    if (
+        not trade_decision.get("expression_bucket_id")
+        or trade_decision.get("expression_bucket_id") == "No material update"
+    ):
+        trade_decision["expression_bucket_id"] = (
+            audit_detail.get("expression_bucket_id") or trade_decision.get("expression_bucket_id")
+        )
+    if audit_detail.get("confidence") is not None:
+        trade_decision["confidence"] = audit_detail.get("confidence")
+    if audit_detail.get("approved_weight") is not None:
+        trade_decision["approved_weight"] = audit_detail.get("approved_weight")
+
+    trade_plan = dict(latest_conclusion.get("trade_plan") or {})
+    if audit_detail.get("thesis"):
+        trade_plan["thesis"] = _audit_trade_summary(audit_detail)
+    if audit_detail.get("time_horizon") is not None:
+        trade_plan["time_horizon"] = audit_detail.get("time_horizon")
+    if audit_detail.get("target_weight") is not None:
+        trade_plan["target_weight"] = audit_detail.get("target_weight")
+    if audit_detail.get("approved_weight") is not None:
+        trade_plan["approved_weight"] = audit_detail.get("approved_weight")
+    if audit_detail.get("max_loss_pct") is not None:
+        trade_plan["max_loss_pct"] = audit_detail.get("max_loss_pct")
+    if audit_detail.get("entry_plan") is not None:
+        trade_plan["entry_plan"] = audit_detail.get("entry_plan")
+    if audit_detail.get("exit_plan") is not None:
+        trade_plan["exit_plan"] = audit_detail.get("exit_plan")
+    if audit_detail.get("key_drivers"):
+        trade_plan["edge"] = tuple(audit_detail.get("key_drivers") or ())
+    if audit_detail.get("invalidators"):
+        trade_plan["invalidators"] = tuple(audit_detail.get("invalidators") or ())
+
+    bull_bear = dict(latest_conclusion.get("bull_bear") or {})
+    if audit_detail.get("confidence") is not None:
+        bull_bear["confidence"] = audit_detail.get("confidence")
+    if audit_detail.get("key_drivers"):
+        bull_bear["bull_points"] = tuple(audit_detail.get("key_drivers") or ())
+    if audit_detail.get("counterarguments"):
+        bull_bear["bear_points"] = tuple(audit_detail.get("counterarguments") or ())
+
+    signal_groups_value = signal_groups(audit_detail.get("core_signal_evidence"))
+    if signal_groups_value:
+        latest_conclusion["signal_groups"] = signal_groups_value
+
+    if (
+        not risk_summary.get("reason")
+        or risk_summary.get("reason") == "No material update"
+    ) and isinstance(audit_detail.get("risk_decision"), dict):
+        risk_summary["reason"] = audit_detail["risk_decision"].get("reason_code") or risk_summary.get("reason")
+    if not risk_summary.get("lookahead_risk_source") and isinstance(audit_detail.get("risk_decision"), dict):
+        risk_summary["lookahead_risk_source"] = audit_detail["risk_decision"].get("lookahead_risk_source")
+    if not risk_summary.get("hedge_overlay_reason") and isinstance(audit_detail.get("risk_decision"), dict):
+        generated_hedge_action = audit_detail["risk_decision"].get("generated_hedge_action")
+        if isinstance(generated_hedge_action, dict):
+            risk_summary["hedge_overlay_reason"] = generated_hedge_action.get("reason_code")
+    if not risk_summary.get("applied_rules") and isinstance(audit_detail.get("risk_decision"), dict):
+        risk_summary["applied_rules"] = audit_detail["risk_decision"].get("applied_rules") or ()
+
+    latest_conclusion["trade_decision"] = trade_decision
+    latest_conclusion["trade_plan"] = trade_plan
+    latest_conclusion["bull_bear"] = bull_bear
+    latest_conclusion["risk_summary"] = risk_summary
+
+    tabs["risk"] = risk_tab
+
+    return {
+        **detail,
+        "latest_conclusion": latest_conclusion,
+        "tabs": tabs,
+    }
+
+
+def _audit_trade_summary(audit_detail: dict[str, Any]) -> str:
+    thesis = str(audit_detail.get("thesis") or "").strip()
+    if thesis:
+        return thesis
+    metadata = audit_detail.get("metadata_json")
+    if isinstance(metadata, dict):
+        selection_reason = str(metadata.get("selection_reason") or "").strip()
+        if selection_reason:
+            return selection_reason
+    return "No material update"
+
+
+def _to_decimal(value: str) -> Decimal:
+    try:
+        return Decimal(value.strip())
+    except (AttributeError, InvalidOperation) as exc:
+        raise ValueError(f"Invalid decimal value: {value}") from exc
+
+
+def _split_csv(raw: str, *, uppercase: bool = False) -> list[str]:
+    parts = []
+    for value in raw.split(","):
+        normalized = value.strip()
+        if not normalized:
+            continue
+        parts.append(normalized.upper() if uppercase else normalized)
+    return parts
+
+
+def _group_latest_by_ticker(rows: tuple[dict[str, Any], ...]) -> dict[str, dict[str, Any]]:
+    grouped: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        ticker = str(row.get("ticker") or "").strip().upper()
+        if not ticker:
+            continue
+        if ticker not in grouped:
+            grouped[ticker] = dict(row)
+    return grouped
+
+
+def _latest_trade_decision_id_for_ticker(
+    trade_rows: list[dict[str, Any]],
+    ticker: str | None,
+) -> str | None:
+    normalized_ticker = str(ticker or "").strip().upper()
+    if not normalized_ticker:
+        return None
+
+    matching_rows = [row for row in trade_rows if str(row.get("ticker") or "").strip().upper() == normalized_ticker]
+    if not matching_rows:
+        return None
+
+    latest_row = max(
+        matching_rows,
+        key=lambda row: row.get("decision_time") or row.get("created_at") or "",
+    )
+    return str(latest_row.get("trading_decision_id") or "") or None
+
+
+def _load_material_signal_change_tickers(session: Any) -> set[str]:
+    rows = (
+        session.query(IntradaySignalSnapshot)
+        .order_by(IntradaySignalSnapshot.decision_time.desc())
+        .limit(100)
+        .all()
+    )
+    tickers: set[str] = set()
+    for row in rows:
+        if row.delta_vs_baseline_json:
+            tickers.add(str(row.ticker).upper())
+    return tickers
+
+
+def _load_risk_by_ticker(session: Any) -> dict[str, dict[str, Any]]:
+    rows = (
+        session.query(RiskDecision)
+        .order_by(RiskDecision.decision_time.desc(), RiskDecision.created_at.desc())
+        .limit(100)
+        .all()
+    )
+    grouped: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        ticker = str(row.ticker or "").strip().upper()
+        if not ticker or ticker in grouped:
+            continue
+        lookahead_risk_source = _risk_decision_lookahead_source(row)
+        generated_hedge_action = getattr(row, "generated_hedge_action_json", None)
+        grouped[ticker] = {
+            "status": row.status,
+            "reason": row.reason_code,
+            "lookahead_risk_source": lookahead_risk_source,
+            "generated_hedge_action": generated_hedge_action,
+            "applied_rules": _risk_applied_rules(getattr(row, "applied_rules_json", None)),
+            "history": [
+                {
+                    "time": row.decision_time or row.created_at,
+                    "status": row.status,
+                    "summary": row.reason_code,
+                }
+            ],
+        }
+    return grouped
+
+
+def _risk_decision_lookahead_source(row: Any) -> str | None:
+    metadata_json = dict(getattr(row, "metadata_json", {}) or {})
+    direct_value = getattr(row, "lookahead_risk_source", None)
+    if direct_value is not None:
+        value = str(direct_value).strip()
+        if value:
+            return value
+    metadata_value = metadata_json.get("lookahead_risk_source")
+    if metadata_value is None:
+        return None
+    value = str(metadata_value).strip()
+    return value or None
+
+
+def _risk_applied_rules(value: Any) -> tuple[str, ...]:
+    """Normalize ``applied_rules_json`` into readable rule labels.
+
+    The risk manager is deterministic, so its "reasoning" is the set of rules it
+    evaluated. Entries may be plain strings or dicts carrying a rule id / reason.
+    """
+    if not isinstance(value, (list, tuple)):
+        return ()
+    labels: list[str] = []
+    for item in value:
+        if isinstance(item, dict):
+            label = str(
+                item.get("label")
+                or item.get("rule")
+                or item.get("rule_id")
+                or item.get("name")
+                or item.get("reason_code")
+                or ""
+            ).strip()
+        else:
+            label = str(item or "").strip()
+        if label and label not in labels:
+            labels.append(label)
+    return tuple(labels)
+
+
+def _risk_decision_binding_constraint(row: Any) -> str | None:
+    metadata_json = dict(getattr(row, "metadata_json", {}) or {})
+    direct_value = getattr(row, "binding_constraint", None)
+    if direct_value is not None:
+        value = str(direct_value).strip()
+        if value:
+            return value
+    metadata_value = metadata_json.get("binding_constraint")
+    if metadata_value is None:
+        return None
+    value = str(metadata_value).strip()
+    return value or None
+
+
+def _load_signal_history_by_ticker(session: Any) -> dict[str, dict[str, Any]]:
+    signal_rows = (
+        session.query(SignalSnapshot)
+        .order_by(SignalSnapshot.decision_time.desc(), SignalSnapshot.created_at.desc())
+        .limit(100)
+        .all()
+    )
+    intraday_rows = (
+        session.query(IntradaySignalSnapshot)
+        .order_by(IntradaySignalSnapshot.decision_time.desc(), IntradaySignalSnapshot.created_at.desc())
+        .limit(100)
+        .all()
+    )
+
+    grouped: dict[str, dict[str, Any]] = {}
+    for row in signal_rows:
+        ticker = str(row.ticker or "").strip().upper()
+        if not ticker:
+            continue
+        entry = grouped.setdefault(ticker, {"technical": [], "summary": [], "timeline": []})
+        signal_json = row.signal_json if isinstance(row.signal_json, dict) else {}
+
+        technical_items = signal_json.get("technical")
+        if isinstance(technical_items, list):
+            for item in technical_items:
+                if isinstance(item, dict):
+                    entry["technical"].append(item)
+        elif isinstance(technical_items, dict):
+            entry["technical"].extend(_technical_history_items(technical_items))
+
+        summary_items = signal_json.get("summary")
+        if isinstance(summary_items, list):
+            for item in summary_items:
+                if str(item).strip():
+                    entry["summary"].append(str(item).strip())
+        else:
+            entry["summary"].extend(_signal_summary_items(signal_json))
+
+        entry["timeline"].append(
+            {
+                "time": row.decision_time,
+                "event_type": row.snapshot_type or "signal_snapshot",
+                "summary": _timeline_summary_from_signal(signal_json),
+            }
+        )
+
+    for row in intraday_rows:
+        ticker = str(row.ticker or "").strip().upper()
+        if not ticker:
+            continue
+        entry = grouped.setdefault(ticker, {"technical": [], "summary": [], "timeline": []})
+        delta = row.delta_vs_baseline_json if isinstance(row.delta_vs_baseline_json, dict) else {}
+        if delta:
+            entry["summary"].append(", ".join(sorted(delta.keys())))
+        entry["timeline"].append(
+            {
+                "time": row.decision_time,
+                "event_type": "intraday",
+                "summary": ", ".join(sorted(delta.keys())) if delta else "Intraday refresh",
+            }
+        )
+
+    return grouped
+
+
+def _load_news_by_ticker(session: Any) -> dict[str, list[dict[str, Any]]]:
+    alert_rows = (
+        session.query(NewsAlert)
+        .order_by(NewsAlert.published_at.desc(), NewsAlert.created_at.desc())
+        .limit(100)
+        .all()
+    )
+    event_rows = (
+        session.query(EventNewsItem)
+        .order_by(EventNewsItem.published_at.desc(), EventNewsItem.available_for_decision_at.desc())
+        .limit(100)
+        .all()
+    )
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    seen: set[tuple[str, str, str, str | None]] = set()
+    for row in alert_rows:
+        ticker = str(row.ticker or "").strip().upper()
+        if not ticker:
+            continue
+        _append_news_snippet(
+            grouped,
+            seen,
+            ticker=ticker,
+            title=row.headline,
+            summary=row.summary,
+            published_at=row.published_at,
+        )
+    for row in event_rows:
+        ticker = str(row.ticker or "").strip().upper()
+        if not ticker:
+            continue
+        _append_news_snippet(
+            grouped,
+            seen,
+            ticker=ticker,
+            title=row.headline,
+            summary=row.summary,
+            published_at=row.published_at,
+            event_type=getattr(row, "event_type", None),
+            importance=getattr(row, "importance", None),
+        )
+    return grouped
+
+
+def _load_fundamentals_by_ticker(session: Any) -> dict[str, list[dict[str, Any]]]:
+    rows = (
+        session.query(SignalSnapshot)
+        .order_by(SignalSnapshot.decision_time.desc(), SignalSnapshot.created_at.desc())
+        .limit(100)
+        .all()
+    )
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        ticker = str(row.ticker or "").strip().upper()
+        if not ticker:
+            continue
+        signal_json = row.signal_json if isinstance(row.signal_json, dict) else {}
+        items = grouped.setdefault(ticker, [])
+        fundamentals = signal_json.get("fundamentals")
+        if isinstance(fundamentals, list):
+            for item in fundamentals:
+                if not isinstance(item, dict):
+                    continue
+                items.append(
+                    {
+                        "title": item.get("title"),
+                        "summary": item.get("summary"),
+                        "as_of": row.decision_time,
+                    }
+                )
+            continue
+
+        fundamental_metrics = signal_json.get("fundamental")
+        if isinstance(fundamental_metrics, dict):
+            items.extend(_fundamental_snippets_from_metrics(fundamental_metrics, row.decision_time))
+    return grouped
+
+
+def _timeline_summary_from_signal(signal_json: dict[str, Any]) -> str:
+    summary_items = signal_json.get("summary")
+    if isinstance(summary_items, list):
+        for item in summary_items:
+            text = str(item).strip()
+            if text:
+                return text
+    derived_items = _signal_summary_items(signal_json)
+    if derived_items:
+        return derived_items[0]
+    return "Signal snapshot updated"
+
+
+def _technical_history_items(technical: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        {
+            "label": "price",
+            "points": [
+                value
+                for value in (
+                    technical.get("price_vs_sma_200"),
+                    technical.get("price_vs_sma_50"),
+                    technical.get("price_vs_sma_20"),
+                    technical.get("return_20d"),
+                )
+                if _is_number(value)
+            ],
+            "summary": _price_technical_summary(technical),
+        },
+        {
+            "label": "relative_strength",
+            "points": [
+                value
+                for value in (
+                    technical.get("rs_vs_spy_1d"),
+                    technical.get("rs_vs_qqq_1d"),
+                    technical.get("relative_volume"),
+                )
+                if _is_number(value)
+            ],
+            "summary": _relative_strength_summary(technical),
+        },
+    ]
+
+
+def _signal_summary_items(signal_json: dict[str, Any]) -> list[str]:
+    items: list[str] = []
+    events_news = signal_json.get("events_news")
+    technical = signal_json.get("technical")
+    fundamental = signal_json.get("fundamental")
+
+    if isinstance(events_news, dict):
+        negative_catalyst = str(events_news.get("direct_negative_catalyst_type") or "").strip()
+        sentiment = str(events_news.get("sentiment_direction") or "").strip()
+        catalyst_quality = events_news.get("catalyst_quality_score")
+        if negative_catalyst:
+            items.append(
+                f"Events/news sentiment {sentiment or 'negative'}; direct negative catalyst: {negative_catalyst}."
+            )
+        elif sentiment:
+            quality_text = (
+                f"; catalyst quality {_format_decimal(catalyst_quality)}"
+                if _is_number(catalyst_quality)
+                else ""
+            )
+            items.append(f"Events/news sentiment {sentiment}{quality_text}.")
+
+    if isinstance(technical, dict):
+        technical_bits: list[str] = []
+        if _is_number(technical.get("return_20d")):
+            technical_bits.append(f"20d return {_format_pct(technical['return_20d'])}")
+        if _is_number(technical.get("relative_volume")):
+            technical_bits.append(f"relative volume {_format_decimal(technical['relative_volume'])}")
+        if technical_bits:
+            items.append(f"Technical: {', '.join(technical_bits)}.")
+
+    if isinstance(fundamental, dict):
+        fundamental_bits: list[str] = []
+        if _is_number(fundamental.get("quality_score")):
+            fundamental_bits.append(f"quality {_format_decimal(fundamental['quality_score'])}")
+        if _is_number(fundamental.get("revenue_growth_score")):
+            fundamental_bits.append(f"revenue growth {_format_decimal(fundamental['revenue_growth_score'])}")
+        if _is_number(fundamental.get("margin_trend_score")):
+            fundamental_bits.append(f"margin trend {_format_decimal(fundamental['margin_trend_score'])}")
+        if _is_number(fundamental.get("valuation_percentile")):
+            fundamental_bits.append(f"valuation percentile {_format_decimal(fundamental['valuation_percentile'])}")
+        if fundamental_bits:
+            items.append(f"Fundamental: {', '.join(fundamental_bits)}.")
+
+    return items
+
+
+def _price_technical_summary(technical: dict[str, Any]) -> str:
+    parts: list[str] = []
+    if _is_number(technical.get("return_20d")):
+        parts.append(f"20d return {_format_pct(technical['return_20d'])}")
+    below_levels = [
+        label
+        for key, label in (
+            ("price_vs_sma_20", "SMA20"),
+            ("price_vs_sma_50", "SMA50"),
+            ("price_vs_sma_200", "SMA200"),
+        )
+        if _is_number(technical.get(key)) and float(technical[key]) < 0
+    ]
+    if below_levels:
+        if len(below_levels) == 1:
+            parts.append(f"below {below_levels[0]}")
+        elif len(below_levels) == 2:
+            parts.append(f"below {below_levels[0]} and {below_levels[1]}")
+        else:
+            parts.append(f"below {', '.join(below_levels[:-1])}, and {below_levels[-1]}")
+    return "; ".join(parts) if parts else "Price trend unavailable"
+
+
+def _relative_strength_summary(technical: dict[str, Any]) -> str:
+    parts: list[str] = []
+    if _is_number(technical.get("rs_vs_spy_1d")):
+        parts.append(f"RS vs SPY {_format_pct(technical['rs_vs_spy_1d'])}")
+    else:
+        parts.append("RS vs SPY unavailable")
+    if _is_number(technical.get("relative_volume")):
+        parts.append(f"relative volume {_format_decimal(technical['relative_volume'])}")
+    return "; ".join(parts)
+
+
+def _fundamental_snippets_from_metrics(
+    metrics: dict[str, Any],
+    as_of: Any,
+) -> list[dict[str, Any]]:
+    mapping = (
+        ("quality_score", "Quality"),
+        ("margin_trend_score", "Margin Trend"),
+        ("revenue_growth_score", "Revenue Growth"),
+        ("valuation_percentile", "Valuation Percentile"),
+    )
+    items: list[dict[str, Any]] = []
+    for key, title in mapping:
+        value = metrics.get(key)
+        if not _is_number(value):
+            continue
+        items.append(
+            {
+                "title": title,
+                "summary": _format_decimal(value),
+                "as_of": as_of,
+            }
+        )
+    return items
+
+
+def _append_news_snippet(
+    grouped: dict[str, list[dict[str, Any]]],
+    seen: set[tuple[str, str, str, str | None]],
+    *,
+    ticker: str,
+    title: Any,
+    summary: Any,
+    published_at: Any,
+    event_type: Any = None,
+    importance: Any = None,
+) -> None:
+    normalized_title = str(title or "").strip()
+    if not normalized_title:
+        return
+    normalized_summary = str(summary or "").strip()
+    time_key = published_at.isoformat() if hasattr(published_at, "isoformat") else str(published_at or "") or None
+    dedupe_key = (ticker, normalized_title, normalized_summary, time_key)
+    if dedupe_key in seen:
+        return
+    seen.add(dedupe_key)
+    grouped.setdefault(ticker, []).append(
+        {
+            "title": normalized_title,
+            "summary": normalized_summary,
+            "published_at": published_at,
+            "event_type": str(event_type or "").strip() or None,
+            "importance": str(importance or "").strip() or None,
+        }
+    )
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _format_pct(value: Any) -> str:
+    return f"{float(value) * 100:.2f}%"
+
+
+def _format_decimal(value: Any) -> str:
+    return f"{float(value):.2f}"

@@ -72,6 +72,6 @@ def test_run_trading_macro_event_db_smoke_round_trips_canonical_rows():
     assert len(result["persisted"]["calendar_event_ids"]) == 2
     assert len(result["persisted"]["portfolio_event_risk_assessment_ids"]) == 2
     assert result["persisted"]["risk_factor_exposure_count"] == 2
-    assert result["reloaded"]["risk_macro_regime"] == "risk_off"
+    assert result["reloaded"]["risk_macro_regime"] == "Risk Off"
     assert result["reloaded"]["risk_macro_event_risk_level"] == "High"
     assert result["reloaded"]["risk_macro_top_source"] == "Own event window"

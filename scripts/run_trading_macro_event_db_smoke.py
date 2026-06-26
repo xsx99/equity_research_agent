@@ -278,7 +278,7 @@ def run_smoke(
         and loaded_macro.metadata_json.get("smoke_run_id") == smoke_run_id,
         "calendar_events_reloaded": len(loaded_events) == 2,
         "event_assessments_reloaded": len(loaded_assessments) == 2,
-        "today_payload_uses_canonical_regime": risk_macro_payload["command_center"]["regime"] == "risk_off",
+        "today_payload_uses_canonical_regime": risk_macro_payload["command_center"]["regime"] == "Risk Off",
         "today_payload_sees_event_risk": risk_macro_payload["command_center"]["event_risk_level"] == "High",
     }
     status = "passed" if all(checks.values()) else "failed"

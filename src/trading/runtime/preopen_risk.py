@@ -507,7 +507,7 @@ def _preopen_option_strategy_payload(
         return None
 
     from src.trading.options.strategy import OptionsStrategyLayer
-    from src.trading.workflows.trading_decision import (
+    from src.trading.workflows.option_strategy_builder import (
         _build_option_strategy_payload,
         _decision_action_for_expression,
     )
