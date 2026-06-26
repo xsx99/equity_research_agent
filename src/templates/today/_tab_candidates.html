@@ -1,0 +1,235 @@
+    <section class="card secondary-surface standalone-surface">
+      <div class="surface-heading">
+        <div><h2>Candidates</h2></div>
+        <p class="detail-muted">Operator queue, candidate decisions, and advanced universe context.</p>
+      </div>
+      <div class="surface-summary-row">
+        <article class="summary-tile">
+          <span class="metric-label">Candidate Summary</span>
+          <strong>{{ candidates.aggregate_summary.scored }} scored</strong>
+          <span class="detail-muted">{{ candidates.aggregate_summary.actionable }} actionable · {{ candidates.aggregate_summary.watch }} watch · {{ candidates.aggregate_summary.blocked }} blocked</span>
+        </article>
+      </div>
+      {% set candidate_summary = candidates.summary or {} %}
+      {% set action_queue = candidates.action_queue if candidates.action_queue is defined else (candidate_summary.action_queue or ()) %}
+      {% set manual_review_queue = candidates.manual_review_queue if candidates.manual_review_queue is defined else candidates.manual_requests %}
+      {% set decision_readout = candidates.decision_readout if candidates.decision_readout is defined else candidates.rows %}
+      <div class="surface-summary-row">
+        <article class="summary-tile">
+          <span class="metric-label">Action Queue</span>
+          <strong>{{ action_queue | length }} item{% if (action_queue | length) != 1 %}s{% endif %}</strong>
+        </article>
+        <article class="summary-tile">
+          <span class="metric-label">Decision Readout</span>
+          <strong>{{ decision_readout | length }} candidate{% if decision_readout|length != 1 %}s{% endif %}</strong>
+        </article>
+        <article class="summary-tile">
+          <span class="metric-label">Manual Review Queue</span>
+          <strong>{{ manual_review_queue | length }} active request{% if manual_review_queue|length != 1 %}s{% endif %}</strong>
+        </article>
+        <article class="summary-tile">
+          <span class="metric-label">Theme Monitor</span>
+          <strong>{{ candidates.themes | length }} tracked theme{% if candidates.themes|length != 1 %}s{% endif %}</strong>
+        </article>
+      </div>
+      <section class="surface-block">
+        <div class="surface-block-head">
+          <div class="section-label">Action Queue</div>
+          <span class="surface-block-count">{{ action_queue | length }}</span>
+        </div>
+        {% if action_queue %}
+        <div class="candidate-queue-list scroll-panel">
+          {% for row in action_queue %}
+          <article class="candidate-queue-card">
+            <div class="candidate-card-head">
+              <div>
+                <strong>{{ row.ticker }}</strong>
+                <div class="detail-muted">{{ row.label }}</div>
+              </div>
+            </div>
+            <p>{{ row.summary }}</p>
+          </article>
+          {% endfor %}
+        </div>
+        {% else %}<p class="detail-muted quiet-empty">No candidate actions need attention.</p>{% endif %}
+      </section>
+      <section class="surface-block">
+        <div class="section-label">Pinned Review</div>
+        <form method="post" action="/today/manual-requests" class="form-row">
+          <input type="text" name="ticker" placeholder="Ticker">
+          <input type="text" name="reason" placeholder="Reason">
+          <select name="mode">
+            <option value="review_only">Review Only</option>
+            <option value="paper_trade_eligible">Paper Trade Eligible</option>
+          </select>
+          <button class="btn btn-primary" type="submit">Pin Review</button>
+        </form>
+      </section>
+      <section class="surface-block">
+        <div class="surface-block-head">
+          <div class="section-label">Manual Review Queue</div>
+          <span class="surface-block-count">{{ manual_review_queue | length }}</span>
+        </div>
+        {% if manual_review_queue %}
+        <div class="candidate-queue-list scroll-panel">
+          {% for row in manual_review_queue %}
+          <article class="candidate-queue-card">
+            <div class="candidate-card-head">
+              <div>
+                <strong>{{ row.ticker }}</strong>
+                <div class="detail-muted">{{ row.status_label or row.status }}</div>
+              </div>
+              <span class="detail-chip">{{ row.mode_label or row.mode }}</span>
+            </div>
+            <p>{{ row.operator_summary or row.reason }}</p>
+            <div class="candidate-meta-grid">
+              <div>
+                <span class="metric-label">Reason</span>
+                <strong>{{ row.reason }}</strong>
+              </div>
+              <div>
+                <span class="metric-label">Last Evaluated</span>
+                <strong>{{ row.last_evaluated_label or "Not evaluated yet" }}</strong>
+              </div>
+              <div>
+                <span class="metric-label">Decision State</span>
+                <strong>{{ row.decision_state_label or "Pending evaluation" }}</strong>
+              </div>
+              <div>
+                <span class="metric-label">Execution State</span>
+                <strong>{{ row.execution_state_label or "Unlinked" }}</strong>
+              </div>
+            </div>
+            {% if row.latest_block_reason %}
+            <p class="detail-muted">{{ row.latest_block_reason }}</p>
+            {% endif %}
+            {% if row.linked_detail_url %}
+            <a href="{{ row.linked_detail_url }}" class="detail-link">Open audit detail</a>
+            {% elif row.degraded_linkage_copy %}
+            <p class="detail-muted">{{ row.degraded_linkage_copy }}</p>
+            {% endif %}
+            {% if row.dismiss_form_action %}
+            <form method="post" action="{{ row.dismiss_form_action }}">
+              <button class="btn" type="submit">Dismiss</button>
+            </form>
+            {% endif %}
+          </article>
+          {% endfor %}
+        </div>
+        {% else %}<p class="detail-muted quiet-empty">No active manual requests.</p>{% endif %}
+      </section>
+      <section class="surface-block">
+        <div class="surface-block-head">
+          <div class="section-label">Candidate Decisions</div>
+          <span class="surface-block-count">{{ decision_readout | length }}</span>
+        </div>
+        {% if decision_readout %}
+        <div class="candidate-decision-list scroll-rail">
+          {% for row in decision_readout %}
+          <article class="candidate-decision-card" data-testid="candidate-group-{{ row.ticker }}">
+            <div class="candidate-card-head">
+              <div>
+                <strong>{{ row.ticker }}</strong>
+                <div class="detail-muted">{{ row.primary_reason or row.operator_summary }}</div>
+              </div>
+              <span class="detail-chip">{{ row.current_outcome_label or row.result_status }}</span>
+            </div>
+            <div class="candidate-decision-grid">
+              <div>
+                <span class="metric-label">Primary Reason</span>
+                <strong>{{ row.primary_reason or row.why_reviewed_label or row.selection_source }}</strong>
+              </div>
+              <div>
+                <span class="metric-label">Current Outcome</span>
+                <strong>{{ row.current_outcome_label or row.result_status }}</strong>
+              </div>
+              <div>
+                <span class="metric-label">Trade Identity</span>
+                <strong>{{ row.trade_identity_label or row.trade_identity }}</strong>
+              </div>
+              <div>
+                <span class="metric-label">Strategy Lens</span>
+                <strong>{{ row.strategy_label or row.strategy_match }}</strong>
+              </div>
+              <div>
+                <span class="metric-label">Confidence</span>
+                <strong>{{ fmt_number(row.confidence) if row.confidence is not none else "—" }}</strong>
+              </div>
+              <div>
+                <span class="metric-label">Evaluation History</span>
+                <strong>{{ row.evaluation_history_label or "Latest review" }}</strong>
+              </div>
+            </div>
+            {% if row.selection_reason %}
+            <div>
+              <span class="metric-label">Decision Thesis</span>
+              <p class="hero-summary">{{ row.selection_reason }}</p>
+            </div>
+            {% endif %}
+            <div>
+              <span class="metric-label">Signals Used</span>
+              <ul class="history-card-listing">
+                {% for bullet in row.signal_bullets %}
+                <li>{{ bullet }}</li>
+                {% endfor %}
+                {% for bullet in row.risk_tags %}
+                <li>{{ bullet }}</li>
+                {% endfor %}
+                {% for bullet in row.invalidators %}
+                <li>{{ bullet }}</li>
+                {% endfor %}
+              </ul>
+            </div>
+            {% if row.evaluation_count and row.evaluation_count > 1 %}
+            <div>
+              <span class="metric-label">Evaluation timeline</span>
+              <ul class="candidate-timeline-list">
+                {% for evaluation in row.evaluations %}
+                <li class="candidate-timeline-item">
+                  <div class="candidate-timeline-head">
+                    <strong><time datetime="{{ evaluation.decision_time | iso_datetime }}" data-local-time-format="datetime">{{ evaluation.decision_time | local_time('datetime') }}</time></strong>
+                    <span class="detail-chip">{{ evaluation.outcome }}</span>
+                  </div>
+                  <div class="detail-muted">{{ evaluation.strategy_label }}</div>
+                  {% if evaluation.confidence is not none %}
+                  <div class="detail-muted">Confidence {{ fmt_number(evaluation.confidence) }}</div>
+                  {% endif %}
+                  {% if evaluation.summary %}
+                  <p class="detail-muted">{{ evaluation.summary }}</p>
+                  {% endif %}
+                </li>
+                {% endfor %}
+              </ul>
+            </div>
+            {% endif %}
+            {% if row.alternatives %}
+            <details>
+              <summary>Strategy alternatives</summary>
+              <div class="candidate-meta-grid">
+                {% for alt in row.alternatives %}
+                <div>
+                  <span class="metric-label">{{ alt.strategy_label }}</span>
+                  <strong>{{ alt.trade_identity_label or "Alternative" }}</strong>
+                  {% if alt.confidence is not none %}
+                  <div class="detail-muted">Confidence {{ fmt_number(alt.confidence) }}</div>
+                  {% endif %}
+                  <div class="detail-muted">{{ alt.operator_summary }}</div>
+                </div>
+                {% endfor %}
+              </div>
+            </details>
+            {% endif %}
+          </article>
+          {% endfor %}
+        </div>
+        {% else %}<p class="detail-muted quiet-empty">No candidates in the active universe.</p>{% endif %}
+      </section>
+      <section class="surface-block">
+        <div class="section-label">Themes</div>
+        {% if candidates.themes %}
+        <div class="theme-chip-list">
+          {% for row in candidates.themes %}<span class="theme-chip">{{ row.display_name }}</span>{% endfor %}
+        </div>
+        {% else %}<p class="detail-muted quiet-empty">No themes.</p>{% endif %}
+      </section>
+    </section>

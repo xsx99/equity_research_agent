@@ -10,6 +10,11 @@
 >
 > **Verified at HEAD `1c01346` ("clean up code").** All line numbers below were accurate at that
 > commit — **re-verify each boundary before editing** (re-run the analysis snippets provided).
+>
+> **STATUS (as of `26819d0` "split god files"):** PRs A–E in this document are **DONE**. The next
+> targets — the biggest residual this work created (`today_loaders.py`, 1750 lines) and the front-end
+> god files this doc never scoped (`style.css`, `today.html`, `research_detail.html`) — are covered in
+> the follow-up: **`docs/refactor-split-god-files-round2.md`**.
 
 ---
 

@@ -1,0 +1,173 @@
+"""Portfolio loader helpers for the today router."""
+from __future__ import annotations
+
+from typing import Any
+
+from src.db.models.trading import PaperOptionPosition, PaperPosition, PortfolioIntent, PortfolioSnapshot, RiskHedgeDecision
+from src.web.presenters.today_copy import generic_status_label, intent_type_label, option_strategy_type_label, strategy_label, trade_identity_label
+from src.web.presenters.today_portfolio_analytics import build_portfolio_analytics
+from src.web.routers import today_loaders
+
+
+def _build_portfolio_view(
+    *,
+    header: dict[str, Any],
+    positions: tuple[dict[str, Any], ...],
+    option_positions: tuple[dict[str, Any], ...],
+    hedge_overlays: tuple[dict[str, Any], ...],
+    overview: dict[str, Any],
+    portfolio_history: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    return {
+        "positions": positions,
+        "option_positions": option_positions,
+        "hedge_overlays": hedge_overlays,
+        "position_summary": {
+            "count": len(positions),
+            "market_value": today_loaders._safe_sum(positions, "market_value"),
+            "unrealized_pnl": today_loaders._safe_sum(positions, "unrealized_pnl"),
+        },
+        "option_position_summary": {
+            "count": len(option_positions),
+            "market_value": today_loaders._safe_sum(option_positions, "market_value"),
+            "max_loss": today_loaders._safe_sum(option_positions, "max_loss"),
+        },
+        "hedge_overlay_summary": {
+            "count": len(hedge_overlays),
+            "protected_notional": today_loaders._safe_sum(hedge_overlays, "protected_notional"),
+        },
+        "kpis": {
+            "account_equity": header.get("account_equity"),
+            "day_pnl": header.get("day_pnl"),
+            "realized_pnl": header.get("realized_pnl"),
+            "unrealized_pnl": header.get("unrealized_pnl"),
+            "gross_exposure": header.get("gross_exposure"),
+            "net_exposure": header.get("net_exposure"),
+            "cash_balance": header.get("cash_balance"),
+            "buying_power": header.get("buying_power"),
+        },
+        "analytics": build_portfolio_analytics(portfolio_history or []),
+        "needs_attention": {
+            "needs_review": tuple(overview.get("command_center", {}).get("needs_review") or ()),
+            "live_alerts": tuple(overview.get("live_alerts") or ()),
+            "material_changes": tuple(overview.get("material_changes") or ()),
+        },
+    }
+
+
+def _load_positions(session: Any) -> tuple[dict[str, Any], ...]:
+    rows = (
+        session.query(PaperPosition)
+        .filter(PaperPosition.status == "open")
+        .order_by(PaperPosition.updated_at.desc())
+        .all()
+    )
+    return tuple(
+        {
+            "ticker": row.ticker,
+            "trade_identity": row.trade_identity,
+            "trade_identity_label": trade_identity_label(row.trade_identity),
+            "strategy_id": row.strategy_id,
+            "strategy_label": strategy_label(row.strategy_id),
+            "quantity": row.quantity,
+            "market_value": row.market_value,
+            "unrealized_pnl": getattr(row, "unrealized_pnl", None),
+        }
+        for row in rows
+    )
+
+
+def _load_recent_closed_positions(session: Any) -> tuple[dict[str, Any], ...]:
+    rows = (
+        session.query(PaperPosition)
+        .filter(PaperPosition.status == "closed")
+        .order_by(PaperPosition.closed_at.desc(), PaperPosition.updated_at.desc())
+        .limit(25)
+        .all()
+    )
+    return tuple(
+        {
+            "ticker": row.ticker,
+            "trade_identity": row.trade_identity,
+            "trade_identity_label": trade_identity_label(row.trade_identity),
+            "strategy_id": row.strategy_id,
+            "strategy_label": strategy_label(row.strategy_id),
+            "quantity": row.quantity,
+            "market_value": row.market_value,
+            "opened_at": row.opened_at,
+            "updated_at": row.updated_at,
+            "closed_at": row.closed_at,
+            "status": row.status,
+        }
+        for row in rows
+    )
+
+
+def _load_option_positions(session: Any) -> tuple[dict[str, Any], ...]:
+    rows = (
+        session.query(PaperOptionPosition)
+        .filter(PaperOptionPosition.status == "open")
+        .order_by(PaperOptionPosition.updated_at.desc())
+        .all()
+    )
+    return tuple(
+        {
+            "ticker": row.ticker,
+            "option_strategy_type": row.option_strategy_type,
+            "option_strategy_type_label": option_strategy_type_label(row.option_strategy_type),
+            "trade_identity": row.trade_identity,
+            "trade_identity_label": trade_identity_label(row.trade_identity),
+            "market_value": getattr(row, "market_value", None),
+            "max_loss": row.max_loss,
+        }
+        for row in rows
+    )
+
+
+def _load_hedge_overlays(session: Any) -> tuple[dict[str, Any], ...]:
+    rows = (
+        session.query(RiskHedgeDecision)
+        .order_by(RiskHedgeDecision.created_at.desc())
+        .limit(10)
+        .all()
+    )
+    return tuple(
+        {
+            "ticker": row.ticker,
+            "option_strategy_type": row.option_strategy_type,
+            "option_strategy_type_label": option_strategy_type_label(row.option_strategy_type),
+            "protected_notional": row.protected_notional,
+        }
+        for row in rows
+    )
+
+
+def _load_portfolio_history(session: Any, *, limit: int = 180) -> list[dict[str, Any]]:
+    rows = (
+        session.query(PortfolioSnapshot)
+        .order_by(PortfolioSnapshot.snapshot_time.desc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        {
+            "time": row.snapshot_time,
+            "equity": row.account_equity,
+            "day_pnl": row.day_pnl,
+        }
+        for row in reversed(rows)
+    ]
+
+
+def _load_portfolio_intents(session: Any) -> tuple[dict[str, Any], ...]:
+    rows = session.query(PortfolioIntent).order_by(PortfolioIntent.created_at.desc()).limit(20).all()
+    return tuple(
+        {
+            "ticker": row.ticker,
+            "intent_type": row.intent_type,
+            "lifecycle_status": row.lifecycle_status,
+            "intent_type_label": intent_type_label(row.intent_type),
+            "lifecycle_status_label": generic_status_label(row.lifecycle_status),
+        }
+        for row in rows
+    )

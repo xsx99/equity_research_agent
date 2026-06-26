@@ -1,0 +1,159 @@
+    <section class="card secondary-surface standalone-surface">
+      <div class="surface-heading"><div><p class="eyebrow">Focused Surface</p><h2>Risk &amp; Macro</h2></div></div>
+      {% if risk_macro.command_center %}
+      <section class="surface-block" data-testid="macro-strip">
+        <div class="surface-block-head">
+          <div class="section-label">Macro Strip</div>
+        </div>
+        <div class="overview-strip-grid">
+          <article class="overview-strip-chip">
+            <span class="metric-label">Regime</span>
+            <strong>{{ risk_macro.command_center.regime }}</strong>
+          </article>
+          <article class="overview-strip-chip">
+            <span class="metric-label">Risk Appetite</span>
+            <strong>{{ risk_macro.command_center.risk_appetite_label }}</strong>
+          </article>
+          <article class="overview-strip-chip">
+            <span class="metric-label">Exposure Usage</span>
+            <strong>{% if risk_macro.command_center.exposure_usage_pct is not none %}{{ "%.2f%%"|format(risk_macro.command_center.exposure_usage_pct) }}{% else %}Unavailable{% endif %}</strong>
+          </article>
+          <article class="overview-strip-chip">
+            <span class="metric-label">Event Risk</span>
+            <strong>{{ risk_macro.command_center.event_risk_level }}</strong>
+          </article>
+        </div>
+        {% if risk_macro.command_center.warning_banner %}
+        <p class="detail-muted">{{ risk_macro.command_center.warning_banner }}</p>
+        {% endif %}
+        {% if risk_macro.command_center.basis_note %}
+        <p class="detail-muted">{{ risk_macro.command_center.basis_note }}</p>
+        {% endif %}
+      </section>
+      {% endif %}
+      <div class="surface-summary-row">
+        <article class="summary-tile">
+          <span class="metric-label">Risk Status</span>
+          <strong>{{ risk_macro.summary.risk_status }}</strong>
+        </article>
+        <article class="summary-tile">
+          <span class="metric-label">Top Risk Sources</span>
+          <strong>{{ risk_macro.summary.top_risk_sources | length }} source{% if risk_macro.summary.top_risk_sources|length != 1 %}s{% endif %}</strong>
+        </article>
+        <article class="summary-tile">
+          <span class="metric-label">Data / Model Availability</span>
+          <strong>{{ risk_macro.summary.availability_issues | length }} issue{% if risk_macro.summary.availability_issues|length != 1 %}s{% endif %}</strong>
+        </article>
+      </div>
+      <section class="surface-block">
+        <p><strong>Risk Config Version:</strong> {{ risk_macro.risk_config_version or "unavailable" }}</p>
+      </section>
+      <section class="surface-block">
+        <div class="section-label">Top Risk Sources</div>
+        {% if risk_macro.summary.top_risk_sources %}
+        {% for row in risk_macro.summary.top_risk_sources %}
+        <div class="detail-muted"><strong>{{ row.label }}</strong>: {{ row.summary }}</div>
+        {% endfor %}
+        {% else %}<p class="detail-muted quiet-empty">No concentrated risk sources recorded.</p>{% endif %}
+      </section>
+      <section class="surface-block">
+        <div class="surface-block-head">
+          <div class="section-label">Event Calendar</div>
+          <span class="surface-block-count">{{ risk_macro.events | length }}</span>
+        </div>
+        {% if risk_macro.events %}
+        {% set risk_event_sections = namespace(calendar=(), earnings=()) %}
+        {% for row in risk_macro.events %}
+        {% set event_kind = ((row.event_type_label or row.event_type or "") | lower) %}
+        {% if "earn" in event_kind %}
+        {% set risk_event_sections.earnings = risk_event_sections.earnings + (row,) %}
+        {% else %}
+        {% set risk_event_sections.calendar = risk_event_sections.calendar + (row,) %}
+        {% endif %}
+        {% endfor %}
+        <div class="risk-calendar-grid">
+          <section class="risk-calendar-section" data-testid="economic-calendar">
+            <div class="section-label">Economic Calendar</div>
+            {% if risk_event_sections.calendar %}
+            <div class="calendar-list">
+              {% for row in risk_event_sections.calendar %}
+              <article class="calendar-row">
+                <div>
+                  <strong>{{ row.risk_mechanism or row.event_type_label or row.event_type }}</strong>
+                  <div class="detail-muted">{{ row.affected_ticker or "Portfolio" }}</div>
+                  {% if row.scheduled_at %}
+                  <div class="detail-muted"><time datetime="{{ row.scheduled_at | iso_datetime }}" data-local-time-format="datetime">{{ row.scheduled_at | local_time('datetime') }}</time></div>
+                  {% endif %}
+                </div>
+                <div class="calendar-meta">
+                  {% if row.importance %}
+                  <span class="impact-badge">{{ row.importance | upper }}</span>
+                  {% endif %}
+                  {% if row.portfolio_risk_level %}
+                  <span class="impact-badge impact-badge-muted">{{ row.portfolio_risk_level | upper }}</span>
+                  {% endif %}
+                </div>
+              </article>
+              {% endfor %}
+            </div>
+            {% else %}
+            <p class="detail-muted quiet-empty surface-empty-copy">No economic calendar rows are currently visible.</p>
+            {% endif %}
+          </section>
+          <section class="risk-calendar-section" data-testid="upcoming-earnings">
+            <div class="section-label">Upcoming Earnings</div>
+            {% if risk_event_sections.earnings %}
+            <div class="earnings-card-list">
+              {% for row in risk_event_sections.earnings %}
+              <article class="earnings-chip">
+                <div class="earnings-chip-head">
+                  <strong>{{ row.affected_ticker or row.event_type_label or row.event_type }}</strong>
+                  {% if row.importance %}
+                  <span class="impact-badge">{{ row.importance | upper }}</span>
+                  {% endif %}
+                </div>
+                <div class="detail-muted">{{ row.risk_mechanism or row.event_type_label or row.event_type }}</div>
+                {% if row.scheduled_at %}
+                <div class="detail-muted"><time datetime="{{ row.scheduled_at | iso_datetime }}" data-local-time-format="datetime">{{ row.scheduled_at | local_time('datetime') }}</time></div>
+                {% endif %}
+              </article>
+              {% endfor %}
+            </div>
+            {% else %}
+            <p class="detail-muted quiet-empty surface-empty-copy">No upcoming earnings are currently visible.</p>
+            {% endif %}
+          </section>
+        </div>
+        {% else %}<p class="detail-muted quiet-empty">No event-risk rows are currently visible.</p>{% endif %}
+      </section>
+      <section class="surface-block">
+        <div class="surface-block-head">
+          <div class="section-label">Risk Source Readout</div>
+          <span class="surface-block-count">{{ risk_macro.risk_sources | length }}</span>
+        </div>
+        {% if risk_macro.risk_sources %}
+        <div class="candidate-queue-list scroll-panel">
+          {% for row in risk_macro.risk_sources %}
+          <article class="candidate-queue-card">
+            <div class="candidate-card-head">
+              <div>
+                <strong>{{ row.ticker or "Portfolio" }}</strong>
+                <div class="detail-muted">{{ row.risk_source_label or row.risk_source }} / {{ row.severity }}</div>
+              </div>
+              <span class="detail-chip">{{ row.recommended_action_label or row.recommended_action }}</span>
+            </div>
+            <p>{{ row.rationale }}</p>
+          </article>
+          {% endfor %}
+        </div>
+        {% else %}<p class="detail-muted quiet-empty">No risk-source rows are currently visible.</p>{% endif %}
+      </section>
+      <section class="surface-block">
+        <div class="section-label">Data / Model Availability</div>
+        {% if risk_macro.summary.availability_issues %}
+        {% for row in risk_macro.summary.availability_issues %}
+        <div class="detail-muted"><strong>{{ row.label }}</strong>: {{ row.summary }}</div>
+        {% endfor %}
+        {% else %}<p class="detail-muted quiet-empty">No availability issues recorded.</p>{% endif %}
+      </section>
+    </section>

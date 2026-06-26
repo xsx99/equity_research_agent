@@ -1,0 +1,457 @@
+    <main class="primary-workspace">
+      <section class="card trades-canvas">
+        <div class="surface-heading">
+          <div>
+            <p class="eyebrow">Primary Workspace</p>
+            <h2>Trades</h2>
+          </div>
+          <p class="detail-muted">Ticker-first command surface for current decisions, evidence, and risk.</p>
+        </div>
+
+        {% set action_now_bucket = workspace.buckets.action_now if workspace and workspace.buckets.action_now is defined else () %}
+        {% set open_positions_bucket = workspace.buckets.open_positions if workspace and workspace.buckets.open_positions is defined else () %}
+        {% set closed_today_bucket = workspace.buckets.closed_today if workspace and workspace.buckets.closed_today is defined else () %}
+        {% set reviewing_bucket = workspace.buckets.reviewing if workspace and workspace.buckets.reviewing is defined else () %}
+        {% set watch_bucket = workspace.buckets.watch if workspace and workspace.buckets.watch is defined else () %}
+        {% set merged_reviewing_bucket = reviewing_bucket + watch_bucket %}
+        {% if workspace and (action_now_bucket or open_positions_bucket or closed_today_bucket or merged_reviewing_bucket) %}
+        <div class="ticker-workspace" data-selected-ticker="{{ workspace.selected_ticker }}">
+          <aside class="ticker-rail sticky-rail">
+            {% for bucket_id, bucket_label, bucket_items in (
+              ("action_now", "Action Now", action_now_bucket),
+              ("open_positions", "Open Positions", open_positions_bucket),
+              ("closed_today", "Closed Today", closed_today_bucket),
+              ("reviewing", "Reviewing", merged_reviewing_bucket)
+            ) %}
+            <section class="ticker-bucket" data-bucket="{{ bucket_id }}">
+              <div class="surface-heading surface-heading-compact">
+                <h3>{{ bucket_label }}</h3>
+                <span class="bucket-count">{{ bucket_items | length }}</span>
+              </div>
+              {% if bucket_items %}
+              <div class="ticker-card-list">
+                {% for item in bucket_items %}
+                <a
+                  class="ticker-card {% if item.ticker == workspace.selected_ticker %}active{% endif %}"
+                  href="/today?tab=trades&ticker={{ item.ticker }}&detail_tab={{ selected_detail_tab }}"
+                  {% if item.ticker == workspace.selected_ticker %}aria-current="page"{% endif %}
+                >
+                  <div class="ticker-card-header">
+                    <strong>{{ item.ticker }}</strong>
+                    {% if item.attention_badge %}
+                    <span>{{ item.attention_badge }}</span>
+                    {% endif %}
+                  </div>
+                  <div class="ticker-card-decision">{{ item.card_label or item.latest_decision or item.decision or "No Decision" }}</div>
+                  {% if item.card_detail %}
+                  <div class="detail-muted">{{ item.card_detail }}</div>
+                  {% endif %}
+                  <div class="detail-muted">{{ item.why_now or "No material update." }}</div>
+                  <div class="ticker-card-meta ticker-card-footer">
+                    {% if item.position_risk_line %}
+                    <span class="detail-muted">{{ item.position_risk_line }}</span>
+                    {% endif %}
+                    <span class="detail-muted">{{ item.recency_label or item.last_updated_label or "Recency unavailable" }}</span>
+                  </div>
+                </a>
+                {% endfor %}
+              </div>
+              {% else %}
+              <p class="detail-muted quiet-empty surface-empty-copy">No tickers in this bucket.</p>
+              {% endif %}
+            </section>
+            {% endfor %}
+          </aside>
+
+          <div class="ticker-detail-panel">
+            {% if has_rich_detail %}
+            <section class="card subcard ticker-detail-hero">
+              <div class="surface-heading surface-heading-compact">
+                <div>
+                  <p class="eyebrow">Selected Ticker</p>
+                  <h3>{{ workspace.selected_ticker }}</h3>
+                </div>
+                {% if detail.latest_conclusion.trade_decision.expression_bucket_label %}
+                <span class="detail-chip">{{ detail.latest_conclusion.trade_decision.expression_bucket_label }}</span>
+                {% endif %}
+              </div>
+              {% if detail.lifecycle %}
+              <div class="section-label">Lifecycle</div>
+              <div class="hero-meta-row hero-meta-pills">
+                <span class="meta-pill"><span class="meta-pill-label">State</span><strong>{{ detail.lifecycle.state_label }}</strong></span>
+                {% if detail.lifecycle.opened_at %}
+                <span class="meta-pill"><span class="meta-pill-label">Opened</span><strong><time datetime="{{ detail.lifecycle.opened_at | iso_datetime }}" data-local-time-format="datetime">{{ detail.lifecycle.opened_at | local_time('datetime') }}</time></strong></span>
+                {% endif %}
+                {% if detail.lifecycle.closed_at %}
+                <span class="meta-pill"><span class="meta-pill-label">Closed</span><strong><time datetime="{{ detail.lifecycle.closed_at | iso_datetime }}" data-local-time-format="datetime">{{ detail.lifecycle.closed_at | local_time('datetime') }}</time></strong></span>
+                {% endif %}
+              </div>
+              {% if detail.lifecycle.entry_summary and detail.lifecycle.entry_summary != "No material update" %}
+              <p class="detail-muted">Entry: {{ detail.lifecycle.entry_summary }}</p>
+              {% endif %}
+              {% if detail.lifecycle.exit_summary and detail.lifecycle.exit_summary != "No material update" %}
+              <p class="detail-muted">Exit: {{ detail.lifecycle.exit_summary }}</p>
+              {% endif %}
+              {% endif %}
+              <div class="section-label">Trade Decision</div>
+              <div class="section-label">Latest Conclusion</div>
+              <p class="hero-decision">{{ latest_trade_decision.label or "No decision" }}</p>
+              {% if latest_trade_decision.summary %}
+              <p class="hero-summary">{{ latest_trade_decision.summary }}</p>
+              {% endif %}
+              <div class="hero-meta-row hero-meta-pills">
+                {% if latest_trade_decision.strategy_label %}
+                <span class="meta-pill"><span class="meta-pill-label">Strategy</span><strong>{{ latest_trade_decision.strategy_label }}</strong></span>
+                {% endif %}
+                {% if latest_trade_decision.confidence is not none %}
+                <span class="meta-pill"><span class="meta-pill-label">Confidence</span><strong>{{ fmt_number(latest_trade_decision.confidence) }}</strong></span>
+                {% endif %}
+                {% if latest_trade_decision.approved_weight is not none %}
+                <span class="meta-pill"><span class="meta-pill-label">Approved Weight</span><strong>{{ fmt_number(latest_trade_decision.approved_weight * 100, 1) }}%</strong></span>
+                {% endif %}
+                {% if detail.latest_conclusion.risk_summary.status_label %}
+                <span class="meta-pill"><span class="meta-pill-label">Risk</span><strong>{{ detail.latest_conclusion.risk_summary.status_label }}</strong></span>
+                {% endif %}
+              </div>
+            </section>
+
+            <div class="ticker-support-grid">
+              <section class="card subcard" data-testid="signal-summary">
+                <h4>Signal Summary</h4>
+                <div class="support-mini-meta signal-summary-meta">
+                  <span class="detail-muted">{{ detail.latest_conclusion.signal_summary.summary_bullets | length }} highlighted signal{% if detail.latest_conclusion.signal_summary.summary_bullets|length != 1 %}s{% endif %}</span>
+                  {% if detail.latest_conclusion.signal_summary.latest_signal_time_label %}
+                  <span class="detail-muted">Latest signal {{ detail.latest_conclusion.signal_summary.latest_signal_time_label }}</span>
+                  {% endif %}
+                  {% if detail.latest_conclusion.signal_summary.hidden_bullet_count %}
+                  <span class="detail-muted">{{ detail.latest_conclusion.signal_summary.hidden_bullet_count }} more signals in other groups</span>
+                  {% endif %}
+                </div>
+                {% set primary_sections = detail.latest_conclusion.signal_summary.primary_sections if detail.latest_conclusion.signal_summary.primary_sections is defined else () %}
+                {% if primary_sections %}
+                <div class="signal-summary-grid">
+                  {% for section in primary_sections %}
+                  <article class="signal-summary-card">
+                    <div class="signal-summary-card-head">
+                      <span class="section-label">{{ section.label }}</span>
+                      {% if section.bullets|length > 1 %}
+                      <span class="surface-block-count">{{ section.bullets|length }}</span>
+                      {% endif %}
+                    </div>
+                    <ul class="signal-summary-list">
+                      {% for item in section.bullets %}
+                      <li>{{ item }}</li>
+                      {% endfor %}
+                    </ul>
+                  </article>
+                  {% endfor %}
+                </div>
+                {% elif detail.latest_conclusion.signal_summary.summary_bullets %}
+                <ul class="output-list">
+                  {% for item in detail.latest_conclusion.signal_summary.summary_bullets %}
+                  <li>{{ item }}</li>
+                  {% endfor %}
+                </ul>
+                {% else %}
+                <p class="detail-muted quiet-empty surface-empty-copy">Unavailable.</p>
+                {% endif %}
+                {% if detail.latest_conclusion.signal_summary.event_news_summary %}
+                <div class="section-label">Event / News Summary</div>
+                <p class="detail-muted">{{ detail.latest_conclusion.signal_summary.event_news_summary }}</p>
+                {% endif %}
+              </section>
+
+              {% set risk = detail.latest_conclusion.risk_summary %}
+              <section class="card subcard risk-manager-subcard">
+                <div class="risk-manager-head">
+                  <h4>Risk Manager</h4>
+                  {% set risk_status = risk.status_label if risk.status_label and risk.status_label != "No material update" else "Unavailable" %}
+                  <span class="detail-chip risk-status-chip risk-status-{{ (risk.status or 'unknown') | lower }}">{{ risk_status }}</span>
+                </div>
+                {% set has_risk_detail = (risk.reason and risk.reason != "No material update") or risk.lookahead_risk_source or risk.hedge_overlay_reason or risk.applied_rules %}
+                {% if has_risk_detail %}
+                {% if risk.reason and risk.reason != "No material update" %}
+                <p class="detail-muted">{{ risk.reason }}</p>
+                {% endif %}
+                {% if risk.lookahead_risk_source %}
+                <p class="detail-muted"><span class="metric-label">Lookahead risk</span> {{ risk.lookahead_risk_source }}</p>
+                {% endif %}
+                {% if risk.hedge_overlay_reason %}
+                <p class="detail-muted"><span class="metric-label">Hedge overlay</span> {{ risk.hedge_overlay_reason }}</p>
+                {% endif %}
+                {% if risk.applied_rules %}
+                <details class="risk-applied-rules">
+                  <summary>Applied rules ({{ risk.applied_rules | length }})</summary>
+                  <ul class="output-list">
+                    {% for rule in risk.applied_rules %}<li>{{ rule }}</li>{% endfor %}
+                  </ul>
+                </details>
+                {% endif %}
+                {% else %}
+                <p class="detail-muted quiet-empty">No additional risk notes.</p>
+                {% endif %}
+              </section>
+
+              <section class="card subcard">
+                <h4>Position / Execution State</h4>
+                <div class="support-kv-list">
+                  {% if detail.latest_conclusion.position_execution.position_label %}
+                  <div class="support-kv-row">
+                    <span class="metric-label">Position</span>
+                    <strong>{{ detail.latest_conclusion.position_execution.position_label }}</strong>
+                  </div>
+                  {% endif %}
+                  {% if detail.latest_conclusion.position_execution.order_status %}
+                  <div class="support-kv-row">
+                    <span class="metric-label">Order</span>
+                    <strong>{{ detail.latest_conclusion.position_execution.order_status_label or detail.latest_conclusion.position_execution.order_status }}</strong>
+                  </div>
+                  {% endif %}
+                </div>
+                <div class="detail-muted {% if not detail.latest_conclusion.position_execution.summary %}surface-empty-copy quiet-empty{% endif %}">{{ detail.latest_conclusion.position_execution.summary or "Unavailable." }}</div>
+              </section>
+            </div>
+
+            {% if latest_trade_plan %}
+            <section class="card subcard trade-plan-card" data-testid="trade-plan">
+              <div class="surface-heading surface-heading-compact">
+                <div>
+                  <h4>Trade Plan</h4>
+                  {% if latest_trade_plan.thesis %}
+                  <p class="detail-muted">{{ latest_trade_plan.thesis }}</p>
+                  {% endif %}
+                </div>
+                {% if latest_trade_plan.time_horizon %}
+                <span class="detail-chip">{{ latest_trade_plan.time_horizon }}</span>
+                {% endif %}
+              </div>
+              <div class="support-kv-list trade-plan-grid">
+                {% if latest_trade_plan.target_weight is not none %}
+                <div class="support-kv-row">
+                  <span class="metric-label">Target Weight</span>
+                  <strong>{{ fmt_number(latest_trade_plan.target_weight * 100, 1) }}%</strong>
+                </div>
+                {% endif %}
+                {% if latest_trade_plan.approved_weight is not none %}
+                <div class="support-kv-row">
+                  <span class="metric-label">Approved Weight</span>
+                  <strong>{{ fmt_number(latest_trade_plan.approved_weight * 100, 1) }}%</strong>
+                </div>
+                {% endif %}
+                {% if latest_trade_plan.max_loss_pct is not none %}
+                <div class="support-kv-row">
+                  <span class="metric-label">Max Loss</span>
+                  <strong>{{ fmt_number(latest_trade_plan.max_loss_pct * 100, 1) }}%</strong>
+                </div>
+                {% endif %}
+                {% if latest_trade_plan.entry_plan %}
+                <div class="support-kv-row">
+                  <span class="metric-label">Entry Plan</span>
+                  <strong>{{ latest_trade_plan.entry_plan }}</strong>
+                </div>
+                {% endif %}
+                {% if latest_trade_plan.exit_plan %}
+                <div class="support-kv-row">
+                  <span class="metric-label">Exit Plan</span>
+                  <strong>{{ latest_trade_plan.exit_plan }}</strong>
+                </div>
+                {% endif %}
+              </div>
+              {% if latest_trade_plan.edge %}
+              <div class="section-label">Edge</div>
+              <ul class="history-card-listing">
+                {% for bullet in latest_trade_plan.edge %}
+                <li>{{ bullet }}</li>
+                {% endfor %}
+              </ul>
+              {% endif %}
+              {% if latest_trade_plan.invalidators %}
+              <div class="section-label">Invalidators</div>
+              <ul class="history-card-listing">
+                {% for bullet in latest_trade_plan.invalidators %}
+                <li>{{ bullet }}</li>
+                {% endfor %}
+              </ul>
+              {% endif %}
+            </section>
+            {% endif %}
+
+            <div class="ticker-detail-data-surfaces">
+              {% if latest_bull_bear %}
+              <section class="card subcard" data-testid="bull-bear">
+                <div class="surface-heading surface-heading-compact">
+                  <div>
+                    <h4>Bull / Bear</h4>
+                    {% if latest_bull_bear.confidence is not none %}
+                    <p class="detail-muted">Confidence {{ fmt_number(latest_bull_bear.confidence) }}</p>
+                    {% endif %}
+                  </div>
+                </div>
+                <div class="bull-bear-grid">
+                  <article class="signal-summary-card">
+                    <div class="signal-summary-card-head">
+                      <span class="section-label">Bull Points</span>
+                    </div>
+                    {% if latest_bull_bear.bull_points %}
+                    <ul class="history-card-listing">
+                      {% for bullet in latest_bull_bear.bull_points %}
+                      <li>{{ bullet }}</li>
+                      {% endfor %}
+                    </ul>
+                    {% else %}
+                    <p class="detail-muted quiet-empty surface-empty-copy">No bull points.</p>
+                    {% endif %}
+                  </article>
+                  <article class="signal-summary-card">
+                    <div class="signal-summary-card-head">
+                      <span class="section-label">Bear Points</span>
+                    </div>
+                    {% if latest_bull_bear.bear_points %}
+                    <ul class="history-card-listing">
+                      {% for bullet in latest_bull_bear.bear_points %}
+                      <li>{{ bullet }}</li>
+                      {% endfor %}
+                    </ul>
+                    {% else %}
+                    <p class="detail-muted quiet-empty surface-empty-copy">No bear points.</p>
+                    {% endif %}
+                  </article>
+                </div>
+              </section>
+              {% endif %}
+
+              <section class="card subcard" data-testid="signal-groups">
+                <div class="surface-heading surface-heading-compact">
+                  <div>
+                    <h4>Signal Groups</h4>
+                  </div>
+                </div>
+                {% if latest_signal_groups %}
+                <div class="signal-group-grid">
+                  {% for group in latest_signal_groups %}
+                  <article class="signal-group-card">
+                    <div class="signal-summary-card-head">
+                      <span class="section-label">{{ group.label }}</span>
+                      {% if group.bullets | length > 1 %}
+                      <span class="surface-block-count">{{ group.bullets | length }}</span>
+                      {% endif %}
+                    </div>
+                    {% if group.bullets %}
+                    <ul class="history-card-listing">
+                      {% for bullet in group.bullets %}
+                      <li>{{ bullet }}</li>
+                      {% endfor %}
+                    </ul>
+                    {% else %}
+                    <p class="detail-muted quiet-empty surface-empty-copy">No signal bullets.</p>
+                    {% endif %}
+                  </article>
+                  {% endfor %}
+                </div>
+                {% else %}
+                <p class="detail-muted quiet-empty surface-empty-copy">No signal groups.</p>
+                {% endif %}
+              </section>
+            </div>
+
+            <div class="ticker-detail-nav" role="tablist" aria-label="Ticker detail sections">
+              <a
+                class="ticker-detail-nav-link active"
+                href="/today?tab=trades&ticker={{ workspace.selected_ticker }}&detail_tab=timeline"
+              >
+                Timeline
+              </a>
+            </div>
+
+            <section class="card subcard scroll-panel" data-panel="timeline" data-testid="history-cards">
+              <h4>History</h4>
+              {% if selected_detail_item and selected_detail_item.trade_decision and selected_detail_item.trade_decision.thesis %}
+              <p class="detail-muted">{{ selected_detail_item.trade_decision.thesis }}</p>
+              {% endif %}
+              <div class="history-card-list">
+                {% for item in detail.tabs.timeline %}
+                {% set signal_bullets = item.signal_summary if item.signal_summary is defined else ((item.summary,) if item.summary is defined else ("No material update",)) %}
+                {% set trade_decision = item.trade_decision if item.trade_decision is defined else {"label": (item.summary if item.summary is defined else "No material update"), "summary": (item.detail if item.detail is defined else none)} %}
+                {% set risk_view = item.risk if item.risk is defined else {"status_label": "Unavailable", "summary": none} %}
+                {% set change_summary = item.change_summary if item.change_summary is defined else (item.delta_fields if item.delta_fields is defined else ()) %}
+                <article class="history-card history-card-{{ item.change_type or 'neutral' }}">
+                  <div class="history-card-head">
+                    <div>
+                      <div class="section-label">{{ item.title or "Latest Snapshot" }}</div>
+                      {% if item.time_label %}
+                      <strong>{{ item.time_label }}</strong>
+                      {% else %}
+                      <strong>Timestamp unavailable</strong>
+                      {% endif %}
+                    </div>
+                    <span class="surface-block-count">{{ (item.change_type or "snapshot").replace("_", " ") }}</span>
+                  </div>
+
+                  <div class="history-card-grid">
+                    <div class="history-card-section">
+                      <span class="metric-label">Signal Summary</span>
+                      <ul class="history-card-listing">
+                        {% for bullet in signal_bullets %}
+                        <li>{{ bullet }}</li>
+                        {% endfor %}
+                      </ul>
+                    </div>
+                    <div class="history-card-section">
+                      <span class="metric-label">Trade Decision</span>
+                      <strong>{{ trade_decision.label or "No material update" }}</strong>
+                      {% if trade_decision.thesis %}
+                      <p class="detail-muted">{{ trade_decision.thesis }}</p>
+                      {% endif %}
+                      {% if trade_decision.summary and trade_decision.summary != "No material update" %}
+                      <p class="detail-muted">{{ trade_decision.summary }}</p>
+                      {% endif %}
+                    </div>
+                    <div class="history-card-section">
+                      <span class="metric-label">Risk</span>
+                      <strong>{{ risk_view.status_label or "No material update" }}</strong>
+                      {% if risk_view.summary %}
+                      <p class="detail-muted">{{ risk_view.summary }}</p>
+                      {% endif %}
+                    </div>
+                  </div>
+
+                  {% if change_summary %}
+                  <div class="history-card-change">
+                    <span class="metric-label">What Changed</span>
+                    <ul class="history-card-listing">
+                      {% for field in change_summary %}
+                      <li>{{ field }}</li>
+                      {% endfor %}
+                    </ul>
+                  </div>
+                  {% endif %}
+                </article>
+                {% else %}
+                <p class="detail-muted quiet-empty surface-empty-copy">No material update.</p>
+                {% endfor %}
+              </div>
+            </section>
+            {% elif detail %}
+            <section class="card subcard ticker-detail-hero">
+              <div class="surface-heading surface-heading-compact">
+                <div>
+                  <p class="eyebrow">Selected Ticker</p>
+                  <h3>{{ workspace.selected_ticker }}</h3>
+                </div>
+              </div>
+              <p class="detail-muted quiet-empty surface-empty-copy">Detailed workspace modules are unavailable for this ticker.</p>
+            </section>
+            {% else %}
+            <section class="card subcard empty-state-panel">
+              <p class="detail-muted quiet-empty surface-empty-copy">No ticker selected.</p>
+            </section>
+            {% endif %}
+          </div>
+        </div>
+        {% else %}
+        <section class="card subcard empty-state-panel">
+          <p class="detail-muted quiet-empty surface-empty-copy">No tickers in the workstation yet.</p>
+        </section>
+        {% endif %}
+      </section>
+    </main>

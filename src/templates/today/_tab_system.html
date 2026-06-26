@@ -1,0 +1,158 @@
+    <section class="card secondary-surface standalone-surface">
+      <div class="surface-heading"><div><h2>System</h2></div></div>
+      <div class="surface-summary-row">
+        <article class="summary-tile">
+          <span class="metric-label">Reflection Snapshot</span>
+          <strong>{{ system.learning_strategies.reflection.status_label if system.learning_strategies.reflection else "Unavailable" }}</strong>
+        </article>
+        <article class="summary-tile">
+          <span class="metric-label">Strategy Pipeline</span>
+          <strong>{{ system.learning_strategies.strategy_proposals | length }} proposal{% if system.learning_strategies.strategy_proposals|length != 1 %}s{% endif %}</strong>
+          <span class="detail-muted">{{ system.learning_strategies.strategy_performance | length }} tracked strategy{% if system.learning_strategies.strategy_performance|length != 1 %}s{% endif %}</span>
+        </article>
+        <article class="summary-tile">
+          <span class="metric-label">LLM Spend</span>
+          <strong>{{ system.llm_usage_summary.count }} usage row{% if system.llm_usage_summary.count != 1 %}s{% endif %}</strong>
+          <span class="detail-muted">{{ fmt_currency(system.llm_usage_summary.estimated_cost) if system.llm_usage_summary.estimated_cost is not none else "—" }} estimated cost</span>
+        </article>
+        <article class="summary-tile">
+          <span class="metric-label">Provider Calls</span>
+          <strong>{{ system.provider_usage_summary.count }} provider event{% if system.provider_usage_summary.count != 1 %}s{% endif %}</strong>
+        </article>
+      </div>
+      <section class="surface-block">
+        <div class="surface-block-head">
+          <div class="section-label">System Issues</div>
+          <span class="surface-block-count">{{ system.system_issues | length }}</span>
+        </div>
+        {% if system.system_issues %}
+        {% for row in system.system_issues %}
+        <p><strong>{{ row.label }}</strong>: {{ row.summary }}</p>
+        {% endfor %}
+        {% else %}<p class="detail-muted quiet-empty surface-empty-copy">No system issues.</p>{% endif %}
+      </section>
+      <section class="surface-block">
+        <div class="section-label">Performance Snapshot</div>
+        {% if system.learning_strategies.reflection %}
+        <p><strong>Reflection Status:</strong> {{ system.learning_strategies.reflection.status_label or system.learning_strategies.reflection.status }}</p>
+        {% if system.learning_strategies.reflection.what_worked %}
+        <ul class="output-list">
+          {% for item in system.learning_strategies.reflection.what_worked %}<li>{{ item }}</li>{% endfor %}
+        </ul>
+        {% endif %}
+        {% else %}<p class="detail-muted quiet-empty">No reflection recorded.</p>{% endif %}
+      </section>
+      <section class="surface-block">
+        <div class="surface-block-head">
+          <div class="section-label">Strategy Proposals</div>
+          <span class="surface-block-count">{{ system.learning_strategies.strategy_proposals | length }}</span>
+        </div>
+        {% if system.learning_strategies.strategy_proposals %}
+        <div class="surface-table-wrap">
+          <table class="compact-table">
+            <thead><tr><th>Strategy</th><th>Status</th></tr></thead>
+            <tbody>{% for row in system.learning_strategies.strategy_proposals %}<tr><td>{{ row.proposed_strategy_id }}</td><td>{{ row.proposal_status_label or row.proposal_status }}</td></tr>{% endfor %}</tbody>
+          </table>
+        </div>
+        {% else %}<p class="detail-muted quiet-empty">No strategy proposals.</p>{% endif %}
+      </section>
+      <section class="surface-block">
+        <div class="surface-block-head">
+          <div class="section-label">Strategy Performance</div>
+          <span class="surface-block-count">{{ system.learning_strategies.strategy_performance | length }}</span>
+        </div>
+        <p class="detail-muted">
+          {{ system.learning_strategies.learning_summary_text or "No strategy learning summary available." }}
+        </p>
+        {% if system.learning_strategies.strategy_performance %}
+        <div class="surface-table-wrap">
+          <table class="compact-table">
+            <thead><tr><th>Strategy</th><th>Status</th><th>Win Rate</th><th>Total P&amp;L</th><th>Learning Summary</th></tr></thead>
+            <tbody>{% for row in system.learning_strategies.strategy_performance %}<tr><td>{{ row.strategy_id }}</td><td>{{ row.lifecycle_status_label or row.lifecycle_status }}</td><td>{% if row.win_rate is not none %}{{ fmt_number(row.win_rate) }}%{% else %}—{% endif %}</td><td>{{ fmt_currency(row.total_pnl) }}</td><td>{{ row.learning_summary }}</td></tr>{% endfor %}</tbody>
+          </table>
+        </div>
+        {% else %}<p class="detail-muted quiet-empty">No strategy performance records.</p>{% endif %}
+      </section>
+      <section class="surface-block">
+        <div class="surface-block-head">
+          <div class="section-label">Learning Factors</div>
+          <span class="surface-block-count">{{ system.learning_strategies.learning_factors | length }}</span>
+        </div>
+        <p class="detail-muted">{{ system.learning_strategies.learning_factors | length }} factor{% if system.learning_strategies.learning_factors|length != 1 %}s{% endif %} · {{ system.exposure_summary.total_exposure if system.exposure_summary.total_exposure is not none else "—" }}</p>
+        {% if system.learning_strategies.learning_factors %}
+        <div class="surface-table-wrap">
+          <table class="compact-table">
+            <thead><tr><th>Title</th><th>Status</th><th>Scope</th></tr></thead>
+            <tbody>{% for row in system.learning_strategies.learning_factors %}<tr><td>{{ row.title }}</td><td>{{ row.status_label or row.status }}</td><td>{{ row.scope_label or row.scope }}</td></tr>{% endfor %}</tbody>
+          </table>
+        </div>
+        {% else %}<p class="detail-muted quiet-empty">No active learning factors.</p>{% endif %}
+      </section>
+      <section class="surface-block">
+        <div class="surface-block-head">
+          <div class="section-label">Loop Observability</div>
+          <span class="surface-block-count">{{ system.learning_strategies.observability.funnel | length }}</span>
+        </div>
+        <div class="surface-summary-row">
+          {% for row in system.learning_strategies.observability.funnel %}
+          <article class="summary-tile">
+            <span class="metric-label">{{ row.label }}</span>
+            <strong>{{ row.count }}</strong>
+          </article>
+          {% endfor %}
+        </div>
+        <div class="surface-summary-row">
+          {% for row in system.learning_strategies.observability.promotion_breakdown %}
+          <article class="summary-tile">
+            <span class="metric-label">{{ row.label }} Promotions</span>
+            <strong>{{ row.count }}</strong>
+          </article>
+          {% endfor %}
+        </div>
+        <div class="section-label">Today Weight Inputs</div>
+        {% if system.learning_strategies.observability.weight_inputs %}
+        <div class="surface-table-wrap">
+          <table class="compact-table">
+            <thead><tr><th>Factor</th><th>Scope</th><th>Effect</th></tr></thead>
+            <tbody>{% for row in system.learning_strategies.observability.weight_inputs %}<tr><td>{{ row.title }}</td><td>{{ row.scope_label }}</td><td>{{ row.effect_summary }}</td></tr>{% endfor %}</tbody>
+          </table>
+        </div>
+        {% else %}<p class="detail-muted quiet-empty">No active learning-factor weight inputs recorded.</p>{% endif %}
+      </section>
+      <section class="surface-block">
+        <div class="surface-block-head">
+          <div class="section-label">Usage Ledger</div>
+          <span class="surface-block-count">{{ system.ops_cost.llm_usage | length }}</span>
+        </div>
+        {% if system.ops_cost.llm_usage %}
+        <p class="detail-muted">{{ system.llm_usage_summary.count }} event{% if system.llm_usage_summary.count != 1 %}s{% endif %} · {{ fmt_currency(system.llm_usage_summary.estimated_cost) if system.llm_usage_summary.estimated_cost is not none else "—" }} estimated cost</p>
+        <div class="surface-table-wrap">
+          <table class="compact-table">
+            <thead><tr><th>Pipeline</th><th>Provider</th><th>Model</th><th>Estimated Cost</th></tr></thead>
+            <tbody>{% for row in system.ops_cost.llm_usage %}<tr><td>{{ row.pipeline_name }}</td><td>{{ row.provider }}</td><td>{{ row.model }}</td><td>{{ fmt_currency(row.estimated_cost) }}</td></tr>{% endfor %}</tbody>
+          </table>
+        </div>
+        {% else %}<p class="detail-muted quiet-empty">No LLM usage events.</p>{% endif %}
+      </section>
+      <section class="surface-block">
+        <div class="surface-block-head">
+          <div class="section-label">Provider Usage</div>
+          <span class="surface-block-count">{{ system.ops_cost.provider_usage | length }}</span>
+        </div>
+        {% if system.ops_cost.provider_usage %}
+        <div class="surface-table-wrap">
+          <table class="compact-table">
+            <thead><tr><th>Provider</th><th>Endpoint</th><th>Status</th><th>Cache</th></tr></thead>
+            <tbody>{% for row in system.ops_cost.provider_usage %}<tr><td>{{ row.provider }}</td><td>{{ row.endpoint }}</td><td>{{ row.status_label or row.status }}</td><td>{{ row.cache_status_label or row.cache_status }}</td></tr>{% endfor %}</tbody>
+          </table>
+        </div>
+        {% else %}<p class="detail-muted quiet-empty">No provider usage events.</p>{% endif %}
+      </section>
+      <section class="surface-block">
+        <div class="surface-block-head">
+          <div class="section-label">Event / Exposure Snapshot</div>
+          <span class="surface-block-count">{{ system.event_summary.count }}</span>
+        </div>
+        <p class="detail-muted">{{ system.event_summary.count }} event{% if system.event_summary.count != 1 %}s{% endif %} · {{ system.exposure_summary.total_exposure if system.exposure_summary.total_exposure is not none else "—" }}</p>
+      </section>
+    </section>

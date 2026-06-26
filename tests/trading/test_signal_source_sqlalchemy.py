@@ -101,8 +101,8 @@ class _SharedNewsProvider:
         del ticker, limit
         return [
             {
-                "title": "Macro headline impacting several mega-caps",
-                "summary": "Shared article returned for multiple symbols.",
+                "title": "AAPL and MSFT react to shared macro headline",
+                "summary": "Shared article returned for multiple symbols including AAPL and MSFT.",
                 "source": "fixture-news",
                 "url": "https://example.com/shared-article",
                 "published_at": "2026-06-03T12:30:00+00:00",
