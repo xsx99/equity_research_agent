@@ -15,6 +15,22 @@ from src.trading.brokers.paper_option import (
     PaperOptionPosition,
 )
 from src.trading.brokers.paper_stock import PaperOrderRequest, PaperOrderRecord, PaperStockBroker
+from src.trading.execution.attempts import (
+    ExecutionAttemptRecord,
+    REASON_BROKER_ERROR,
+    REASON_BROKER_UNAVAILABLE,
+    REASON_INSTRUMENT_MISMATCH,
+    REASON_MISSING_CREDENTIALS,
+    REASON_NOT_AUTHORIZED,
+    REASON_NOT_EXECUTABLE_ACTION,
+    REASON_NO_FILL,
+    REASON_ORDER_REJECTED,
+    REASON_RISK_MISSING,
+    REASON_RISK_REJECTED,
+    failed,
+    skipped,
+    submitted,
+)
 from src.trading.manual_review.requests import ManualTickerRequestService
 from src.trading.options.strategy import OptionStrategyDecisionRecord, OptionsStrategyLayer
 from src.trading.portfolio.state import PortfolioSnapshot
@@ -53,6 +69,7 @@ class PaperExecutionWorkflowResult:
     paper_orders: tuple[PaperOrderRecord, ...]
     paper_option_orders: tuple[PaperOptionOrderRecord, ...]
     portfolio_snapshots: tuple[PortfolioSnapshot, ...]
+    execution_attempts: tuple[ExecutionAttemptRecord, ...] = ()
 
 
 class PaperExecutionWorkflow:
@@ -87,11 +104,13 @@ class PaperExecutionWorkflow:
         trading_decisions: tuple[TradingDecisionRecord, ...],
         risk_decisions: tuple[RiskDecisionRecord, ...],
         trade_date: datetime,
+        phase: str = "preopen",
     ) -> PaperExecutionWorkflowResult:
         risk_by_id = {decision.risk_decision_id: decision for decision in risk_decisions}
         orders: list[PaperOrderRecord] = []
         option_orders: list[PaperOptionOrderRecord] = []
         snapshots: list[PortfolioSnapshot] = []
+        attempts: list[ExecutionAttemptRecord] = []
         for trading_decision in trading_decisions:
             if trading_decision.instrument_type == "option":
                 self._execute_option_expression_plan(
@@ -101,6 +120,8 @@ class PaperExecutionWorkflow:
                     option_orders=option_orders,
                     orders=orders,
                     snapshots=snapshots,
+                    phase=phase,
+                    attempts=attempts,
                 )
                 continue
             self._execute_stock_decision(
@@ -109,16 +130,21 @@ class PaperExecutionWorkflow:
                 trade_date=trade_date,
                 orders=orders,
                 snapshots=snapshots,
+                phase=phase,
+                attempts=attempts,
             )
         self._execute_generated_hedges(
             risk_decisions=risk_decisions,
             trade_date=trade_date,
             option_orders=option_orders,
+            phase=phase,
+            attempts=attempts,
         )
         return PaperExecutionWorkflowResult(
             paper_orders=tuple(orders),
             paper_option_orders=tuple(option_orders),
             portfolio_snapshots=tuple(snapshots),
+            execution_attempts=tuple(attempts),
         )
 
     def _execute_generated_hedges(
@@ -127,6 +153,8 @@ class PaperExecutionWorkflow:
         risk_decisions: tuple[RiskDecisionRecord, ...],
         trade_date: datetime,
         option_orders: list[PaperOptionOrderRecord],
+        phase: str,
+        attempts: list[ExecutionAttemptRecord],
     ) -> None:
         if self.option_broker is None:
             return
@@ -160,6 +188,8 @@ class PaperExecutionWorkflow:
                 risk_decision=hedge_risk_decision,
                 trade_date=trade_date,
                 option_orders=option_orders,
+                phase=phase,
+                attempts=attempts,
             )
 
     def _execute_option_expression_plan(
@@ -171,6 +201,8 @@ class PaperExecutionWorkflow:
         option_orders: list[PaperOptionOrderRecord],
         orders: list[PaperOrderRecord],
         snapshots: list[PortfolioSnapshot],
+        phase: str,
+        attempts: list[ExecutionAttemptRecord],
     ) -> None:
         current_decision = trading_decision
         current_risk_decision = risk_decision
@@ -191,6 +223,8 @@ class PaperExecutionWorkflow:
                     trade_date=trade_date,
                     orders=orders,
                     snapshots=snapshots,
+                    phase=phase,
+                    attempts=attempts,
                 )
                 return
             next_decision, next_risk_decision = self._handle_option_decision(
@@ -198,6 +232,8 @@ class PaperExecutionWorkflow:
                 risk_decision=current_risk_decision,
                 trade_date=trade_date,
                 option_orders=option_orders,
+                phase=phase,
+                attempts=attempts,
             )
             if next_decision is not None and next_decision.expression_bucket_id != current_decision.expression_bucket_id:
                 current_decision = self._persist_fallback_resolution(
@@ -215,15 +251,35 @@ class PaperExecutionWorkflow:
         risk_decision: RiskDecisionRecord | None,
         trade_date: datetime,
         option_orders: list[PaperOptionOrderRecord],
+        phase: str,
+        attempts: list[ExecutionAttemptRecord],
     ) -> tuple[TradingDecisionRecord | None, RiskDecisionRecord | None]:
         option_decision = _option_decision_from_trading_decision(
             trading_decision=trading_decision,
             trade_date=trade_date,
         )
         if option_decision is None:
+            self._save_execution_attempt(
+                skipped(
+                    trading_decision=trading_decision,
+                    phase=phase,
+                    reason_code=REASON_NOT_EXECUTABLE_ACTION,
+                ),
+                attempts=attempts,
+            )
             return self._next_expression_decision(trading_decision), risk_decision
         self.repository.save_option_strategy_decision(option_decision)
         if option_decision.status == "rejected":
+            self._save_execution_attempt(
+                skipped(
+                    trading_decision=trading_decision,
+                    phase=phase,
+                    reason_code=REASON_NOT_EXECUTABLE_ACTION,
+                    detail=option_decision.rejection_reason,
+                    risk_decision_id=risk_decision.risk_decision_id if risk_decision is not None else None,
+                ),
+                attempts=attempts,
+            )
             return self._next_expression_decision(trading_decision), risk_decision
         self.repository.save_option_strategy_legs(self.options_strategy_layer.build_legs(option_decision))
         active_risk_decision = risk_decision
@@ -233,9 +289,37 @@ class PaperExecutionWorkflow:
                 option_decision=option_decision,
                 trade_date=trade_date,
             )
-        if self.option_broker is None or active_risk_decision is None:
+        if self.option_broker is None:
+            self._save_execution_attempt(
+                skipped(
+                    trading_decision=trading_decision,
+                    phase=phase,
+                    reason_code=REASON_BROKER_UNAVAILABLE,
+                    risk_decision_id=active_risk_decision.risk_decision_id if active_risk_decision is not None else None,
+                ),
+                attempts=attempts,
+            )
+            return self._next_expression_decision(trading_decision), active_risk_decision
+        if active_risk_decision is None:
+            self._save_execution_attempt(
+                skipped(
+                    trading_decision=trading_decision,
+                    phase=phase,
+                    reason_code=REASON_RISK_MISSING,
+                ),
+                attempts=attempts,
+            )
             return self._next_expression_decision(trading_decision), active_risk_decision
         if active_risk_decision.status not in {"approved", "reduced"}:
+            self._save_execution_attempt(
+                skipped(
+                    trading_decision=trading_decision,
+                    phase=phase,
+                    reason_code=REASON_RISK_REJECTED,
+                    risk_decision_id=active_risk_decision.risk_decision_id,
+                ),
+                attempts=attempts,
+            )
             return self._next_expression_decision(trading_decision), active_risk_decision
         active_risk_decision = self._attach_execution_risk_decision(
             trading_decision=trading_decision,
@@ -254,13 +338,54 @@ class PaperExecutionWorkflow:
             existing_position=existing_position,
         )
         if order_request is None:
+            self._save_execution_attempt(
+                skipped(
+                    trading_decision=trading_decision,
+                    phase=phase,
+                    reason_code=REASON_NOT_EXECUTABLE_ACTION,
+                    risk_decision_id=active_risk_decision.risk_decision_id,
+                ),
+                attempts=attempts,
+            )
             return self._next_expression_decision(trading_decision), active_risk_decision
         order = self.option_broker.submit_order(order_request)
         self.repository.save_paper_option_order(order)
         option_orders.append(order)
         if order.status == "rejected":
+            rejection_reason = str(order.rejection_reason or "").strip()
+            if rejection_reason == REASON_MISSING_CREDENTIALS:
+                reason_code = REASON_MISSING_CREDENTIALS
+                outcome_factory = failed
+            elif rejection_reason == REASON_BROKER_ERROR:
+                reason_code = REASON_BROKER_ERROR
+                outcome_factory = failed
+            else:
+                reason_code = REASON_ORDER_REJECTED
+                outcome_factory = skipped
+            self._save_execution_attempt(
+                outcome_factory(
+                    trading_decision=trading_decision,
+                    phase=phase,
+                    reason_code=reason_code,
+                    paper_option_order_id=order.paper_option_order_id,
+                    risk_decision_id=active_risk_decision.risk_decision_id,
+                    detail=order.rejection_reason,
+                ),
+                attempts=attempts,
+            )
             return self._next_expression_decision(trading_decision), active_risk_decision
         execution = self.option_broker.find_execution_by_order_id(order.paper_option_order_id)
+        if execution is None:
+            self._save_execution_attempt(
+                skipped(
+                    trading_decision=trading_decision,
+                    phase=phase,
+                    reason_code=REASON_NO_FILL,
+                    risk_decision_id=active_risk_decision.risk_decision_id,
+                ),
+                attempts=attempts,
+            )
+            return self._next_expression_decision(trading_decision), active_risk_decision
         if execution is not None and not self.repository.has_paper_option_execution(execution.paper_option_execution_id):
             self.repository.save_paper_option_execution(execution)
             for position in _materialized_option_positions(
@@ -327,6 +452,15 @@ class PaperExecutionWorkflow:
                         },
                     )
                 )
+        self._save_execution_attempt(
+            submitted(
+                trading_decision=trading_decision,
+                phase=phase,
+                paper_option_order_id=order.paper_option_order_id,
+                risk_decision_id=active_risk_decision.risk_decision_id,
+            ),
+            attempts=attempts,
+        )
         return None, None
 
     def _execute_stock_decision(
@@ -337,16 +471,59 @@ class PaperExecutionWorkflow:
         trade_date: datetime,
         orders: list[PaperOrderRecord],
         snapshots: list[PortfolioSnapshot],
+        phase: str,
+        attempts: list[ExecutionAttemptRecord],
     ) -> None:
         if trading_decision.instrument_type != "stock":
+            self._save_execution_attempt(
+                skipped(
+                    trading_decision=trading_decision,
+                    phase=phase,
+                    reason_code=REASON_INSTRUMENT_MISMATCH,
+                ),
+                attempts=attempts,
+            )
             return
         if trading_decision.decision not in {"enter_long", "reduce", "exit", "enter_short"}:
+            self._save_execution_attempt(
+                skipped(
+                    trading_decision=trading_decision,
+                    phase=phase,
+                    reason_code=REASON_NOT_EXECUTABLE_ACTION,
+                ),
+                attempts=attempts,
+            )
             return
-        if not bool(trading_decision.metadata_json.get("paper_trade_authorized", False)) and trading_decision.manual_request_id is None:
+        if not bool(trading_decision.paper_trade_authorized) and trading_decision.manual_request_id is None:
+            self._save_execution_attempt(
+                skipped(
+                    trading_decision=trading_decision,
+                    phase=phase,
+                    reason_code=REASON_NOT_AUTHORIZED,
+                ),
+                attempts=attempts,
+            )
             return
         if risk_decision is None:
+            self._save_execution_attempt(
+                skipped(
+                    trading_decision=trading_decision,
+                    phase=phase,
+                    reason_code=REASON_RISK_MISSING,
+                ),
+                attempts=attempts,
+            )
             return
         if risk_decision.status not in {"approved", "reduced"}:
+            self._save_execution_attempt(
+                skipped(
+                    trading_decision=trading_decision,
+                    phase=phase,
+                    reason_code=REASON_RISK_REJECTED,
+                    risk_decision_id=risk_decision.risk_decision_id,
+                ),
+                attempts=attempts,
+            )
             return
         manual_request_mode = self._manual_request_mode(
             trading_decision.manual_request_id,
@@ -364,8 +541,26 @@ class PaperExecutionWorkflow:
         orders.append(order)
         execution = self.broker.find_execution_by_order_id(order.paper_order_id)
         if execution is None:
+            self._save_execution_attempt(
+                skipped(
+                    trading_decision=trading_decision,
+                    phase=phase,
+                    reason_code=REASON_NO_FILL,
+                    risk_decision_id=risk_decision.risk_decision_id,
+                ),
+                attempts=attempts,
+            )
             return
         if self.repository.has_paper_execution(execution.paper_execution_id):
+            self._save_execution_attempt(
+                submitted(
+                    trading_decision=trading_decision,
+                    phase=phase,
+                    paper_order_id=order.paper_order_id,
+                    risk_decision_id=risk_decision.risk_decision_id,
+                ),
+                attempts=attempts,
+            )
             return
         self.repository.save_paper_execution(execution)
         sync_result = self.portfolio_sync.run(
@@ -378,6 +573,24 @@ class PaperExecutionWorkflow:
             },
         )
         snapshots.append(sync_result.snapshot)
+        self._save_execution_attempt(
+            submitted(
+                trading_decision=trading_decision,
+                phase=phase,
+                paper_order_id=order.paper_order_id,
+                risk_decision_id=risk_decision.risk_decision_id,
+            ),
+            attempts=attempts,
+        )
+
+    def _save_execution_attempt(
+        self,
+        attempt: ExecutionAttemptRecord,
+        *,
+        attempts: list[ExecutionAttemptRecord],
+    ) -> None:
+        self.repository.save_execution_attempt(attempt)
+        attempts.append(attempt)
 
     def _next_expression_decision(
         self,
@@ -437,6 +650,7 @@ class PaperExecutionWorkflow:
                 usage_events=trading_decision.usage_events,
                 decision_time=trading_decision.decision_time,
                 available_for_decision_at=trading_decision.available_for_decision_at,
+                paper_trade_authorized=trading_decision.paper_trade_authorized,
                 key_drivers=list(trading_decision.key_drivers),
                 counterarguments=list(trading_decision.counterarguments),
                 invalidators=list(trading_decision.invalidators),
@@ -647,6 +861,7 @@ class PaperExecutionWorkflow:
             usage_events=resolved_decision.usage_events,
             decision_time=resolved_decision.decision_time,
             available_for_decision_at=resolved_decision.available_for_decision_at,
+            paper_trade_authorized=resolved_decision.paper_trade_authorized,
             key_drivers=list(resolved_decision.key_drivers),
             counterarguments=list(resolved_decision.counterarguments),
             invalidators=list(resolved_decision.invalidators),
@@ -713,6 +928,7 @@ class PaperExecutionWorkflow:
             usage_events=trading_decision.usage_events,
             decision_time=trading_decision.decision_time,
             available_for_decision_at=trading_decision.available_for_decision_at,
+            paper_trade_authorized=trading_decision.paper_trade_authorized,
             key_drivers=list(trading_decision.key_drivers),
             counterarguments=list(trading_decision.counterarguments),
             invalidators=list(trading_decision.invalidators),

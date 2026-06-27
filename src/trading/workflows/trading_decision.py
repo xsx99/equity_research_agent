@@ -69,6 +69,7 @@ class TradingDecisionRecord:
     usage_events: list[UsageEventRecord]
     decision_time: datetime
     available_for_decision_at: datetime
+    paper_trade_authorized: bool = False
     key_drivers: list[str] = field(default_factory=list)
     counterarguments: list[str] = field(default_factory=list)
     invalidators: list[str] = field(default_factory=list)
@@ -213,6 +214,12 @@ class TradingDecisionPipeline:
                 usage_events=list(usage_events),
                 decision_time=decision_time,
                 available_for_decision_at=candidate.available_for_decision_at,
+                paper_trade_authorized=bool(
+                    candidate.manual_request_id is None
+                    or payload["manual_request_context"].get("manual_request_mode") == "paper_trade_eligible"
+                )
+                and candidate.strategy_lifecycle_status in {"active", "experimental"}
+                and str(final_output["decision"]) not in {"no_trade", "hold"},
                 context_snapshot_json=payload,
                 metadata_json={
                     "paper_trade_authorized": bool(
@@ -542,6 +549,7 @@ class TradingDecisionPipeline:
             usage_events=[],
             decision_time=decision_time,
             available_for_decision_at=candidate.available_for_decision_at,
+            paper_trade_authorized=False,
             context_snapshot_json=context_snapshot,
             metadata_json={
                 "paper_trade_authorized": False,

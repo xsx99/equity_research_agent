@@ -7,6 +7,7 @@ from src.db.models.trading.signals import *
 from src.db.models.trading.macro_calendar import *
 from src.db.models.trading.risk import *
 from src.db.models.trading.execution import *
+from src.db.models.trading.execution_attempt import *
 from src.db.models.trading.intraday import *
 from src.db.models.trading.reflection import *
 from src.db.models.trading.universe import *
@@ -19,6 +20,7 @@ for _module_name in (
     "macro_calendar",
     "risk",
     "execution",
+    "execution_attempt",
     "intraday",
     "reflection",
     "universe",
@@ -36,6 +38,7 @@ def __dir__():
         "macro_calendar",
         "risk",
         "execution",
+        "execution_attempt",
         "intraday",
         "reflection",
         "universe",

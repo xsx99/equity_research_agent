@@ -1102,6 +1102,7 @@ def test_paper_execution_workflow_persists_into_sqlalchemy_repository():
         usage_events=[],
         decision_time=now,
         available_for_decision_at=now,
+        paper_trade_authorized=True,
         metadata_json={"paper_trade_authorized": True},
     )
     risk_decision = RiskDecisionRecord(
@@ -1166,6 +1167,7 @@ def test_load_intraday_request_contexts_includes_option_execution_metadata():
             usage_events=[],
             decision_time=now,
             available_for_decision_at=now,
+            paper_trade_authorized=True,
             metadata_json={
                 "paper_trade_authorized": True,
                 "option_strategy": {

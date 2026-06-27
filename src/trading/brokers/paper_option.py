@@ -195,14 +195,9 @@ class PaperOptionBroker:
         self._sleeper = sleeper or (lambda seconds: None)
         self._max_poll_attempts = max_poll_attempts
         self._poll_interval_seconds = poll_interval_seconds
-        use_broker = any(
-            value is not None
-            for value in (
-                api_key,
-                secret_key,
-                client,
-                trading_base_url,
-            )
+        use_broker = bool(
+            client is not None
+            or (self.api_key and self.secret_key)
         )
         self._local = None if use_broker else LocalPaperOptionBroker(now=self._now)
         self.orders = [] if self._local is None else self._local.orders
@@ -241,13 +236,40 @@ class PaperOptionBroker:
                 filled_at=None,
             )
 
-        response = self._client.post(
-            f"{self.trading_base_url}/v2/orders",
-            json=_alpaca_order_payload(request, client_order_id=key),
-            headers=self._auth_headers(),
-        )
-        response.raise_for_status()
-        latest_payload = self._poll_until_terminal(client_order_id=key, initial_payload=response.json())
+        submitted_at = self._now()
+        try:
+            response = self._client.post(
+                f"{self.trading_base_url}/v2/orders",
+                json=_alpaca_order_payload(request, client_order_id=key),
+                headers=self._auth_headers(),
+            )
+            response.raise_for_status()
+            latest_payload = self._poll_until_terminal(client_order_id=key, initial_payload=response.json())
+        except RuntimeError as exc:
+            rejection_reason = "missing_credentials" if str(exc) == "missing_alpaca_credentials" else "broker_error"
+            return self._store_local_order(
+                request=request,
+                client_order_id=key,
+                broker_order_id=None,
+                status="rejected",
+                rejection_reason=rejection_reason,
+                filled_avg_price=None,
+                filled_qty=None,
+                submitted_at=submitted_at,
+                filled_at=None,
+            )
+        except Exception:
+            return self._store_local_order(
+                request=request,
+                client_order_id=key,
+                broker_order_id=None,
+                status="rejected",
+                rejection_reason="broker_error",
+                filled_avg_price=None,
+                filled_qty=None,
+                submitted_at=submitted_at,
+                filled_at=None,
+            )
         return self._store_local_order(
             request=request,
             client_order_id=key,
@@ -256,7 +278,7 @@ class PaperOptionBroker:
             rejection_reason=_string_or_none(latest_payload.get("reject_reason")),
             filled_avg_price=_float_or_none(latest_payload.get("filled_avg_price")),
             filled_qty=_float_or_none(latest_payload.get("filled_qty")),
-            submitted_at=_datetime_or_now(latest_payload.get("submitted_at"), fallback=self._now()),
+            submitted_at=_datetime_or_now(latest_payload.get("submitted_at"), fallback=submitted_at),
             filled_at=_datetime_or_none(latest_payload.get("filled_at")),
         )
 

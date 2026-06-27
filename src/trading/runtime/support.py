@@ -87,12 +87,40 @@ def build_execution_report(
     mode: str,
     orders_submitted: int,
     option_orders_submitted: int = 0,
+    orders_skipped: int = 0,
+    orders_failed: int = 0,
+    skip_reasons: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     """Normalize runtime execution reporting across live trading phases."""
     return {
         "mode": mode,
         "orders_submitted": orders_submitted,
         "option_orders_submitted": option_orders_submitted,
+        "orders_skipped": orders_skipped,
+        "orders_failed": orders_failed,
+        "skip_reasons": dict(skip_reasons or {}),
+    }
+
+
+def summarize_execution_attempts(
+    attempts: tuple[object, ...] | list[object],
+) -> dict[str, Any]:
+    skipped = 0
+    failed = 0
+    skip_reasons: dict[str, int] = {}
+    for attempt in attempts:
+        outcome = str(getattr(attempt, "outcome", "") or "")
+        reason_code = str(getattr(attempt, "reason_code", "") or "")
+        if outcome == "skipped":
+            skipped += 1
+            if reason_code:
+                skip_reasons[reason_code] = skip_reasons.get(reason_code, 0) + 1
+        elif outcome == "failed":
+            failed += 1
+    return {
+        "orders_skipped": skipped,
+        "orders_failed": failed,
+        "skip_reasons": skip_reasons,
     }
 
 

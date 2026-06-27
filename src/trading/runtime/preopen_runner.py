@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 
 from src.trading.runtime.preopen_dependencies import LivePreopenDependencies
-from src.trading.runtime.support import build_execution_report, build_runtime_report
+from src.trading.runtime.support import build_execution_report, build_runtime_report, summarize_execution_attempts
 
 
 class LivePreopenRuntime:
@@ -94,13 +94,18 @@ class LivePreopenRuntime:
             trading_decisions=decisions,
             risk_decisions=risk_decisions,
             trade_date=as_of,
+            phase="preopen",
         )
         submitted_orders = tuple(getattr(result, "paper_orders", ()))
         submitted_option_orders = tuple(getattr(result, "paper_option_orders", ()))
+        attempt_summary = summarize_execution_attempts(tuple(getattr(result, "execution_attempts", ())))
         return build_execution_report(
             mode="execute",
             orders_submitted=len(submitted_orders),
             option_orders_submitted=len(submitted_option_orders) if self.execute_paper_option_orders else 0,
+            orders_skipped=int(attempt_summary["orders_skipped"]),
+            orders_failed=int(attempt_summary["orders_failed"]),
+            skip_reasons=dict(attempt_summary["skip_reasons"]),
         )
 
     def _validate_execution_policy(self) -> None:

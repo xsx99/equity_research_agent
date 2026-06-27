@@ -17,6 +17,7 @@ from src.trading.brokers.paper_option import (
 from src.trading.intraday.news_alerts import NewsAlertRecord
 from src.trading.intraday.signals import IntradaySignalScanRecord, IntradaySignalSnapshotRecord
 from src.trading.brokers.paper_stock import PaperExecutionRecord, PaperOrderRecord
+from src.trading.execution.attempts import ExecutionAttemptRecord
 from src.trading.risk.hedges import RiskHedgeDecisionRecord
 from src.trading.risk.options import OptionRiskSnapshotRecord
 from src.trading.options.strategy import OptionStrategyDecisionRecord, OptionStrategyLegRecord
@@ -83,6 +84,7 @@ class InMemoryTradingRepository:
         self.trading_decisions: list["TradingDecisionRecord"] = []
         self.paper_orders: list[PaperOrderRecord] = []
         self.paper_executions: list[PaperExecutionRecord] = []
+        self.execution_attempts: list[ExecutionAttemptRecord] = []
         self.paper_positions: list[StockPosition] = []
         self.option_strategy_decisions: list[OptionStrategyDecisionRecord] = []
         self.option_strategy_legs: list[OptionStrategyLegRecord] = []
@@ -416,6 +418,17 @@ class InMemoryTradingRepository:
 
     def has_paper_execution(self, paper_execution_id: str) -> bool:
         return any(item.paper_execution_id == paper_execution_id for item in self.paper_executions)
+
+    def save_execution_attempt(self, attempt: ExecutionAttemptRecord) -> None:
+        self.execution_attempts = [
+            item
+            for item in self.execution_attempts
+            if item.execution_attempt_id != attempt.execution_attempt_id
+        ]
+        self.execution_attempts.append(attempt)
+
+    def list_execution_attempts(self) -> tuple[ExecutionAttemptRecord, ...]:
+        return tuple(self.execution_attempts)
 
     def save_paper_option_order(self, order: PaperOptionOrderRecord) -> None:
         if order.paper_option_order_id not in {item.paper_option_order_id for item in self.paper_option_orders}:
