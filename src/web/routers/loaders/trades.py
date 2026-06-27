@@ -238,8 +238,6 @@ def _merge_audit_detail_into_workspace_detail(
         trade_plan["entry_plan"] = audit_detail.get("entry_plan")
     if audit_detail.get("exit_plan") is not None:
         trade_plan["exit_plan"] = audit_detail.get("exit_plan")
-    if audit_detail.get("key_drivers"):
-        trade_plan["edge"] = tuple(audit_detail.get("key_drivers") or ())
     if audit_detail.get("invalidators"):
         trade_plan["invalidators"] = tuple(audit_detail.get("invalidators") or ())
 

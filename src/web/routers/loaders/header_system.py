@@ -18,6 +18,7 @@ from src.web.routers import today_loaders
 
 _TAB_LABELS = (
     ("portfolio", "Portfolio"),
+    ("overview", "Overview"),
     ("trades", "Trades"),
     ("candidates", "Candidates"),
     ("risk-macro", "Risk & Macro"),

@@ -124,7 +124,6 @@ def _build_detail(
             "max_loss_pct": latest_decision.get("max_loss_pct"),
             "entry_plan": operator_text(metadata_json.get("entry_plan")) or None,
             "exit_plan": operator_text(metadata_json.get("exit_plan")) or None,
-            "edge": tuple(key_drivers),
             "invalidators": tuple(invalidators),
         },
         "bull_bear": {

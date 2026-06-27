@@ -5,6 +5,7 @@ import uuid
 from contextlib import ExitStack, contextmanager
 from datetime import date, datetime, timezone
 from decimal import Decimal
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -28,6 +29,7 @@ def _dashboard_payload() -> dict:
         "selected_tab": "portfolio",
         "tabs": (
             {"id": "portfolio", "label": "Portfolio"},
+            {"id": "overview", "label": "Overview"},
             {"id": "trades", "label": "Trades"},
             {"id": "candidates", "label": "Candidates"},
             {"id": "risk-macro", "label": "Risk & Macro"},
@@ -309,7 +311,6 @@ def _dashboard_payload() -> dict:
                         "max_loss_pct": Decimal("0.03"),
                         "entry_plan": "Add on closing strength.",
                         "exit_plan": "Trim on failed breakout.",
-                        "edge": ("relative strength is improving",),
                         "invalidators": ("loses VWAP",),
                     },
                     "bull_bear": {
@@ -796,11 +797,11 @@ class TestTodayDashboard:
         assert "today-global-tabs" in response.text
         assert "today-workspace" in response.text
         assert "Portfolio" in response.text
+        assert "Overview" in response.text
         assert "Trades" in response.text
         assert "Candidates" in response.text
         assert "Risk &amp; Macro" in response.text
         assert "System" in response.text
-        assert "Overview" not in response.text
         assert "Learning &amp; Strategies" not in response.text
         assert "Ops &amp; Cost" not in response.text
         assert "Account Equity" in response.text
@@ -826,6 +827,7 @@ class TestTodayDashboard:
         assert "surface-block-count" in response.text
         assert "today-global-tab-muted" in response.text
         assert "today-global-tab-spacer" in response.text
+        assert 'href="/today?tab=overview"' in response.text
         assert 'href="/today?tab=system"' in response.text
 
     def test_trades_tab_only_renders_trades_workspace_body(self, client):
@@ -839,8 +841,9 @@ class TestTodayDashboard:
         assert "Signal Summary" in response.text
         assert "Breakout confirmed + risk approved" in response.text
         assert 'data-testid="trade-plan"' in response.text
-        assert 'data-testid="bull-bear"' in response.text
-        assert 'data-testid="signal-groups"' in response.text
+        assert 'data-testid="rationale-evidence"' in response.text
+        assert 'data-testid="bull-bear"' not in response.text
+        assert 'data-testid="signal-groups"' not in response.text
         assert "ticker-card-meta" in response.text
         assert "meta-pill" in response.text
         assert "support-kv-row" in response.text
@@ -862,8 +865,9 @@ class TestTodayDashboard:
         assert "Within Limits" in response.text
         assert "within_limits" not in response.text
         assert 'data-testid="trade-plan"' in response.text
-        assert 'data-testid="bull-bear"' in response.text
-        assert 'data-testid="signal-groups"' in response.text
+        assert 'data-testid="rationale-evidence"' in response.text
+        assert 'data-testid="bull-bear"' not in response.text
+        assert 'data-testid="signal-groups"' not in response.text
         assert "Breakout remains valid after the catalyst." in response.text
         assert "Add on closing strength." in response.text
         assert "relative strength is improving" in response.text
@@ -2276,6 +2280,44 @@ class TestTodayDashboard:
             ),
         }
 
+    def test_load_today_dashboard_keeps_overview_tab_reachable(self):
+        from src.web.routers.today import load_today_dashboard
+
+        session = _query_stub_session()
+        trade_rows = _ticker_selection_trade_rows()
+        selected_nvda_detail = _selected_trade_detail("NVDA")
+
+        with (
+            patch("src.web.routers.today._load_trade_rows", return_value=trade_rows),
+            patch("src.web.routers.today._load_positions", return_value=()),
+            patch("src.web.routers.today._load_recent_closed_positions", return_value=()),
+            patch("src.web.routers.today._load_trade_detail", return_value=selected_nvda_detail),
+            patch("src.web.routers.today._load_option_positions", return_value=()),
+            patch("src.web.routers.today._load_hedge_overlays", return_value=()),
+            patch("src.web.routers.today._load_live_alerts", return_value=()),
+            patch("src.web.routers.today._load_material_changes", return_value=()),
+            patch("src.web.routers.today._load_risk_exposures", return_value=()),
+            patch("src.web.routers.today._load_candidate_rows", return_value=()),
+            patch("src.web.routers.today._load_manual_requests", return_value=()),
+            patch("src.web.routers.today._load_portfolio_intents", return_value=()),
+            patch("src.web.routers.today._load_relationships", return_value=()),
+            patch("src.web.routers.today._load_peer_baskets", return_value=()),
+            patch("src.web.routers.today._load_themes", return_value=()),
+            patch("src.web.routers.today._load_learning_factors", return_value=()),
+            patch("src.web.routers.today._load_strategy_performance", return_value=()),
+            patch("src.web.routers.today._load_strategy_proposals", return_value=()),
+            patch("src.web.routers.today._load_llm_usage", return_value=()),
+        ):
+            dashboard = load_today_dashboard(
+                session,
+                selected_tab="overview",
+                decision_id=None,
+                selected_ticker="NVDA",
+            )
+
+        assert dashboard["selected_tab"] == "overview"
+        assert any(tab["id"] == "overview" for tab in dashboard["tabs"])
+
     def test_load_today_dashboard_builds_risk_macro_summary(self):
         from src.web.routers.today import load_today_dashboard
 
@@ -2702,6 +2744,14 @@ def test_load_strategy_performance_computes_win_rate_percentage():
             "total_pnl": Decimal("1.2"),
         },
     )
+
+
+def test_today_styles_define_attention_feed_row_variants():
+    stylesheet = Path("src/static/style.css").read_text()
+
+    assert ".attention-feed-row-review" in stylesheet
+    assert ".attention-feed-row-alert" in stylesheet
+    assert ".attention-feed-row-signal" in stylesheet
 
 
 @contextmanager

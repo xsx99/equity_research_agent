@@ -212,6 +212,83 @@
               </section>
             </div>
 
+            <section class="card subcard rationale-evidence-card" data-testid="rationale-evidence">
+              <div class="surface-heading surface-heading-compact">
+                <div>
+                  <h4>Rationale &amp; Evidence</h4>
+                  <p class="detail-muted">Claims and the evidence the system used to support them live together here.</p>
+                </div>
+                {% if latest_bull_bear and latest_bull_bear.confidence is not none %}
+                <span class="detail-chip">Confidence {{ fmt_number(latest_bull_bear.confidence) }}</span>
+                {% endif %}
+              </div>
+
+              <div class="rationale-claims-grid">
+                <article class="signal-summary-card rationale-claim-card">
+                  <div class="signal-summary-card-head">
+                    <span class="section-label">Bull Case</span>
+                    {% if latest_bull_bear and latest_bull_bear.bull_points and latest_bull_bear.bull_points | length > 1 %}
+                    <span class="surface-block-count">{{ latest_bull_bear.bull_points | length }}</span>
+                    {% endif %}
+                  </div>
+                  {% if latest_bull_bear and latest_bull_bear.bull_points %}
+                  <ul class="history-card-listing">
+                    {% for bullet in latest_bull_bear.bull_points %}
+                    <li>{{ bullet }}</li>
+                    {% endfor %}
+                  </ul>
+                  {% else %}
+                  <p class="detail-muted quiet-empty surface-empty-copy">No bull points.</p>
+                  {% endif %}
+                </article>
+
+                <article class="signal-summary-card rationale-claim-card">
+                  <div class="signal-summary-card-head">
+                    <span class="section-label">Bear Case</span>
+                    {% if latest_bull_bear and latest_bull_bear.bear_points and latest_bull_bear.bear_points | length > 1 %}
+                    <span class="surface-block-count">{{ latest_bull_bear.bear_points | length }}</span>
+                    {% endif %}
+                  </div>
+                  {% if latest_bull_bear and latest_bull_bear.bear_points %}
+                  <ul class="history-card-listing">
+                    {% for bullet in latest_bull_bear.bear_points %}
+                    <li>{{ bullet }}</li>
+                    {% endfor %}
+                  </ul>
+                  {% else %}
+                  <p class="detail-muted quiet-empty surface-empty-copy">No bear points.</p>
+                  {% endif %}
+                </article>
+              </div>
+
+              <div class="section-label">Evidence</div>
+              {% if latest_signal_groups %}
+              <div class="signal-group-grid rationale-evidence-grid">
+                {% for group in latest_signal_groups %}
+                <article class="signal-group-card">
+                  <div class="signal-summary-card-head">
+                    <span class="section-label">{{ group.label }}</span>
+                    {% if group.bullets | length > 1 %}
+                    <span class="surface-block-count">{{ group.bullets | length }}</span>
+                    {% endif %}
+                  </div>
+                  {% if group.bullets %}
+                  <ul class="history-card-listing">
+                    {% for bullet in group.bullets %}
+                    <li>{{ bullet }}</li>
+                    {% endfor %}
+                  </ul>
+                  {% else %}
+                  <p class="detail-muted quiet-empty surface-empty-copy">No signal bullets.</p>
+                  {% endif %}
+                </article>
+                {% endfor %}
+              </div>
+              {% else %}
+              <p class="detail-muted quiet-empty surface-empty-copy">No signal groups.</p>
+              {% endif %}
+            </section>
+
             {% if latest_trade_plan %}
             <section class="card subcard trade-plan-card" data-testid="trade-plan">
               <div class="surface-heading surface-heading-compact">
@@ -257,14 +334,6 @@
                 </div>
                 {% endif %}
               </div>
-              {% if latest_trade_plan.edge %}
-              <div class="section-label">Edge</div>
-              <ul class="history-card-listing">
-                {% for bullet in latest_trade_plan.edge %}
-                <li>{{ bullet }}</li>
-                {% endfor %}
-              </ul>
-              {% endif %}
               {% if latest_trade_plan.invalidators %}
               <div class="section-label">Invalidators</div>
               <ul class="history-card-listing">
@@ -275,84 +344,6 @@
               {% endif %}
             </section>
             {% endif %}
-
-            <div class="ticker-detail-data-surfaces">
-              {% if latest_bull_bear %}
-              <section class="card subcard" data-testid="bull-bear">
-                <div class="surface-heading surface-heading-compact">
-                  <div>
-                    <h4>Bull / Bear</h4>
-                    {% if latest_bull_bear.confidence is not none %}
-                    <p class="detail-muted">Confidence {{ fmt_number(latest_bull_bear.confidence) }}</p>
-                    {% endif %}
-                  </div>
-                </div>
-                <div class="bull-bear-grid">
-                  <article class="signal-summary-card">
-                    <div class="signal-summary-card-head">
-                      <span class="section-label">Bull Points</span>
-                    </div>
-                    {% if latest_bull_bear.bull_points %}
-                    <ul class="history-card-listing">
-                      {% for bullet in latest_bull_bear.bull_points %}
-                      <li>{{ bullet }}</li>
-                      {% endfor %}
-                    </ul>
-                    {% else %}
-                    <p class="detail-muted quiet-empty surface-empty-copy">No bull points.</p>
-                    {% endif %}
-                  </article>
-                  <article class="signal-summary-card">
-                    <div class="signal-summary-card-head">
-                      <span class="section-label">Bear Points</span>
-                    </div>
-                    {% if latest_bull_bear.bear_points %}
-                    <ul class="history-card-listing">
-                      {% for bullet in latest_bull_bear.bear_points %}
-                      <li>{{ bullet }}</li>
-                      {% endfor %}
-                    </ul>
-                    {% else %}
-                    <p class="detail-muted quiet-empty surface-empty-copy">No bear points.</p>
-                    {% endif %}
-                  </article>
-                </div>
-              </section>
-              {% endif %}
-
-              <section class="card subcard" data-testid="signal-groups">
-                <div class="surface-heading surface-heading-compact">
-                  <div>
-                    <h4>Signal Groups</h4>
-                  </div>
-                </div>
-                {% if latest_signal_groups %}
-                <div class="signal-group-grid">
-                  {% for group in latest_signal_groups %}
-                  <article class="signal-group-card">
-                    <div class="signal-summary-card-head">
-                      <span class="section-label">{{ group.label }}</span>
-                      {% if group.bullets | length > 1 %}
-                      <span class="surface-block-count">{{ group.bullets | length }}</span>
-                      {% endif %}
-                    </div>
-                    {% if group.bullets %}
-                    <ul class="history-card-listing">
-                      {% for bullet in group.bullets %}
-                      <li>{{ bullet }}</li>
-                      {% endfor %}
-                    </ul>
-                    {% else %}
-                    <p class="detail-muted quiet-empty surface-empty-copy">No signal bullets.</p>
-                    {% endif %}
-                  </article>
-                  {% endfor %}
-                </div>
-                {% else %}
-                <p class="detail-muted quiet-empty surface-empty-copy">No signal groups.</p>
-                {% endif %}
-              </section>
-            </div>
 
             <div class="ticker-detail-nav" role="tablist" aria-label="Ticker detail sections">
               <a

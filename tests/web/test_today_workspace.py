@@ -41,7 +41,7 @@ def test_build_ticker_workspace_groups_attention_buckets():
     assert workspace["selected_ticker"] == "NVDA"
 
 
-def test_build_ticker_workspace_builds_trade_plan_bull_bear_and_signal_groups():
+def test_build_ticker_workspace_builds_trade_plan_without_duplicate_edge_alias():
     workspace = build_ticker_workspace(
         trade_rows=[
             {
@@ -95,7 +95,6 @@ def test_build_ticker_workspace_builds_trade_plan_bull_bear_and_signal_groups():
         "max_loss_pct": 0.03,
         "entry_plan": "Add on closing strength.",
         "exit_plan": "Trim on failed breakout.",
-        "edge": ("relative strength is improving",),
         "invalidators": ("loses VWAP",),
     }
     assert detail["latest_conclusion"]["bull_bear"] == {
@@ -1427,7 +1426,7 @@ def test_build_ticker_workspace_cleans_trade_plan_copy_and_rationale():
     assert detail["latest_conclusion"]["trade_plan"]["time_horizon"] == "Swing Trade"
     assert detail["latest_conclusion"]["trade_plan"]["entry_plan"] == "Add On Closing Strength"
     assert detail["latest_conclusion"]["trade_plan"]["exit_plan"] == "Trim On Failed Breakout"
-    assert detail["latest_conclusion"]["trade_plan"]["edge"] == (
+    assert detail["latest_conclusion"]["bull_bear"]["bull_points"] == (
         "Sector Relative Strength",
         "Relative Volume",
     )

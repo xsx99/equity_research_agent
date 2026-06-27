@@ -1334,6 +1334,18 @@ a:hover { text-decoration: underline; }
   background: #f7faff;
 }
 
+.attention-feed-row-review {
+  border-left: 4px solid #2f6f37;
+}
+
+.attention-feed-row-alert {
+  border-left: 4px solid #b84318;
+}
+
+.attention-feed-row-signal {
+  border-left: 4px solid #35516f;
+}
+
 .attention-feed-body {
   display: grid;
   gap: 0.2rem;
@@ -1438,6 +1450,21 @@ a:hover { text-decoration: underline; }
   display: grid;
   gap: 0.55rem;
   margin-top: 1rem;
+}
+
+.rationale-evidence-card {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.rationale-claims-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.rationale-evidence-grid {
+  margin-top: 0.1rem;
 }
 
 .trade-plan-grid {
