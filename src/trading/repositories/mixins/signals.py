@@ -3,10 +3,16 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
+from src.core import config as app_config
 from src.db.models.trading import EventNewsItem, SignalSnapshot
 from src.trading.signals import SignalSnapshotResult
 from src.trading.signals.sources import EventNewsItemRecord
 from src.trading.repositories._base_common import _to_uuid, _to_uuid_or_none
+from src.trading.runtime.trade_day import local_day_bounds_utc
+
+
+def _trade_day_window(trade_date: date) -> tuple[object, object]:
+    return local_day_bounds_utc(trade_date, app_config.SCHEDULER_TIMEZONE)
 
 
 class SignalsRepositoryMixin:
@@ -129,12 +135,19 @@ class SignalsRepositoryMixin:
         snapshot_type: str,
         trade_date: date,
     ) -> dict[str, SignalSnapshotResult]:
+        start_utc, end_utc = _trade_day_window(trade_date)
         selected_by_ticker: dict[str, SignalSnapshotResult] = {}
         ticker_set = {ticker.strip().upper() for ticker in tickers}
-        for row in self.session.query(SignalSnapshot).all():
-            if row.snapshot_type != snapshot_type or row.ticker not in ticker_set:
-                continue
-            if row.decision_time.date() != trade_date:
+        for row in (
+            self.session.query(SignalSnapshot)
+            .filter(
+                SignalSnapshot.snapshot_type == snapshot_type,
+                SignalSnapshot.decision_time >= start_utc,
+                SignalSnapshot.decision_time < end_utc,
+            )
+            .all()
+        ):
+            if row.ticker not in ticker_set:
                 continue
             snapshot = SignalSnapshotResult(
                 signal_snapshot_id=str(row.signal_snapshot_id),

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from types import SimpleNamespace
 
 from src.trading.post_close.reflection import ReflectionPipelineRequest
 from src.trading.runtime.dispatch import get_job_phase_handler
+from src.trading.runtime.trade_day import local_day_bounds_utc
 from src.trading.runtime.reflection import (
     LiveReflectionDependencies,
     LiveReflectionRequestLoader,
@@ -18,8 +19,15 @@ from src.trading.runtime.reflection import (
 class _Repository:
     def __init__(self, payload: dict[str, object]) -> None:
         self.payload = payload
+        self.calls: list[tuple[date, tuple[datetime, datetime] | None]] = []
 
-    def load_reflection_inputs(self, *, trade_date: date) -> dict[str, object]:
+    def load_reflection_inputs(
+        self,
+        *,
+        trade_date: date,
+        window: tuple[datetime, datetime] | None = None,
+    ) -> dict[str, object]:
+        self.calls.append((trade_date, window))
         assert trade_date == date(2026, 6, 4)
         return dict(self.payload)
 
@@ -63,7 +71,11 @@ def test_live_reflection_request_loader_assembles_same_day_option_and_hedge_arti
     }
     loader = LiveReflectionRequestLoader(repository=_Repository(payload))
 
-    result = loader.load(trade_date=date(2026, 6, 4), decision_time=decision_time)
+    result = loader.load(
+        trade_date=date(2026, 6, 4),
+        decision_time=decision_time,
+        window=local_day_bounds_utc(date(2026, 6, 4), "America/New_York"),
+    )
 
     assert result.status == "ready"
     assert isinstance(result.request, ReflectionPipelineRequest)
@@ -84,6 +96,7 @@ def test_live_reflection_request_loader_returns_skipped_when_portfolio_outcome_m
     result = loader.load(
         trade_date=date(2026, 6, 4),
         decision_time=datetime(2026, 6, 4, 22, 0, tzinfo=timezone.utc),
+        window=local_day_bounds_utc(date(2026, 6, 4), "America/New_York"),
     )
 
     assert result.status == "skipped"
@@ -94,9 +107,16 @@ def test_live_reflection_request_loader_returns_skipped_when_portfolio_outcome_m
 @dataclass(frozen=True)
 class _RequestLoader:
     result: ReflectionLoadResult
+    calls: list[tuple[date, datetime, tuple[datetime, datetime] | None]] = field(default_factory=list)
 
-    def load(self, *, trade_date: date, decision_time: datetime) -> ReflectionLoadResult:
-        assert trade_date == date(2026, 6, 4)
+    def load(
+        self,
+        *,
+        trade_date: date,
+        decision_time: datetime,
+        window: tuple[datetime, datetime] | None = None,
+    ) -> ReflectionLoadResult:
+        self.calls.append((trade_date, decision_time, window))
         assert decision_time.tzinfo is not None
         return self.result
 
@@ -157,6 +177,37 @@ def test_live_reflection_runtime_runs_pipeline_when_request_is_ready():
     assert result["phase"] == "reflection"
     assert result["summary"]["daily_reflection_count"] == 1
     assert result["summary"]["learning_factor_count"] == 1
+
+
+def test_live_reflection_runtime_uses_scheduler_local_trade_date_and_window(monkeypatch):
+    monkeypatch.setattr("src.trading.runtime.reflection.app_config.SCHEDULER_TIMEZONE", "America/New_York")
+    request = ReflectionPipelineRequest(
+        trade_date=date(2026, 6, 4),
+        decision_time=datetime(2026, 6, 5, 1, 30, tzinfo=timezone.utc),
+        available_for_decision_at=datetime(2026, 6, 5, 1, 30, tzinfo=timezone.utc),
+        portfolio_outcome={"day_pnl": 250.0},
+        morning_macro_snapshot={"regime": "neutral"},
+        trading_decisions=({"ticker": "AAPL"},),
+        portfolio_snapshots=({"account_equity": 100250.0},),
+    )
+    loader = _RequestLoader(ReflectionLoadResult(status="ready", request=request))
+    runtime = LiveReflectionRuntime(
+        dependencies=LiveReflectionDependencies(
+            request_loader=loader,
+            reflection_pipeline=_ReflectionPipeline(),
+        ),
+        now=lambda: datetime(2026, 6, 5, 1, 30, tzinfo=timezone.utc),
+    )
+
+    runtime.run()
+
+    assert loader.calls == [
+        (
+            date(2026, 6, 4),
+            datetime(2026, 6, 5, 1, 30, tzinfo=timezone.utc),
+            local_day_bounds_utc(date(2026, 6, 4), "America/New_York"),
+        )
+    ]
 
 
 def test_run_live_reflection_once_builds_default_dependencies_when_not_injected(monkeypatch):

@@ -4,6 +4,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 
+from src.core import config as app_config
 from src.db.models.trading import (
     CandidateOutcomeEvaluation,
     CandidateScore,
@@ -30,6 +31,11 @@ from src.trading.repositories._base_records import (
     _daily_reflection_record,
     _learning_factor_record,
 )
+from src.trading.runtime.trade_day import local_day_bounds_utc
+
+
+def _trade_day_window(trade_date: date) -> tuple[object, object]:
+    return local_day_bounds_utc(trade_date, app_config.SCHEDULER_TIMEZONE)
 
 
 class StrategyRepositoryMixin:
@@ -123,8 +129,9 @@ class StrategyRepositoryMixin:
         self.session.add(row)
         self.session.flush()
     def load_strategy_evolution_inputs(self, *, trade_date: date) -> dict[str, object]:
+        start_utc, end_utc = _trade_day_window(trade_date)
         latest_reflection = max(
-            (row for row in self.session.query(DailyReflection).all() if row.trade_date == trade_date),
+            self.session.query(DailyReflection).filter(DailyReflection.trade_date == trade_date).all(),
             key=lambda row: row.created_at,
             default=None,
         )
@@ -137,18 +144,28 @@ class StrategyRepositoryMixin:
             "daily_reflections": daily_reflections,
             "learning_factors": tuple(
                 _learning_factor_record(row)
-                for row in self.session.query(LearningFactor).all()
-                if row.trade_date == trade_date
+                for row in self.session.query(LearningFactor)
+                .filter(LearningFactor.trade_date == trade_date)
+                .all()
             ),
             "rejected_candidates": tuple(
                 _rejected_candidate_payload(row)
-                for row in self.session.query(CandidateScore).all()
-                if row.decision_time.date() == trade_date and row.rejection_reason
+                for row in self.session.query(CandidateScore)
+                .filter(
+                    CandidateScore.decision_time >= start_utc,
+                    CandidateScore.decision_time < end_utc,
+                )
+                .all()
+                if row.rejection_reason
             ),
             "candidate_outcome_evaluations": tuple(
                 _candidate_outcome_record(row)
-                for row in self.session.query(CandidateOutcomeEvaluation).all()
-                if row.decision_time.date() == trade_date
+                for row in self.session.query(CandidateOutcomeEvaluation)
+                .filter(
+                    CandidateOutcomeEvaluation.decision_time >= start_utc,
+                    CandidateOutcomeEvaluation.decision_time < end_utc,
+                )
+                .all()
             ),
         }
     def save_candidate_scores(self, candidates: list[CandidateScoreRecord] | tuple[CandidateScoreRecord, ...]) -> None:

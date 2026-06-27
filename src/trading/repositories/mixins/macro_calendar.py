@@ -53,12 +53,10 @@ class MacroCalendarRepositoryMixin:
         trade_date: date,
         decision_time: datetime | None = None,
     ) -> MacroSnapshotRecord | None:
-        rows = [
-            row
-            for row in self.session.query(MacroSnapshot).all()
-            if row.trade_date == trade_date
-            and (decision_time is None or row.snapshot_time <= decision_time)
-        ]
+        query = self.session.query(MacroSnapshot).filter(MacroSnapshot.trade_date == trade_date)
+        if decision_time is not None:
+            query = query.filter(MacroSnapshot.snapshot_time <= decision_time)
+        rows = query.all()
         if not rows:
             return None
         row = max(rows, key=lambda item: item.snapshot_time)

@@ -5,6 +5,7 @@ from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any
 
+from src.core import config as app_config
 from src.db.models.trading import (
     CandidateScore,
     IntradayRebalanceDecision,
@@ -20,6 +21,11 @@ from src.trading.intraday.news_alerts import NewsAlertRecord
 from src.trading.intraday.signals import IntradaySignalScanRecord, IntradaySignalSnapshotRecord
 from src.trading.repositories._base_common import _to_uuid, _to_uuid_or_none
 from src.trading.repositories._base_manual_review import _intraday_context_metadata
+from src.trading.runtime.trade_day import local_day_bounds_utc
+
+
+def _trade_day_window(trade_date: date) -> tuple[object, object]:
+    return local_day_bounds_utc(trade_date, app_config.SCHEDULER_TIMEZONE)
 
 
 class IntradayRepositoryMixin:
@@ -67,12 +73,18 @@ class IntradayRepositoryMixin:
         tickers: tuple[str, ...],
         trade_date: date,
     ) -> dict[str, IntradaySignalSnapshotRecord]:
+        start_utc, end_utc = _trade_day_window(trade_date)
         selected_by_ticker: dict[str, IntradaySignalSnapshotRecord] = {}
         ticker_set = {ticker.strip().upper() for ticker in tickers}
-        for row in self.session.query(IntradaySignalSnapshot).all():
+        for row in (
+            self.session.query(IntradaySignalSnapshot)
+            .filter(
+                IntradaySignalSnapshot.decision_time >= start_utc,
+                IntradaySignalSnapshot.decision_time < end_utc,
+            )
+            .all()
+        ):
             if row.ticker not in ticker_set:
-                continue
-            if row.decision_time.date() != trade_date:
                 continue
             snapshot = IntradaySignalSnapshotRecord(
                 intraday_signal_snapshot_id=str(row.intraday_signal_snapshot_id),
@@ -125,11 +137,17 @@ class IntradayRepositoryMixin:
         tickers: tuple[str, ...],
         trade_date: date,
     ) -> frozenset[str]:
+        start_utc, end_utc = _trade_day_window(trade_date)
         ticker_set = {ticker.strip().upper() for ticker in tickers}
         return frozenset(
             row.dedupe_key
-            for row in self.session.query(NewsAlert).all()
-            if row.ticker in ticker_set and row.created_at.date() == trade_date
+            for row in self.session.query(NewsAlert)
+            .filter(
+                NewsAlert.created_at >= start_utc,
+                NewsAlert.created_at < end_utc,
+            )
+            .all()
+            if row.ticker in ticker_set
         )
     def save_intraday_rebalance_decision(self, decision: Any) -> None:
         row = self.session.query(IntradayRebalanceDecision).filter_by(
@@ -156,23 +174,36 @@ class IntradayRepositoryMixin:
         row.metadata_json = dict(decision.metadata_json)
         self.session.flush()
     def load_intraday_scope(self, *, trade_date: date) -> tuple[str, ...]:
+        start_utc, end_utc = _trade_day_window(trade_date)
         tickers: set[str] = set()
         tickers.update(position.ticker for position in self.load_paper_positions())
         tickers.update(position.ticker for position in self.load_paper_option_positions())
         tickers.update(
             row.ticker
-            for row in self.session.query(PaperOrder).all()
-            if row.trade_date == trade_date and row.ticker
+            for row in self.session.query(PaperOrder)
+            .filter(PaperOrder.trade_date == trade_date)
+            .all()
+            if row.ticker
         )
         tickers.update(
             row.ticker
-            for row in self.session.query(CandidateScore).all()
-            if row.decision_time.date() == trade_date and row.ticker
+            for row in self.session.query(CandidateScore)
+            .filter(
+                CandidateScore.decision_time >= start_utc,
+                CandidateScore.decision_time < end_utc,
+            )
+            .all()
+            if row.ticker
         )
         tickers.update(
             row.ticker
-            for row in self.session.query(TradingDecision).all()
-            if row.decision_time.date() == trade_date and row.ticker
+            for row in self.session.query(TradingDecision)
+            .filter(
+                TradingDecision.decision_time >= start_utc,
+                TradingDecision.decision_time < end_utc,
+            )
+            .all()
+            if row.ticker
         )
         tickers.update(
             row.ticker
@@ -186,6 +217,7 @@ class IntradayRepositoryMixin:
         tickers: tuple[str, ...],
         trade_date: date,
     ) -> dict[str, Any]:
+        start_utc, end_utc = _trade_day_window(trade_date)
         ticker_set = {ticker.strip().upper() for ticker in tickers}
         contexts: dict[str, Any] = {}
         stock_positions_by_ticker = {position.ticker: position for position in self.load_paper_positions()}
@@ -202,19 +234,38 @@ class IntradayRepositoryMixin:
                 manual_request_by_ticker[row.ticker] = row
         classifications_by_id = {
             str(row.trade_classification_id): row
-            for row in self.session.query(TradeClassification).all()
-            if row.ticker in ticker_set and row.decision_time.date() == trade_date
+            for row in self.session.query(TradeClassification)
+            .filter(
+                TradeClassification.decision_time >= start_utc,
+                TradeClassification.decision_time < end_utc,
+            )
+            .all()
+            if row.ticker in ticker_set
         }
         latest_candidate_by_ticker: dict[str, Any] = {}
-        for row in self.session.query(CandidateScore).all():
-            if row.ticker not in ticker_set or row.decision_time.date() != trade_date:
+        for row in (
+            self.session.query(CandidateScore)
+            .filter(
+                CandidateScore.decision_time >= start_utc,
+                CandidateScore.decision_time < end_utc,
+            )
+            .all()
+        ):
+            if row.ticker not in ticker_set:
                 continue
             current = latest_candidate_by_ticker.get(row.ticker)
             if current is None or row.available_for_decision_at > current.available_for_decision_at:
                 latest_candidate_by_ticker[row.ticker] = row
         latest_decision_by_ticker: dict[str, Any] = {}
-        for row in self.session.query(TradingDecision).all():
-            if row.ticker not in ticker_set or row.decision_time.date() != trade_date:
+        for row in (
+            self.session.query(TradingDecision)
+            .filter(
+                TradingDecision.decision_time >= start_utc,
+                TradingDecision.decision_time < end_utc,
+            )
+            .all()
+        ):
+            if row.ticker not in ticker_set:
                 continue
             current = latest_decision_by_ticker.get(row.ticker)
             if current is None or row.available_for_decision_at > current.available_for_decision_at:
@@ -319,9 +370,15 @@ class IntradayRepositoryMixin:
         tickers: tuple[str, ...],
         trade_date: date,
     ) -> dict[str, tuple[str, ...]]:
+        start_utc, end_utc = _trade_day_window(trade_date)
         ticker_set = {ticker.strip().upper() for ticker in tickers}
         return {
             row.ticker: (row.ticker,)
-            for row in self.session.query(CandidateScore).all()
-            if row.ticker in ticker_set and row.decision_time.date() == trade_date
+            for row in self.session.query(CandidateScore)
+            .filter(
+                CandidateScore.decision_time >= start_utc,
+                CandidateScore.decision_time < end_utc,
+            )
+            .all()
+            if row.ticker in ticker_set
         }

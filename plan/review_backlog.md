@@ -41,7 +41,7 @@ it can raise mid-submit (no try/except around `submit_order`), potentially crash
 local sim without credentials and returns rejected audit rows instead of raising on forced-live
 auth failures.
 
-### 2. Reflection skips on a timezone boundary
+### 2. Reflection skips on a timezone boundary [Resolved 2026-06-27]
 **Where:** `src/trading/runtime/reflection.py:88` (`trade_date=decision_time.date()`);
 `src/trading/repositories/mixins/reflection.py:16` (naive `datetime.combine(...)`).
 
@@ -49,6 +49,11 @@ auth failures.
 and the repository compares a naive `datetime.combine(trade_date, ...)` against timezone-aware
 columns. When local time straddles UTC midnight, `trade_date` misses the day's rows → empty →
 reflection skips. **Fix together with #4** (push the filter into a timezone-aware `WHERE`).
+
+**Status:** Fixed by PR 36. Reflection now derives `trade_date` in `SCHEDULER_TIMEZONE`, computes
+the UTC `[start, end)` window for that local day, forwards the window into
+`load_reflection_inputs(...)`, and has regression coverage for both the UTC-boundary case and the
+window-helper DST behavior.
 
 ---
 
@@ -79,12 +84,18 @@ Remaining follow-ups:
 
 ## P2 — Query performance
 
-### 4. Whole-table load then Python-side filter
+### 4. Whole-table load then Python-side filter [Resolved 2026-06-27]
 **Where:** `src/trading/repositories/mixins/reflection.py` (`load_reflection_inputs`) plus ~56
 `session.query(Model).all()` sites across `repositories/mixins/`, filtered in Python by
 `.date() == trade_date`. Loads whole tables into memory (slow/timeout as data grows) and is
 entangled with the timezone bug (#2). **Fix:** push the date filter into a timezone-aware `WHERE`,
 together with #2.
+
+**Status:** Fixed by PR 36 for the date-filtered hot paths. Reflection now filters timestamp
+columns with UTC range predicates and `Date` columns with `trade_date` equality, and the sibling
+single-day filters in `strategy`, `intraday`, `signals`, `risk`, `macro_calendar`, and
+`runtime_misc` were moved into SQL. Deliberate non-date whole-table scans remain tracked in the
+progress tracker rather than being expanded into this PR.
 
 ---
 

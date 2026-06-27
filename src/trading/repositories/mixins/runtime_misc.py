@@ -80,11 +80,10 @@ class RuntimeMiscRepositoryMixin:
         phase: str,
         trade_date: date | None = None,
     ) -> dict[str, Any] | None:
-        rows = [
-            row
-            for row in self.session.query(TradingRuntimeRun).all()
-            if row.phase == phase and (trade_date is None or row.trade_date == trade_date)
-        ]
+        query = self.session.query(TradingRuntimeRun).filter(TradingRuntimeRun.phase == phase)
+        if trade_date is not None:
+            query = query.filter(TradingRuntimeRun.trade_date == trade_date)
+        rows = query.all()
         if not rows:
             return None
         row = max(

@@ -7,6 +7,7 @@ from typing import Any, Callable
 
 from src.core import config as app_config
 from src.trading.post_close.reflection import ReflectionPipeline, ReflectionPipelineRequest
+from src.trading.runtime.trade_day import local_day_bounds_utc, trade_date_for
 from src.trading.runtime.support import build_runtime_report
 
 
@@ -23,8 +24,14 @@ class LiveReflectionRequestLoader:
     def __init__(self, *, repository: Any) -> None:
         self.repository = repository
 
-    def load(self, *, trade_date: date, decision_time: datetime) -> ReflectionLoadResult:
-        payload = self.repository.load_reflection_inputs(trade_date=trade_date)
+    def load(
+        self,
+        *,
+        trade_date: date,
+        decision_time: datetime,
+        window: tuple[datetime, datetime],
+    ) -> ReflectionLoadResult:
+        payload = self.repository.load_reflection_inputs(trade_date=trade_date, window=window)
         portfolio_outcome = payload.get("portfolio_outcome")
         portfolio_snapshots = tuple(payload.get("portfolio_snapshots") or ())
         reasons: list[str] = []
@@ -84,9 +91,12 @@ class LiveReflectionRuntime:
 
     def run(self) -> dict[str, Any]:
         decision_time = self.now()
+        trade_date = trade_date_for(decision_time, app_config.SCHEDULER_TIMEZONE)
+        window = local_day_bounds_utc(trade_date, app_config.SCHEDULER_TIMEZONE)
         load_result = self.dependencies.request_loader.load(
-            trade_date=decision_time.date(),
+            trade_date=trade_date,
             decision_time=decision_time,
+            window=window,
         )
         if load_result.status != "ready" or load_result.request is None:
             return build_runtime_report(

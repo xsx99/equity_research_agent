@@ -1,26 +1,39 @@
 from __future__ import annotations
 
+import operator
 import uuid
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any
 
+from sqlalchemy.sql.elements import BinaryExpression, BooleanClauseList
+
 from src.db.models.trading import (
+    CandidateOutcomeEvaluation,
     CandidateScore,
     CalendarEvent,
     DailyReflection,
+    IntradayRebalanceDecision,
     LearningFactor,
     ManualTickerRequest,
     MacroSnapshot,
+    NewsAlert,
+    OptionRiskSnapshot,
+    OptionStrategyDecision,
     OptionStrategyLeg,
     PaperExecution,
+    PaperOptionPosition as PaperOptionPositionModel,
     PaperOrder,
     PaperPosition,
     PaperOptionExecution,
     PaperOptionOrder,
     PortfolioEventRiskAssessment,
+    PortfolioRiskSnapshot,
+    PortfolioSnapshot as PortfolioSnapshotModel,
     RiskDecision,
+    RiskHedgeDecision,
+    RiskFactorExposure,
     TradingRuntimeRun,
     TradingDecision,
     UniverseFilterConfig,
@@ -40,6 +53,7 @@ from src.trading.options.strategy import OptionStrategyDecisionRecord, OptionStr
 from src.trading.portfolio.state import PortfolioSnapshot, StockPosition
 from src.trading.post_close.reflection import LearningFactorRecord
 from src.trading.repositories.sqlalchemy import SqlAlchemyTradingRepository, _trading_decision_payload
+from src.trading.runtime.trade_day import local_day_bounds_utc
 from src.trading.workflows.paper_execution import PaperExecutionWorkflow
 from src.trading.manual_review.requests import ManualTickerRequestService
 from src.trading.risk import HedgeActionRecord, PortfolioRiskIntentRecord, PositionRiskActionRecord, RiskDecisionRecord
@@ -49,6 +63,14 @@ from src.trading.workflows.trading_decision import TradingDecisionRecord
 class _FakeQuery:
     def __init__(self, rows: list[object]) -> None:
         self._rows = rows
+
+    def filter(self, *criteria: Any) -> "_FakeQuery":
+        filtered = [
+            row
+            for row in self._rows
+            if all(_matches_filter_criterion(row, criterion) for criterion in criteria)
+        ]
+        return _FakeQuery(filtered)
 
     def filter_by(self, **kwargs: Any) -> "_FakeQuery":
         filtered = [
@@ -82,6 +104,45 @@ class _FakeSession:
 
     def flush(self) -> None:
         self.flush_calls += 1
+
+
+def _matches_filter_criterion(row: object, criterion: Any) -> bool:
+    if isinstance(criterion, BooleanClauseList):
+        clauses = list(criterion.clauses)
+        if criterion.operator is operator.and_:
+            return all(_matches_filter_criterion(row, clause) for clause in clauses)
+        if criterion.operator is operator.or_:
+            return any(_matches_filter_criterion(row, clause) for clause in clauses)
+        raise AssertionError(f"unsupported boolean operator: {criterion.operator!r}")
+    if isinstance(criterion, BinaryExpression):
+        left = _resolve_filter_operand(row, criterion.left)
+        right = _resolve_filter_operand(row, criterion.right)
+        if criterion.operator is operator.eq:
+            return left == right
+        if criterion.operator is operator.ne:
+            return left != right
+        if criterion.operator is operator.ge:
+            return left is not None and right is not None and left >= right
+        if criterion.operator is operator.gt:
+            return left is not None and right is not None and left > right
+        if criterion.operator is operator.le:
+            return left is not None and right is not None and left <= right
+        if criterion.operator is operator.lt:
+            return left is not None and right is not None and left < right
+        if getattr(criterion.operator, "__name__", "") == "in_op":
+            return left in set(right)
+        if getattr(criterion.operator, "__name__", "") == "not_in_op":
+            return left not in set(right)
+        raise AssertionError(f"unsupported comparison operator: {criterion.operator!r}")
+    raise AssertionError(f"unsupported filter criterion: {criterion!r}")
+
+
+def _resolve_filter_operand(row: object, operand: Any) -> Any:
+    if hasattr(operand, "value"):
+        return operand.value
+    if hasattr(operand, "key"):
+        return getattr(row, operand.key)
+    return operand
 
 
 def test_sqlalchemy_repository_persists_universe_snapshot_and_symbols():
@@ -1294,3 +1355,429 @@ def test_sqlalchemy_repository_loads_active_and_shadow_learning_factors():
 
     assert [row.factor_key for row in rows] == ["lf-active", "lf-shadow"]
     assert all(isinstance(row, LearningFactorRecord) for row in rows)
+
+
+def test_sqlalchemy_repository_load_reflection_inputs_matches_expected_result_set_within_utc_day():
+    session = _FakeSession()
+    repository = SqlAlchemyTradingRepository(session)
+    trade_date = date(2026, 6, 4)
+    window = (
+        datetime(2026, 6, 4, 0, 0, tzinfo=timezone.utc),
+        datetime(2026, 6, 5, 0, 0, tzinfo=timezone.utc),
+    )
+    risk_snapshot_id = uuid.uuid4()
+    session.rows_by_type[PortfolioSnapshotModel] = [
+        SimpleNamespace(
+            snapshot_time=datetime(2026, 6, 4, 15, 45, tzinfo=timezone.utc),
+            cash_balance=Decimal("50000"),
+            account_equity=Decimal("100250"),
+            net_liquidation_value=Decimal("100250"),
+            buying_power=Decimal("150000"),
+            day_pnl=Decimal("250"),
+            realized_pnl=Decimal("125"),
+            unrealized_pnl=Decimal("125"),
+            metadata_json={"window": "in"},
+        ),
+        SimpleNamespace(
+            snapshot_time=datetime(2026, 6, 5, 0, 30, tzinfo=timezone.utc),
+            cash_balance=Decimal("50010"),
+            account_equity=Decimal("100260"),
+            net_liquidation_value=Decimal("100260"),
+            buying_power=Decimal("150010"),
+            day_pnl=Decimal("260"),
+            realized_pnl=Decimal("130"),
+            unrealized_pnl=Decimal("130"),
+            metadata_json={"window": "out"},
+        ),
+    ]
+    session.rows_by_type[PortfolioRiskSnapshot] = [
+        SimpleNamespace(
+            portfolio_risk_snapshot_id=risk_snapshot_id,
+            decision_time=datetime(2026, 6, 4, 15, 46, tzinfo=timezone.utc),
+            account_equity=Decimal("100250"),
+            cash_balance=Decimal("50000"),
+            buying_power=Decimal("150000"),
+            net_exposure=Decimal("10000"),
+            gross_exposure=Decimal("15000"),
+            metadata_json={"window": "in"},
+        ),
+        SimpleNamespace(
+            portfolio_risk_snapshot_id=uuid.uuid4(),
+            decision_time=datetime(2026, 6, 5, 0, 1, tzinfo=timezone.utc),
+            account_equity=Decimal("100260"),
+            cash_balance=Decimal("50010"),
+            buying_power=Decimal("150010"),
+            net_exposure=Decimal("10010"),
+            gross_exposure=Decimal("15010"),
+            metadata_json={"window": "out"},
+        ),
+    ]
+    session.rows_by_type[DailyReflection] = [
+        SimpleNamespace(
+            trade_date=trade_date,
+            created_at=datetime(2026, 6, 4, 21, 0, tzinfo=timezone.utc),
+            metadata_json={"learning_factors_used": [{"factor_key": "lf-in"}]},
+        ),
+        SimpleNamespace(
+            trade_date=date(2026, 6, 5),
+            created_at=datetime(2026, 6, 5, 21, 0, tzinfo=timezone.utc),
+            metadata_json={"learning_factors_used": [{"factor_key": "lf-out"}]},
+        ),
+    ]
+    session.rows_by_type[RiskHedgeDecision] = [
+        SimpleNamespace(
+            ticker="QQQ",
+            action="adjust_hedge",
+            option_strategy_type="long_put",
+            rationale="protect gains",
+            hedge_cost=Decimal("80"),
+            protected_notional=Decimal("12000"),
+            metadata_json={"generated_hedge_action": {"protected_exposure_basis": "net_exposure"}},
+            created_at=datetime(2026, 6, 4, 19, 0, tzinfo=timezone.utc),
+        ),
+        SimpleNamespace(
+            ticker="SPY",
+            action="open_hedge",
+            option_strategy_type="long_put",
+            rationale="too late",
+            hedge_cost=Decimal("90"),
+            protected_notional=Decimal("13000"),
+            metadata_json={"generated_hedge_action": {"protected_exposure_basis": "gross_exposure"}},
+            created_at=datetime(2026, 6, 5, 0, 30, tzinfo=timezone.utc),
+        ),
+    ]
+    session.rows_by_type[CandidateScore] = [
+        SimpleNamespace(
+            ticker="AAPL",
+            strategy_id="gap_reclaim_v1",
+            strategy_version="v1",
+            candidate_score=Decimal("0.77"),
+            selection_source="scanner",
+            manual_request_id=None,
+            decision_time=datetime(2026, 6, 4, 15, 0, tzinfo=timezone.utc),
+            rejection_reason="risk_limit",
+        ),
+        SimpleNamespace(
+            ticker="MSFT",
+            strategy_id="gap_reclaim_v1",
+            strategy_version="v1",
+            candidate_score=Decimal("0.66"),
+            selection_source="scanner",
+            manual_request_id=None,
+            decision_time=datetime(2026, 6, 5, 0, 30, tzinfo=timezone.utc),
+            rejection_reason="too_late",
+        ),
+    ]
+    session.rows_by_type[ManualTickerRequest] = [
+        SimpleNamespace(
+            ticker="NVDA",
+            mode="review_only",
+            status="active",
+            latest_result_status="queued",
+            created_at=datetime(2026, 6, 4, 15, 30, tzinfo=timezone.utc),
+            last_evaluated_at=None,
+        ),
+        SimpleNamespace(
+            ticker="AMD",
+            mode="review_only",
+            status="active",
+            latest_result_status="queued",
+            created_at=datetime(2026, 6, 5, 0, 20, tzinfo=timezone.utc),
+            last_evaluated_at=None,
+        ),
+    ]
+    session.rows_by_type[TradingDecision] = [
+        SimpleNamespace(
+            ticker="AAPL",
+            decision="enter_long",
+            strategy_id="gap_reclaim_v1",
+            trade_identity="tactical_stock_trade",
+            instrument_type="stock",
+            selection_source="scanner",
+            confidence=Decimal("0.74"),
+            target_weight=Decimal("0.04"),
+            approved_weight=Decimal("0.04"),
+            key_drivers_json=["relative_strength"],
+            counterarguments_json=[],
+            invalidators_json=[],
+            metadata_json={},
+            decision_time=datetime(2026, 6, 4, 15, 31, tzinfo=timezone.utc),
+        ),
+        SimpleNamespace(
+            ticker="NVDA",
+            decision="no_trade",
+            strategy_id="gap_reclaim_v1",
+            trade_identity="watch_only",
+            instrument_type="watch",
+            selection_source="scanner",
+            confidence=Decimal("0.55"),
+            target_weight=Decimal("0"),
+            approved_weight=Decimal("0"),
+            key_drivers_json=[],
+            counterarguments_json=[],
+            invalidators_json=[],
+            metadata_json={},
+            decision_time=datetime(2026, 6, 4, 15, 32, tzinfo=timezone.utc),
+        ),
+        SimpleNamespace(
+            ticker="MSFT",
+            decision="enter_long",
+            strategy_id="gap_reclaim_v1",
+            trade_identity="tactical_stock_trade",
+            instrument_type="stock",
+            selection_source="scanner",
+            confidence=Decimal("0.71"),
+            target_weight=Decimal("0.03"),
+            approved_weight=Decimal("0.03"),
+            key_drivers_json=[],
+            counterarguments_json=[],
+            invalidators_json=[],
+            metadata_json={},
+            decision_time=datetime(2026, 6, 5, 0, 30, tzinfo=timezone.utc),
+        ),
+    ]
+    session.rows_by_type[NewsAlert] = [
+        SimpleNamespace(
+            ticker="AAPL",
+            alert_type="earnings",
+            severity="high",
+            sentiment="positive",
+            headline="In window",
+            summary="summary",
+            action_required=True,
+            published_at=datetime(2026, 6, 4, 15, 33, tzinfo=timezone.utc),
+            created_at=datetime(2026, 6, 4, 15, 34, tzinfo=timezone.utc),
+        ),
+        SimpleNamespace(
+            ticker="MSFT",
+            alert_type="earnings",
+            severity="high",
+            sentiment="positive",
+            headline="Out of window",
+            summary="summary",
+            action_required=True,
+            published_at=datetime(2026, 6, 5, 0, 33, tzinfo=timezone.utc),
+            created_at=datetime(2026, 6, 5, 0, 34, tzinfo=timezone.utc),
+        ),
+    ]
+    session.rows_by_type[IntradayRebalanceDecision] = [
+        SimpleNamespace(
+            ticker="AAPL",
+            action="exit",
+            status="approved",
+            reason_code="protect_gains",
+            confidence=Decimal("0.81"),
+            decision_time=datetime(2026, 6, 4, 15, 35, tzinfo=timezone.utc),
+        ),
+        SimpleNamespace(
+            ticker="MSFT",
+            action="exit",
+            status="approved",
+            reason_code="too_late",
+            confidence=Decimal("0.70"),
+            decision_time=datetime(2026, 6, 5, 0, 35, tzinfo=timezone.utc),
+        ),
+    ]
+    session.rows_by_type[PaperOrder] = [
+        SimpleNamespace(
+            ticker="AAPL",
+            action="buy",
+            quantity=Decimal("10"),
+            order_price=Decimal("200"),
+            status="filled",
+            trade_date=trade_date,
+            created_at=datetime(2026, 6, 4, 15, 36, tzinfo=timezone.utc),
+        ),
+        SimpleNamespace(
+            ticker="MSFT",
+            action="buy",
+            quantity=Decimal("5"),
+            order_price=Decimal("400"),
+            status="filled",
+            trade_date=date(2026, 6, 5),
+            created_at=datetime(2026, 6, 5, 0, 36, tzinfo=timezone.utc),
+        ),
+    ]
+    session.rows_by_type[PaperExecution] = [
+        SimpleNamespace(
+            ticker="AAPL",
+            quantity=Decimal("10"),
+            fill_price=Decimal("201"),
+            trade_date=trade_date,
+            executed_at=datetime(2026, 6, 4, 15, 37, tzinfo=timezone.utc),
+            net_cash_effect=Decimal("-2010"),
+        ),
+        SimpleNamespace(
+            ticker="MSFT",
+            quantity=Decimal("5"),
+            fill_price=Decimal("401"),
+            trade_date=date(2026, 6, 5),
+            executed_at=datetime(2026, 6, 5, 0, 37, tzinfo=timezone.utc),
+            net_cash_effect=Decimal("-2005"),
+        ),
+    ]
+    session.rows_by_type[RiskFactorExposure] = [
+        SimpleNamespace(
+            portfolio_risk_snapshot_id=risk_snapshot_id,
+            factor_type="sector",
+            factor_value="technology",
+            gross_exposure=Decimal("10000"),
+            net_exposure=Decimal("9000"),
+            metadata_json={},
+        ),
+        SimpleNamespace(
+            portfolio_risk_snapshot_id=uuid.uuid4(),
+            factor_type="sector",
+            factor_value="financials",
+            gross_exposure=Decimal("2000"),
+            net_exposure=Decimal("1000"),
+            metadata_json={},
+        ),
+    ]
+    session.rows_by_type[CandidateOutcomeEvaluation] = [
+        SimpleNamespace(
+            ticker="AAPL",
+            strategy_id="gap_reclaim_v1",
+            trade_identity="tactical_stock_trade",
+            evaluation_status="final",
+            candidate_return=Decimal("0.03"),
+            alpha=Decimal("0.02"),
+            benchmark_returns_json={"QQQ": 0.01},
+            decision_time=datetime(2026, 6, 4, 15, 38, tzinfo=timezone.utc),
+        ),
+        SimpleNamespace(
+            ticker="MSFT",
+            strategy_id="gap_reclaim_v1",
+            trade_identity="tactical_stock_trade",
+            evaluation_status="final",
+            candidate_return=Decimal("0.01"),
+            alpha=Decimal("0.00"),
+            benchmark_returns_json={"QQQ": 0.01},
+            decision_time=datetime(2026, 6, 5, 0, 38, tzinfo=timezone.utc),
+        ),
+    ]
+    session.rows_by_type[OptionStrategyDecision] = [
+        SimpleNamespace(
+            ticker="AAPL",
+            option_strategy_type="long_call",
+            status="ready",
+            decision_action="open_option_strategy",
+            created_at=datetime(2026, 6, 4, 15, 39, tzinfo=timezone.utc),
+        ),
+        SimpleNamespace(
+            ticker="MSFT",
+            option_strategy_type="long_call",
+            status="ready",
+            decision_action="open_option_strategy",
+            created_at=datetime(2026, 6, 5, 0, 39, tzinfo=timezone.utc),
+        ),
+    ]
+    session.rows_by_type[PaperOptionPositionModel] = [
+        SimpleNamespace(
+            ticker="AAPL",
+            option_strategy_type="long_call",
+            quantity=1,
+            status="open",
+            opened_at=datetime(2026, 6, 4, 15, 40, tzinfo=timezone.utc),
+        ),
+        SimpleNamespace(
+            ticker="MSFT",
+            option_strategy_type="long_call",
+            quantity=1,
+            status="open",
+            opened_at=datetime(2026, 6, 5, 0, 40, tzinfo=timezone.utc),
+        ),
+    ]
+    session.rows_by_type[OptionRiskSnapshot] = [
+        SimpleNamespace(
+            ticker="AAPL",
+            option_strategy_type="long_call",
+            risk_status="approved",
+            reason_code="within_limits",
+            created_at=datetime(2026, 6, 4, 15, 41, tzinfo=timezone.utc),
+        ),
+        SimpleNamespace(
+            ticker="MSFT",
+            option_strategy_type="long_call",
+            risk_status="approved",
+            reason_code="within_limits",
+            created_at=datetime(2026, 6, 5, 0, 41, tzinfo=timezone.utc),
+        ),
+    ]
+
+    payload = repository.load_reflection_inputs(trade_date=trade_date, window=window)
+
+    assert payload["portfolio_outcome"]["snapshot_time"] == "2026-06-04T15:45:00+00:00"
+    assert [row["ticker"] for row in payload["strategy_candidates"]] == ["AAPL"]
+    assert [row["ticker"] for row in payload["manual_ticker_requests"]] == ["NVDA"]
+    assert [row["ticker"] for row in payload["trading_decisions"]] == ["AAPL"]
+    assert [row["ticker"] for row in payload["rejected_decisions"]] == ["NVDA"]
+    assert [row["ticker"] for row in payload["intraday_news_alerts"]] == ["AAPL"]
+    assert [row["ticker"] for row in payload["intraday_rebalance_decisions"]] == ["AAPL"]
+    assert [row["ticker"] for row in payload["paper_orders"]] == ["AAPL"]
+    assert [row["ticker"] for row in payload["paper_executions"]] == ["AAPL"]
+    assert [row["factor_value"] for row in payload["risk_factor_exposures"]] == ["technology"]
+    assert [row["ticker"] for row in payload["candidate_outcome_evaluations"]] == ["AAPL"]
+    assert [row["ticker"] for row in payload["paper_option_decisions"]] == ["AAPL"]
+    assert [row["ticker"] for row in payload["paper_option_positions"]] == ["AAPL"]
+    assert [row["ticker"] for row in payload["option_risk_snapshots"]] == ["AAPL"]
+    assert [row["ticker"] for row in payload["risk_hedge_overlays"]] == ["QQQ"]
+    assert payload["learning_factors_used"] == ({"factor_key": "lf-in"},)
+
+
+def test_sqlalchemy_repository_load_reflection_inputs_includes_late_local_day_rows():
+    session = _FakeSession()
+    repository = SqlAlchemyTradingRepository(session)
+    trade_date = date(2026, 6, 4)
+    window = local_day_bounds_utc(trade_date, "America/New_York")
+    risk_snapshot_id = uuid.uuid4()
+    late_row_time = datetime(2026, 6, 5, 1, 30, tzinfo=timezone.utc)
+    session.rows_by_type[PortfolioSnapshotModel] = [
+        SimpleNamespace(
+            snapshot_time=late_row_time,
+            cash_balance=Decimal("50000"),
+            account_equity=Decimal("100250"),
+            net_liquidation_value=Decimal("100250"),
+            buying_power=Decimal("150000"),
+            day_pnl=Decimal("250"),
+            realized_pnl=Decimal("125"),
+            unrealized_pnl=Decimal("125"),
+            metadata_json={},
+        )
+    ]
+    session.rows_by_type[PortfolioRiskSnapshot] = [
+        SimpleNamespace(
+            portfolio_risk_snapshot_id=risk_snapshot_id,
+            decision_time=late_row_time,
+            account_equity=Decimal("100250"),
+            cash_balance=Decimal("50000"),
+            buying_power=Decimal("150000"),
+            net_exposure=Decimal("10000"),
+            gross_exposure=Decimal("15000"),
+            metadata_json={},
+        )
+    ]
+    session.rows_by_type[TradingDecision] = [
+        SimpleNamespace(
+            ticker="AAPL",
+            decision="enter_long",
+            strategy_id="gap_reclaim_v1",
+            trade_identity="tactical_stock_trade",
+            instrument_type="stock",
+            selection_source="scanner",
+            confidence=Decimal("0.74"),
+            target_weight=Decimal("0.04"),
+            approved_weight=Decimal("0.04"),
+            key_drivers_json=["relative_strength"],
+            counterarguments_json=[],
+            invalidators_json=[],
+            metadata_json={},
+            decision_time=late_row_time,
+        )
+    ]
+
+    payload = repository.load_reflection_inputs(trade_date=trade_date, window=window)
+
+    assert payload["portfolio_outcome"] is not None
+    assert [row["ticker"] for row in payload["trading_decisions"]] == ["AAPL"]
+    assert payload["portfolio_snapshots"][0]["snapshot_time"] == late_row_time.isoformat()

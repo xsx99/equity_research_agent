@@ -5,6 +5,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 
+from src.core import config as app_config
 from src.db.models.trading import (
     OptionRiskSnapshot,
     PortfolioRiskIntent,
@@ -26,6 +27,11 @@ from src.trading.repositories._base_records import (
     _latest_portfolio_risk_snapshot_id,
     _portfolio_risk_intent_record,
 )
+from src.trading.runtime.trade_day import local_day_bounds_utc
+
+
+def _trade_day_window(trade_date: date) -> tuple[object, object]:
+    return local_day_bounds_utc(trade_date, app_config.SCHEDULER_TIMEZONE)
 
 
 class RiskRepositoryMixin:
@@ -101,11 +107,15 @@ class RiskRepositoryMixin:
         row.metadata_json = dict(intent.metadata_json)
         self.session.flush()
     def load_portfolio_risk_intents(self, *, trade_date: date) -> tuple[PortfolioRiskIntentRecord, ...]:
-        rows = [
-            row
-            for row in self.session.query(PortfolioRiskIntent).all()
-            if row.decision_time.date() == trade_date
-        ]
+        start_utc, end_utc = _trade_day_window(trade_date)
+        rows = (
+            self.session.query(PortfolioRiskIntent)
+            .filter(
+                PortfolioRiskIntent.decision_time >= start_utc,
+                PortfolioRiskIntent.decision_time < end_utc,
+            )
+            .all()
+        )
         rows.sort(key=lambda row: row.decision_time)
         return tuple(_portfolio_risk_intent_record(row) for row in rows)
     def save_risk_factor_exposures(
