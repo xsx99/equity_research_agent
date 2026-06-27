@@ -491,7 +491,10 @@ def test_intraday_rebalance_attaches_sector_cluster_generated_hedge_payload(tmp_
     assert repository.risk_decisions[0].generated_hedge_action["risk_source"] == "sector_event_cluster"
 
 
-def test_intraday_rebalance_executes_generated_risk_hedge_overlay_with_reduce(tmp_path):
+def test_intraday_rebalance_executes_generated_risk_hedge_overlay_with_reduce(tmp_path, monkeypatch):
+    monkeypatch.delenv("ALPACA_API_KEY", raising=False)
+    monkeypatch.delenv("ALPACA_SECRET_KEY", raising=False)
+    monkeypatch.delenv("ALPACA_API_SECRET", raising=False)
     repository = InMemoryTradingRepository()
     registry = _write_prompt(tmp_path)
     now = datetime(2026, 6, 2, 15, 30, tzinfo=timezone.utc)
@@ -561,6 +564,7 @@ def test_intraday_rebalance_executes_generated_risk_hedge_overlay_with_reduce(tm
         "orders_submitted": 1,
         "option_orders_submitted": 1,
         "orders_skipped": 0,
+        "orders_failed": 0,
         "skip_reasons": {},
     }
     assert len(repository.paper_orders) == 1
@@ -731,7 +735,10 @@ def test_intraday_rebalance_can_emit_roll_option_strategy_for_event_risk(tmp_pat
     assert result.decisions[0].reason_code == "event_risk_blocked"
 
 
-def test_intraday_rebalance_pipeline_executes_close_option_strategy_for_existing_position(tmp_path):
+def test_intraday_rebalance_pipeline_executes_close_option_strategy_for_existing_position(tmp_path, monkeypatch):
+    monkeypatch.delenv("ALPACA_API_KEY", raising=False)
+    monkeypatch.delenv("ALPACA_SECRET_KEY", raising=False)
+    monkeypatch.delenv("ALPACA_API_SECRET", raising=False)
     repository = InMemoryTradingRepository()
     registry = _write_prompt(tmp_path)
     now = datetime(2026, 6, 2, 15, 30, tzinfo=timezone.utc)
@@ -852,6 +859,7 @@ def test_intraday_rebalance_pipeline_executes_close_option_strategy_for_existing
         "orders_submitted": 0,
         "option_orders_submitted": 1,
         "orders_skipped": 0,
+        "orders_failed": 0,
         "skip_reasons": {},
     }
     assert len(repository.paper_option_orders) == 1

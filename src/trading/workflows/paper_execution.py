@@ -350,7 +350,6 @@ class PaperExecutionWorkflow:
             return self._next_expression_decision(trading_decision), active_risk_decision
         order = self.option_broker.submit_order(order_request)
         self.repository.save_paper_option_order(order)
-        option_orders.append(order)
         if order.status == "rejected":
             rejection_reason = str(order.rejection_reason or "").strip()
             if rejection_reason == REASON_MISSING_CREDENTIALS:
@@ -374,6 +373,7 @@ class PaperExecutionWorkflow:
                 attempts=attempts,
             )
             return self._next_expression_decision(trading_decision), active_risk_decision
+        option_orders.append(order)
         execution = self.option_broker.find_execution_by_order_id(order.paper_option_order_id)
         if execution is None:
             self._save_execution_attempt(

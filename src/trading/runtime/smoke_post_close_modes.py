@@ -5,10 +5,12 @@ from datetime import timedelta
 from typing import Any
 
 from src.agents.prompt_registry import PromptRegistry
+from src.core import config as app_config
 from src.trading.post_close.reflection import ReflectionPipeline, ReflectionPipelineRequest
 from src.trading.post_close.strategy_evolution import StrategyEvolutionPipeline, StrategyEvolutionRequest
 from src.trading.repositories.in_memory import InMemoryTradingRepository
 
+from .trade_day import trade_date_for
 from .smoke_support import (
     _fixed_now,
     _reflection_agent_runner,
@@ -29,6 +31,7 @@ def run_strategy_evolution_once() -> dict[str, Any]:
 
 def _run_reflection_fixture() -> dict[str, Any]:
     decision_time = _fixed_now() + timedelta(hours=8)
+    trade_date = trade_date_for(decision_time, app_config.SCHEDULER_TIMEZONE)
     repository = InMemoryTradingRepository()
     result = ReflectionPipeline(
         repository=repository,
@@ -37,7 +40,7 @@ def _run_reflection_fixture() -> dict[str, Any]:
         agent_runner=_reflection_agent_runner,
     ).run(
         request=ReflectionPipelineRequest(
-            trade_date=decision_time.date(),
+            trade_date=trade_date,
             decision_time=decision_time,
             available_for_decision_at=decision_time,
             portfolio_outcome={"realized_pnl": 125.0, "unrealized_pnl": -10.0},
@@ -58,6 +61,7 @@ def _run_reflection_fixture() -> dict[str, Any]:
 
 def _run_strategy_evolution_fixture() -> dict[str, Any]:
     decision_time = _fixed_now() + timedelta(hours=8)
+    trade_date = trade_date_for(decision_time, app_config.SCHEDULER_TIMEZONE)
     repository = InMemoryTradingRepository()
     _seed_strategy_definitions(repository)
     reflection_result = ReflectionPipeline(
@@ -67,7 +71,7 @@ def _run_strategy_evolution_fixture() -> dict[str, Any]:
         agent_runner=_reflection_agent_runner,
     ).run(
         request=ReflectionPipelineRequest(
-            trade_date=decision_time.date(),
+            trade_date=trade_date,
             decision_time=decision_time,
             available_for_decision_at=decision_time,
             portfolio_outcome={"realized_pnl": 125.0, "unrealized_pnl": -10.0},
@@ -82,7 +86,7 @@ def _run_strategy_evolution_fixture() -> dict[str, Any]:
         agent_runner=_strategy_evolution_agent_runner,
     ).run(
         request=StrategyEvolutionRequest(
-            trade_date=decision_time.date(),
+            trade_date=trade_date,
             decision_time=decision_time,
             available_for_decision_at=decision_time,
             daily_reflections=reflection_result.daily_reflections,

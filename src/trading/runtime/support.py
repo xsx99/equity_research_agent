@@ -105,19 +105,29 @@ def build_execution_report(
 def summarize_execution_attempts(
     attempts: tuple[object, ...] | list[object],
 ) -> dict[str, Any]:
+    submitted_orders = 0
+    submitted_option_orders = 0
     skipped = 0
     failed = 0
     skip_reasons: dict[str, int] = {}
     for attempt in attempts:
         outcome = str(getattr(attempt, "outcome", "") or "")
         reason_code = str(getattr(attempt, "reason_code", "") or "")
-        if outcome == "skipped":
+        instrument_type = str(getattr(attempt, "instrument_type", "") or "")
+        if outcome == "submitted":
+            if instrument_type == "option":
+                submitted_option_orders += 1
+            else:
+                submitted_orders += 1
+        elif outcome == "skipped":
             skipped += 1
             if reason_code:
                 skip_reasons[reason_code] = skip_reasons.get(reason_code, 0) + 1
         elif outcome == "failed":
             failed += 1
     return {
+        "orders_submitted": submitted_orders,
+        "option_orders_submitted": submitted_option_orders,
         "orders_skipped": skipped,
         "orders_failed": failed,
         "skip_reasons": skip_reasons,

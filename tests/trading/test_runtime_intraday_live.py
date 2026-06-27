@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -14,6 +15,7 @@ from src.trading.runtime.intraday_refresh import (
     run_live_intraday_refresh_once,
 )
 from src.trading.runtime.intraday_refresh_dependencies import build_live_intraday_refresh_dependencies
+from src.trading.runtime import intraday_refresh_dependencies as intraday_deps
 from src.trading.runtime.lookahead_risk import LookaheadRiskWorkflowHelper
 from src.trading.signals import SignalSnapshotResult
 from src.trading.signals.sources import EventNewsItemRecord, SourceRecord
@@ -608,6 +610,95 @@ def test_live_intraday_refresh_runtime_reports_option_orders_separately_when_ena
         "orders_failed": 0,
         "skip_reasons": {},
     }
+
+
+def test_repository_intraday_scope_loader_uses_scheduler_local_trade_date(monkeypatch):
+    monkeypatch.setattr(intraday_deps.app_config, "SCHEDULER_TIMEZONE", "America/New_York")
+
+    class _Repository:
+        def __init__(self) -> None:
+            self.trade_dates: list[date] = []
+
+        def load_intraday_scope(self, *, trade_date: date) -> tuple[str, ...]:
+            self.trade_dates.append(trade_date)
+            return ("AAPL",)
+
+    repository = _Repository()
+    loader = intraday_deps._RepositoryIntradayScopeLoader(repository)
+
+    scope = loader.load_scope(decision_time=datetime(2026, 6, 5, 1, 30, tzinfo=timezone.utc))
+
+    assert scope == ("AAPL",)
+    assert repository.trade_dates == [date(2026, 6, 4)]
+
+
+def test_repository_intraday_dependency_loaders_use_scheduler_local_trade_date(monkeypatch):
+    monkeypatch.setattr(intraday_deps.app_config, "SCHEDULER_TIMEZONE", "America/New_York")
+
+    class _Repository:
+        def __init__(self) -> None:
+            self.baseline_dates: list[date] = []
+            self.previous_dates: list[date] = []
+            self.request_context_dates: list[date] = []
+            self.news_dates: list[date] = []
+            self.candidate_dates: list[date] = []
+            self.macro_dates: list[date] = []
+
+        def load_latest_signal_snapshots_for_tickers(self, *, tickers: tuple[str, ...], snapshot_type: str, trade_date: date):
+            del tickers, snapshot_type
+            self.baseline_dates.append(trade_date)
+            return {}
+
+        def load_latest_intraday_signal_snapshots_for_tickers(self, *, tickers: tuple[str, ...], trade_date: date):
+            del tickers
+            self.previous_dates.append(trade_date)
+            return {}
+
+        def load_intraday_request_contexts(self, *, tickers: tuple[str, ...], trade_date: date):
+            del tickers
+            self.request_context_dates.append(trade_date)
+            return {}
+
+        def load_existing_news_alert_dedupe_keys(self, *, tickers: tuple[str, ...], trade_date: date):
+            del tickers
+            self.news_dates.append(trade_date)
+            return frozenset()
+
+        def load_intraday_candidate_context(self, *, tickers: tuple[str, ...], trade_date: date):
+            del tickers
+            self.candidate_dates.append(trade_date)
+            return {}
+
+        def load_latest_macro_snapshot(self, *, trade_date: date, decision_time: datetime):
+            del decision_time
+            self.macro_dates.append(trade_date)
+            return None
+
+    repository = _Repository()
+    decision_time = datetime(2026, 6, 5, 1, 30, tzinfo=timezone.utc)
+
+    intraday_deps._RepositoryBaselineLoader(repository).load_for_tickers(
+        tickers=("AAPL",),
+        decision_time=decision_time,
+    )
+    intraday_deps._RepositoryPreviousIntradaySnapshotLoader(repository).load_for_tickers(
+        tickers=("AAPL",),
+        decision_time=decision_time,
+    )
+    intraday_deps._RepositoryIntradayRequestContextLoader(repository).load_for_tickers(
+        tickers=("AAPL",),
+        decision_time=decision_time,
+    )
+    intraday_deps._RepositoryExistingNewsDedupeKeyLoader(repository)(("AAPL",), decision_time)
+    intraday_deps._RepositoryIntradayCandidateContextLoader(repository)(("AAPL",), decision_time)
+    intraday_deps._RepositoryMacroSnapshotLoader(repository)(decision_time)
+
+    assert repository.baseline_dates == [date(2026, 6, 4)]
+    assert repository.previous_dates == [date(2026, 6, 4)]
+    assert repository.request_context_dates == [date(2026, 6, 4)]
+    assert repository.news_dates == [date(2026, 6, 4)]
+    assert repository.candidate_dates == [date(2026, 6, 4)]
+    assert repository.macro_dates == [date(2026, 6, 4)]
 
 
 def test_live_intraday_refresh_runtime_passes_portfolio_risk_intent_into_rebalance_pipeline():

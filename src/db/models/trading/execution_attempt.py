@@ -22,6 +22,7 @@ _EXECUTION_ATTEMPT_REASON_CODES = (
     "no_fill",
     "missing_credentials",
     "broker_error",
+    "no_action_required",
 )
 
 

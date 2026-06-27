@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from types import SimpleNamespace
 
@@ -94,8 +94,10 @@ def test_live_strategy_evolution_request_loader_returns_skipped_when_reflection_
 @dataclass(frozen=True)
 class _RequestLoader:
     result: StrategyEvolutionLoadResult
+    calls: list[tuple[date, datetime]] = field(default_factory=list)
 
     def load(self, *, trade_date: date, decision_time: datetime) -> StrategyEvolutionLoadResult:
+        self.calls.append((trade_date, decision_time))
         assert trade_date == date(2026, 6, 4)
         assert decision_time.tzinfo is not None
         return self.result
@@ -162,6 +164,33 @@ def test_live_strategy_evolution_runtime_runs_pipeline_when_request_is_ready():
     assert result["summary"]["strategy_definition_count"] == 1
     assert result["summary"]["strategy_evaluation_result_count"] == 1
     assert result["summary"]["lifecycle_update_count"] == 1
+
+
+def test_live_strategy_evolution_runtime_uses_scheduler_local_trade_date(monkeypatch):
+    monkeypatch.setattr("src.trading.runtime.strategy_evolution.app_config.SCHEDULER_TIMEZONE", "America/New_York")
+    request = StrategyEvolutionRequest(
+        trade_date=date(2026, 6, 4),
+        decision_time=datetime(2026, 6, 5, 1, 30, tzinfo=timezone.utc),
+        available_for_decision_at=datetime(2026, 6, 5, 1, 30, tzinfo=timezone.utc),
+        daily_reflections=(SimpleNamespace(daily_reflection_id="reflection-1", strategy_proposal_hints=()),),
+    )
+    loader = _RequestLoader(StrategyEvolutionLoadResult(status="ready", request=request))
+    runtime = LiveStrategyEvolutionRuntime(
+        dependencies=LiveStrategyEvolutionDependencies(
+            request_loader=loader,
+            strategy_evolution_pipeline=_StrategyEvolutionPipeline(),
+        ),
+        now=lambda: datetime(2026, 6, 5, 1, 30, tzinfo=timezone.utc),
+    )
+
+    runtime.run()
+
+    assert loader.calls == [
+        (
+            date(2026, 6, 4),
+            datetime(2026, 6, 5, 1, 30, tzinfo=timezone.utc),
+        )
+    ]
 
 
 def test_run_live_strategy_evolution_once_builds_default_dependencies_when_not_injected(monkeypatch):

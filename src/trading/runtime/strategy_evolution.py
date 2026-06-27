@@ -7,6 +7,7 @@ from typing import Any, Callable
 
 from src.core import config as app_config
 from src.trading.post_close.strategy_evolution import StrategyEvolutionPipeline, StrategyEvolutionRequest
+from src.trading.runtime.trade_day import trade_date_for
 from src.trading.runtime.support import build_runtime_report
 
 
@@ -64,8 +65,9 @@ class LiveStrategyEvolutionRuntime:
 
     def run(self) -> dict[str, Any]:
         decision_time = self.now()
+        trade_date = trade_date_for(decision_time, app_config.SCHEDULER_TIMEZONE)
         load_result = self.dependencies.request_loader.load(
-            trade_date=decision_time.date(),
+            trade_date=trade_date,
             decision_time=decision_time,
         )
         if load_result.status != "ready" or load_result.request is None:

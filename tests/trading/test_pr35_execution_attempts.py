@@ -12,6 +12,7 @@ from src.trading.brokers.paper_stock import PaperExecutionRecord, PaperOrderReco
 from src.trading.execution.attempts import (
     REASON_BROKER_UNAVAILABLE,
     REASON_BROKER_ERROR,
+    REASON_NO_ACTION_REQUIRED,
     REASON_NOT_AUTHORIZED,
     REASON_SUBMITTED,
     ExecutionAttemptRecord,
@@ -490,7 +491,10 @@ def test_build_execution_report_includes_skipped_failed_and_reason_breakdown():
     }
 
 
-def test_paper_option_broker_falls_back_to_local_mode_when_only_base_url_is_configured():
+def test_paper_option_broker_falls_back_to_local_mode_when_only_base_url_is_configured(monkeypatch):
+    monkeypatch.delenv("ALPACA_API_KEY", raising=False)
+    monkeypatch.delenv("ALPACA_SECRET_KEY", raising=False)
+    monkeypatch.delenv("ALPACA_API_SECRET", raising=False)
     broker = PaperOptionBroker(
         trading_base_url="https://paper-api.alpaca.markets",
         now=lambda: datetime(2026, 6, 26, 15, 30, tzinfo=timezone.utc),
@@ -559,7 +563,56 @@ def test_intraday_rebalance_records_broker_unavailable_skip_and_summary(tmp_path
         "orders_submitted": 0,
         "option_orders_submitted": 0,
         "orders_skipped": 1,
+        "orders_failed": 0,
         "skip_reasons": {"broker_unavailable": 1},
+    }
+
+
+def test_intraday_rebalance_records_intentional_hold_as_no_action_required(tmp_path):
+    repository = InMemoryTradingRepository()
+    registry = _write_intraday_prompt(tmp_path)
+    ledger = PortfolioLedger(starting_cash_balance=100000.0)
+    pipeline = IntradayRebalancePipeline(
+        repository=repository,
+        prompt_registry=registry,
+        model_name="gpt-5-mini",
+        agent_runner=lambda prompt, model: {
+            "content": {
+                "ticker": "AAPL",
+                "action": "hold",
+                "thesis": "No change is warranted intraday.",
+                "confidence": 0.62,
+                "target_weight": 0.05,
+                "max_loss_pct": 0.02,
+                "urgency": "medium",
+                "rationale": ["stay_with_plan"],
+                "risk_checks": ["liquidity_ok"],
+                "schema_version": "v1",
+                "generated_at": "2026-06-26T15:30:00+00:00",
+            }
+        },
+        broker=_FilledStockBroker(),
+    )
+
+    result = pipeline.run(
+        rebalance_requests=(_intraday_request(),),
+        portfolio_context=ledger.build_portfolio_context(as_of=datetime(2026, 6, 26, 15, 30, tzinfo=timezone.utc)),
+        risk_appetite="balanced",
+        trade_date=datetime(2026, 6, 26, 15, 30, tzinfo=timezone.utc),
+        execute_approved=True,
+    )
+
+    attempts = repository.list_execution_attempts()
+    assert len(attempts) == 1
+    assert attempts[0].phase == "intraday"
+    assert attempts[0].reason_code == REASON_NO_ACTION_REQUIRED
+    assert attempts[0].outcome == "skipped"
+    assert result.execution_summary == {
+        "orders_submitted": 0,
+        "option_orders_submitted": 0,
+        "orders_skipped": 1,
+        "orders_failed": 0,
+        "skip_reasons": {"no_action_required": 1},
     }
 
 
@@ -603,7 +656,9 @@ def test_paper_execution_workflow_records_failed_option_attempt_on_broker_error(
         trade_date=datetime(2026, 6, 26, 15, 30, tzinfo=timezone.utc),
     )
 
-    assert len(result.paper_option_orders) == 1
+    assert result.paper_option_orders == ()
+    assert len(repository.paper_option_orders) == 1
+    assert repository.paper_option_orders[0].status == "rejected"
     attempts = repository.list_execution_attempts()
     assert len(attempts) == 1
     assert attempts[0].reason_code == REASON_BROKER_ERROR

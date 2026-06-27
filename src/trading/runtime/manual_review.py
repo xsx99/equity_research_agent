@@ -153,12 +153,21 @@ class LiveManualReviewRuntime:
         )
         submitted_orders = tuple(getattr(result, "paper_orders", ()))
         submitted_option_orders = tuple(getattr(result, "paper_option_orders", ()))
-        attempt_summary = summarize_execution_attempts(tuple(getattr(result, "execution_attempts", ())))
+        attempts = tuple(getattr(result, "execution_attempts", ()))
+        attempt_summary = summarize_execution_attempts(attempts)
         return ManualReviewExecutionResult(
             report=build_execution_report(
                 mode="execute",
-                orders_submitted=len(submitted_orders),
-                option_orders_submitted=len(submitted_option_orders),
+                orders_submitted=(
+                    int(attempt_summary["orders_submitted"])
+                    if attempts
+                    else len(submitted_orders)
+                ),
+                option_orders_submitted=(
+                    int(attempt_summary["option_orders_submitted"])
+                    if attempts
+                    else len(submitted_option_orders)
+                ),
                 orders_skipped=int(attempt_summary["orders_skipped"]),
                 orders_failed=int(attempt_summary["orders_failed"]),
                 skip_reasons=dict(attempt_summary["skip_reasons"]),

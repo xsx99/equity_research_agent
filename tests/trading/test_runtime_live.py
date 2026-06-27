@@ -32,6 +32,7 @@ from src.trading.runtime.support import (
     build_runtime_report,
     seed_initial_strategy_definitions,
 )
+from src.trading.execution.attempts import ExecutionAttemptRecord
 from src.trading.strategies.definitions import load_all_trading_definitions
 from src.trading.strategies.matching import StrategyDefinitionRecord
 
@@ -290,6 +291,45 @@ def test_live_preopen_runtime_reports_option_orders_separately_when_enabled():
         "option_orders_submitted": 1,
         "orders_skipped": 0,
         "orders_failed": 0,
+        "skip_reasons": {},
+    }
+
+
+def test_live_preopen_runtime_counts_failed_option_attempts_from_execution_attempts():
+    runtime, recorder = _build_runtime(
+        execute_paper_orders=True,
+        execute_paper_option_orders=True,
+        execution_result=SimpleNamespace(
+            paper_orders=(),
+            paper_option_orders=(SimpleNamespace(ticker="AAPL", status="rejected"),),
+            execution_attempts=(
+                ExecutionAttemptRecord.create(
+                    trading_decision_id="decision-1",
+                    risk_decision_id="risk-1",
+                    paper_order_id=None,
+                    paper_option_order_id="option-order-1",
+                    ticker="AAPL",
+                    strategy_id="strong_theme_catalyst_continuation_v1",
+                    trade_identity="tactical_option_trade",
+                    instrument_type="option",
+                    phase="preopen",
+                    action="open_option_strategy",
+                    outcome="failed",
+                    reason_code="broker_error",
+                ),
+            ),
+        ),
+    )
+
+    result = runtime.run()
+
+    assert recorder.calls[-1] == "paper_execution"
+    assert result["execution"] == {
+        "mode": "execute",
+        "orders_submitted": 0,
+        "option_orders_submitted": 0,
+        "orders_skipped": 0,
+        "orders_failed": 1,
         "skip_reasons": {},
     }
 

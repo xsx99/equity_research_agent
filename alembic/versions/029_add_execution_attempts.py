@@ -55,7 +55,8 @@ def upgrade() -> None:
             "reason_code IN ("
             "'submitted', 'not_executable_action', 'instrument_mismatch', 'not_authorized', "
             "'risk_missing', 'risk_rejected', 'dry_run', 'broker_unavailable', "
-            "'order_rejected', 'no_fill', 'missing_credentials', 'broker_error'"
+            "'order_rejected', 'no_fill', 'missing_credentials', 'broker_error', "
+            "'no_action_required'"
             ")",
             name="ck_execution_attempts_reason_code",
         ),

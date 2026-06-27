@@ -19,11 +19,13 @@ from src.agents.trading_schemas import (
 from src.trading.execution.attempts import (
     ExecutionAttemptRecord,
     REASON_BROKER_UNAVAILABLE,
+    REASON_NO_ACTION_REQUIRED,
     REASON_NOT_EXECUTABLE_ACTION,
     REASON_RISK_MISSING,
     REASON_RISK_REJECTED,
 )
 from src.trading.risk import PortfolioRiskIntentRecord, PositionRiskActionRecord, RiskConfigResolver, RiskDecisionRecord
+from src.trading.runtime.support import summarize_execution_attempts
 from src.trading.workflows.paper_execution import PaperExecutionWorkflow
 from src.trading.workflows.trading_decision import TradingDecisionRecord
 
@@ -253,12 +255,9 @@ class IntradayRebalancePipeline:
                 execution_decisions.append(execution_decision)
                 execution_risk_decisions.append(risk_decision)
 
-        execution_summary: dict[str, Any] = {
-            "orders_submitted": 0,
-            "option_orders_submitted": 0,
-            "orders_skipped": len([attempt for attempt in execution_attempts if attempt.outcome == "skipped"]),
-            "skip_reasons": _reason_counts(execution_attempts, outcome="skipped"),
-        }
+        execution_summary = _execution_summary(
+            attempts=execution_attempts,
+        )
         if execute_approved and self.broker is not None and execution_decisions:
             execution_result = PaperExecutionWorkflow(
                 repository=self.repository,
@@ -270,13 +269,13 @@ class IntradayRebalancePipeline:
                 trade_date=trade_date or rebalance_requests[0].decision_time,
                 phase="intraday",
             )
-            execution_attempts.extend(tuple(getattr(execution_result, "execution_attempts", ())))
-            execution_summary = {
-                "orders_submitted": len(tuple(getattr(execution_result, "paper_orders", ()))),
-                "option_orders_submitted": len(tuple(getattr(execution_result, "paper_option_orders", ()))),
-                "orders_skipped": len([attempt for attempt in execution_attempts if attempt.outcome == "skipped"]),
-                "skip_reasons": _reason_counts(execution_attempts, outcome="skipped"),
-            }
+            workflow_attempts = tuple(getattr(execution_result, "execution_attempts", ()))
+            execution_attempts.extend(workflow_attempts)
+            execution_summary = _execution_summary(
+                attempts=execution_attempts,
+                fallback_orders=tuple(getattr(execution_result, "paper_orders", ())),
+                fallback_option_orders=tuple(getattr(execution_result, "paper_option_orders", ())),
+            )
 
         return IntradayRebalancePipelineResult(
             decisions=tuple(decisions),
@@ -512,6 +511,8 @@ class IntradayRebalancePipeline:
         if not execute_approved:
             return None
         if not self._requires_execution_risk_decision(request=request, action=decision.action):
+            if decision.action == "hold" and decision.status == "approved":
+                return REASON_NO_ACTION_REQUIRED
             return REASON_NOT_EXECUTABLE_ACTION
         if decision.status != "approved":
             return REASON_RISK_REJECTED
@@ -562,15 +563,29 @@ def _repair_prompt(rendered_text: str, validation_error: str) -> str:
         f"{validation_error}\n\n"
         "Return only one corrected JSON object with no markdown."
     )
-
-
-def _reason_counts(attempts: list[ExecutionAttemptRecord], *, outcome: str) -> dict[str, int]:
-    counts: dict[str, int] = {}
-    for attempt in attempts:
-        if attempt.outcome != outcome:
-            continue
-        counts[attempt.reason_code] = counts.get(attempt.reason_code, 0) + 1
-    return counts
+def _execution_summary(
+    *,
+    attempts: list[ExecutionAttemptRecord],
+    fallback_orders: tuple[object, ...] = (),
+    fallback_option_orders: tuple[object, ...] = (),
+) -> dict[str, Any]:
+    attempt_summary = summarize_execution_attempts(tuple(attempts))
+    use_attempt_counts = bool(attempts)
+    return {
+        "orders_submitted": (
+            int(attempt_summary["orders_submitted"])
+            if use_attempt_counts
+            else len(fallback_orders)
+        ),
+        "option_orders_submitted": (
+            int(attempt_summary["option_orders_submitted"])
+            if use_attempt_counts
+            else len(fallback_option_orders)
+        ),
+        "orders_skipped": int(attempt_summary["orders_skipped"]),
+        "orders_failed": int(attempt_summary["orders_failed"]),
+        "skip_reasons": dict(attempt_summary["skip_reasons"]),
+    }
 
 
 def _matching_planner_position_action(

@@ -18,6 +18,7 @@ REASON_ORDER_REJECTED = "order_rejected"
 REASON_NO_FILL = "no_fill"
 REASON_MISSING_CREDENTIALS = "missing_credentials"
 REASON_BROKER_ERROR = "broker_error"
+REASON_NO_ACTION_REQUIRED = "no_action_required"
 
 ALL_REASON_CODES = frozenset(
     {
@@ -33,6 +34,7 @@ ALL_REASON_CODES = frozenset(
         REASON_NO_FILL,
         REASON_MISSING_CREDENTIALS,
         REASON_BROKER_ERROR,
+        REASON_NO_ACTION_REQUIRED,
     }
 )
 

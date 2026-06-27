@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Callable
 
 from src.core import config as app_config
@@ -10,6 +10,7 @@ from src.trading.events import CalendarEventPipeline, PortfolioEventRiskAssessme
 from src.trading.intraday.news_alerts import NewsAlertService
 from src.trading.intraday.rebalance import IntradayRebalancePipeline
 from src.trading.macro import MacroSnapshotPipeline
+from src.trading.runtime.trade_day import trade_date_for
 
 
 @dataclass(frozen=True)
@@ -91,14 +92,8 @@ def build_live_intraday_refresh_dependencies(session: Any | None = None) -> Live
             option_broker=option_broker,
         ),
         trading_repository=trading_repository,
-        existing_news_dedupe_key_loader=lambda tickers, decision_time: trading_repository.load_existing_news_alert_dedupe_keys(
-            tickers=tickers,
-            trade_date=decision_time.date(),
-        ),
-        candidate_context_loader=lambda tickers, decision_time: trading_repository.load_intraday_candidate_context(
-            tickers=tickers,
-            trade_date=decision_time.date(),
-        ),
+        existing_news_dedupe_key_loader=_RepositoryExistingNewsDedupeKeyLoader(trading_repository),
+        candidate_context_loader=_RepositoryIntradayCandidateContextLoader(trading_repository),
         position_context_loader=lambda tickers, positions: {
             ticker: (ticker,)
             for ticker in tickers
@@ -107,10 +102,7 @@ def build_live_intraday_refresh_dependencies(session: Any | None = None) -> Live
         theme_context_loader=lambda tickers, decision_time: {},
         macro_state_loader=lambda decision_time: None,
         lookahead_helper=LookaheadRiskWorkflowHelper(hedge_planner=PortfolioHedgePlanner()),
-        macro_snapshot_loader=lambda decision_time: trading_repository.load_latest_macro_snapshot(
-            trade_date=decision_time.date(),
-            decision_time=decision_time,
-        ),
+        macro_snapshot_loader=_RepositoryMacroSnapshotLoader(trading_repository),
         macro_snapshot_pipeline=MacroSnapshotPipeline(
             global_context_fetcher=lambda as_of: get_global_context(as_of=as_of, limit=5),
         ),
@@ -119,12 +111,16 @@ def build_live_intraday_refresh_dependencies(session: Any | None = None) -> Live
     )
 
 
+def _scheduler_trade_date(decision_time: datetime) -> date:
+    return trade_date_for(decision_time, app_config.SCHEDULER_TIMEZONE)
+
+
 class _RepositoryIntradayScopeLoader:
     def __init__(self, repository: Any) -> None:
         self.repository = repository
 
     def load_scope(self, *, decision_time: datetime) -> tuple[str, ...]:
-        return self.repository.load_intraday_scope(trade_date=decision_time.date())
+        return self.repository.load_intraday_scope(trade_date=_scheduler_trade_date(decision_time))
 
 
 class _RepositoryBaselineLoader:
@@ -135,7 +131,7 @@ class _RepositoryBaselineLoader:
         return self.repository.load_latest_signal_snapshots_for_tickers(
             tickers=tickers,
             snapshot_type="pre_open",
-            trade_date=decision_time.date(),
+            trade_date=_scheduler_trade_date(decision_time),
         )
 
 
@@ -146,7 +142,7 @@ class _RepositoryPreviousIntradaySnapshotLoader:
     def load_for_tickers(self, *, tickers: tuple[str, ...], decision_time: datetime) -> dict[str, Any]:
         return self.repository.load_latest_intraday_signal_snapshots_for_tickers(
             tickers=tickers,
-            trade_date=decision_time.date(),
+            trade_date=_scheduler_trade_date(decision_time),
         )
 
 
@@ -157,5 +153,38 @@ class _RepositoryIntradayRequestContextLoader:
     def load_for_tickers(self, *, tickers: tuple[str, ...], decision_time: datetime) -> dict[str, Any]:
         return self.repository.load_intraday_request_contexts(
             tickers=tickers,
-            trade_date=decision_time.date(),
+            trade_date=_scheduler_trade_date(decision_time),
+        )
+
+
+class _RepositoryExistingNewsDedupeKeyLoader:
+    def __init__(self, repository: Any) -> None:
+        self.repository = repository
+
+    def __call__(self, tickers: tuple[str, ...], decision_time: datetime) -> frozenset[str]:
+        return self.repository.load_existing_news_alert_dedupe_keys(
+            tickers=tickers,
+            trade_date=_scheduler_trade_date(decision_time),
+        )
+
+
+class _RepositoryIntradayCandidateContextLoader:
+    def __init__(self, repository: Any) -> None:
+        self.repository = repository
+
+    def __call__(self, tickers: tuple[str, ...], decision_time: datetime) -> dict[str, tuple[str, ...]]:
+        return self.repository.load_intraday_candidate_context(
+            tickers=tickers,
+            trade_date=_scheduler_trade_date(decision_time),
+        )
+
+
+class _RepositoryMacroSnapshotLoader:
+    def __init__(self, repository: Any) -> None:
+        self.repository = repository
+
+    def __call__(self, decision_time: datetime) -> object | None:
+        return self.repository.load_latest_macro_snapshot(
+            trade_date=_scheduler_trade_date(decision_time),
+            decision_time=decision_time,
         )
