@@ -8,80 +8,61 @@
 
 **Tech Stack:** Python, SQLAlchemy, Alembic, Postgres JSONB, FastAPI/Jinja, APScheduler, pytest, existing market/news/global-context providers.
 
-**Contracts:** Before changing any PR module, check [Module Contracts](../module_contracts.md). The PR modules are split for readability but keep the original PR order and stop-after-review policy.
-
-**Reading Guide:** Use [PR Reading Guide](reading_guide.md) to choose the smallest design-module set needed for the current PR. Do not load every design and implementation module by default.
-
 ---
+
+## Reading Discipline
+
+The original 14-PR plan is built. Work now arrives as additional `pr_XX_*.md` / dated `*-design.md` slices. Read the **smallest** context for the slice in front of you — do not load every design and implementation module by default.
+
+**Startup reading (every implementation session):**
+
+1. `documents/general_instructions.md`
+2. [Module Contracts](../module_contracts.md) — the durable interface contracts; check these before changing any producer/consumer.
+3. This README.
+4. The current slice's module file under `plan/implementation/`.
+
+Then, **on demand** (not a full read): skim the **Recent** section of the [progress tracker](../progress_tracker.md) for the latest status and any design decision that superseded the module text. Older history is summarized there; full detail is archived under `plan/archive/`.
+
+Then read only the design modules relevant to the slice (see key below).
+
+**Read more only when:**
+
+- The slice changes a producer/consumer listed in [Module Contracts](../module_contracts.md).
+- A test or implementation touches an upstream table/service/schema not covered by the modules already read.
+- The tracker says a design decision superseded the module text.
+- Existing code diverges from the plan in a way that affects the current contract.
+
+**Do not** load all design modules or all PR modules at session start. The directory is the source of truth — there is no hand-maintained PR index to keep in sync.
+
+## Design Modules
+
+Foundational architecture (`plan/design/`):
+
+| ID | Module |
+| --- | --- |
+| D01 | [Context, Goals, and Approach](../design/01_context_goals_approach.md) |
+| D02 | [Target Architecture](../design/02_target_architecture.md) |
+| D03 | [Strategy Architecture](../design/03_strategy_architecture.md) |
+| D04 | [Signal Snapshots and Point-in-Time Data](../design/04_signal_snapshots.md) |
+| D05 | [Workflows and Decision Contracts](../design/05_workflows_and_decision_contracts.md) |
+| D06 | [Paper Trading and Risk](../design/06_paper_trading_and_risk.md) |
+| D07 | [Replay, Reflection, and Learning](../design/07_replay_reflection_learning.md) |
+| D08 | [Data Model](../design/08_data_model.md) |
+| D09 | [UI, Error Handling, Testing, and Delivery](../design/09_ui_error_testing_delivery.md) |
+
+Follow-up slices live alongside these as `design/10_…`–`14_…` (live wiring, `/today` UI passes) and dated `design/YYYY-MM-DD-*.md` files (option execution, risk/macro contracts, manual-review audit, signal expansion, etc.). Read a follow-up doc only when the current slice touches its area; pick by filename.
 
 ## Execution Rules
 
 - Each PR slice stops after verification. Do not begin the next slice until the user has reviewed and merged.
 - Use TDD for implementation code: write failing tests, run targeted tests, implement, rerun targeted tests, then run the broader relevant suite.
-- After every completed implementation slice, update `plan/research_app/trading_agent_refactor/progress_tracker.md`.
+- After every completed implementation slice, prepend a dated entry to the **Recent** section of `plan/progress_tracker.md`.
 - For major refactor slices, update `documents/repo_overview.md`. If the file is absent, create it with the current architecture summary.
 - For Python commands, run `source ~/.venv/bin/activate` first.
 - Any DB/API smoke test must be standalone and rate-limit conscious.
 - Unit tests must use fake providers. Integration tests that touch external-provider behavior should use recorded `vcrpy` cassettes or equivalent fixtures. Live provider smoke tests are opt-in and must not block ordinary CI.
 - Deployment changes must preserve Docker Compose and persistent disk Postgres requirements.
 
-## PR Slice Overview
+## PR Modules
 
-1. **PR 1a: Minimal Trading Foundation**
-   Add only the minimum durable foundation: strategy definition schema, prompt registry/schema, portfolio-pool trade identity enums, and a versioned in-code seed catalog for the 15 broad tactical strategies, 4 eval-derived playbook strategies, and 5 initial strategy expression buckets from the design doc, including defined-risk option expressions. No universe, source ingestion, relationship graph, scheduler, API calls, or trading behavior yet.
-2. **PR 1b: Portfolio Intents + Relationship Graph Schema**
-   Add `portfolio_intents`, `ticker_relationships`, `peer_baskets`, and `theme_taxonomy` plus focused services/tests for core-holding eligibility and structured peer/theme read-through inputs. No signal pipeline or strategy scoring yet.
-3. **PR 2: Provider Resilience + Three-Family Point-in-Time Signal MVP**
-   Add provider adapter guardrails, fake providers, request budgeting/rate-limit/backoff/circuit-breaker metadata, user-editable liquidity/sector universe filters, manual ticker request ingestion, and deterministic pre-open signal snapshots across MVP technical, fundamental, and events/news signal families.
-4. **PR 3: Strategy Matching + Historical Replay Outcome Evaluator**
-   Match scanner and manual-request symbols to strategy definitions and persist ranked candidates with strategy horizon/evidence, source attribution, primary strategy selection, trade identity classification, catalyst-watch vs ordinary-watch distinction, confidence-calibration inputs, and deterministic replay/outcome evaluation against `SPY`, `QQQ`, sector/theme ETF, and decision-time peer baskets.
-5. **PR 4: Position Sizing + Portfolio Risk Manager**
-   Add deterministic sizing, risk appetite presets, generated risk configs, risk factor exposure calculation, unified margin-account buying-power caps, conservative broker-profile margin estimates, concentration caps, embedded bearish-evidence gating, and reduce/reject decisions.
-6. **PR 5: Trading Decision Agent Guardrails**
-   Add bounded trading agent output with Pydantic schema validation, retry, safe fallback, manual request mode gating, prompt/schema persistence, and no paper order side effects yet.
-7. **PR 6: Alpaca-Backed Paper Stock Broker + Portfolio State**
-   Add Alpaca-backed stock paper orders/executions, broker-synced positions, and unified paper margin-account portfolio snapshots with margin model profile/source metadata.
-8. **PR 7: Paper Options Strategy Layer + Assignment Risk**
-   Add paper-only leg-based option strategy decisions, option legs, option orders/positions, open/close/roll/adjust/avoid-event actions, an initial whitelist of long call/put, credit spread, long straddle, and long strangle strategies, strategy-level option risk, conservative option margin requirements, and worst-case assigned-portfolio risk checks when assignment is possible.
-9. **PR 8: Intraday Signal Refresh + News Alerts + Rebalance**
-   Add hourly intraday signal refresh, normalized alerts, material signal-change detection, and risk-gated intraday rebalance decisions for stocks, paper option strategies, and hedge overlays.
-10. **PR 9: Reflection + Learning Factors**
-   Add post-close reflection with highest-quality model routing, Pydantic validation/fallback, learning factor lifecycle defaulting to candidate/observation, replay outcome consumption, benchmark/peer attribution, bullish/bearish calibration, paper options attribution, and strategy proposal hints.
-11. **PR 10: Strategy Evolution + Dynamic Strategy Catalog**
-   Convert repeated learning patterns into proposed strategies, shadow-test them, and promote/retire strategy definitions.
-12. **PR 11: Today Dashboard UI**
-   Add `/today`, pinned review, candidate, trade, options, risk exposure, reflection, and learning views.
-13. **PR 12: Scheduler, Smoke Tests, Deploy Docs**
-   Wire daily jobs, standalone smoke scripts, and deployment/runbook docs.
-14. **PR 13: Live Preopen Pipeline**
-   Replace the fixture-backed morning runtime with a production-wired preopen pipeline that loads live config from Postgres, uses real providers and broker state, persists trading artifacts, and can safely drive the morning decision path end-to-end.
-15. **PR 14: Runtime Structure And Live Phase Roadmap**
-   Split the mixed scheduler/runtime shell into a dispatch-only facade plus phase-specific live runtime modules, preserve the existing scheduler/CLI operator surface, migrate manual review/intraday/reflection/strategy-evolution onto dedicated live runtimes, and keep fixture behavior smoke-only.
-16. **PR 14a: Preopen Runtime Run Observability**
-   Persist normalized live preopen runtime reports, surface the latest preopen funnel directly in `/today` `Overview`, and stop relying on downstream artifact-table inference for operator visibility into whether the morning run executed and where it stopped.
-
-## PR Module Files
-
-| PR | Module |
-| --- | --- |
-| PR 1a | [pr_01a_minimal_trading_foundation.md](pr_01a_minimal_trading_foundation.md) |
-| PR 1b | [pr_01b_portfolio_intents_relationship_graph.md](pr_01b_portfolio_intents_relationship_graph.md) |
-| PR 2 | [pr_02_provider_resilience_signal_mvp.md](pr_02_provider_resilience_signal_mvp.md) |
-| PR 3 | [pr_03_strategy_matching_replay.md](pr_03_strategy_matching_replay.md) |
-| PR 4 | [pr_04_position_sizing_risk_manager.md](pr_04_position_sizing_risk_manager.md) |
-| PR 5 | [pr_05_trading_decision_agent_guardrails.md](pr_05_trading_decision_agent_guardrails.md) |
-| PR 6 | [pr_06_paper_stock_broker_portfolio_state.md](pr_06_paper_stock_broker_portfolio_state.md) |
-| PR 7 | [pr_07_paper_options_assignment_risk.md](pr_07_paper_options_assignment_risk.md) |
-| PR 8 | [pr_08_intraday_refresh_rebalance.md](pr_08_intraday_refresh_rebalance.md) |
-| PR 9 | [pr_09_reflection_learning_factors.md](pr_09_reflection_learning_factors.md) |
-| PR 10 | [pr_10_strategy_evolution.md](pr_10_strategy_evolution.md) |
-| PR 11 | [pr_11_today_dashboard_ui.md](pr_11_today_dashboard_ui.md) |
-| PR 11a | [pr_11a_ticker_first_today_dashboard.md](pr_11a_ticker_first_today_dashboard.md) |
-| PR 11b | [pr_11b_today_dashboard_visual_refresh.md](pr_11b_today_dashboard_visual_refresh.md) |
-| PR 11c | [pr_11c_lifecycle_command_center.md](pr_11c_lifecycle_command_center.md) |
-| PR 12 | [pr_12_scheduler_smoke_deploy_docs.md](pr_12_scheduler_smoke_deploy_docs.md) |
-| PR 13 | [pr_13_live_preopen_pipeline.md](pr_13_live_preopen_pipeline.md) |
-| PR 14 | [pr_14_runtime_structure_live_phase_roadmap.md](pr_14_runtime_structure_live_phase_roadmap.md) |
-| PR 14a | [pr_14a_preopen_runtime_run_observability.md](pr_14a_preopen_runtime_run_observability.md) |
-
----
+PR modules are **not** enumerated here — the list rots. The source of truth is the directory: `plan/implementation/` holds self-named `pr_XX_*.md` and dated `*-design.md` files, and the tracker's **Recent** section shows the latest slice and status.
