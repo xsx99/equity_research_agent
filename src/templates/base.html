@@ -3,12 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{% block title %}Research App{% endblock %}</title>
+  <title>{% block title %}Trading Workstation{% endblock %}</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
   <nav>
-    <span class="brand">Research App</span>
+    <span class="brand">Trading Workstation</span>
     <a href="/today" {% if request.url.path.startswith('/today') %}class="active"{% endif %}>Today</a>
     <a href="/research" {% if request.url.path.startswith('/research') %}class="active"{% endif %}>Research</a>
     <a href="/watchlist" {% if request.url.path.startswith('/watchlist') %}class="active"{% endif %}>Watchlist</a>

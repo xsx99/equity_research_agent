@@ -1,13 +1,14 @@
-"""FastAPI application factory.
+"""FastAPI application factory for the trading workstation UI.
 
 Routes:
+  GET  /today                   — trading workstation dashboard
   GET  /watchlist               — list all watchlist tickers; form to add
   POST /watchlist/add           — add/reactivate a ticker
   POST /watchlist/{ticker}/delete — deactivate a ticker
-  GET  /research                — list research runs with aggregated eval stats
+  GET  /research                — legacy research runs with aggregated eval stats
   GET  /research/{run_id}       — run detail (input, output, eval)
-  POST /admin/run-now           — trigger research pipeline
-  POST /admin/eval-now          — trigger eval pipeline
+  POST /admin/run-now           — trigger the legacy research pipeline
+  POST /admin/eval-now          — trigger the legacy eval pipeline
 """
 from __future__ import annotations
 
@@ -34,7 +35,7 @@ def create_app() -> FastAPI:
         init_db()
         yield
 
-    app = FastAPI(title="Insider Research App", lifespan=lifespan)
+    app = FastAPI(title="Trading Workstation", lifespan=lifespan)
     app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
 
     templates = Jinja2Templates(directory=_TEMPLATES_DIR)
