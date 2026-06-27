@@ -565,6 +565,9 @@ def test_live_intraday_refresh_runtime_runs_live_intraday_chain_in_dry_run_mode(
         "mode": "dry_run",
         "orders_submitted": 0,
         "option_orders_submitted": 0,
+        "orders_skipped": 0,
+        "orders_failed": 0,
+        "skip_reasons": {},
     }
     assert trading_repository.saved_scan is not None
     assert len(trading_repository.saved_snapshots) == 2
@@ -601,6 +604,9 @@ def test_live_intraday_refresh_runtime_reports_option_orders_separately_when_ena
         "mode": "execute",
         "orders_submitted": 1,
         "option_orders_submitted": 1,
+        "orders_skipped": 0,
+        "orders_failed": 0,
+        "skip_reasons": {},
     }
 
 

@@ -16,6 +16,13 @@ from src.agents.trading_schemas import (
     IntradayRebalanceOutput,
     IntradayRebalanceOutputFallback,
 )
+from src.trading.execution.attempts import (
+    ExecutionAttemptRecord,
+    REASON_BROKER_UNAVAILABLE,
+    REASON_NOT_EXECUTABLE_ACTION,
+    REASON_RISK_MISSING,
+    REASON_RISK_REJECTED,
+)
 from src.trading.risk import PortfolioRiskIntentRecord, PositionRiskActionRecord, RiskConfigResolver, RiskDecisionRecord
 from src.trading.workflows.paper_execution import PaperExecutionWorkflow
 from src.trading.workflows.trading_decision import TradingDecisionRecord
@@ -90,7 +97,7 @@ class IntradayRebalancePipelineResult:
     """Persisted intraday rebalance artifacts."""
 
     decisions: tuple[IntradayRebalanceDecisionRecord, ...]
-    execution_summary: dict[str, int] = field(default_factory=dict)
+    execution_summary: dict[str, Any] = field(default_factory=dict)
 
 
 class IntradayRebalancePipeline:
@@ -132,6 +139,7 @@ class IntradayRebalancePipeline:
         decisions: list[IntradayRebalanceDecisionRecord] = []
         execution_decisions: list[TradingDecisionRecord] = []
         execution_risk_decisions: list[RiskDecisionRecord] = []
+        execution_attempts: list[ExecutionAttemptRecord] = []
 
         for request in rebalance_requests:
             output, prompt_template, prompt_run, usage_events, status, reason_code = self._run_agent(request)
@@ -219,12 +227,21 @@ class IntradayRebalancePipeline:
             self.repository.save_intraday_rebalance_decision(decision)
             decisions.append(decision)
 
-            if self._should_execute_decision(
+            skip_reason = self._execution_skip_reason(
                 request=request,
                 decision=decision,
                 risk_decision=risk_decision,
                 execute_approved=execute_approved,
-            ):
+            )
+            if skip_reason is not None:
+                attempt = self._record_execution_skip(
+                    request=request,
+                    decision=decision,
+                    risk_decision=risk_decision,
+                    reason_code=skip_reason,
+                )
+                execution_attempts.append(attempt)
+            elif execute_approved:
                 execution_decision = self._to_trading_decision(
                     request,
                     decision,
@@ -236,7 +253,12 @@ class IntradayRebalancePipeline:
                 execution_decisions.append(execution_decision)
                 execution_risk_decisions.append(risk_decision)
 
-        execution_summary = {"orders_submitted": 0, "option_orders_submitted": 0}
+        execution_summary: dict[str, Any] = {
+            "orders_submitted": 0,
+            "option_orders_submitted": 0,
+            "orders_skipped": len([attempt for attempt in execution_attempts if attempt.outcome == "skipped"]),
+            "skip_reasons": _reason_counts(execution_attempts, outcome="skipped"),
+        }
         if execute_approved and self.broker is not None and execution_decisions:
             execution_result = PaperExecutionWorkflow(
                 repository=self.repository,
@@ -246,10 +268,14 @@ class IntradayRebalancePipeline:
                 trading_decisions=tuple(execution_decisions),
                 risk_decisions=tuple(execution_risk_decisions),
                 trade_date=trade_date or rebalance_requests[0].decision_time,
+                phase="intraday",
             )
+            execution_attempts.extend(tuple(getattr(execution_result, "execution_attempts", ())))
             execution_summary = {
                 "orders_submitted": len(tuple(getattr(execution_result, "paper_orders", ()))),
                 "option_orders_submitted": len(tuple(getattr(execution_result, "paper_option_orders", ()))),
+                "orders_skipped": len([attempt for attempt in execution_attempts if attempt.outcome == "skipped"]),
+                "skip_reasons": _reason_counts(execution_attempts, outcome="skipped"),
             }
 
         return IntradayRebalancePipelineResult(
@@ -454,6 +480,7 @@ class IntradayRebalancePipeline:
             usage_events=list(usage_events),
             decision_time=request.decision_time,
             available_for_decision_at=request.available_for_decision_at,
+            paper_trade_authorized=True,
             metadata_json=metadata_json,
         )
 
@@ -474,21 +501,58 @@ class IntradayRebalancePipeline:
             return quantity if quantity > 0 else 1.0
         return quantity
 
-    def _should_execute_decision(
+    def _execution_skip_reason(
         self,
         *,
         request: IntradayRebalanceRequest,
         decision: IntradayRebalanceDecisionRecord,
         risk_decision: RiskDecisionRecord | None,
         execute_approved: bool,
-    ) -> bool:
-        return bool(
-            execute_approved
-            and self.broker is not None
-            and risk_decision is not None
-            and decision.status == "approved"
-            and self._requires_execution_risk_decision(request=request, action=decision.action)
+    ) -> str | None:
+        if not execute_approved:
+            return None
+        if not self._requires_execution_risk_decision(request=request, action=decision.action):
+            return REASON_NOT_EXECUTABLE_ACTION
+        if decision.status != "approved":
+            return REASON_RISK_REJECTED
+        if risk_decision is None:
+            return REASON_RISK_MISSING
+        if risk_decision.status != "approved":
+            return REASON_RISK_REJECTED
+        if self.broker is None:
+            return REASON_BROKER_UNAVAILABLE
+        return None
+
+    def _record_execution_skip(
+        self,
+        *,
+        request: IntradayRebalanceRequest,
+        decision: IntradayRebalanceDecisionRecord,
+        risk_decision: RiskDecisionRecord | None,
+        reason_code: str,
+    ) -> ExecutionAttemptRecord:
+        attempt = ExecutionAttemptRecord.create(
+            trading_decision_id=None,
+            risk_decision_id=risk_decision.risk_decision_id if risk_decision is not None else None,
+            paper_order_id=None,
+            paper_option_order_id=None,
+            ticker=request.ticker,
+            strategy_id=request.strategy_id,
+            trade_identity=request.trade_identity,
+            instrument_type=request.instrument_type,
+            phase="intraday",
+            action=decision.action,
+            outcome="skipped",
+            reason_code=reason_code,
+            detail=decision.thesis or None,
+            metadata_json={
+                "intraday_rebalance_decision_id": decision.intraday_rebalance_decision_id,
+                "baseline_signal_snapshot_id": request.baseline_signal_snapshot_id,
+                "intraday_signal_snapshot_id": request.intraday_signal_snapshot_id,
+            },
         )
+        self.repository.save_execution_attempt(attempt)
+        return attempt
 
 
 def _repair_prompt(rendered_text: str, validation_error: str) -> str:
@@ -498,6 +562,15 @@ def _repair_prompt(rendered_text: str, validation_error: str) -> str:
         f"{validation_error}\n\n"
         "Return only one corrected JSON object with no markdown."
     )
+
+
+def _reason_counts(attempts: list[ExecutionAttemptRecord], *, outcome: str) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for attempt in attempts:
+        if attempt.outcome != outcome:
+            continue
+        counts[attempt.reason_code] = counts.get(attempt.reason_code, 0) + 1
+    return counts
 
 
 def _matching_planner_position_action(

@@ -246,6 +246,9 @@ class LiveIntradayRefreshRuntime:
             mode="execute" if self.execute_paper_orders else "dry_run",
             orders_submitted=self._submitted_orders(rebalance_result),
             option_orders_submitted=self._submitted_option_orders(rebalance_result),
+            orders_skipped=self._skipped_orders(rebalance_result),
+            orders_failed=self._failed_orders(rebalance_result),
+            skip_reasons=self._skip_reasons(rebalance_result),
         )
         return build_runtime_report(
             phase="intraday_refresh",
@@ -268,6 +271,27 @@ class LiveIntradayRefreshRuntime:
             return 0
         summary = getattr(rebalance_result, "execution_summary", {}) or {}
         return int(summary.get("option_orders_submitted", 0) or 0)
+
+    def _skipped_orders(self, rebalance_result: object) -> int:
+        if not self.execute_paper_orders:
+            return 0
+        summary = getattr(rebalance_result, "execution_summary", {}) or {}
+        return int(summary.get("orders_skipped", 0) or 0)
+
+    def _failed_orders(self, rebalance_result: object) -> int:
+        if not self.execute_paper_orders:
+            return 0
+        summary = getattr(rebalance_result, "execution_summary", {}) or {}
+        return int(summary.get("orders_failed", 0) or 0)
+
+    def _skip_reasons(self, rebalance_result: object) -> dict[str, int]:
+        if not self.execute_paper_orders:
+            return {}
+        summary = getattr(rebalance_result, "execution_summary", {}) or {}
+        return {
+            str(reason): int(count)
+            for reason, count in dict(summary.get("skip_reasons", {}) or {}).items()
+        }
 
     def _validate_execution_policy(self) -> None:
         if self.execute_paper_option_orders and not self.execute_paper_orders:

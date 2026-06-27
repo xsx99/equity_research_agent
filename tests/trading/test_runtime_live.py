@@ -170,10 +170,12 @@ class _PaperExecutionWorkflow:
         trading_decisions: tuple[object, ...],
         risk_decisions: tuple[object, ...],
         trade_date: datetime,
+        phase: str = "preopen",
     ) -> object:
         assert trading_decisions
         assert risk_decisions
         assert trade_date.tzinfo is not None
+        assert phase in {"preopen", "manual_review", "intraday"}
         self.recorder.record("paper_execution")
         return self.result
 
@@ -286,6 +288,9 @@ def test_live_preopen_runtime_reports_option_orders_separately_when_enabled():
         "mode": "execute",
         "orders_submitted": 1,
         "option_orders_submitted": 1,
+        "orders_skipped": 0,
+        "orders_failed": 0,
+        "skip_reasons": {},
     }
 
 
@@ -336,6 +341,9 @@ def test_run_live_preopen_once_persists_passed_runtime_row(monkeypatch):
             "mode": "dry_run",
             "orders_submitted": 0,
             "option_orders_submitted": 0,
+            "orders_skipped": 0,
+            "orders_failed": 0,
+            "skip_reasons": {},
         },
     }
 
@@ -780,6 +788,9 @@ def test_build_execution_report_supports_dry_run_mode():
         "mode": "dry_run",
         "orders_submitted": 0,
         "option_orders_submitted": 0,
+        "orders_skipped": 0,
+        "orders_failed": 0,
+        "skip_reasons": {},
     }
 
 
