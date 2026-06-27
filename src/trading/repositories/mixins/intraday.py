@@ -1,6 +1,25 @@
 from __future__ import annotations
 
-from src.trading.repositories._base import *  # noqa: F401,F403
+from datetime import date
+from decimal import Decimal
+from types import SimpleNamespace
+from typing import Any
+
+from src.db.models.trading import (
+    CandidateScore,
+    IntradayRebalanceDecision,
+    IntradaySignalScan,
+    IntradaySignalSnapshot,
+    ManualTickerRequest,
+    NewsAlert,
+    PaperOrder,
+    TradeClassification,
+    TradingDecision,
+)
+from src.trading.intraday.news_alerts import NewsAlertRecord
+from src.trading.intraday.signals import IntradaySignalScanRecord, IntradaySignalSnapshotRecord
+from src.trading.repositories._base_common import _to_uuid, _to_uuid_or_none
+from src.trading.repositories._base_manual_review import _intraday_context_metadata
 
 
 class IntradayRepositoryMixin:

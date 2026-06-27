@@ -1,6 +1,18 @@
 from __future__ import annotations
 
-from src.trading.repositories._base import *  # noqa: F401,F403
+from datetime import date, datetime
+from decimal import Decimal
+
+from src.db.models.trading import CalendarEvent, MacroSnapshot, PortfolioEventRiskAssessment
+from src.trading.events import CalendarEventRecord, PortfolioEventRiskAssessmentRecord
+from src.trading.macro import MacroSnapshotRecord
+from src.trading.repositories._base_common import _to_uuid, _to_uuid_or_none
+from src.trading.repositories._base_records import (
+    _calendar_event_record,
+    _macro_snapshot_record,
+    _portfolio_event_risk_assessment_record,
+    _portfolio_event_risk_assessment_storage_key,
+)
 
 
 class MacroCalendarRepositoryMixin:

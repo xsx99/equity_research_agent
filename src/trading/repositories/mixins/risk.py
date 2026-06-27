@@ -1,6 +1,31 @@
 from __future__ import annotations
 
-from src.trading.repositories._base import *  # noqa: F401,F403
+import uuid
+from datetime import date
+from decimal import Decimal
+from typing import Any
+
+from src.db.models.trading import (
+    OptionRiskSnapshot,
+    PortfolioRiskIntent,
+    PortfolioRiskSnapshot,
+    PositionSizingDecision,
+    RiskDecision,
+    RiskFactorExposure,
+    RiskHedgeDecision,
+)
+from src.trading.risk.hedges import RiskHedgeDecisionRecord
+from src.trading.risk.lookahead import PortfolioRiskIntentRecord
+from src.trading.risk.options import OptionRiskSnapshotRecord
+from src.trading.repositories._base_common import _decimal_or_none, _to_uuid, _to_uuid_or_none
+from src.trading.repositories._base_payloads import (
+    _hedge_action_payload,
+    _position_risk_action_payload,
+)
+from src.trading.repositories._base_records import (
+    _latest_portfolio_risk_snapshot_id,
+    _portfolio_risk_intent_record,
+)
 
 
 class RiskRepositoryMixin:

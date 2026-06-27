@@ -1,6 +1,12 @@
 from __future__ import annotations
 
-from src.trading.repositories._base import *  # noqa: F401,F403
+from datetime import date
+from typing import Any
+
+from src.db.models.trading import EventNewsItem, SignalSnapshot
+from src.trading.signals import SignalSnapshotResult
+from src.trading.signals.sources import EventNewsItemRecord
+from src.trading.repositories._base_common import _to_uuid, _to_uuid_or_none
 
 
 class SignalsRepositoryMixin:

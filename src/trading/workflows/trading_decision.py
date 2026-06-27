@@ -26,15 +26,17 @@ from src.trading.signals.sources import (
 )
 from src.trading.strategies.classifier import TradeClassificationRecord
 from src.trading.strategies.matching import CandidateScoreRecord, StrategyDefinitionRecord
-from src.trading.workflows.option_strategy_builder import (
+from src.trading.workflows.option_strategy_builder_evidence import (
     _WINDOWED_EVENT_NEWS_FIELDS,
-    _build_option_strategy_payloads,
-    _classification_instrument_type,
     _evidence_priority,
     _news_evidence_limit,
     _render_news_source_text,
-    _resolve_expression_fallback_plan,
     _round_nested_floats,
+)
+from src.trading.workflows.option_strategy_builder_payload import _build_option_strategy_payloads
+from src.trading.workflows.option_strategy_builder_policy import (
+    _classification_instrument_type,
+    _resolve_expression_fallback_plan,
 )
 
 

@@ -82,6 +82,35 @@ def test_compatibility_hubs_still_reexport_runtime_import_surfaces():
     assert isinstance(_WINDOWED_EVENT_NEWS_FIELDS, tuple)
 
 
+def test_compatibility_hub_all_lists_only_intended_exports():
+    import src.trading.repositories._base as repository_base
+    import src.trading.workflows.option_strategy_builder as option_strategy_builder
+    from pathlib import Path
+
+    assert "_build_option_strategy_payload" in option_strategy_builder.__all__
+    assert "_resolve_expression_fallback_plan" in option_strategy_builder.__all__
+    assert "annotations" not in option_strategy_builder.__all__
+    assert "globals()" not in Path(option_strategy_builder.__file__).read_text()
+
+    assert "_RepositoryBase" in repository_base.__all__
+    assert "_portfolio_snapshot_payload" in repository_base.__all__
+    assert "_macro_snapshot_record" in repository_base.__all__
+    assert "Any" not in repository_base.__all__
+    assert "Decimal" not in repository_base.__all__
+    assert "StrategyDefinition" not in repository_base.__all__
+    assert "annotations" not in repository_base.__all__
+    assert "globals()" not in Path(repository_base.__file__).read_text()
+
+
+def test_repository_mixins_do_not_star_import_repository_base():
+    from pathlib import Path
+
+    mixin_dir = Path("src/trading/repositories/mixins")
+    for path in sorted(mixin_dir.glob("*.py")):
+        content = path.read_text()
+        assert "from src.trading.repositories._base import *" not in content, path.name
+
+
 def test_split_keeps_runtime_import_smoke_clean():
     import src.trading.repositories.sqlalchemy as sqlalchemy_repository
     import src.trading.runtime.preopen_risk as preopen_risk

@@ -1,6 +1,34 @@
 from __future__ import annotations
 
-from src.trading.repositories._base import *  # noqa: F401,F403
+import uuid
+from decimal import Decimal
+
+from src.db.models.trading import (
+    OptionStrategyDecision,
+    OptionStrategyLeg,
+    PaperExecution,
+    PaperOptionExecution,
+    PaperOptionOrder,
+    PaperOptionPosition as PaperOptionPositionModel,
+    PaperOrder,
+    PaperPosition,
+    PortfolioSnapshot as PortfolioSnapshotModel,
+)
+from src.trading.brokers.paper_option import (
+    PaperOptionExecutionRecord,
+    PaperOptionOrderRecord,
+    PaperOptionPosition,
+)
+from src.trading.brokers.paper_stock import PaperExecutionRecord, PaperOrderRecord
+from src.trading.options.strategy import OptionStrategyDecisionRecord, OptionStrategyLegRecord
+from src.trading.portfolio.state import PortfolioSnapshot, StockPosition
+from src.trading.repositories._base_common import (
+    _decimal_or_none,
+    _format_option_contract_symbol,
+    _legacy_option_client_order_id,
+    _to_uuid,
+    _to_uuid_or_none,
+)
 
 
 class ExecutionRepositoryMixin:
