@@ -203,6 +203,15 @@ def client():
             yield c
 
 
+class TestAppMetadata:
+    def test_create_app_uses_trading_workstation_title(self):
+        from src.web import create_app
+
+        app = create_app()
+
+        assert app.title == "Trading Workstation"
+
+
 class TestTimestampFilters:
     def test_iso_datetime_normalizes_aware_datetime(self):
         from src.web.filters import iso_datetime
@@ -239,6 +248,7 @@ class TestWatchlistPage:
         assert resp.status_code == 200
         assert "AAPL" in resp.text
         assert "MSFT" in resp.text
+        assert "Trading Workstation" in resp.text
         assert 'data-local-time-format="date"' in resp.text
         assert 'datetime="2026-03-22T09:00:00Z"' in resp.text
 
