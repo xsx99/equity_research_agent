@@ -557,7 +557,12 @@ def test_intraday_rebalance_executes_generated_risk_hedge_overlay_with_reduce(tm
     )
 
     assert result.decisions[0].action == "reduce"
-    assert result.execution_summary == {"orders_submitted": 1, "option_orders_submitted": 1}
+    assert result.execution_summary == {
+        "orders_submitted": 1,
+        "option_orders_submitted": 1,
+        "orders_skipped": 0,
+        "skip_reasons": {},
+    }
     assert len(repository.paper_orders) == 1
     assert len(repository.paper_option_orders) == 1
     assert repository.paper_option_orders[0].trade_identity == "risk_hedge_overlay"
@@ -843,7 +848,12 @@ def test_intraday_rebalance_pipeline_executes_close_option_strategy_for_existing
 
     assert result.decisions[0].action == "close_option_strategy"
     assert result.decisions[0].status == "approved"
-    assert result.execution_summary == {"orders_submitted": 0, "option_orders_submitted": 1}
+    assert result.execution_summary == {
+        "orders_submitted": 0,
+        "option_orders_submitted": 1,
+        "orders_skipped": 0,
+        "skip_reasons": {},
+    }
     assert len(repository.paper_option_orders) == 1
     assert repository.paper_option_orders[0].action == "close_option_strategy"
     assert any(position.status == "closed" for position in repository.paper_option_positions)

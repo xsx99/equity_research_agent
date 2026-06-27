@@ -14,7 +14,7 @@ them. Fixing #1+#3 together, and #2+#4 together, is the efficient grouping.
 
 ## P0 — Reliability
 
-### 1. Orders silently not placed
+### 1. Orders silently not placed [Resolved 2026-06-26]
 **Where:** `src/trading/workflows/paper_execution.py:343-350` (stock); `paper_execution_options.py`
 (option). Pre-open and intraday both flow through `PaperExecutionWorkflow`.
 
@@ -35,11 +35,11 @@ reads as success. (Intraday is otherwise wired end-to-end and does authorize its
 The option broker enters live mode whenever `trading_base_url` is set; with missing Alpaca creds
 it can raise mid-submit (no try/except around `submit_order`), potentially crashing the whole run.
 
-**Fix:** replace each silent `return` (and the intraday execution-skip) with a persisted, reasoned
-"skipped" execution record + structured log (`not_authorized`, `risk_rejected`, `dry_run`,
-`missing_credentials`, …). The execution report must distinguish
-`submitted / skipped(reason) / failed(error)` — never conflate "0 orders" with "success". Option
-broker should fail-fast / fall back to local sim rather than 401 mid-submit.
+**Status:** Fixed by PR 35. Execution paths now emit persisted `execution_attempts` rows for
+`submitted`, `skipped(reason)`, and `failed(error)` outcomes; runtime execution reports now surface
+`orders_skipped`, `orders_failed`, and `skip_reasons`; and the option broker now falls back to
+local sim without credentials and returns rejected audit rows instead of raising on forced-live
+auth failures.
 
 ### 2. Reflection skips on a timezone boundary
 **Where:** `src/trading/runtime/reflection.py:88` (`trade_date=decision_time.date()`);
@@ -54,7 +54,7 @@ reflection skips. **Fix together with #4** (push the filter into a timezone-awar
 
 ## P1 — Data model integrity
 
-### 3. Control flow keyed off untyped JSON
+### 3. Control flow keyed off untyped JSON [Partially resolved 2026-06-26]
 `paper_trade_authorized` is a real column (`src/db/models/trading/execution.py:78`), but the
 control flow never switched to it:
 - `paper_execution.py:345` still gates on `metadata_json.get("paper_trade_authorized")` — this is
@@ -65,8 +65,15 @@ control flow never switched to it:
 - `config_json.{required_signals, selection_policy, allowed_instruments, macro_blocked_regimes}`
   drives strategy matching/selection with no schema validation.
 
-**Fix:** cut control-flow reads over to the real columns, drop the JSON duplicates, add pydantic
-validation for `config_json`. Leave display-only JSON (entry/exit plans, key_drivers) as-is.
+**Status:** `paper_trade_authorized` is fixed in PR 35: `TradingDecisionRecord` now carries the
+typed field, repository persistence writes the real column from that field, and execution control
+flow now reads the typed value instead of JSON. The `strategy_lifecycle_status` item was narrowed:
+there is no execution-side column to cut over to here, so PR 35 added a catalog-backed fallback in
+`paper_execution_options.py` instead of silently defaulting to `"active"` when metadata is absent.
+Remaining follow-ups:
+- add Pydantic validation for strategy `config_json`
+- decide whether `strategy_lifecycle_status` needs a first-class persisted surface instead of the
+  current metadata/catalog fallback
 
 ---
 

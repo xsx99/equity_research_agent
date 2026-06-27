@@ -6,6 +6,7 @@ from decimal import Decimal
 from typing import Any
 
 from src.db.models.trading import (
+    ExecutionAttempt,
     ManualTickerRequest,
     PaperExecution,
     PaperOrder,
@@ -16,6 +17,7 @@ from src.db.models.trading import (
     UniverseSnapshot,
     UniverseSymbol,
 )
+from src.trading.execution.attempts import ExecutionAttemptRecord
 from src.trading.data_sources.universe import UniverseFilterConfig as UniverseFilterConfigRecord
 from src.trading.manual_review.sqlalchemy import ManualReviewAuditRow
 from src.trading.repositories._base_common import (
@@ -182,7 +184,9 @@ class RuntimeMiscRepositoryMixin:
         row.invalidators_json = list(decision.invalidators)
         row.prompt_run_id = None
         row.fallback_action = decision.metadata_json.get("fallback_action")
-        row.paper_trade_authorized = bool(decision.metadata_json.get("paper_trade_authorized", False))
+        row.paper_trade_authorized = bool(
+            getattr(decision, "paper_trade_authorized", decision.metadata_json.get("paper_trade_authorized", False))
+        )
         row.context_snapshot_json = {
             **dict(decision.context_snapshot_json),
             "prompt_template": {
@@ -195,6 +199,29 @@ class RuntimeMiscRepositoryMixin:
         row.decision_time = decision.decision_time
         row.available_for_decision_at = decision.available_for_decision_at
         row.metadata_json = dict(decision.metadata_json)
+        self.session.flush()
+    def save_execution_attempt(self, attempt: ExecutionAttemptRecord) -> None:
+        row = self.session.query(ExecutionAttempt).filter_by(
+            execution_attempt_id=_to_uuid(attempt.execution_attempt_id)
+        ).one_or_none()
+        if row is None:
+            row = ExecutionAttempt(execution_attempt_id=_to_uuid(attempt.execution_attempt_id))
+            self.session.add(row)
+        row.trading_decision_id = _to_uuid_or_none(attempt.trading_decision_id)
+        row.risk_decision_id = _to_uuid_or_none(attempt.risk_decision_id)
+        row.paper_order_id = _to_uuid_or_none(attempt.paper_order_id)
+        row.paper_option_order_id = _to_uuid_or_none(attempt.paper_option_order_id)
+        row.ticker = attempt.ticker
+        row.strategy_id = attempt.strategy_id
+        row.trade_identity = attempt.trade_identity
+        row.instrument_type = attempt.instrument_type
+        row.phase = attempt.phase
+        row.action = attempt.action
+        row.outcome = attempt.outcome
+        row.reason_code = attempt.reason_code
+        row.detail = attempt.detail
+        row.created_at = attempt.created_at
+        row.metadata_json = dict(attempt.metadata_json)
         self.session.flush()
     def load_manual_review_audit_rows(self) -> tuple[ManualReviewAuditRow, ...]:
         active_requests = [

@@ -285,6 +285,7 @@ def _trading_decision(*, decision: str = "enter_long", manual_request_id: str | 
         usage_events=[],
         decision_time=now,
         available_for_decision_at=now,
+        paper_trade_authorized=True,
         metadata_json={"paper_trade_authorized": True},
     )
 
@@ -352,6 +353,7 @@ def _option_trading_decision(
         usage_events=[],
         decision_time=now,
         available_for_decision_at=now,
+        paper_trade_authorized=True,
         metadata_json={
             "paper_trade_authorized": True,
             "option_strategy": {
@@ -794,6 +796,7 @@ def test_paper_execution_workflow_persists_option_artifacts_and_overlay():
         usage_events=[],
         decision_time=now,
         available_for_decision_at=now,
+        paper_trade_authorized=True,
         metadata_json={
             "paper_trade_authorized": True,
             "option_strategy": {
@@ -1128,6 +1131,7 @@ def test_paper_execution_workflow_falls_back_to_stock_when_option_expression_is_
         usage_events=[],
         decision_time=now,
         available_for_decision_at=now,
+        paper_trade_authorized=True,
         context_snapshot_json={
             "candidate_context": {
                 "strategy_run_id": "run-2",
@@ -1301,6 +1305,7 @@ def test_paper_execution_workflow_reapproves_stock_fallback_before_submitting_or
         usage_events=[],
         decision_time=now,
         available_for_decision_at=now,
+        paper_trade_authorized=True,
         context_snapshot_json={
             "candidate_context": {"candidate_score": 0.78},
             "classification_context": {
@@ -1493,6 +1498,7 @@ def test_paper_execution_workflow_reapproves_option_fallback_before_submitting_o
         usage_events=[],
         decision_time=now,
         available_for_decision_at=now,
+        paper_trade_authorized=True,
         context_snapshot_json={
             "candidate_context": {
                 "candidate_score": 0.78,

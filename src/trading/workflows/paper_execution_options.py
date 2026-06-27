@@ -18,6 +18,7 @@ from src.trading.risk import (
     RiskDecisionRecord,
     TradeRiskRequest,
 )
+from src.trading.strategies.definitions import load_all_trading_definitions
 from src.trading.workflows.trading_decision import TradingDecisionRecord
 
 
@@ -68,6 +69,7 @@ def _hedge_trading_decision_from_generated_action(
         usage_events=[],
         decision_time=trade_date,
         available_for_decision_at=trade_date,
+        paper_trade_authorized=True,
         key_drivers=[str(hedge_action.get("reason_code") or "risk_overlay")],
         counterarguments=[],
         invalidators=[],
@@ -668,7 +670,7 @@ def _build_execution_fallback_trade_risk_request(
         candidate_score=float(candidate_context.get("candidate_score", trading_decision.confidence)),
         decision_time=trading_decision.decision_time,
         direction="bullish" if trading_decision.decision != "enter_short" else "bearish",
-        strategy_lifecycle_status=str(trading_decision.metadata_json.get("strategy_lifecycle_status") or "active"),
+        strategy_lifecycle_status=_resolve_strategy_lifecycle_status(trading_decision),
     )
     classification = SimpleNamespace(
         trade_classification_id=trading_decision.trade_classification_id,
@@ -793,7 +795,7 @@ def _build_execution_fallback_option_trade_risk_request(
         candidate_score=float(candidate_context.get("candidate_score", trading_decision.confidence)),
         decision_time=trading_decision.decision_time,
         direction="bullish" if trading_decision.decision != "enter_short" else "bearish",
-        strategy_lifecycle_status=str(trading_decision.metadata_json.get("strategy_lifecycle_status") or "active"),
+        strategy_lifecycle_status=_resolve_strategy_lifecycle_status(trading_decision),
     )
     classification = SimpleNamespace(
         trade_classification_id=trading_decision.trade_classification_id,
@@ -863,3 +865,23 @@ def _build_execution_fallback_option_risk_input(
         net_debit_or_credit=option_decision.net_debit_or_credit * contracts,
         legs=tuple(legs),
     )
+
+
+def _resolve_strategy_lifecycle_status(trading_decision: TradingDecisionRecord) -> str:
+    metadata_value = str(trading_decision.metadata_json.get("strategy_lifecycle_status") or "").strip()
+    if metadata_value:
+        return metadata_value
+    candidate_context = dict(trading_decision.context_snapshot_json.get("candidate_context") or {})
+    candidate_value = str(candidate_context.get("strategy_lifecycle_status") or "").strip()
+    if candidate_value:
+        return candidate_value
+    for row in load_all_trading_definitions():
+        if str(row.get("strategy_id") or "") != trading_decision.strategy_id:
+            continue
+        version = str(row.get("version") or row.get("strategy_version") or "").strip()
+        if version and version != trading_decision.strategy_version:
+            continue
+        lifecycle_status = str(row.get("lifecycle_status") or "").strip()
+        if lifecycle_status:
+            return lifecycle_status
+    return "active"

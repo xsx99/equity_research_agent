@@ -136,8 +136,18 @@ class _PaperExecutionWorkflow:
         self.recorder = recorder
         self.result = result
 
-    def run(self, *, trading_decisions: tuple[object, ...], risk_decisions: tuple[object, ...], trade_date: datetime) -> object:
+    def run(
+        self,
+        *,
+        trading_decisions: tuple[object, ...],
+        risk_decisions: tuple[object, ...],
+        trade_date: datetime,
+        phase: str = "manual_review",
+    ) -> object:
+        assert trading_decisions
+        assert risk_decisions
         assert trade_date.tzinfo is not None
+        assert phase in {"preopen", "manual_review", "intraday"}
         self.recorder.record("paper_execution")
         return self.result
 
@@ -348,6 +358,9 @@ def test_live_manual_review_runtime_reports_request_execution_reachability_in_dr
         "mode": "dry_run",
         "orders_submitted": 0,
         "option_orders_submitted": 0,
+        "orders_skipped": 0,
+        "orders_failed": 0,
+        "skip_reasons": {},
     }
 
 
@@ -362,4 +375,7 @@ def test_live_manual_review_runtime_executes_explicit_paper_orders_without_optio
         "mode": "execute",
         "orders_submitted": 1,
         "option_orders_submitted": 0,
+        "orders_skipped": 0,
+        "orders_failed": 0,
+        "skip_reasons": {},
     }
