@@ -52,9 +52,21 @@ def build_today_learning_strategies(
             ("active", "Active"),
         )
     )
+    learning_factors_enriched = tuple(
+        {
+            **row,
+            "effect_summary": _effect_summary(tuple(row.get("effect_tags") or ())),
+            "applied_today": (
+                str(row.get("status") or "") == "active"
+                and str(row.get("scope") or "") in {"strategy", "risk", "portfolio"}
+                and bool(tuple(row.get("effect_tags") or ()))
+            ),
+        }
+        for row in learning_factors
+    )
     return {
         "reflection": reflection,
-        "learning_factors": learning_factors,
+        "learning_factors": learning_factors_enriched,
         "strategy_performance": strategy_performance_with_summary,
         "strategy_proposals": strategy_proposals,
         "strategy_definitions": strategy_definitions,

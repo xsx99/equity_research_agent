@@ -70,6 +70,7 @@ def _load_positions(session: Any) -> tuple[dict[str, Any], ...]:
             "strategy_id": row.strategy_id,
             "strategy_label": strategy_label(row.strategy_id),
             "quantity": row.quantity,
+            "avg_cost": getattr(row, "avg_cost", None),
             "market_value": row.market_value,
             "unrealized_pnl": getattr(row, "unrealized_pnl", None),
         }
@@ -117,7 +118,9 @@ def _load_option_positions(session: Any) -> tuple[dict[str, Any], ...]:
             "option_strategy_type_label": option_strategy_type_label(row.option_strategy_type),
             "trade_identity": row.trade_identity,
             "trade_identity_label": trade_identity_label(row.trade_identity),
-            "market_value": getattr(row, "market_value", None),
+            "quantity": getattr(row, "quantity", None),
+            "expiry_label": row.expiry.strftime("%Y-%m-%d") if getattr(row, "expiry", None) else None,
+            "buying_power_effect": getattr(row, "buying_power_effect", None),
             "max_loss": row.max_loss,
         }
         for row in rows
@@ -136,7 +139,10 @@ def _load_hedge_overlays(session: Any) -> tuple[dict[str, Any], ...]:
             "ticker": row.ticker,
             "option_strategy_type": row.option_strategy_type,
             "option_strategy_type_label": option_strategy_type_label(row.option_strategy_type),
+            "action_label": row.action.replace("_", " ").title() if getattr(row, "action", None) else None,
+            "hedge_cost": getattr(row, "hedge_cost", None),
             "protected_notional": row.protected_notional,
+            "created_at": getattr(row, "created_at", None),
         }
         for row in rows
     )

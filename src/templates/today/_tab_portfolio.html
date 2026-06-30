@@ -1,26 +1,16 @@
     <section class="card secondary-surface standalone-surface">
-      <div class="surface-heading"><div><h2>Portfolio</h2></div></div>
-      <div class="surface-summary-row">
-        <article class="summary-tile">
-          <span class="metric-label">P&amp;L Snapshot</span>
-          <strong>{{ fmt_currency(portfolio.kpis.account_equity) if portfolio.kpis.account_equity is not none else "—" }}</strong>
-          <span class="detail-muted {% if portfolio.kpis.day_pnl is not none and portfolio.kpis.day_pnl > 0 %}kpi-pos{% elif portfolio.kpis.day_pnl is not none and portfolio.kpis.day_pnl < 0 %}kpi-neg{% endif %}">{{ fmt_currency(portfolio.kpis.day_pnl) if portfolio.kpis.day_pnl is not none else "—" }} day / {{ fmt_currency(portfolio.kpis.unrealized_pnl) if portfolio.kpis.unrealized_pnl is not none else "—" }} unrealized</span>
-        </article>
-        <article class="summary-tile">
-          <span class="metric-label">Cash / Buying Power</span>
-          <strong>{{ fmt_currency(portfolio.kpis.cash_balance) if portfolio.kpis.cash_balance is not none else "—" }}</strong>
-          <span class="detail-muted">{{ fmt_currency(portfolio.kpis.buying_power) if portfolio.kpis.buying_power is not none else "—" }} buying power</span>
-        </article>
-        <article class="summary-tile">
-          <span class="metric-label">Exposure</span>
-          <strong>{{ pct(portfolio.kpis.net_exposure) if portfolio.kpis.net_exposure is not none else "—" }} / {{ pct(portfolio.kpis.gross_exposure) if portfolio.kpis.gross_exposure is not none else "—" }}</strong>
-          <span class="detail-muted">net / gross</span>
-        </article>
+      <div class="surface-heading">
+        <div><p class="eyebrow">Account</p><h2>Portfolio</h2></div>
+        <p class="detail-muted">Account-level vitals are in the page header above.</p>
       </div>
+
       {% if portfolio.analytics %}
+      {% set m = portfolio.analytics.metrics %}
+      {% set eff = portfolio.strategy_effectiveness if portfolio.strategy_effectiveness is defined else none %}
+      {# NOTE: charts are pre-rendered sparklines; axis charts with date labels await backend P3a (dated series). #}
       <section class="surface-block portfolio-analytics-block" data-testid="portfolio-analytics">
         <div class="surface-block-head">
-          <div class="section-label">Portfolio Analytics</div>
+          <div class="section-label">Portfolio Growth &amp; Daily P&amp;L</div>
           <span class="surface-block-count">{{ portfolio.analytics.point_count }}</span>
         </div>
         <div class="portfolio-chart-stack">
@@ -29,6 +19,7 @@
               <div class="section-label">Account Equity</div>
               <svg class="portfolio-chart equity-chart" viewBox="0 0 720 180" role="img" aria-label="Account Equity Over Time">
                 <polyline class="equity-line" points="{{ portfolio.analytics.equity_chart.points }}"></polyline>
+                {% for tick in portfolio.analytics.x_axis_ticks %}<text class="chart-axis-label" x="{{ tick.x }}" y="174" text-anchor="{{ tick.anchor }}">{{ tick.time | local_time('month_day') }}</text>{% endfor %}
               </svg>
             </article>
             <article class="portfolio-chart-card">
@@ -38,50 +29,70 @@
                 {% for bar in portfolio.analytics.pnl_chart.bars %}
                 <rect class="{% if bar.positive %}pnl-bar-pos{% else %}pnl-bar-neg{% endif %}" x="{{ bar.x }}" y="{{ bar.y }}" width="{{ bar.w }}" height="{{ bar.h }}" rx="2" ry="2"></rect>
                 {% endfor %}
+                {% for tick in portfolio.analytics.x_axis_ticks %}<text class="chart-axis-label" x="{{ tick.x }}" y="174" text-anchor="{{ tick.anchor }}">{{ tick.time | local_time('month_day') }}</text>{% endfor %}
               </svg>
             </article>
           </div>
-          <div class="portfolio-chart-metrics">
-            <article class="summary-tile">
-              <span class="metric-label">Total Return</span>
-              <strong>{% if portfolio.analytics.metrics.total_return is not none %}{{ fmt_number(portfolio.analytics.metrics.total_return * 100, 1) }}%{% else %}—{% endif %}</strong>
+          <div class="truth-cards">
+            <article class="truth-card t-red">
+              <div class="label">Max Drawdown</div>
+              <div class="value neg">{% if m.max_drawdown is not none %}{{ fmt_number(m.max_drawdown * 100, 1) }}%{% else %}—{% endif %}</div>
+              <div class="note">peak to trough</div>
             </article>
-            <article class="summary-tile">
-              <span class="metric-label">Max Drawdown</span>
-              <strong>{% if portfolio.analytics.metrics.max_drawdown is not none %}{{ fmt_number(portfolio.analytics.metrics.max_drawdown * 100, 1) }}%{% else %}—{% endif %}</strong>
+            <article class="truth-card t-green">
+              <div class="label">Best Day</div>
+              <div class="value pos">{{ fmt_currency(m.best_day) if m.best_day is not none else "—" }}</div>
             </article>
-            <article class="summary-tile">
-              <span class="metric-label">Best Day</span>
-              <strong>{{ fmt_currency(portfolio.analytics.metrics.best_day) if portfolio.analytics.metrics.best_day is not none else "—" }}</strong>
+            <article class="truth-card t-red">
+              <div class="label">Worst Day</div>
+              <div class="value neg">{{ fmt_currency(m.worst_day) if m.worst_day is not none else "—" }}</div>
             </article>
-            <article class="summary-tile">
-              <span class="metric-label">Worst Day</span>
-              <strong>{{ fmt_currency(portfolio.analytics.metrics.worst_day) if portfolio.analytics.metrics.worst_day is not none else "—" }}</strong>
+            <article class="truth-card t-blue">
+              <div class="label">Profitable Days</div>
+              <div class="value">{% if m.profitable_days_pct is not none %}{{ fmt_number(m.profitable_days_pct * 100, 1) }}%{% else %}—{% endif %}</div>
+              <div class="note">{{ m.win_days }}W / {{ m.loss_days }}L</div>
             </article>
-            <article class="summary-tile">
-              <span class="metric-label">Win Days</span>
-              <strong>{{ portfolio.analytics.metrics.win_days }}</strong>
+            <article class="truth-card t-blue">
+              <div class="label">Profit Factor</div>
+              <div class="value">{% if m.daily_profit_factor is not none %}{{ fmt_number(m.daily_profit_factor, 1) }}{% else %}—{% endif %}</div>
+              <div class="note">avg day {{ fmt_currency(m.avg_day_pnl) if m.avg_day_pnl is not none else "—" }}</div>
             </article>
-            <article class="summary-tile">
-              <span class="metric-label">Loss Days</span>
-              <strong>{{ portfolio.analytics.metrics.loss_days }}</strong>
+            <article class="truth-card t-blue">
+              <div class="label">Sharpe Ratio</div>
+              <div class="value">{% if m.sharpe_ratio is not none %}{{ fmt_number(m.sharpe_ratio, 2) }}{% else %}—{% endif %}</div>
+              <div class="note">annualized · rf 0</div>
             </article>
-            <article class="summary-tile">
-              <span class="metric-label">Profitable Days</span>
-              <strong>{% if portfolio.analytics.metrics.profitable_days_pct is not none %}{{ fmt_number(portfolio.analytics.metrics.profitable_days_pct * 100, 1) }}%{% else %}—{% endif %}</strong>
+            <article class="truth-card t-amber">
+              <div class="label">Total Return vs Benchmark</div>
+              <div class="value">—</div>
+              <div class="note">awaiting benchmark feed</div>
             </article>
-            <article class="summary-tile">
-              <span class="metric-label">Avg Day P&amp;L</span>
-              <strong>{{ fmt_currency(portfolio.analytics.metrics.avg_day_pnl) if portfolio.analytics.metrics.avg_day_pnl is not none else "—" }}</strong>
+            <article class="truth-card t-amber">
+              <div class="label">Daily Return vs Benchmark</div>
+              <div class="value">—</div>
+              <div class="note">awaiting benchmark feed</div>
             </article>
-            <article class="summary-tile">
-              <span class="metric-label">Profit Factor</span>
-              <strong>{% if portfolio.analytics.metrics.daily_profit_factor is not none %}{{ fmt_number(portfolio.analytics.metrics.daily_profit_factor, 1) }}{% else %}—{% endif %}</strong>
+            {% if eff and eff.most %}
+            <article class="truth-card t-green">
+              <div class="label">Most Effective Strategy</div>
+              <div class="value strategy-name">{{ strategy_label(eff.most.strategy_id) or eff.most.strategy_id }}</div>
+              {% if eff.most.win_rate is not none %}<div class="note">{{ eff.most.win_rate }}% win</div>{% endif %}
+              <div class="note">{{ fmt_currency(eff.most.total_pnl) if eff.most.total_pnl is not none else "—" }} alpha</div>
             </article>
+            {% endif %}
+            {% if eff and eff.least %}
+            <article class="truth-card t-red">
+              <div class="label">Least Effective Strategy</div>
+              <div class="value strategy-name">{{ strategy_label(eff.least.strategy_id) or eff.least.strategy_id }}</div>
+              {% if eff.least.win_rate is not none %}<div class="note">{{ eff.least.win_rate }}% win</div>{% endif %}
+              <div class="note">{{ fmt_currency(eff.least.total_pnl) if eff.least.total_pnl is not none else "—" }} alpha</div>
+            </article>
+            {% endif %}
           </div>
         </div>
       </section>
       {% endif %}
+
       <section class="surface-block">
         <div class="surface-block-head">
           <div class="section-label">Stock Positions</div>
@@ -90,13 +101,14 @@
         <p class="detail-muted">{{ portfolio.position_summary.count }} positions · {{ fmt_currency(portfolio.position_summary.market_value) if portfolio.position_summary.market_value is not none else "—" }} market value · <span class="{% if portfolio.position_summary.unrealized_pnl is not none and portfolio.position_summary.unrealized_pnl > 0 %}kpi-pos{% elif portfolio.position_summary.unrealized_pnl is not none and portfolio.position_summary.unrealized_pnl < 0 %}kpi-neg{% endif %}">{{ fmt_currency(portfolio.position_summary.unrealized_pnl) if portfolio.position_summary.unrealized_pnl is not none else "—" }}</span></p>
         {% if portfolio.positions %}
         <div class="surface-table-wrap">
-          <table class="compact-table">
-            <thead><tr><th>Ticker</th><th>Identity</th><th>Strategy</th><th>Qty</th><th>Market Value</th></tr></thead>
-            <tbody>{% for row in portfolio.positions %}<tr><td>{{ row.ticker }}</td><td>{{ row.trade_identity_label or row.trade_identity }}</td><td>{{ row.strategy_label or strategy_label(row.strategy_id) or "—" }}</td><td>{{ fmt_number(row.quantity) }}</td><td>{{ fmt_currency(row.market_value) }}</td></tr>{% endfor %}</tbody>
+          <table class="dtable">
+            <thead><tr><th>Symbol</th><th>Identity</th><th>Strategy</th><th>Qty</th><th>Entry</th><th>Market Value</th><th>Unrealized P&amp;L</th></tr></thead>
+            <tbody>{% for row in portfolio.positions %}<tr><td class="sym">{{ row.ticker }}</td><td>{{ row.trade_identity_label or row.trade_identity }}</td><td>{{ row.strategy_label or strategy_label(row.strategy_id) or "—" }}</td><td>{{ fmt_number(row.quantity) }}</td><td>{{ fmt_currency(row.avg_cost) if row.avg_cost is not none else "—" }}</td><td>{{ fmt_currency(row.market_value) }}</td><td class="{% if row.unrealized_pnl is not none and row.unrealized_pnl > 0 %}pos{% elif row.unrealized_pnl is not none and row.unrealized_pnl < 0 %}neg{% endif %}">{{ fmt_currency(row.unrealized_pnl) if row.unrealized_pnl is not none else "—" }}</td></tr>{% endfor %}</tbody>
           </table>
         </div>
         {% else %}<p class="detail-muted quiet-empty">No open stock positions.</p>{% endif %}
       </section>
+
       <section class="surface-block">
         <div class="surface-block-head">
           <div class="section-label">Option Positions</div>
@@ -105,13 +117,14 @@
         <p class="detail-muted">{{ portfolio.option_position_summary.count }} strategies · {{ fmt_currency(portfolio.option_position_summary.market_value) if portfolio.option_position_summary.market_value is not none else "—" }} · max loss {{ fmt_currency(portfolio.option_position_summary.max_loss) if portfolio.option_position_summary.max_loss is not none else "—" }}</p>
         {% if portfolio.option_positions %}
         <div class="surface-table-wrap">
-          <table class="compact-table">
-            <thead><tr><th>Ticker</th><th>Strategy Type</th><th>Identity</th><th>Max Loss</th></tr></thead>
-            <tbody>{% for row in portfolio.option_positions %}<tr><td>{{ row.ticker }}</td><td>{{ row.option_strategy_type_label or row.option_strategy_type }}</td><td>{{ row.trade_identity_label or row.trade_identity }}</td><td>{{ fmt_currency(row.max_loss) }}</td></tr>{% endfor %}</tbody>
+          <table class="dtable">
+            <thead><tr><th>Symbol</th><th>Strategy Type</th><th>Identity</th><th>Contracts</th><th>Expiry</th><th>BP Effect</th><th>Max Loss</th></tr></thead>
+            <tbody>{% for row in portfolio.option_positions %}<tr><td class="sym">{{ row.ticker }}</td><td>{{ row.option_strategy_type_label or row.option_strategy_type }}</td><td>{{ row.trade_identity_label or row.trade_identity }}</td><td>{{ fmt_number(row.quantity) if row.quantity is not none else "—" }}</td><td>{{ row.expiry_label or "—" }}</td><td>{{ fmt_currency(row.buying_power_effect) if row.buying_power_effect is not none else "—" }}</td><td>{{ fmt_currency(row.max_loss) }}</td></tr>{% endfor %}</tbody>
           </table>
         </div>
         {% else %}<p class="detail-muted quiet-empty">No open option positions.</p>{% endif %}
       </section>
+
       <section class="surface-block">
         <div class="surface-block-head">
           <div class="section-label">Hedge Overlays</div>
@@ -120,88 +133,13 @@
         <p class="detail-muted">{{ portfolio.hedge_overlay_summary.count }} overlay{% if portfolio.hedge_overlay_summary.count != 1 %}s{% endif %} · {{ fmt_currency(portfolio.hedge_overlay_summary.protected_notional) if portfolio.hedge_overlay_summary.protected_notional is not none else "—" }} protected notional</p>
         {% if portfolio.hedge_overlays %}
         <div class="surface-table-wrap">
-          <table class="compact-table">
-            <thead><tr><th>Ticker</th><th>Strategy Type</th><th>Protected Notional</th></tr></thead>
-            <tbody>{% for row in portfolio.hedge_overlays %}<tr><td>{{ row.ticker }}</td><td>{{ row.option_strategy_type_label or row.option_strategy_type }}</td><td>{{ fmt_currency(row.protected_notional) }}</td></tr>{% endfor %}</tbody>
+          <table class="dtable">
+            <thead><tr><th>Symbol</th><th>Action</th><th>Strategy Type</th><th>Hedge Cost</th><th>Protected Notional</th><th>Added</th></tr></thead>
+            <tbody>{% for row in portfolio.hedge_overlays %}<tr><td class="sym">{{ row.ticker }}</td><td>{{ row.action_label or "—" }}</td><td>{{ row.option_strategy_type_label or row.option_strategy_type }}</td><td>{{ fmt_currency(row.hedge_cost) if row.hedge_cost is not none else "—" }}</td><td>{{ fmt_currency(row.protected_notional) }}</td><td>{% if row.created_at %}<time datetime="{{ row.created_at | iso_datetime }}" data-local-time-format="date">{{ row.created_at | local_time('date') }}</time>{% else %}—{% endif %}</td></tr>{% endfor %}</tbody>
           </table>
         </div>
         {% else %}<p class="detail-muted quiet-empty">No hedge overlays.</p>{% endif %}
       </section>
-      <section class="surface-block">
-        <div class="surface-block-head">
-          <div class="section-label">Needs Attention</div>
-        </div>
-        {% set needs_review = portfolio.needs_attention.needs_review %}
-        {% set live_alerts = portfolio.needs_attention.live_alerts %}
-        {% set material_changes = portfolio.needs_attention.material_changes %}
-        {% if not needs_review and not live_alerts and not material_changes %}
-        <p class="detail-muted quiet-empty surface-empty-copy">Nothing needs attention</p>
-        {% else %}
-        <div class="attention-feed">
-          <section class="surface-block attention-feed-section">
-            <div class="surface-block-head">
-              <div class="section-label">Ready for Review</div>
-              <span class="surface-block-count">{{ needs_review | length }}</span>
-            </div>
-            {% if needs_review %}
-            <div class="attention-feed-list">
-              {% for row in needs_review %}
-              <a href="/today?tab=trades&ticker={{ row.ticker }}" class="attention-feed-row attention-feed-row-review">
-                <span class="attention-badge attention-badge-review">Review</span>
-                <div class="attention-feed-body">
-                  <strong>{{ row.ticker }}</strong>
-                  <p class="detail-muted">{{ row.summary }}</p>
-                </div>
-              </a>
-              {% endfor %}
-            </div>
-            {% else %}
-            <p class="detail-muted quiet-empty surface-empty-copy">No review items.</p>
-            {% endif %}
-          </section>
-          <section class="surface-block attention-feed-section">
-            <div class="surface-block-head">
-              <div class="section-label">Live Alerts</div>
-              <span class="surface-block-count">{{ live_alerts | length }}</span>
-            </div>
-            {% if live_alerts %}
-            <div class="attention-feed-list">
-              {% for row in live_alerts %}
-              <a href="/today?tab=trades&ticker={{ row.ticker }}" class="attention-feed-row attention-feed-row-alert">
-                <span class="attention-badge attention-badge-alert">Alert</span>
-                <div class="attention-feed-body">
-                  <strong>{{ row.ticker }}</strong>
-                  <p class="detail-muted">{{ row.headline }}</p>
-                </div>
-              </a>
-              {% endfor %}
-            </div>
-            {% else %}
-            <p class="detail-muted quiet-empty surface-empty-copy">No live alerts.</p>
-            {% endif %}
-          </section>
-          <section class="surface-block attention-feed-section">
-            <div class="surface-block-head">
-              <div class="section-label">Material Changes</div>
-              <span class="surface-block-count">{{ material_changes | length }}</span>
-            </div>
-            {% if material_changes %}
-            <div class="attention-feed-list">
-              {% for row in material_changes %}
-              <a href="/today?tab=trades&ticker={{ row.ticker }}" class="attention-feed-row attention-feed-row-signal">
-                <span class="attention-badge attention-badge-signal">Signal Change</span>
-                <div class="attention-feed-body">
-                  <strong>{{ row.ticker }}</strong>
-                  <p class="detail-muted">{{ row.summary }}</p>
-                </div>
-              </a>
-              {% endfor %}
-            </div>
-            {% else %}
-            <p class="detail-muted quiet-empty surface-empty-copy">No material changes.</p>
-            {% endif %}
-          </section>
-        </div>
-        {% endif %}
-      </section>
+      {# Attention items live on the Overview tab. Realized-trade stats and the
+         Profitability-Truth row await backend data (handoff P3c/P3d). #}
     </section>

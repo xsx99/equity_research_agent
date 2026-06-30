@@ -23,7 +23,7 @@ def fmt_conf(value: Optional[float]) -> str:
 def fmt_currency(value: Optional[float]) -> str:
     if value is None:
         return "—"
-    return f"${value:,.2f}"
+    return f"${value:,.0f}"
 
 
 def fmt_number(value: Any, decimals: int = 2) -> str:
@@ -77,6 +77,8 @@ def local_time(value: Any, display: str = "datetime") -> str:
         return local_dt.strftime("%Y-%m-%d")
     if display == "month_day":
         return local_dt.strftime("%m-%d")
+    if display == "month_day_time":
+        return local_dt.strftime("%m-%d %H:%M")
     if display == "datetime_seconds":
         return local_dt.strftime("%Y-%m-%d %H:%M:%S %Z")
     return local_dt.strftime("%Y-%m-%d %H:%M %Z")

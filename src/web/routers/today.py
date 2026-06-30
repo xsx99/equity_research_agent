@@ -195,7 +195,7 @@ def init(templates: Jinja2Templates) -> None:
 @router.get("/today", response_class=HTMLResponse)
 def today_dashboard(
     request: Request,
-    tab: str = "portfolio",
+    tab: str = "overview",
     decision_id: str | None = None,
     ticker: str | None = None,
     detail_tab: str = "timeline",
@@ -411,6 +411,17 @@ def load_today_dashboard(
         closed_positions=closed_positions,
         latest_preopen_run=latest_preopen_run,
     )
+    # Map ticker -> [(decision_time, agent thesis)] (newest-first) from the trading
+    # decisions so candidates can surface the LLM thesis instead of rule-based reasons.
+    thesis_history_by_ticker: dict[str, list[tuple[Any, str]]] = {}
+    for row in trade_rows:
+        ticker_symbol = str(row.get("ticker") or "").strip().upper()
+        thesis_text = row.get("thesis")
+        if not ticker_symbol or not thesis_text:
+            continue
+        thesis_history_by_ticker.setdefault(ticker_symbol, []).append(
+            (row.get("decision_time"), thesis_text)
+        )
     candidates = build_today_candidates_view(
         rows=candidate_rows,
         manual_requests=manual_requests,
@@ -419,6 +430,7 @@ def load_today_dashboard(
         portfolio_intents=portfolio_intents,
         relationships=relationships,
         peer_baskets=peer_baskets,
+        thesis_history_by_ticker=thesis_history_by_ticker,
     )
     portfolio_history = _load_portfolio_history(session)
     portfolio = _build_portfolio_view(
@@ -429,10 +441,26 @@ def load_today_dashboard(
         overview=overview,
         portfolio_history=portfolio_history,
     )
+    # Surface the account-level total return on the header's Unrealized P&L card
+    # (computed in the portfolio analytics from the equity history).
+    if isinstance(header, dict) and header.get("total_return") is None:
+        _analytics = portfolio.get("analytics") if isinstance(portfolio, dict) else None
+        _metrics = _analytics.get("metrics") if isinstance(_analytics, dict) else None
+        if isinstance(_metrics, dict):
+            header["total_return"] = _metrics.get("total_return")
+    # Most / least effective strategy for the Portfolio analytics cards
+    # (ranked by cumulative alpha = total_pnl in strategy performance).
+    strategy_perf = _load_strategy_performance(session)
+    _ranked = [p for p in strategy_perf if p.get("total_pnl") is not None]
+    if isinstance(portfolio, dict):
+        portfolio["strategy_effectiveness"] = {
+            "most": max(_ranked, key=lambda p: p["total_pnl"]) if _ranked else None,
+            "least": min(_ranked, key=lambda p: p["total_pnl"]) if len(_ranked) > 1 else None,
+        }
     learning_strategies = build_today_learning_strategies(
         reflection=_serialize_reflection(latest_reflection),
         learning_factors=_load_learning_factors(session),
-        strategy_performance=_load_strategy_performance(session),
+        strategy_performance=strategy_perf,
         strategy_proposals=_load_strategy_proposals(session),
         strategy_definitions=_load_strategy_definitions(session),
         strategy_evaluation_results=_load_strategy_evaluation_results(session),

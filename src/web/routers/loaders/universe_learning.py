@@ -56,10 +56,13 @@ def _load_themes(session: Any) -> tuple[dict[str, Any], ...]:
 def _serialize_reflection(reflection: DailyReflection | None) -> dict[str, Any] | None:
     if reflection is None:
         return None
+    payload = reflection.reflection_json or {}
     return {
         "status": reflection.status,
         "status_label": generic_status_label(reflection.status),
-        "what_worked": tuple((reflection.reflection_json or {}).get("what_worked") or []),
+        "what_worked": tuple(payload.get("what_worked") or []),
+        "what_failed": tuple(payload.get("what_failed") or []),
+        "attribution": tuple(payload.get("attribution") or []),
     }
 
 

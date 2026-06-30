@@ -1,99 +1,120 @@
     <section class="card secondary-surface standalone-surface">
       <div class="surface-heading"><div><p class="eyebrow">Focused Surface</p><h2>Risk &amp; Macro</h2></div></div>
-      {% if risk_macro.command_center %}
+      {% set mc = risk_macro.command_center %}
+      {% if mc %}
       <section class="surface-block" data-testid="macro-strip">
         <div class="surface-block-head">
-          <div class="section-label">Macro Strip</div>
+          <div class="section-label">Macro Command Center</div>
         </div>
-        <div class="overview-strip-grid">
-          <article class="overview-strip-chip">
-            <span class="metric-label">Regime</span>
-            <strong>{{ risk_macro.command_center.regime }}</strong>
-          </article>
-          <article class="overview-strip-chip">
-            <span class="metric-label">Risk Appetite</span>
-            <strong>{{ risk_macro.command_center.risk_appetite_label }}</strong>
-          </article>
-          <article class="overview-strip-chip">
-            <span class="metric-label">Exposure Usage</span>
-            <strong>{% if risk_macro.command_center.exposure_usage_pct is not none %}{{ "%.2f%%"|format(risk_macro.command_center.exposure_usage_pct) }}{% else %}Unavailable{% endif %}</strong>
-          </article>
-          <article class="overview-strip-chip">
-            <span class="metric-label">Event Risk</span>
-            <strong>{{ risk_macro.command_center.event_risk_level }}</strong>
-          </article>
+        <div class="cmd-grid">
+          <div class="cmd-tile"><div class="l">Regime</div><div class="v amber">{{ mc.regime }}</div></div>
+          <div class="cmd-tile"><div class="l">Risk Appetite</div><div class="v blue">{{ mc.risk_appetite_label }}</div></div>
+          <div class="cmd-tile"><div class="l">Risk Status</div><div class="v">{{ risk_macro.summary.risk_status }}</div></div>
+          <div class="cmd-tile"><div class="l">Exposure Usage</div><div class="v">{% if mc.exposure_usage_pct is not none %}{{ "%.1f%%"|format(mc.exposure_usage_pct) }}{% else %}Unavailable{% endif %}</div></div>
+          <div class="cmd-tile"><div class="l">Event Risk</div><div class="v red">{{ mc.event_risk_level }}</div></div>
+          {% if mc.favored_exposures %}<div class="cmd-tile"><div class="l">Sectors Favored</div><div class="v green sm">{{ mc.favored_exposures | join(", ") }}</div></div>{% endif %}
+          {% if mc.avoided_exposures %}<div class="cmd-tile"><div class="l">Sectors Avoided</div><div class="v red sm">{{ mc.avoided_exposures | join(", ") }}</div></div>{% endif %}
         </div>
-        {% if risk_macro.command_center.warning_banner %}
-        <p class="detail-muted">{{ risk_macro.command_center.warning_banner }}</p>
-        {% endif %}
-        {% if risk_macro.command_center.basis_note %}
-        <p class="detail-muted">{{ risk_macro.command_center.basis_note }}</p>
-        {% endif %}
+        {% if mc.warning_banner %}<div class="warn-banner">{{ mc.warning_banner }}</div>{% endif %}
       </section>
       {% endif %}
-      <div class="surface-summary-row">
-        <article class="summary-tile">
-          <span class="metric-label">Risk Status</span>
-          <strong>{{ risk_macro.summary.risk_status }}</strong>
-        </article>
-        <article class="summary-tile">
-          <span class="metric-label">Top Risk Sources</span>
-          <strong>{{ risk_macro.summary.top_risk_sources | length }} source{% if risk_macro.summary.top_risk_sources|length != 1 %}s{% endif %}</strong>
-        </article>
-        <article class="summary-tile">
-          <span class="metric-label">Data / Model Availability</span>
-          <strong>{{ risk_macro.summary.availability_issues | length }} issue{% if risk_macro.summary.availability_issues|length != 1 %}s{% endif %}</strong>
-        </article>
-      </div>
+
+      {# Split events once; reused by the calendar block below and to dedupe risk actions. #}
+      {% set ev = namespace(calendar=(), earnings=(), earn_tickers=[], cal_high=0, earn_high=0) %}
+      {% for row in risk_macro.events or () %}
+      {% set event_kind = ((row.event_type_label or row.event_type or "") | lower) %}
+      {% set imp = (row.importance or "") | lower %}
+      {% if "earn" in event_kind %}
+      {% set ev.earnings = ev.earnings + (row,) %}
+      {% set ev.earn_tickers = ev.earn_tickers + [(row.affected_ticker or "") | upper] %}
+      {% if imp == "high" %}{% set ev.earn_high = ev.earn_high + 1 %}{% endif %}
+      {% else %}
+      {% set ev.calendar = ev.calendar + (row,) %}
+      {% if imp == "high" %}{% set ev.cal_high = ev.cal_high + 1 %}{% endif %}
+      {% endif %}
+      {% endfor %}
+      {% set other = namespace(rows=()) %}
+      {% for row in risk_macro.risk_sources or () %}{% if (row.ticker or "") | upper not in ev.earn_tickers %}{% set other.rows = other.rows + (row,) %}{% endif %}{% endfor %}
+
+      {# Risk context — macro read + the three short risk lists, grouped and aligned. #}
       <section class="surface-block">
-        <p><strong>Risk Config Version:</strong> {{ risk_macro.risk_config_version or "unavailable" }}</p>
+        {% if mc and mc.operator_note %}
+        <div class="macro-read">
+          <span class="section-label">Macro Read</span>
+          <p>{{ mc.operator_note }}</p>
+        </div>
+        {% endif %}
+        <div class="risk-context-grid">
+          <div class="risk-context-col">
+            <div class="section-label">Top Risk Sources</div>
+            {% if risk_macro.summary.top_risk_sources %}
+            <ul class="summary-points">
+              {% for row in risk_macro.summary.top_risk_sources %}<li><strong>{{ row.label }}</strong> — {{ row.summary }}</li>{% endfor %}
+            </ul>
+            {% else %}<p class="detail-muted quiet-empty surface-empty-copy">No concentrated risk sources.</p>{% endif %}
+          </div>
+          <div class="risk-context-col">
+            <div class="section-label">Other Risk Actions</div>
+            {% if other.rows %}
+            <ul class="summary-points">
+              {% for row in other.rows %}<li><strong>{{ row.ticker or "Portfolio" }}</strong> <span class="detail-chip">{{ row.recommended_action_label or row.recommended_action }}</span> — {{ row.rationale }}</li>{% endfor %}
+            </ul>
+            {% else %}<p class="detail-muted quiet-empty surface-empty-copy">No standalone risk actions.</p>{% endif %}
+          </div>
+          <div class="risk-context-col">
+            <div class="section-label">Data / Model Availability</div>
+            {% if risk_macro.summary.availability_issues %}
+            <ul class="summary-points">
+              {% for row in risk_macro.summary.availability_issues %}<li><strong>{{ row.label }}</strong> — {{ row.summary }}</li>{% endfor %}
+            </ul>
+            {% else %}<p class="detail-muted quiet-empty surface-empty-copy">No availability issues.</p>{% endif %}
+          </div>
+        </div>
       </section>
-      <section class="surface-block">
-        <div class="section-label">Top Risk Sources</div>
-        {% if risk_macro.summary.top_risk_sources %}
-        {% for row in risk_macro.summary.top_risk_sources %}
-        <div class="detail-muted"><strong>{{ row.label }}</strong>: {{ row.summary }}</div>
-        {% endfor %}
-        {% else %}<p class="detail-muted quiet-empty">No concentrated risk sources recorded.</p>{% endif %}
+
+      {# Macro News — needs a macro-level news feed (backend); renders only when present. #}
+      {% if risk_macro.macro_news %}
+      <section class="surface-block" data-testid="macro-news">
+        <div class="surface-block-head">
+          <div class="section-label">Macro News</div>
+          <span class="surface-block-count">{{ risk_macro.macro_news | length }}</span>
+        </div>
+        <div class="news-list">
+          {% for item in risk_macro.macro_news %}
+          <article class="news-item">
+            <h4>{{ item.title or item.headline or 'Untitled macro item' }}</h4>
+            {% set meta = [] %}
+            {% if item.source %}{% set meta = meta + [item.source] %}{% endif %}
+            {% if item.sentiment %}{% set meta = meta + ["sentiment " ~ item.sentiment] %}{% endif %}
+            {% if meta or item.time %}<p class="detail-muted">{{ meta | join(" · ") }}{% if item.time %}{% if meta %} · {% endif %}<time datetime="{{ item.time | iso_datetime }}" data-local-time-format="datetime">{{ item.time | local_time('datetime') }}</time>{% endif %}</p>{% endif %}
+            <p>{{ item.summary or 'No summary captured.' }}</p>
+          </article>
+          {% endfor %}
+        </div>
       </section>
+      {% endif %}
+
       <section class="surface-block">
         <div class="surface-block-head">
           <div class="section-label">Event Calendar</div>
           <span class="surface-block-count">{{ risk_macro.events | length }}</span>
         </div>
         {% if risk_macro.events %}
-        {% set risk_event_sections = namespace(calendar=(), earnings=()) %}
-        {% for row in risk_macro.events %}
-        {% set event_kind = ((row.event_type_label or row.event_type or "") | lower) %}
-        {% if "earn" in event_kind %}
-        {% set risk_event_sections.earnings = risk_event_sections.earnings + (row,) %}
-        {% else %}
-        {% set risk_event_sections.calendar = risk_event_sections.calendar + (row,) %}
-        {% endif %}
-        {% endfor %}
         <div class="risk-calendar-grid">
           <section class="risk-calendar-section" data-testid="economic-calendar">
-            <div class="section-label">Economic Calendar</div>
-            {% if risk_event_sections.calendar %}
-            <div class="calendar-list">
-              {% for row in risk_event_sections.calendar %}
-              <article class="calendar-row">
-                <div>
-                  <strong>{{ row.risk_mechanism or row.event_type_label or row.event_type }}</strong>
-                  <div class="detail-muted">{{ row.affected_ticker or "Portfolio" }}</div>
-                  {% if row.scheduled_at %}
-                  <div class="detail-muted"><time datetime="{{ row.scheduled_at | iso_datetime }}" data-local-time-format="datetime">{{ row.scheduled_at | local_time('datetime') }}</time></div>
-                  {% endif %}
-                </div>
-                <div class="calendar-meta">
-                  {% if row.importance %}
-                  <span class="impact-badge">{{ row.importance | upper }}</span>
-                  {% endif %}
-                  {% if row.portfolio_risk_level %}
-                  <span class="impact-badge impact-badge-muted">{{ row.portfolio_risk_level | upper }}</span>
-                  {% endif %}
-                </div>
-              </article>
+            <div class="surface-block-head">
+              <div class="section-label">Economic Calendar</div>
+              <span class="detail-muted cal-count">{{ ev.calendar | length }} event{% if ev.calendar|length != 1 %}s{% endif %}{% if ev.cal_high %} · {{ ev.cal_high }} high-impact{% endif %}</span>
+            </div>
+            {% if ev.calendar %}
+            <div class="cal-event-list">
+              {% for row in ev.calendar %}
+              <div class="cal-event-row">
+                <span class="cal-dot impact-dot-{{ (row.importance or 'low') | lower }}"></span>
+                <span class="cal-time">{% if row.scheduled_at %}<time datetime="{{ row.scheduled_at | iso_datetime }}" data-local-time-format="month_day_time">{{ row.scheduled_at | local_time('month_day_time') }}</time>{% else %}—{% endif %}</span>
+                <span class="cal-name">{{ row.risk_mechanism or row.event_type_label or row.event_type }}</span>
+                {% if row.importance %}<span class="impact-badge impact-{{ row.importance | lower }}">{{ row.importance | upper }}</span>{% endif %}
+              </div>
               {% endfor %}
             </div>
             {% else %}
@@ -101,21 +122,22 @@
             {% endif %}
           </section>
           <section class="risk-calendar-section" data-testid="upcoming-earnings">
-            <div class="section-label">Upcoming Earnings</div>
-            {% if risk_event_sections.earnings %}
-            <div class="earnings-card-list">
-              {% for row in risk_event_sections.earnings %}
-              <article class="earnings-chip">
-                <div class="earnings-chip-head">
+            <div class="surface-block-head">
+              <div class="section-label">Upcoming Earnings</div>
+              <span class="detail-muted cal-count">{{ ev.earnings | length }} report{% if ev.earnings|length != 1 %}s{% endif %}{% if ev.earn_high %} · {{ ev.earn_high }} high-impact{% endif %}</span>
+            </div>
+            {% if ev.earnings %}
+            <div class="earnings-tile-grid">
+              {% for row in ev.earnings %}
+              <article class="earnings-tile">
+                <div class="et-head">
                   <strong>{{ row.affected_ticker or row.event_type_label or row.event_type }}</strong>
-                  {% if row.importance %}
-                  <span class="impact-badge">{{ row.importance | upper }}</span>
-                  {% endif %}
+                  {% if row.importance %}<span class="impact-badge impact-{{ row.importance | lower }}">{{ row.importance | upper }}</span>{% endif %}
                 </div>
-                <div class="detail-muted">{{ row.risk_mechanism or row.event_type_label or row.event_type }}</div>
-                {% if row.scheduled_at %}
-                <div class="detail-muted"><time datetime="{{ row.scheduled_at | iso_datetime }}" data-local-time-format="datetime">{{ row.scheduled_at | local_time('datetime') }}</time></div>
-                {% endif %}
+                <div class="et-meta">{% if row.scheduled_at %}<time datetime="{{ row.scheduled_at | iso_datetime }}" data-local-time-format="month_day">{{ row.scheduled_at | local_time('month_day') }}</time>{% endif %}{% if row.risk_mechanism %} · {{ row.risk_mechanism }}{% endif %}</div>
+                {% for rs in risk_macro.risk_sources if (rs.ticker or "") | upper == (row.affected_ticker or "") | upper %}
+                <div class="et-action"><span class="detail-chip">{{ rs.recommended_action_label or rs.recommended_action }}</span> <span>{{ rs.rationale }}</span></div>
+                {% endfor %}
               </article>
               {% endfor %}
             </div>
@@ -125,35 +147,5 @@
           </section>
         </div>
         {% else %}<p class="detail-muted quiet-empty">No event-risk rows are currently visible.</p>{% endif %}
-      </section>
-      <section class="surface-block">
-        <div class="surface-block-head">
-          <div class="section-label">Risk Source Readout</div>
-          <span class="surface-block-count">{{ risk_macro.risk_sources | length }}</span>
-        </div>
-        {% if risk_macro.risk_sources %}
-        <div class="candidate-queue-list scroll-panel">
-          {% for row in risk_macro.risk_sources %}
-          <article class="candidate-queue-card">
-            <div class="candidate-card-head">
-              <div>
-                <strong>{{ row.ticker or "Portfolio" }}</strong>
-                <div class="detail-muted">{{ row.risk_source_label or row.risk_source }} / {{ row.severity }}</div>
-              </div>
-              <span class="detail-chip">{{ row.recommended_action_label or row.recommended_action }}</span>
-            </div>
-            <p>{{ row.rationale }}</p>
-          </article>
-          {% endfor %}
-        </div>
-        {% else %}<p class="detail-muted quiet-empty">No risk-source rows are currently visible.</p>{% endif %}
-      </section>
-      <section class="surface-block">
-        <div class="section-label">Data / Model Availability</div>
-        {% if risk_macro.summary.availability_issues %}
-        {% for row in risk_macro.summary.availability_issues %}
-        <div class="detail-muted"><strong>{{ row.label }}</strong>: {{ row.summary }}</div>
-        {% endfor %}
-        {% else %}<p class="detail-muted quiet-empty">No availability issues recorded.</p>{% endif %}
       </section>
     </section>

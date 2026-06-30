@@ -1,198 +1,34 @@
-    <section class="card secondary-surface standalone-surface">
-      <div class="surface-heading">
-        <div>
-          <p class="eyebrow">Focused Surface</p>
-          <h2>Overview</h2>
-        </div>
-      </div>
-      {% if overview.operator_strip %}
-      <div class="overview-operator-strip">
-        <section class="surface-block">
-          <div class="surface-block-head">
-            <div class="section-label">Session State</div>
-          </div>
-          <div class="overview-strip-grid">
-            {% for row in overview.operator_strip.primary %}
-            <article class="overview-strip-chip tone-{{ row.tone or 'neutral' }}">
-              <span class="metric-label">{{ row.label }}</span>
-              <strong>{{ row.value }}</strong>
-            </article>
-            {% endfor %}
-          </div>
-        </section>
-        <section class="surface-block">
-          <div class="surface-block-head">
-            <div class="section-label">Context</div>
-          </div>
-          <div class="overview-strip-grid">
-            {% for row in overview.operator_strip.context %}
-            <article class="overview-strip-chip tone-{{ row.tone or 'neutral' }}">
-              <span class="metric-label">{{ row.label }}</span>
-              <strong>{{ row.value }}</strong>
-            </article>
-            {% endfor %}
-          </div>
-        </section>
-      </div>
-      {% endif %}
-      {% if overview.metric_cards %}
-      <div class="overview-metric-grid">
-        {% for card in overview.metric_cards %}
-        <article class="overview-metric-card">
-          <span class="metric-label">{{ card.label }}</span>
-          <strong>{{ card.primary_value }}</strong>
-          {% if card.secondary_value %}<div class="detail-muted">{{ card.secondary_value }}</div>{% endif %}
-          <div class="overview-metric-meta">
-            {% if card.meta.updated_at_label %}<div class="detail-muted">Updated {{ card.meta.updated_at_label }}</div>{% endif %}
-            {% if card.meta.source_of_truth_label %}<div class="detail-muted">{{ card.meta.source_of_truth_label }}</div>{% endif %}
-            {% if card.meta.basis_note %}<div class="detail-muted">{{ card.meta.basis_note }}</div>{% endif %}
-          </div>
-        </article>
-        {% endfor %}
-      </div>
-      {% endif %}
-      {% if overview.current_summary %}
-      <details class="surface-block">
-        <summary>Current Session Summary</summary>
-        <p>{{ overview.current_summary.headline }}</p>
-        <ul class="output-list">
-          {% for item in overview.current_summary["items"] %}
-          <li>{{ item }}</li>
-          {% endfor %}
-        </ul>
-        {% if overview.current_summary.hidden_item_count %}
-        <p class="detail-muted">{{ overview.current_summary.hidden_item_count }} more summary item{% if overview.current_summary.hidden_item_count != 1 %}s{% endif %} remain behind deeper surfaces.</p>
-        {% endif %}
-        {% if overview.current_summary.meta.updated_at_label %}
-        <p class="detail-muted">Updated {{ overview.current_summary.meta.updated_at_label }}</p>
-        {% endif %}
-      </details>
-      {% endif %}
-      {% if overview.latest_preopen_run %}
-      <section class="surface-block">
-        <div class="surface-block-head">
-          <div class="section-label">Latest Preopen Run</div>
-          <span class="surface-block-count">{{ overview.latest_preopen_run.status_label }}</span>
-        </div>
-        {% if overview.latest_preopen_run.empty_copy %}
-        <p class="detail-muted quiet-empty surface-empty-copy">{{ overview.latest_preopen_run.empty_copy }}</p>
-        {% else %}
-        <div class="surface-summary-row">
-          {% for tile in overview.latest_preopen_run.summary_tiles %}
-          <article class="summary-tile">
-            <span class="metric-label">{{ tile.label }}</span>
-            <strong>{{ tile.value }}</strong>
-          </article>
+{# Overview = triage landing. Just "what needs attention first" — vitals live
+   in the header, macro on Risk & Macro, narrative there too. #}
+{% set feed = overview.attention_feed or [] %}
+
+<div class="surface-heading">
+  <div><p class="eyebrow">Command Center</p><h2>Overview</h2></div>
+  <p class="detail-muted">What needs attention first — alerts, reviews, and signal changes across the book.</p>
+</div>
+
+<div class="panel">
+  <div class="panel-head"><h3>🎯 Needs Attention</h3><span class="meta">{{ feed | length }} ticker{% if feed | length != 1 %}s{% endif %} · alerts, reviews, signal changes</span></div>
+  <div class="panel-body">
+    {% if feed %}
+    <p class="panel-sub">Click any ticker to open its full workspace (decision · evidence · risk · news) to review and act.</p>
+    <div class="attention-feed-list attn-2col">
+      {% for entry in feed %}
+      <a href="/today?tab=trades&ticker={{ entry.ticker }}" class="attention-feed-row attention-feed-row-{{ entry.primary_kind }}">
+        <div class="attention-feed-badges">
+          {% for facet in entry.facets %}
+          <span class="attention-badge attention-badge-{{ facet.kind }}">{{ facet.badge }}</span>
           {% endfor %}
         </div>
-        {% if overview.latest_preopen_run.headline %}
-        <p>{{ overview.latest_preopen_run.headline }}</p>
-        {% endif %}
-        <div class="overview-metric-meta">
-          {% if overview.latest_preopen_run.execution_mode_label %}
-          <div class="detail-muted">Execution Mode: {{ overview.latest_preopen_run.execution_mode_label }}</div>
-          {% endif %}
-          {% if overview.latest_preopen_run.as_of_label %}
-          <div class="detail-muted">As Of {{ overview.latest_preopen_run.as_of_label }}</div>
-          {% endif %}
-          {% if overview.latest_preopen_run.completed_at_label %}
-          <div class="detail-muted">Completed {{ overview.latest_preopen_run.completed_at_label }}</div>
-          {% endif %}
+        <div class="attention-feed-body">
+          <strong>{{ entry.ticker }}</strong>
+          {% for facet in entry.facets %}<p class="detail-muted">{{ facet.text }}</p>{% endfor %}
         </div>
-        {% endif %}
-      </section>
-      {% endif %}
-      <div class="surface-summary-row portfolio-pnl-row">
-        <article class="summary-tile">
-          <span class="metric-label">Ready for Review</span>
-          <strong>{{ overview.command_center.needs_review | length }} ticker{% if overview.command_center.needs_review|length != 1 %}s{% endif %}</strong>
-        </article>
-        <article class="summary-tile">
-          <span class="metric-label">Open Positions</span>
-          <strong>{{ overview.command_center.open_positions | length }} position{% if overview.command_center.open_positions|length != 1 %}s{% endif %}</strong>
-        </article>
-        <article class="summary-tile">
-          <span class="metric-label">System Issues</span>
-          <strong>{{ overview.command_center.system_issues | length }} issue{% if overview.command_center.system_issues|length != 1 %}s{% endif %}</strong>
-        </article>
-      </div>
-      <section class="surface-block">
-        <div class="surface-block-head">
-          <div class="section-label">Ready for Review</div>
-          <span class="surface-block-count">{{ overview.command_center.needs_review | length }}</span>
-        </div>
-        {% if overview.command_center.needs_review %}
-        {% for row in overview.command_center.needs_review %}
-        <div class="detail-muted"><strong>{{ row.ticker }}</strong>: {{ row.summary }}</div>
-        {% endfor %}
-        {% else %}
-        <p class="detail-muted quiet-empty surface-empty-copy">No tickers need review.</p>
-        {% endif %}
-      </section>
-      <section class="surface-block">
-        <div class="surface-block-head">
-          <div class="section-label">Open Positions</div>
-          <span class="surface-block-count">{{ overview.command_center.open_positions | length }}</span>
-        </div>
-        {% if overview.command_center.open_positions %}
-        {% for row in overview.command_center.open_positions %}
-        <div class="detail-muted"><strong>{{ row.ticker }}</strong>: {{ row.summary }}</div>
-        {% endfor %}
-        {% else %}
-        <p class="detail-muted quiet-empty surface-empty-copy">No open positions need attention.</p>
-        {% endif %}
-      </section>
-      <section class="surface-block">
-        <div class="surface-block-head">
-          <div class="section-label">System Issues</div>
-          <span class="surface-block-count">{{ overview.command_center.system_issues | length }}</span>
-        </div>
-        {% if overview.command_center.system_issues %}
-        {% for row in overview.command_center.system_issues %}
-        <div class="detail-muted"><strong>{{ row.label }}</strong>: {{ row.summary }}</div>
-        {% endfor %}
-        {% else %}
-        <p class="detail-muted quiet-empty surface-empty-copy">No system issues.</p>
-        {% endif %}
-      </section>
-      <section class="surface-block">
-        <div class="surface-block-head">
-          <div class="section-label">Live Alerts</div>
-          <span class="surface-block-count">{{ overview.live_alerts | length }}</span>
-        </div>
-        {% if overview.live_alerts %}
-        <div class="surface-table-wrap">
-          <table class="compact-table">
-            <thead><tr><th>Ticker</th><th>Severity</th><th>Headline</th></tr></thead>
-            <tbody>
-              {% for row in overview.live_alerts %}
-              <tr><td>{{ row.ticker }}</td><td>{{ row.severity }}</td><td>{{ row.headline }}</td></tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-        {% else %}
-        <p class="detail-muted quiet-empty surface-empty-copy">No live alerts.</p>
-        {% endif %}
-      </section>
-      <section class="surface-block">
-        <div class="surface-block-head">
-          <div class="section-label">Material Signal Changes</div>
-          <span class="surface-block-count">{{ overview.material_changes | length }}</span>
-        </div>
-        {% if overview.material_changes %}
-        <div class="surface-table-wrap">
-          <table class="compact-table">
-            <thead><tr><th>Ticker</th><th>Summary</th></tr></thead>
-            <tbody>
-              {% for row in overview.material_changes %}
-              <tr><td>{{ row.ticker }}</td><td>{{ row.summary }}</td></tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-        {% else %}
-        <p class="detail-muted quiet-empty surface-empty-copy">No material changes.</p>
-        {% endif %}
-      </section>
-    </section>
+      </a>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="detail-muted quiet-empty surface-empty-copy">Nothing needs attention right now.</p>
+    {% endif %}
+  </div>
+</div>

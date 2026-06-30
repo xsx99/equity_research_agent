@@ -18,31 +18,36 @@
       <p class="detail-muted">{{ header.trade_date if header.trade_date else "—" }} · {{ header.market_phase or "Unavailable" }}</p>
     </div>
 
-    <div class="kpi-bar">
-      <article class="kpi">
-        <span class="kpi-label">Account Equity</span>
-        <strong class="kpi-value kpi-value-lg">{{ fmt_currency(header.account_equity) if header.account_equity is not none else "—" }}</strong>
+    <div class="kpi-cards">
+      <article class="kpi-card k-blue">
+        <div class="label">Account Equity</div>
+        <div class="value">{{ fmt_currency(header.account_equity) if header.account_equity is not none else "—" }}</div>
+        <div class="sub">Total equity</div>
       </article>
-      <article class="kpi">
-        <span class="kpi-label">Day P&amp;L</span>
-        <strong class="kpi-value {% if header.day_pnl is not none and header.day_pnl > 0 %}kpi-pos{% elif header.day_pnl is not none and header.day_pnl < 0 %}kpi-neg{% endif %}">{{ fmt_currency(header.day_pnl) if header.day_pnl is not none else "—" }}</strong>
-        <span class="kpi-sub">{{ pct(header.day_pnl_pct) if header.day_pnl_pct is not none else "—" }}</span>
+      <article class="kpi-card k-green">
+        <div class="label">Day P&amp;L</div>
+        <div class="value {% if header.day_pnl is not none and header.day_pnl > 0 %}pos{% elif header.day_pnl is not none and header.day_pnl < 0 %}neg{% endif %}">{{ fmt_currency(header.day_pnl) if header.day_pnl is not none else "—" }}</div>
+        <div class="sub {% if header.day_pnl is not none and header.day_pnl > 0 %}pos{% elif header.day_pnl is not none and header.day_pnl < 0 %}neg{% endif %}">{{ pct(header.day_pnl_pct) if header.day_pnl_pct is not none else "—" }}</div>
       </article>
-      <article class="kpi">
-        <span class="kpi-label">Unrealized P&amp;L</span>
-        <strong class="kpi-value {% if header.unrealized_pnl is not none and header.unrealized_pnl > 0 %}kpi-pos{% elif header.unrealized_pnl is not none and header.unrealized_pnl < 0 %}kpi-neg{% endif %}">{{ fmt_currency(header.unrealized_pnl) if header.unrealized_pnl is not none else "—" }}</strong>
+      <article class="kpi-card k-violet">
+        <div class="label">Unrealized P&amp;L</div>
+        <div class="value {% if header.unrealized_pnl is not none and header.unrealized_pnl > 0 %}pos{% elif header.unrealized_pnl is not none and header.unrealized_pnl < 0 %}neg{% endif %}">{{ fmt_currency(header.unrealized_pnl) if header.unrealized_pnl is not none else "—" }}</div>
+        {% if header.total_return is not none %}<div class="sub {% if header.total_return >= 0 %}pos{% else %}neg{% endif %}">{{ fmt_number(header.total_return * 100, 1) }}% total return</div>{% else %}<div class="sub">Open positions</div>{% endif %}
       </article>
-      <article class="kpi">
-        <span class="kpi-label">Realized P&amp;L</span>
-        <strong class="kpi-value {% if header.realized_pnl is not none and header.realized_pnl > 0 %}kpi-pos{% elif header.realized_pnl is not none and header.realized_pnl < 0 %}kpi-neg{% endif %}">{{ fmt_currency(header.realized_pnl) if header.realized_pnl is not none else "—" }}</strong>
+      <article class="kpi-card k-amber">
+        <div class="label">Realized P&amp;L</div>
+        <div class="value {% if header.realized_pnl is not none and header.realized_pnl > 0 %}pos{% elif header.realized_pnl is not none and header.realized_pnl < 0 %}neg{% endif %}">{{ fmt_currency(header.realized_pnl) if header.realized_pnl is not none else "—" }}</div>
+        <div class="sub">Closed P&amp;L</div>
       </article>
-      <article class="kpi">
-        <span class="kpi-label">Net / Gross Exp.</span>
-        <strong class="kpi-value">{{ pct(header.net_exposure) if header.net_exposure is not none else "—" }} / {{ pct(header.gross_exposure) if header.gross_exposure is not none else "—" }}</strong>
+      <article class="kpi-card k-cyan">
+        <div class="label">Buying Power</div>
+        <div class="value">{{ fmt_currency(header.buying_power) if header.buying_power is not none else "—" }}</div>
+        <div class="sub">Available to trade</div>
       </article>
-      <article class="kpi">
-        <span class="kpi-label">Buying Power</span>
-        <strong class="kpi-value">{{ fmt_currency(header.buying_power) if header.buying_power is not none else "—" }}</strong>
+      <article class="kpi-card k-pink">
+        <div class="label">Net / Gross Exp.</div>
+        <div class="value">{{ pct(header.net_exposure) if header.net_exposure is not none else "—" }} / {{ pct(header.gross_exposure) if header.gross_exposure is not none else "—" }}</div>
+        <div class="sub">net / gross exposure</div>
       </article>
     </div>
 
@@ -57,8 +62,7 @@
 
   <nav class="today-global-tabs" aria-label="Today sections">
     {% for tab in tabs %}
-    {% if tab.id == "system" %}<span class="today-global-tab-spacer"></span>{% endif %}
-    <a class="today-global-tab {% if tab.id == 'system' %}today-global-tab-muted{% endif %} {% if selected_tab == tab.id %}active{% endif %}" href="/today?tab={{ tab.id }}">{{ tab.label }}</a>
+    <a class="today-global-tab {% if selected_tab == tab.id %}active{% endif %}" href="/today?tab={{ tab.id }}">{{ tab.label }}</a>
     {% endfor %}
   </nav>
 

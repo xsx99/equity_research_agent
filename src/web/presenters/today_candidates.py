@@ -16,12 +16,40 @@ def build_today_candidates_view(
     portfolio_intents: tuple[dict[str, Any], ...],
     relationships: tuple[dict[str, Any], ...],
     peer_baskets: tuple[dict[str, Any], ...],
+    thesis_history_by_ticker: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    decision_readout = _group_candidate_rows(tuple(row for row in rows if not _is_smoke_candidate_row(row)))
+    decision_readout = _group_candidate_rows(
+        tuple(row for row in rows if not _is_smoke_candidate_row(row)),
+        thesis_history_by_ticker=thesis_history_by_ticker or {},
+    )
     manual_review_queue = _normalize_manual_review_rows(
         tuple(row for row in manual_requests if not _is_smoke_manual_review_row(row))
     )
     action_queue = _build_action_queue(decision_readout, manual_review_queue)
+    # A manually-pinned ticker goes through the SAME candidate pipeline, so render it
+    # like an agent candidate: merge its scored candidate detail (strategy, confidence,
+    # thesis, signals, risk, evaluations, alternatives) onto the manual-request row.
+    candidate_by_ticker = {
+        str(group.get("ticker") or "").strip().upper(): group for group in decision_readout
+    }
+    manual_candidates = tuple(
+        {
+            **candidate_by_ticker.get(str(item.get("ticker") or "").strip().upper(), {}),
+            **item,
+            "ticker": str(item.get("ticker") or "").strip().upper(),
+        }
+        for item in manual_review_queue
+    )
+    agent_candidates = tuple(
+        group
+        for group in decision_readout
+        if (group.get("selection_source") or "scanner") not in ("manual_request", "watchlist_pin")
+    )
+    # Most recent candidate-scoring run — the newest decision_time across the scored rows.
+    last_run_at = max(
+        (row.get("decision_time") for row in rows if row.get("decision_time")),
+        default=None,
+    )
     return {
         "summary": {
             "action_queue": action_queue,
@@ -29,6 +57,9 @@ def build_today_candidates_view(
         },
         "action_queue": action_queue,
         "manual_review_queue": manual_review_queue,
+        "agent_candidates": agent_candidates,
+        "manual_candidates": manual_candidates,
+        "last_run_at": last_run_at,
         "decision_readout": decision_readout,
         "rows": rows,
         "manual_requests": manual_requests,
@@ -40,7 +71,29 @@ def build_today_candidates_view(
     }
 
 
-def _group_candidate_rows(rows: tuple[dict[str, Any], ...]) -> tuple[dict[str, Any], ...]:
+def _thesis_at(history: tuple[Any, ...], when: Any) -> str | None:
+    """Most recent agent thesis at or before `when` (history is newest-first)."""
+    if not history:
+        return None
+    for decision_time, thesis in history:
+        if when is None:
+            return thesis
+        if decision_time is None:
+            continue
+        try:
+            if decision_time <= when:
+                return thesis
+        except TypeError:
+            continue
+    return None
+
+
+def _group_candidate_rows(
+    rows: tuple[dict[str, Any], ...],
+    *,
+    thesis_history_by_ticker: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any], ...]:
+    thesis_history_by_ticker = thesis_history_by_ticker or {}
     grouped: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
         ticker = str(row.get("ticker") or "").strip().upper()
@@ -51,6 +104,7 @@ def _group_candidate_rows(rows: tuple[dict[str, Any], ...]) -> tuple[dict[str, A
     groups: list[dict[str, Any]] = []
     for ticker, items in grouped.items():
         sorted_items = sorted(items, key=_candidate_sort_key)
+        ticker_history = thesis_history_by_ticker.get(ticker, ())
         evaluations = _dedupe_evaluations(
             sorted(
                 sorted_items,
@@ -58,13 +112,16 @@ def _group_candidate_rows(rows: tuple[dict[str, Any], ...]) -> tuple[dict[str, A
                     _reverse_timestamp_key(row.get("decision_time")),
                     -(float(row.get("candidate_score") or 0.0)),
                 ),
-            )
+            ),
+            ticker_history=ticker_history,
         )
         primary = sorted_items[0]
         groups.append(
             {
                 "ticker": ticker,
                 "latest_outcome": primary.get("current_outcome_label") or primary.get("result_status") or "Unavailable",
+                "thesis": (ticker_history[0][1] if ticker_history else None),
+                "selection_source": primary.get("selection_source"),
                 "primary_reason": operator_text(primary.get("operator_summary")) or "No material update.",
                 "trade_identity_label": primary.get("trade_identity_label"),
                 "strategy_label": _display_strategy_label(primary),
@@ -98,7 +155,11 @@ def _group_candidate_rows(rows: tuple[dict[str, Any], ...]) -> tuple[dict[str, A
     return tuple(groups)
 
 
-def _dedupe_evaluations(rows: list[dict[str, Any]]) -> tuple[dict[str, Any], ...]:
+def _dedupe_evaluations(
+    rows: list[dict[str, Any]],
+    *,
+    ticker_history: tuple[Any, ...] = (),
+) -> tuple[dict[str, Any], ...]:
     evaluations: list[dict[str, Any]] = []
     seen: set[tuple[Any, ...]] = set()
     for item in rows:
@@ -107,6 +168,7 @@ def _dedupe_evaluations(rows: list[dict[str, Any]]) -> tuple[dict[str, Any], ...
             "outcome": item.get("current_outcome_label") or item.get("result_status") or "Unavailable",
             "strategy_label": _display_strategy_label(item),
             "confidence": _candidate_confidence(item),
+            "thesis": _thesis_at(ticker_history, item.get("decision_time")),
             "summary": operator_text(item.get("operator_summary")) or "No material update.",
         }
         key = (

@@ -72,6 +72,38 @@ def build_portfolio_analytics(
     gross_loss = abs(sum(value for value in day_pnls if value < 0))
     daily_profit_factor = (gross_win / gross_loss) if gross_loss else None
 
+    # Sharpe ratio (annualized, risk-free = 0) from daily equity returns.
+    daily_returns = [
+        equity_values[i] / equity_values[i - 1] - 1.0
+        for i in range(1, len(equity_values))
+        if equity_values[i - 1]
+    ]
+    sharpe_ratio = None
+    if len(daily_returns) >= 2:
+        mean_return = sum(daily_returns) / len(daily_returns)
+        variance = sum((r - mean_return) ** 2 for r in daily_returns) / (len(daily_returns) - 1)
+        std_return = variance ** 0.5
+        if std_return > 0:
+            sharpe_ratio = (mean_return / std_return) * (252 ** 0.5)
+
+    # X-axis date ticks (a few evenly-spaced points) shared by both charts.
+    x_axis_ticks: list[dict[str, Any]] = []
+    if point_count >= 2:
+        tick_count = min(5, point_count)
+        seen_idx: set[int] = set()
+        for k in range(tick_count):
+            idx = round(k * (point_count - 1) / (tick_count - 1))
+            if idx in seen_idx:
+                continue
+            seen_idx.add(idx)
+            x_axis_ticks.append(
+                {
+                    "x": round(plot_left + (idx / (point_count - 1)) * plot_width, 1),
+                    "time": series[idx].get("time"),
+                    "anchor": "start" if idx == 0 else ("end" if idx == point_count - 1 else "middle"),
+                }
+            )
+
     return {
         "point_count": point_count,
         "equity_chart": {
@@ -84,6 +116,7 @@ def build_portfolio_analytics(
             "baseline_y": round(baseline_y, 1),
             "bar_width": round(bar_width, 1),
         },
+        "x_axis_ticks": tuple(x_axis_ticks),
         "equity_start": equity_values[0],
         "equity_end": equity_values[-1],
         "equity_min": equity_min,
@@ -98,14 +131,16 @@ def build_portfolio_analytics(
             "worst_day": worst_day,
             "avg_day_pnl": avg_day_pnl,
             "daily_profit_factor": daily_profit_factor,
+            "sharpe_ratio": sharpe_ratio,
         },
     }
 
 
-def _normalize_history_row(row: dict[str, Any]) -> dict[str, float | None]:
+def _normalize_history_row(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "equity": _safe_float(row.get("equity")),
         "day_pnl": _safe_float(row.get("day_pnl")),
+        "time": row.get("time"),
     }
 
 

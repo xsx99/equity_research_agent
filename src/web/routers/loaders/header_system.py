@@ -17,11 +17,11 @@ from src.web.presenters.today_copy import (
 from src.web.routers import today_loaders
 
 _TAB_LABELS = (
-    ("portfolio", "Portfolio"),
     ("overview", "Overview"),
     ("trades", "Trades"),
-    ("candidates", "Candidates"),
+    ("portfolio", "Portfolio"),
     ("risk-macro", "Risk & Macro"),
+    ("candidates", "Candidates"),
     ("system", "System"),
 )
 
@@ -273,7 +273,7 @@ def _serialize_universe_filter(config: UniverseFilterConfig | None) -> dict[str,
 
 def _normalize_tab(tab: str) -> str:
     allowed = {tab_id for tab_id, _ in _TAB_LABELS}
-    return tab if tab in allowed else "portfolio"
+    return tab if tab in allowed else "overview"
 
 
 def _normalize_detail_tab(detail_tab: str) -> str:

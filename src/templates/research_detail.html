@@ -41,7 +41,7 @@
         </td>
       </tr>
       {% if detail.error_message %}
-      <tr><td>Error</td><td style="color:#721c24;">{{ detail.error_message }}</td></tr>
+      <tr><td>Error</td><td style="color:var(--neg);">{{ detail.error_message }}</td></tr>
       {% endif %}
     </table>
   </div>
@@ -61,7 +61,7 @@
       </tr>
       <tr>
         <td>Time Horizon</td>
-        <td>{{ detail.time_horizon or '—' }}{% if detail.time_horizon_rationale %} — <span style="color:#555; font-weight:normal;">{{ detail.time_horizon_rationale }}</span>{% endif %}</td>
+        <td>{{ detail.time_horizon or '—' }}{% if detail.time_horizon_rationale %} — <span style="color:var(--text-muted); font-weight:normal;">{{ detail.time_horizon_rationale }}</span>{% endif %}</td>
       </tr>
       <tr>
         <td>Actionability</td>
@@ -95,7 +95,7 @@
     {% endif %}
 
     {% else %}
-    <p style="color:#666;">No output available.</p>
+    <p style="color:var(--text-muted);">No output available.</p>
     {% endif %}
   </div>
 
@@ -358,9 +358,9 @@
       <tr><td>Exit Source</td><td>{{ detail.evaluation_exit_price_source or '—' }}</td></tr>
     </table>
     {% elif detail.status == 'succeeded' %}
-    <p style="color:#666;">Evaluation window has not elapsed yet.</p>
+    <p style="color:var(--text-muted);">Evaluation window has not elapsed yet.</p>
     {% else %}
-    <p style="color:#666;">No eval result.</p>
+    <p style="color:var(--text-muted);">No eval result.</p>
     {% endif %}
   </div>
 
@@ -411,19 +411,5 @@
   <a href="/research" class="btn btn-primary btn-sm">← Back to Research</a>
 </div>
 
-<script>
-  document.querySelectorAll('[data-tabs]').forEach(container => {
-    const bar = container.querySelector('.tab-bar');
-    bar.querySelectorAll('.tab-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        bar.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        const target = btn.dataset.tab;
-        container.querySelectorAll('.tab-panel').forEach(p => {
-          p.classList.toggle('active', p.dataset.panel === target);
-        });
-      });
-    });
-  });
-</script>
+{# Inner-tab toggling is handled globally by base.html (setupTabs). #}
 {% endblock %}

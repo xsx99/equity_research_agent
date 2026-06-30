@@ -125,7 +125,64 @@ def build_today_overview(
         "command_center": command_center,
         "live_alerts": live_alerts,
         "material_changes": material_changes,
+        "attention_feed": _build_attention_feed(
+            needs_review=command_center["needs_review"],
+            live_alerts=live_alerts,
+            material_changes=material_changes,
+        ),
     }
+
+
+_ATTENTION_PRIORITY = {"alert": 0, "review": 1, "signal": 2}
+
+
+def _build_attention_feed(
+    *,
+    needs_review: tuple[dict[str, Any], ...],
+    live_alerts: tuple[dict[str, Any], ...],
+    material_changes: tuple[dict[str, Any], ...],
+) -> tuple[dict[str, Any], ...]:
+    """Collapse alerts / reviews / signal changes into one entry per ticker.
+
+    A ticker that appears as both (e.g.) a live alert and a material change
+    renders as a single card with both badges instead of duplicate rows.
+    """
+    facets_by_ticker: dict[str, list[dict[str, str]]] = {}
+    order: list[str] = []
+
+    def _add(ticker: Any, kind: str, badge: str, text: Any) -> None:
+        symbol = str(ticker or "").strip().upper()
+        if not symbol:
+            return
+        if symbol not in facets_by_ticker:
+            facets_by_ticker[symbol] = []
+            order.append(symbol)
+        facets_by_ticker[symbol].append(
+            {"kind": kind, "badge": badge, "text": str(text or "").strip()}
+        )
+
+    for row in live_alerts or ():
+        _add(row.get("ticker"), "alert", str(row.get("severity") or "Alert"), row.get("headline") or row.get("summary"))
+    for row in needs_review or ():
+        _add(row.get("ticker"), "review", "Review", row.get("summary"))
+    for row in material_changes or ():
+        _add(row.get("ticker"), "signal", "Signal", row.get("summary"))
+
+    feed: list[dict[str, Any]] = []
+    for symbol in order:
+        facets = sorted(
+            facets_by_ticker[symbol],
+            key=lambda facet: _ATTENTION_PRIORITY.get(facet["kind"], 9),
+        )
+        feed.append(
+            {
+                "ticker": symbol,
+                "primary_kind": facets[0]["kind"],
+                "facets": tuple(facets),
+            }
+        )
+    feed.sort(key=lambda entry: _ATTENTION_PRIORITY.get(entry["primary_kind"], 9))
+    return tuple(feed)
 
 
 def _build_command_center(

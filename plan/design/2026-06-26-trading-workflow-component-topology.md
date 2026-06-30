@@ -124,19 +124,35 @@ src/trading/
     strategy_evolution/         # ← runtime/strategy_evolution.py + post_close/{strategy_evolution,strategy_policy}.py
     replay/                     # ← replay/{historical,outcomes}.py   (smoke-only today — see backlog #6)
 
-  universe/                     # ← data_sources/ + workflows/universe_scan.py
-  signals/                      # signals/ (+ workflows/signal_snapshot.py adapter)
-  strategy/                     # strategies/ (+ workflows/strategy_scoring.py adapter)
   decision/                     # ← workflows/trading_decision.py + workflows/option_strategy_builder/  (5-file family → subpackage)
-  risk/                         # risk/ + runtime/lookahead_risk.py
-  execution/                    # ← workflows/paper_execution*.py + brokers/
-  portfolio/                    # portfolio/ + workflows/portfolio_sync.py
+  execution/                    # already exists (PR 35 attempts.py) + ← workflows/paper_execution*.py
+  signals/                      # signals/ + ← workflows/signal_snapshot.py
+  strategies/                   # strategies/ + ← workflows/strategy_scoring.py   (NOT renamed — heavily imported)
+  portfolio/                    # portfolio/ + ← workflows/portfolio_sync.py
+  risk/                         # risk/ + ← runtime/lookahead_risk.py
+  data_sources/                 # stays put + ← workflows/universe_scan.py   (NOT folded — coherent, 22 importers)
+  brokers/                      # stays put   (NOT folded into execution/ — coherent, 23 importers)
   macro/  events/  relationships/  learning/      # unchanged
-  repositories/                 # unchanged (already split in PR 31/34)
+  repositories/                 # unchanged (already split in PR 31/34); also gains the relocated trade-day util — see below
 ```
 
-The end state has **no `runtime/` and no `workflows/` folder** — both were grouping by mechanism
+The end state has **no `runtime/` folder and a shim-only `workflows/`** — both grouped by mechanism
 ("this is a runtime shell" / "this is a workflow") rather than by workflow identity or capability.
+
+> **Scope refinement (2026-06-27, after PR 35/36 landed).** Two earlier assumptions were corrected
+> by what's now in the tree:
+> - **`brokers/` and `data_sources/` stay where they are**, and **`strategies/` is not renamed to
+>   `strategy/`.** These are already coherent, well-named capability packages with 20+ importers
+>   each. Relocating/renaming them is high-churn, low-clarity — the opposite of the win. The dumping
+>   grounds to dissolve are `workflows/` and `runtime/`, not the packages that are already fine.
+> - **`execution/` already exists** — PR 35 created it for `attempts.py` (the skipped/failed audit
+>   records). That validates the grouping: PR 41 folds `paper_execution*.py` in *next to*
+>   `attempts.py` rather than creating the package from scratch.
+> - **The trade-day time util** (`runtime/trade_day.py`, added by PR 36) is imported by four
+>   repository mixins, creating a `repositories → runtime` dependency that forced a lazy
+>   `__getattr__` hack in `runtime/__init__.py`. It is a cross-cutting utility, not phase code, so it
+>   relocates to a neutral home (a repository/shared util) — which also lets the `__getattr__` hack
+>   be removed. Handled as the opening task of the runtime teardown.
 
 ## Open decisions (for sign-off before implementation)
 
@@ -189,22 +205,32 @@ first). That gives three PRs:
    move-and-reexport mechanics end to end before the larger moves ride on them. Move
    `trading_decision.py` and the 5 builder files into `decision/`, with the builder family as a
    nested subpackage. Hubs preserve `src.trading.workflows.*` paths.
-2. **PR 41 — rest of the capability layer.** `execution/` (`paper_execution*.py` + `brokers/`),
-   `universe/` (`data_sources/` + `universe_scan.py`), and folding the thin pipeline adapters
-   (`signal_snapshot`, `strategy_scoring`, `portfolio_sync`) into `signals/`/`strategy/`/
-   `portfolio/`. Dissolves the `workflows/` folder.
-3. **PR 42 — `phases/` + retire `runtime/`.** All six workflow orchestration moves
-   (`preopen`, `manual_review`, `intraday`, `reflection`, `strategy_evolution`, `replay`) plus the
-   cross-phase `_shell`, in one pass since they share the scheduler entry surface. Replay keeps its
-   smoke-only status (noted in its `__init__` docstring). Retires the now-empty `runtime/` dir.
+2. **PR 41 — dissolve `workflows/` into capability packages.** Move the five remaining real files —
+   `paper_execution.py`/`paper_execution_options.py` → `execution/` (next to PR 35's `attempts.py`),
+   `signal_snapshot.py` → `signals/`, `strategy_scoring.py` → `strategies/`, `portfolio_sync.py` →
+   `portfolio/`, `universe_scan.py` → `data_sources/`. Leave shims at the old `workflows/*` paths.
+   `brokers/` and `data_sources/` are NOT relocated (see scope refinement above).
+3. **PR 42 — morning phases + start the `runtime/` teardown.** First relocate the trade-day util out
+   of `runtime/` to a neutral home and remove the `runtime/__init__.py` `__getattr__` hack. Then move
+   the three workflows that share the universe→signal→strategy→risk→decision→execution backbone into
+   `phases/`: `preopen/`, `manual_review/` (it wraps preopen's deps), and `intraday/`. This is the
+   higher-blast-radius half (touches the scheduler entry surface + the shared dependency container).
+4. **PR 43 — post-close phases + `_shell`, retire `runtime/`.** Move `reflection/`,
+   `strategy_evolution/`, and `replay/` (smoke-only — note in its `__init__`) into `phases/`, plus the
+   cross-phase `_shell` (`facade`/`dispatch`/`support`/`smoke*`). Retire the now-real-code-free
+   `runtime/` package. Post-close phases have a smaller, more isolated surface than the morning
+   cluster, so they ride after it.
 
-Stop after any slice and the tree is still coherent (hubs keep old paths working). PR 40 and 41 can
-be merged into one if a larger capability-layer diff is acceptable to verify in a single go; keep
-the PR 42 boundary regardless, so a broken scheduler import is never tangled with a capability move.
+Stop after any slice and the tree is still coherent (hubs keep old paths working).
 
-Deliberately **not** done as one mega-PR: dissolving `runtime/` and `workflows/` simultaneously
-would put the scheduler surface and the capability moves in the same blast, making a single broken
-import harder to locate.
+**Why phases is split across PR 42/43 (vs. the earlier single-PR plan):** the original roadmap
+collapsed everything post-pilot into one capability PR + one phases PR, on the logic that the work is
+uniform-low-risk. The morning cluster (preopen/manual/intraday) is the exception: it is the
+highest-blast-radius part — it touches the scheduler entry surface *and* the shared dependency
+container that manual-review reuses by reference — so isolating it from the lower-risk post-close
+moves keeps a broken scheduler import easy to locate. PR boundaries still track blast radius, not
+line count; this is one place blast radius genuinely differs. PR 40+41 (capability layer) may still
+be merged if a larger diff is acceptable to verify at once.
 
 ## Non-goals
 

@@ -28,11 +28,11 @@ def _dashboard_payload() -> dict:
     return {
         "selected_tab": "portfolio",
         "tabs": (
-            {"id": "portfolio", "label": "Portfolio"},
             {"id": "overview", "label": "Overview"},
             {"id": "trades", "label": "Trades"},
-            {"id": "candidates", "label": "Candidates"},
+            {"id": "portfolio", "label": "Portfolio"},
             {"id": "risk-macro", "label": "Risk & Macro"},
+            {"id": "candidates", "label": "Candidates"},
             {"id": "system", "label": "System"},
         ),
         "header": {
@@ -792,7 +792,7 @@ class TestTodayDashboard:
         assert response.status_code == 200
         assert "<h1>Today</h1>" in response.text
         assert "today-shell" in response.text
-        assert "kpi-bar" in response.text
+        assert "kpi-cards" in response.text
         assert "kpi-context" in response.text
         assert "today-global-tabs" in response.text
         assert "today-workspace" in response.text
@@ -816,7 +816,7 @@ class TestTodayDashboard:
         assert "$1,000,000.00" in response.text
         assert "$1,250.50" in response.text
         assert "$820.25" in response.text
-        assert "Ready for Review" in response.text
+        assert "Ready for Review" not in response.text
         assert "Needs Review" not in response.text
         assert "trades-canvas" not in response.text
         assert "TSLA" not in response.text
@@ -838,7 +838,8 @@ class TestTodayDashboard:
 
         assert response.status_code == 200
         assert "trades-canvas" in response.text
-        assert "Signal Summary" in response.text
+        assert "Evidence" in response.text
+        assert "Signal Summary" not in response.text
         assert "Breakout confirmed + risk approved" in response.text
         assert 'data-testid="trade-plan"' in response.text
         assert 'data-testid="rationale-evidence"' in response.text
@@ -846,7 +847,7 @@ class TestTodayDashboard:
         assert 'data-testid="signal-groups"' not in response.text
         assert "ticker-card-meta" in response.text
         assert "meta-pill" in response.text
-        assert "support-kv-row" in response.text
+        assert "hero-meta-pills" in response.text
         assert "AI Infrastructure" not in response.text
         assert "gpt-5" not in response.text
         assert "Stock Positions" not in response.text
@@ -859,8 +860,8 @@ class TestTodayDashboard:
             response = client.get("/today?tab=trades&decision_id=decision-action&detail_tab=decisions")
 
         assert response.status_code == 200
-        assert "Latest Conclusion" in response.text
-        assert "Trade Decision" in response.text
+        assert "Latest Decision" in response.text
+        assert "Enter Long" in response.text
         assert "Breakout confirmed + risk approved" in response.text
         assert "Within Limits" in response.text
         assert "within_limits" not in response.text
@@ -872,8 +873,7 @@ class TestTodayDashboard:
         assert "Add on closing strength." in response.text
         assert "relative strength is improving" in response.text
         assert "5.0%" in response.text
-        assert "History" in response.text
-        assert 'data-panel="timeline"' in response.text
+        assert 'data-panel="timeline"' not in response.text
         assert 'href="/today?tab=trades&ticker=AAPL&detail_tab=trend"' not in response.text
         assert 'href="/today?tab=trades&ticker=AAPL&detail_tab=decisions"' not in response.text
         assert 'href="/today?tab=trades&ticker=AAPL&detail_tab=risk"' not in response.text
@@ -891,31 +891,31 @@ class TestTodayDashboard:
         assert "trades-canvas" in response.text
         assert "ticker-workspace" in response.text
         assert "ticker-detail-hero" in response.text
-        assert "ticker-support-grid" in response.text
-        assert "ticker-detail-nav" in response.text
         assert "Action Now" in response.text
         assert "Open Positions" in response.text
         assert "Closed Today" in response.text
-        assert "Reviewing" in response.text
+        assert "Needs Re-evaluation" in response.text
         assert "Watch" in response.text
-        assert "Latest Conclusion" in response.text
-        assert "Lifecycle" in response.text
+        assert "Latest Decision" in response.text
         assert "Open Position" in response.text
         assert "Latest decision: No Trade" in response.text
-        assert 'data-panel="timeline"' in response.text
-        assert "Trade Decision" in response.text
-        assert "Signal Summary" in response.text
+        assert "Enter Long" in response.text
         assert "Event / News Summary" in response.text
         assert "Raised guidance: Demand improved across core products." in response.text
         assert "Risk Manager" in response.text
         assert "Applied rules (2)" in response.text
         assert "Lookahead risk" in response.text
         assert "Hedge overlay" in response.text
-        assert "Position / Execution State" in response.text
-        assert 'data-testid="signal-summary"' in response.text
-        assert 'data-testid="history-cards"' in response.text
-        assert "History" in response.text
+        assert "Long 10 shares" in response.text
+        assert 'data-testid="history-highlights"' in response.text
+        assert "History Highlights" in response.text
         assert "sticky-rail" in response.text
+        # restructured away:
+        assert "ticker-support-grid" not in response.text
+        assert "ticker-detail-nav" not in response.text
+        assert "Signal Summary" not in response.text
+        assert "Position / Execution State" not in response.text
+        assert 'data-panel="timeline"' not in response.text
         assert 'data-panel="trend"' not in response.text
         assert 'data-panel="decisions"' not in response.text
         assert 'data-panel="risk"' not in response.text
@@ -937,39 +937,10 @@ class TestTodayDashboard:
         assert ">2026-06-05T14:32:00Z<" not in response.text
         assert ">2026-06-05T20:02:00Z<" not in response.text
 
-    def test_trades_workspace_renders_timeline_as_only_detail_section(self, client):
-        payload = _dashboard_payload()
-        payload["selected_tab"] = "trades"
-        payload["ticker_workspace"]["selected_detail_tab"] = "timeline"
-        with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
-            response = client.get("/today?tab=trades&ticker=AAPL&detail_tab=timeline")
-
-        assert response.status_code == 200
-        assert "ticker-detail-nav" in response.text
-        assert "Timeline" in response.text
-        assert 'href="/today?tab=trades&ticker=AAPL&detail_tab=trend"' not in response.text
-        assert 'href="/today?tab=trades&ticker=AAPL&detail_tab=decisions"' not in response.text
-        assert 'href="/today?tab=trades&ticker=AAPL&detail_tab=risk"' not in response.text
-        assert 'data-panel="timeline"' in response.text
-        assert 'data-panel="trend"' not in response.text
-        assert 'data-panel="decisions"' not in response.text
-        assert 'data-panel="risk"' not in response.text
-        assert "Primary strategy selected" not in response.text
-
-    def test_trades_workspace_invalid_detail_tab_falls_back_to_timeline(self, client):
-        payload = _dashboard_payload()
-        payload["selected_tab"] = "trades"
-        payload["ticker_workspace"]["selected_detail_tab"] = "timeline"
-        with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
-            response = client.get("/today?tab=trades&ticker=AAPL&detail_tab=decisions")
-
-        assert response.status_code == 200
-        assert 'data-panel="timeline"' in response.text
-        assert 'data-panel="decisions"' not in response.text
-        assert 'data-panel="risk"' not in response.text
-        assert "Decision Ledger" not in response.text
-        assert "Risk Posture" not in response.text
-        assert 'data-panel="decisions"' not in response.text
+    # NOTE: the timeline-panel / detail_tab rendering tests were removed —
+    # the verbose timeline section was replaced by the distilled History
+    # Highlights block in _tab_trades.html. detail_tab normalization is still
+    # covered by the load_today_dashboard tests below.
 
     def test_risk_macro_tab_renders_summary_first_structure(self, client):
         payload = _dashboard_payload()
@@ -999,40 +970,57 @@ class TestTodayDashboard:
         assert "trades-canvas" not in response.text
         assert "AI Infrastructure" not in response.text
 
-    def test_portfolio_tab_renders_needs_attention_modules(self, client):
+    def test_portfolio_tab_omits_attention_modules(self, client):
+        # Attention (review / alerts / material changes) now lives on the
+        # Overview tab; Portfolio focuses on positions, exposure, and P&L.
         payload = _dashboard_payload()
         payload["selected_tab"] = "portfolio"
         with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
             response = client.get("/today?tab=portfolio")
 
         assert response.status_code == 200
-        assert "Ready for Review" in response.text
-        assert "Needs Review" not in response.text
-        assert "attention-feed" in response.text
-        assert "Alert" in response.text
-        assert "Signal Change" in response.text
-        assert "Review" in response.text
+        assert "attention-feed" not in response.text
+        assert "Ready for Review" not in response.text
+        assert "Closed recently and ready for review" not in response.text
+        assert "Relative strength improved vs QQQ" not in response.text
+
+    def test_overview_tab_renders_unified_attention_feed(self, client):
+        payload = _dashboard_payload()
+        payload["selected_tab"] = "overview"
+        with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
+            response = client.get("/today?tab=overview")
+
+        assert response.status_code == 200
+        assert "Command Center" in response.text
+        assert "glance-strip" in response.text
+        assert "Needs Attention" in response.text
+        # NVDA appears as both a live alert and a review -> one merged card
+        # carrying both badges; AAPL is a signal change.
+        assert "attention-badge-alert" in response.text
+        assert "attention-badge-review" in response.text
+        assert "attention-badge-signal" in response.text
+        assert "Raised guidance" in response.text
         assert "Closed recently and ready for review" in response.text
         assert "Relative strength improved vs QQQ" in response.text
-        assert "Raised guidance" in response.text
-        assert "System Issues" not in response.text
-        assert "Latest Preopen Run" not in response.text
-        assert "Session Watch" not in response.text
+        assert "Ready for Review" in response.text
+        assert "trades-canvas" not in response.text
 
-    def test_portfolio_tab_collapses_empty_needs_attention_to_single_line(self, client):
+    def test_overview_tab_collapses_empty_attention_to_single_line(self, client):
         payload = _dashboard_payload()
-        payload["selected_tab"] = "portfolio"
-        payload["portfolio"]["needs_attention"] = {
+        payload["selected_tab"] = "overview"
+        payload["overview"]["command_center"] = {
             "needs_review": (),
-            "live_alerts": (),
-            "material_changes": (),
+            "open_positions": (),
+            "system_issues": (),
         }
+        payload["overview"]["live_alerts"] = ()
+        payload["overview"]["material_changes"] = ()
         with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
-            response = client.get("/today?tab=portfolio")
+            response = client.get("/today?tab=overview")
 
         assert response.status_code == 200
-        assert "Nothing needs attention" in response.text
-        assert "attention-feed" not in response.text
+        assert "Nothing needs attention right now." in response.text
+        assert "attention-feed-row" not in response.text
 
     def test_portfolio_tab_renders_summary_first_structure(self, client):
         payload = _dashboard_payload()
@@ -1231,29 +1219,29 @@ class TestTodayDashboard:
             response = client.get("/today?tab=candidates")
 
         assert response.status_code == 200
-        assert "Action Queue" in response.text
-        assert "Decision Readout" in response.text
-        assert "Manual Review Queue" in response.text
-        assert "Theme Monitor" in response.text
-        assert "surface-block" in response.text
-        assert "Manual Review Queue" in response.text
+        assert "Agent-Scored Candidates" in response.text
+        assert "Manual Watchlist" in response.text
+        assert "panel" in response.text
+        # removed clutter: standalone Action Queue + the extra count tiles
+        assert "Action Queue" not in response.text
+        assert "Decision Readout" not in response.text
+        assert "Theme Monitor" not in response.text
         assert "Review Only" in response.text
         assert "Still on watch" in response.text
-        assert "Candidate Decisions" in response.text
         assert "Momentum setup with clean catalyst." in response.text
-        assert "Decision Thesis" in response.text
-        assert "Signals Used" in response.text
+        # thesis now lives in the row's Primary Reason column; detail = tabs only
+        assert "Recent News" in response.text
+        assert "Alternatives" in response.text
+        assert "History" in response.text
         assert "Confidence" in response.text
         assert "0.91" in response.text
         assert "relative strength and catalyst quality remain aligned" in response.text
-        assert "Evaluation timeline" in response.text
         assert 'data-local-time-format="datetime"' in response.text
         assert ">2026-06-16T13:35:00Z<" not in response.text
         assert "Technical: 20d return 8.26%, relative volume 0.78." in response.text
         assert "Risk tags: gap risk, momentum." in response.text
         assert "Invalidators: loses VWAP." in response.text
         assert "Duplicate Rows" not in response.text
-        assert "Strategy alternatives" in response.text
         assert "Pullback reclaim" in response.text
         assert "0.77" in response.text
         assert "Awaiting fresh event-risk snapshot" in response.text
@@ -1405,7 +1393,7 @@ class TestTodayDashboard:
         assert "surface-block" in response.text
         assert "trades-canvas" not in response.text
 
-    def test_timeline_tab_renders_history_cards(self, client):
+    def test_timeline_renders_as_history_highlights(self, client):
         payload = _dashboard_payload()
         payload["selected_tab"] = "trades"
         payload["ticker_workspace"]["selected_detail_tab"] = "timeline"
@@ -1433,94 +1421,50 @@ class TestTodayDashboard:
             response = client.get("/today?tab=trades&ticker=AAPL&detail_tab=timeline")
 
         assert response.status_code == 200
-        assert 'data-panel="timeline"' in response.text
-        assert "History" in response.text
-        assert "Pre Open Baseline" in response.text
-        assert "Pre Open Rerun" in response.text
-        assert "Trade Decision" in response.text
-        assert "Risk" in response.text
-        assert "Breakout confirmation is still pending." in response.text
+        assert "History Highlights" in response.text
+        assert "history-hl" in response.text
+        assert "2026-06-18 16:42 UTC" in response.text
+        # each historical decision shows the agent's per-snapshot reasoning + the change deltas
+        assert "Catalyst quality faded" in response.text
         assert "sentiment neutral -&gt; negative" in response.text
-        assert "Timeline Detail Sheet" not in response.text
-        assert 'data-panel="trend"' not in response.text
+        # "Why This Decision" surfaces the agent-written thesis
+        assert "Why This Decision" in response.text
+        assert "hl-reasoning" in response.text
+        assert 'data-panel="timeline"' not in response.text
+        assert "ticker-detail-nav" not in response.text
 
-    def test_trades_empty_support_copy_uses_quiet_standardized_text(self, client):
+    def test_trades_empty_rationale_copy_uses_quiet_standardized_text(self, client):
         payload = _dashboard_payload()
         payload["selected_tab"] = "trades"
-        payload["ticker_workspace"]["detail"]["latest_conclusion"]["signal_summary"]["summary_bullets"] = ()
-        payload["ticker_workspace"]["detail"]["latest_conclusion"]["signal_summary"]["hidden_bullet_count"] = 3
-        payload["ticker_workspace"]["detail"]["latest_conclusion"]["signal_summary"]["grouped_sections"] = (
-            {"label": "Policy / Social", "bullets": ("Policy headline turned into a tailwind",)},
-        )
-        payload["ticker_workspace"]["detail"]["latest_conclusion"]["signal_summary"]["technical_charts"] = ()
-        payload["ticker_workspace"]["detail"]["latest_conclusion"]["signal_summary"]["news_snippets"] = ()
-        payload["ticker_workspace"]["detail"]["latest_conclusion"]["signal_summary"]["fundamental_snippets"] = ()
-        payload["ticker_workspace"]["detail"]["latest_conclusion"]["position_execution"]["summary"] = None
+        payload["ticker_workspace"]["detail"]["latest_conclusion"]["bull_bear"]["bull_points"] = ()
+        payload["ticker_workspace"]["detail"]["latest_conclusion"]["bull_bear"]["bear_points"] = ()
+        payload["ticker_workspace"]["detail"]["latest_conclusion"]["signal_groups"] = ()
         with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
             response = client.get("/today?tab=trades&ticker=AAPL")
 
         assert response.status_code == 200
         assert "surface-empty-copy" in response.text
-        assert "Unavailable." in response.text
+        assert "No bull points." in response.text
+        assert "No signal groups." in response.text
 
-    def test_trades_tab_renders_signal_summary_sections_and_timeline_delta_fields(self, client):
-        payload = _dashboard_payload()
-        payload["selected_tab"] = "trades"
-        payload["ticker_workspace"]["detail"]["latest_conclusion"]["signal_summary"]["latest_signal_time_label"] = (
-            "2026-06-18 17:41 UTC"
-        )
-        payload["ticker_workspace"]["detail"]["latest_conclusion"]["signal_summary"]["primary_sections"] = (
-            {"label": "Trend", "bullets": ("Relative strength improved vs QQQ",)},
-            {"label": "Policy / Social", "bullets": ("Policy headline turned into a tailwind",)},
-        )
-        payload["ticker_workspace"]["detail"]["latest_conclusion"]["signal_summary"]["hidden_bullet_count"] = 2
-        payload["ticker_workspace"]["detail"]["latest_conclusion"]["signal_summary"]["grouped_sections"] = (
-            {"label": "Insider", "bullets": ("Insider cluster buy count accelerated",)},
-            {"label": "Policy / Social", "bullets": ("Policy headline turned into a tailwind",)},
-        )
-        payload["ticker_workspace"]["detail"]["tabs"]["timeline"] = (
-            {
-                "title": "Pre Open Baseline",
-                "time_label": "2026-06-18 16:30 UTC",
-                "change_type": "baseline",
-                "signal_summary": ("Sentiment neutral", "Risk approved"),
-                "trade_decision": {"label": "Watch", "summary": "Waiting for confirmation"},
-                "risk": {"status_label": "Approved", "summary": "Within limits"},
-                "change_summary": (),
-            },
-            {
-                "title": "Pre Open Rerun",
-                "time_label": "2026-06-18 16:42 UTC",
-                "change_type": "material_change",
-                "signal_summary": ("Sentiment negative", "Risk reduced"),
-                "trade_decision": {"label": "No Trade", "summary": "Catalyst quality faded after a fresh event-risk check."},
-                "risk": {"status_label": "Reduced", "summary": "Event risk increased"},
-                "change_summary": ("sentiment neutral -> negative", "risk approved -> reduced"),
-            },
-        )
-        with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
-            response = client.get("/today?tab=trades&ticker=AAPL")
-
-        assert response.status_code == 200
-        assert "Latest signal 2026-06-18 17:41 UTC" in response.text
-        assert "Trend" in response.text
-        assert "Policy / Social" in response.text
-        assert "2 more signals in other groups" in response.text
-        assert "Signal summary audit" not in response.text
-        assert "sentiment neutral -&gt; negative" in response.text
+    # Removed: Signal Summary primary/grouped sections no longer render — the
+    # Signal Summary card was dropped (signals now live only under Evidence,
+    # and timeline deltas under History Highlights).
 
     def test_portfolio_empty_state_uses_quiet_standardized_text(self, client):
         payload = _dashboard_payload()
         payload["selected_tab"] = "portfolio"
-        payload["portfolio"]["needs_attention"]["live_alerts"] = ()
-        payload["portfolio"]["needs_attention"]["material_changes"] = ()
+        payload["portfolio"]["positions"] = ()
+        payload["portfolio"]["option_positions"] = ()
+        payload["portfolio"]["hedge_overlays"] = ()
         with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
             response = client.get("/today?tab=portfolio")
 
         assert response.status_code == 200
-        assert "No live alerts." in response.text
-        assert "No material changes." in response.text
-        assert response.text.count("surface-empty-copy") >= 2
+        assert "No open stock positions." in response.text
+        assert "No open option positions." in response.text
+        assert "No hedge overlays." in response.text
+        assert response.text.count("quiet-empty") >= 3
 
     def test_trades_no_selected_ticker_empty_state_uses_standardized_copy(self, client):
         payload = _dashboard_payload()
@@ -2752,6 +2696,26 @@ def test_today_styles_define_attention_feed_row_variants():
     assert ".attention-feed-row-review" in stylesheet
     assert ".attention-feed-row-alert" in stylesheet
     assert ".attention-feed-row-signal" in stylesheet
+
+
+def test_build_attention_feed_merges_by_ticker():
+    from src.web.presenters.today_overview import _build_attention_feed
+
+    feed = _build_attention_feed(
+        needs_review=({"ticker": "NVDA", "summary": "Closed; ready for review"},),
+        live_alerts=({"ticker": "nvda", "severity": "high", "headline": "Raised guidance"},),
+        material_changes=({"ticker": "AAPL", "summary": "RS improved"},),
+    )
+
+    # NVDA collapses to ONE entry carrying both an alert and a review facet.
+    assert len(feed) == 2
+    by_ticker = {entry["ticker"]: entry for entry in feed}
+    nvda = by_ticker["NVDA"]
+    assert nvda["primary_kind"] == "alert"  # alert outranks review
+    assert tuple(f["kind"] for f in nvda["facets"]) == ("alert", "review")
+    assert by_ticker["AAPL"]["primary_kind"] == "signal"
+    # alert-primary ticker sorts ahead of signal-primary ticker
+    assert feed[0]["ticker"] == "NVDA"
 
 
 @contextmanager

@@ -317,6 +317,8 @@ def _build_snippets(items: Any) -> list[dict[str, Any]]:
                 "time": item.get("published_at") or item.get("as_of"),
                 "event_type": item.get("event_type"),
                 "importance": item.get("importance"),
+                "source": item.get("source"),
+                "sentiment": item.get("sentiment"),
                 "empty": False,
             }
         )

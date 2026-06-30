@@ -72,10 +72,52 @@
         });
       };
 
-      if (document.readyState === "loading") {
-        document.addEventListener("DOMContentLoaded", applyLocalTime);
-      } else {
+      const setupExpandableRows = () => {
+        document.querySelectorAll(".sig-row").forEach((row) => {
+          row.addEventListener("click", (event) => {
+            // Don't toggle when the click lands on an interactive child.
+            if (event.target.closest("a, button, form, input, select")) {
+              return;
+            }
+            row.classList.toggle("open");
+            const detail = row.nextElementSibling;
+            if (detail && detail.classList.contains("sig-detail")) {
+              detail.classList.toggle("open");
+            }
+          });
+        });
+      };
+
+      const setupTabs = () => {
+        document.querySelectorAll("[data-tabs]").forEach((container) => {
+          const bar = container.querySelector(".tab-bar");
+          if (!bar) {
+            return;
+          }
+          bar.querySelectorAll(".tab-btn").forEach((btn) => {
+            btn.addEventListener("click", (event) => {
+              event.stopPropagation();
+              bar.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
+              btn.classList.add("active");
+              const target = btn.dataset.tab;
+              container.querySelectorAll(".tab-panel").forEach((panel) => {
+                panel.classList.toggle("active", panel.dataset.panel === target);
+              });
+            });
+          });
+        });
+      };
+
+      const init = () => {
         applyLocalTime();
+        setupExpandableRows();
+        setupTabs();
+      };
+
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", init);
+      } else {
+        init();
       }
     })();
   </script>

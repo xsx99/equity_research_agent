@@ -281,10 +281,13 @@ def _history_trade_decision_view(item: dict[str, Any] | None) -> dict[str, Any]:
     }
     thesis = operator_text(row.get("thesis")) or None
     approved_weight = row.get("approved_weight")
+    confidence = row.get("confidence")
     if thesis is not None:
         trade_decision["thesis"] = thesis
     if approved_weight is not None:
         trade_decision["approved_weight"] = approved_weight
+    if confidence is not None:
+        trade_decision["confidence"] = confidence
     return trade_decision
 
 def _history_risk_view(item: dict[str, Any] | None, *, latest_risk_summary: dict[str, Any]) -> dict[str, Any]:

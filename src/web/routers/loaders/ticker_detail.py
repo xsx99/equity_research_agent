@@ -98,6 +98,8 @@ def _load_news_by_ticker(session: Any) -> dict[str, list[dict[str, Any]]]:
             title=row.headline,
             summary=row.summary,
             published_at=row.published_at,
+            source=getattr(row, "source", None),
+            sentiment=getattr(row, "sentiment", None),
         )
     for row in event_rows:
         ticker = str(row.ticker or "").strip().upper()
@@ -112,6 +114,8 @@ def _load_news_by_ticker(session: Any) -> dict[str, list[dict[str, Any]]]:
             published_at=row.published_at,
             event_type=getattr(row, "event_type", None),
             importance=getattr(row, "importance", None),
+            source=getattr(row, "provider", None),
+            sentiment=getattr(row, "sentiment", None),
         )
     return grouped
 
@@ -311,6 +315,8 @@ def _append_news_snippet(
     published_at: Any,
     event_type: Any = None,
     importance: Any = None,
+    source: Any = None,
+    sentiment: Any = None,
 ) -> None:
     normalized_title = str(title or "").strip()
     if not normalized_title:
@@ -328,5 +334,7 @@ def _append_news_snippet(
             "published_at": published_at,
             "event_type": str(event_type or "").strip() or None,
             "importance": str(importance or "").strip() or None,
+            "source": str(source or "").strip() or None,
+            "sentiment": str(sentiment or "").strip() or None,
         }
     )

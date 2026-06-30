@@ -107,9 +107,22 @@ def build_ticker_workspace(
     if normalized_selected_ticker not in available_tickers:
         normalized_selected_ticker = _default_selected_ticker(buckets)
 
+    # Latest decision run across all tickers — one shared timestamp for the header.
+    # (Per-card `recency_label` stays per-ticker; it reflects each ticker's latest
+    # activity, not the batch decision time.)
+    last_run_at = max(
+        (
+            normalized
+            for row in trade_rows
+            if (normalized := _normalize_datetime(row.get("created_at"))) is not None
+        ),
+        default=None,
+    )
+
     return {
         "selected_ticker": normalized_selected_ticker,
         "buckets": buckets,
+        "last_run_at": last_run_at,
         "detail": _build_detail(
             selected_ticker=normalized_selected_ticker,
             rows_by_ticker=rows_by_ticker,
