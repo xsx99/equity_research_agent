@@ -1,7 +1,7 @@
 from datetime import date, datetime, timezone
 
 from src.agents.prompt_registry import PromptRegistry
-from src.agents.reflection import ReflectionAgent
+from src.agents.reflection import ReflectionAgent, _default_agent_runner
 
 
 def _write_prompt(tmp_path):
@@ -130,3 +130,18 @@ def test_reflection_agent_returns_safe_fallback_after_retry_failure(tmp_path):
     assert result.output_data["reflection_status"] == "reflection_failed"
     assert result.output_data["fallback_action"] == "reflection_failed"
     assert result.metadata["retry_count"] == 1
+
+
+def test_default_reflection_agent_runner_delegates_to_trading_runner(monkeypatch):
+    calls: list[tuple[str, str]] = []
+
+    def fake_runner(prompt: str, model_name: str):
+        calls.append((prompt, model_name))
+        return {"content": '{"ok": true}'}
+
+    monkeypatch.setattr("src.agents.reflection._trading_default_agent_runner", fake_runner, raising=False)
+
+    response = _default_agent_runner("reflection prompt", "gpt-5-mini")
+
+    assert response == {"content": '{"ok": true}'}
+    assert calls == [("reflection prompt", "gpt-5-mini")]

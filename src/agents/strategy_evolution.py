@@ -14,7 +14,13 @@ from src.agents.strategy_evolution_schemas import (
     StrategyEvolutionOutput,
     StrategyEvolutionOutputFallback,
 )
-from src.agents.trading import PromptRunRecord, UsageEventRecord, _coerce_json_object, _normalize_runner_response
+from src.agents.trading import (
+    PromptRunRecord,
+    UsageEventRecord,
+    _coerce_json_object,
+    _default_agent_runner as _trading_default_agent_runner,
+    _normalize_runner_response,
+)
 from src.core import config as app_config
 from src.core.logging import get_logger
 from src.tools.context import ToolContext
@@ -154,4 +160,4 @@ class StrategyEvolutionAgent(BaseAgent):
 
 
 def _default_agent_runner(prompt: str, model_name: str) -> Any:
-    raise RuntimeError("default_strategy_evolution_agent_runner_not_configured")
+    return _trading_default_agent_runner(prompt, model_name)
