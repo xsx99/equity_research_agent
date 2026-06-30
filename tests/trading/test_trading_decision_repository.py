@@ -225,6 +225,8 @@ def test_trading_decision_pipeline_persists_decisions_and_manual_request_status(
     assert result.decisions[0].counterarguments == ["valuation is elevated versus peers"]
     assert result.decisions[0].context_snapshot_json["signal_snapshot"]["signal_snapshot_id"] == "snapshot-1"
     assert result.decisions[0].metadata_json["paper_trade_authorized"] is False
+    assert result.decisions[0].metadata_json["entry_plan"] == "market_open"
+    assert result.decisions[0].metadata_json["exit_plan"] == "close_or_invalidator"
     assert repository.trading_decisions == list(result.decisions)
     assert len(repository.llm_prompt_runs) == 1
     assert len(repository.llm_usage_events) == 1

@@ -32,7 +32,7 @@
       <article class="kpi-card k-violet">
         <div class="label">Unrealized P&amp;L</div>
         <div class="value {% if header.unrealized_pnl is not none and header.unrealized_pnl > 0 %}pos{% elif header.unrealized_pnl is not none and header.unrealized_pnl < 0 %}neg{% endif %}">{{ fmt_currency(header.unrealized_pnl) if header.unrealized_pnl is not none else "—" }}</div>
-        {% if header.total_return is not none %}<div class="sub {% if header.total_return >= 0 %}pos{% else %}neg{% endif %}">{{ fmt_number(header.total_return * 100, 1) }}% total return</div>{% else %}<div class="sub">Open positions</div>{% endif %}
+        {% if header.total_return is defined and header.total_return is not none %}<div class="sub {% if header.total_return >= 0 %}pos{% else %}neg{% endif %}">{{ fmt_number(header.total_return * 100, 1) }}% total return</div>{% else %}<div class="sub">Open positions</div>{% endif %}
       </article>
       <article class="kpi-card k-amber">
         <div class="label">Realized P&amp;L</div>

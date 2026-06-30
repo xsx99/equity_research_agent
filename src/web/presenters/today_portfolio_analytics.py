@@ -106,6 +106,14 @@ def build_portfolio_analytics(
 
     return {
         "point_count": point_count,
+        "series": tuple(
+            {
+                "date": row.get("time"),
+                "equity": float(row["equity"]),
+                "day_pnl": float(row["day_pnl"]) if row["day_pnl"] is not None else None,
+            }
+            for row in series
+        ),
         "equity_chart": {
             "points": equity_points,
             "min": equity_min,

@@ -23,7 +23,7 @@ def fmt_conf(value: Optional[float]) -> str:
 def fmt_currency(value: Optional[float]) -> str:
     if value is None:
         return "—"
-    return f"${value:,.0f}"
+    return f"${value:,.2f}"
 
 
 def fmt_number(value: Any, decimals: int = 2) -> str:

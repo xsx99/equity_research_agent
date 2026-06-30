@@ -235,6 +235,8 @@ class TradingDecisionPipeline:
                     "risk_status": risk.status if risk is not None else None,
                     "confidence_basis": final_output.get("confidence_basis", {}),
                     "benchmark_context": final_output.get("benchmark_context", {}),
+                    "entry_plan": final_output.get("entry_plan"),
+                    "exit_plan": final_output.get("exit_plan"),
                     "key_drivers": final_output.get("key_drivers", []),
                     "counterarguments": final_output.get("counterarguments", []),
                     "risk_checks": final_output.get("risk_checks", []),

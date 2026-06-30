@@ -231,9 +231,11 @@ def _parse_timestamp(value: Any) -> datetime | None:
         return parsed.replace(tzinfo=timezone.utc)
     return parsed
 
-def _normalize_datetime(value: datetime | None) -> datetime | None:
+def _normalize_datetime(value: datetime | str | None) -> datetime | None:
     if value is None:
         return None
+    if isinstance(value, str):
+        return _parse_timestamp(value)
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)

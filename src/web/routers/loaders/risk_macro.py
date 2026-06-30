@@ -127,12 +127,14 @@ def _load_risk_by_ticker(session: Any) -> dict[str, dict[str, Any]]:
             continue
         lookahead_risk_source = _risk_decision_lookahead_source(row)
         generated_hedge_action = getattr(row, "generated_hedge_action_json", None)
+        metadata_json = dict(getattr(row, "metadata_json", {}) or {})
         grouped[ticker] = {
             "status": row.status,
             "reason": row.reason_code,
             "lookahead_risk_source": lookahead_risk_source,
             "generated_hedge_action": generated_hedge_action,
             "applied_rules": _risk_applied_rules(getattr(row, "applied_rules_json", None)),
+            "rule_checks": _risk_rule_checks(metadata_json.get("rule_checks")),
             "history": [
                 {
                     "time": row.decision_time or row.created_at,
@@ -182,6 +184,27 @@ def _risk_applied_rules(value: Any) -> tuple[str, ...]:
         if label and label not in labels:
             labels.append(label)
     return tuple(labels)
+
+
+def _risk_rule_checks(value: Any) -> tuple[dict[str, Any], ...]:
+    if not isinstance(value, (list, tuple)):
+        return ()
+    checks: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        label = str(item.get("label") or "").strip()
+        if not label:
+            continue
+        checks.append(
+            {
+                "label": label,
+                "observed": str(item.get("observed") or "").strip(),
+                "cap": str(item.get("cap") or "").strip(),
+                "passed": bool(item.get("passed")),
+            }
+        )
+    return tuple(checks)
 
 
 def _risk_decision_binding_constraint(row: Any) -> str | None:

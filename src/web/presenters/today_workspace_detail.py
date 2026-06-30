@@ -100,6 +100,7 @@ def _build_detail(
         "lookahead_risk_source": risk.get("lookahead_risk_source"),
         "hedge_overlay_reason": _hedge_overlay_reason(risk.get("generated_hedge_action")),
         "applied_rules": tuple(risk.get("applied_rules") or ()),
+        "rule_checks": tuple(risk.get("rule_checks") or ()),
     }
 
     latest_conclusion = {
@@ -139,6 +140,8 @@ def _build_detail(
             "order_status_label": order_status_label(position.get("order_status") or latest_decision.get("order_status"))
             or _EMPTY_MARKER,
             "summary": position.get("summary") or _EMPTY_MARKER,
+            "fill_price": position.get("avg_fill_price") or position.get("entry_price") or position.get("avg_cost"),
+            "filled_qty": position.get("filled_qty") or position.get("quantity"),
         },
     }
     if trade_summary != _EMPTY_MARKER:

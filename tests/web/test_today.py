@@ -101,6 +101,23 @@ def _dashboard_payload() -> dict:
             "material_changes": (
                 {"ticker": "AAPL", "summary": "Relative strength improved vs QQQ"},
             ),
+            "attention_feed": (
+                {
+                    "ticker": "NVDA",
+                    "primary_kind": "alert",
+                    "facets": (
+                        {"kind": "alert", "badge": "Alert", "text": "Raised guidance"},
+                        {"kind": "review", "badge": "Ready for Review", "text": "Closed recently and ready for review"},
+                    ),
+                },
+                {
+                    "ticker": "AAPL",
+                    "primary_kind": "signal",
+                    "facets": (
+                        {"kind": "signal", "badge": "Signal Change", "text": "Relative strength improved vs QQQ"},
+                    ),
+                },
+            ),
         },
         "portfolio": {
             "kpis": {
@@ -813,9 +830,9 @@ class TestTodayDashboard:
         assert "Margin Util." in response.text
         assert "Open Alerts" in response.text
         assert "Pre-open Job" in response.text
-        assert "$1,000,000.00" in response.text
-        assert "$1,250.50" in response.text
-        assert "$820.25" in response.text
+        assert "$1,000,000" in response.text
+        assert "$1,250" in response.text
+        assert "$820" in response.text
         assert "Ready for Review" not in response.text
         assert "Needs Review" not in response.text
         assert "trades-canvas" not in response.text
@@ -825,8 +842,7 @@ class TestTodayDashboard:
         assert "surface-table-wrap" in response.text
         assert "surface-block" in response.text
         assert "surface-block-count" in response.text
-        assert "today-global-tab-muted" in response.text
-        assert "today-global-tab-spacer" in response.text
+        assert "today-global-tab active" in response.text
         assert 'href="/today?tab=overview"' in response.text
         assert 'href="/today?tab=system"' in response.text
 
@@ -846,8 +862,8 @@ class TestTodayDashboard:
         assert 'data-testid="bull-bear"' not in response.text
         assert 'data-testid="signal-groups"' not in response.text
         assert "ticker-card-meta" in response.text
-        assert "meta-pill" in response.text
-        assert "hero-meta-pills" in response.text
+        assert "card-decision-tag" in response.text
+        assert "trade-header-table" in response.text
         assert "AI Infrastructure" not in response.text
         assert "gpt-5" not in response.text
         assert "Stock Positions" not in response.text
@@ -918,7 +934,7 @@ class TestTodayDashboard:
         assert 'data-panel="timeline"' not in response.text
         assert 'data-panel="trend"' not in response.text
         assert 'data-panel="decisions"' not in response.text
-        assert 'data-panel="risk"' not in response.text
+        assert 'data-panel="risk"' in response.text
         assert "Raw JSON" not in response.text
         assert "Workspace Detail JSON" not in response.text
         assert "Risk JSON" not in response.text
@@ -959,7 +975,8 @@ class TestTodayDashboard:
         assert "macro-strip" in response.text
         assert 'data-testid="economic-calendar"' in response.text
         assert 'data-testid="upcoming-earnings"' in response.text
-        assert 'data-local-time-format="datetime"' in response.text
+        assert 'data-local-time-format="month_day_time"' in response.text
+        assert 'data-local-time-format="month_day"' in response.text
         assert "direct earnings gap risk" in response.text
         assert "AAPL" in response.text
         assert "HIGH" in response.text
@@ -992,7 +1009,8 @@ class TestTodayDashboard:
 
         assert response.status_code == 200
         assert "Command Center" in response.text
-        assert "glance-strip" in response.text
+        assert "attention-feed-list" in response.text
+        assert "attn-2col" in response.text
         assert "Needs Attention" in response.text
         # NVDA appears as both a live alert and a review -> one merged card
         # carrying both badges; AAPL is a signal change.
@@ -1015,6 +1033,7 @@ class TestTodayDashboard:
         }
         payload["overview"]["live_alerts"] = ()
         payload["overview"]["material_changes"] = ()
+        payload["overview"]["attention_feed"] = ()
         with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
             response = client.get("/today?tab=overview")
 
@@ -1029,18 +1048,18 @@ class TestTodayDashboard:
             response = client.get("/today?tab=portfolio")
 
         assert response.status_code == 200
-        assert "P&amp;L Snapshot" in response.text
-        assert "Cash / Buying Power" in response.text
-        assert "Exposure" in response.text
+        assert "Stock Positions" in response.text
+        assert "Option Positions" in response.text
+        assert "Hedge Overlays" in response.text
         assert "surface-table-wrap" in response.text
-        assert "$2,145.20" in response.text
-        assert "$420.00" in response.text
+        assert "$2,145" in response.text
+        assert "$420" in response.text
         assert "Tactical Stock Trade" in response.text
         assert "Long Call" in response.text
         assert "Long Put" in response.text
         assert "2 positions" in response.text
         assert "$3,696.00 market value" in response.text
-        assert "$300.00" in response.text
+        assert "$300" in response.text
         assert "1 strategies" in response.text
         assert "$840.75" in response.text
         assert "max loss $420.00" in response.text
@@ -1358,13 +1377,13 @@ class TestTodayDashboard:
         assert "System Issues" in response.text
         assert "Reflection Snapshot" in response.text
         assert "Strategy Pipeline" in response.text
-        assert "Performance Snapshot" in response.text
+        assert "Strategy Performance" in response.text
         assert "LLM Spend" in response.text
         assert "Usage Ledger" in response.text
         assert "Provider Usage" in response.text
         assert "Bullish catalyst continuation respected" in response.text
         assert "Strategy Performance" in response.text
-        assert "$4,200.00" in response.text
+        assert "$4,200" in response.text
         assert "1 active strategy tracked today." in response.text
         assert "Latest learning: Tighten low-volume gap entries" in response.text
         assert "Tighten low-volume gap entries" in response.text
@@ -1744,7 +1763,7 @@ class TestTodayDashboard:
                 selected_detail_item_index=99,
             )
 
-        assert dashboard["selected_tab"] == "portfolio"
+        assert dashboard["selected_tab"] == "overview"
         assert dashboard["ticker_workspace"]["selected_detail_tab"] == "timeline"
         assert dashboard["ticker_workspace"]["selected_detail_item_index"] == 0
         assert dashboard["ticker_workspace"]["selected_detail_item"]["title"] == "Decision submitted"

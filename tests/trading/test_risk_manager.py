@@ -260,6 +260,34 @@ def test_risk_manager_reduces_trade_when_sector_cap_would_be_exceeded():
     assert decision.reason_code == "sector_concentration_cap"
 
 
+def test_risk_manager_emits_structured_rule_checks_for_ui():
+    portfolio = _portfolio()
+    config = RiskConfigResolver().resolve(
+        risk_appetite=RiskAppetiteProfile.BALANCED,
+        portfolio_context=portfolio,
+        macro_risk_budget_multiplier=1.0,
+    )
+    request = _request()
+    sizing = PositionSizer().size_position(request, portfolio, config)
+
+    decision = RiskManager().evaluate(request, sizing, portfolio, config)
+
+    assert decision.metadata_json["rule_checks"] == [
+        {
+            "label": "Single-name size",
+            "observed": "2.5%",
+            "cap": "8.0% cap",
+            "passed": True,
+        },
+        {
+            "label": "Sector concentration",
+            "observed": "2.5%",
+            "cap": "28.0% cap",
+            "passed": True,
+        },
+    ]
+
+
 def test_risk_manager_blocks_tactical_trade_when_planner_marks_block_open():
     portfolio = _portfolio()
     config = RiskConfigResolver().resolve(

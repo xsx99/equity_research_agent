@@ -256,6 +256,46 @@ def test_build_today_candidates_view_populates_signal_bullets_from_core_signal_e
     assert row["invalidators"] == ("Invalidators: loses VWAP.",)
 
 
+def test_build_today_candidates_view_attaches_recent_news_by_ticker():
+    news = [
+        {
+            "title": "Raised guidance",
+            "summary": "Management lifted the full-year outlook.",
+            "time": "2026-06-16T12:45:00Z",
+            "source": "Dow Jones",
+            "sentiment": "positive",
+            "event_type": "guidance",
+        }
+    ]
+
+    payload = build_today_candidates_view(
+        rows=(
+            {
+                "ticker": "aapl",
+                "decision_time": "2026-06-16T13:35:00Z",
+                "current_outcome_label": "Ready for review",
+                "operator_summary": "Momentum setup with clean catalyst.",
+                "trade_identity_label": "Action Now",
+                "strategy_label": "Gap continuation",
+                "strategy_match": "gap_continuation_v1",
+                "candidate_score": 0.91,
+                "detail_internal_ids": {"strategy_match": "gap_continuation_v1"},
+            },
+        ),
+        manual_requests=(),
+        themes=(),
+        active_universe_filter=None,
+        portfolio_intents=(),
+        relationships=(),
+        peer_baskets=(),
+        news_by_ticker={"AAPL": news},
+    )
+
+    assert payload["decision_readout"][0]["news"] == tuple(news)
+    assert payload["agent_candidates"][0]["news"] == tuple(news)
+    assert payload["rows"][0]["news"] == tuple(news)
+
+
 def test_build_today_candidates_view_adds_evaluation_timeline_in_decision_order():
     payload = build_today_candidates_view(
         rows=(

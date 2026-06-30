@@ -21,6 +21,12 @@ class _FakeQuery:
             ]
         )
 
+    def filter(self, *args, **kwargs):
+        return self
+
+    def order_by(self, *args, **kwargs):
+        return self
+
     def one_or_none(self) -> object | None:
         if not self._rows:
             return None

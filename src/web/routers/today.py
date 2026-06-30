@@ -431,6 +431,7 @@ def load_today_dashboard(
         relationships=relationships,
         peer_baskets=peer_baskets,
         thesis_history_by_ticker=thesis_history_by_ticker,
+        news_by_ticker=news_by_ticker,
     )
     portfolio_history = _load_portfolio_history(session)
     portfolio = _build_portfolio_view(

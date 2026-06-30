@@ -67,6 +67,7 @@ def _build_header(
         ),
         "realized_pnl": latest_portfolio.realized_pnl if latest_portfolio else None,
         "unrealized_pnl": latest_portfolio.unrealized_pnl if latest_portfolio else None,
+        "total_return": None,
         "buying_power": latest_portfolio.buying_power if latest_portfolio else None,
         "stock_market_value": latest_portfolio.stock_market_value if latest_portfolio else None,
         "option_market_value": latest_portfolio.option_market_value if latest_portfolio else None,

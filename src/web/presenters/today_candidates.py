@@ -17,9 +17,12 @@ def build_today_candidates_view(
     relationships: tuple[dict[str, Any], ...],
     peer_baskets: tuple[dict[str, Any], ...],
     thesis_history_by_ticker: dict[str, Any] | None = None,
+    news_by_ticker: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    normalized_news_by_ticker = _normalize_news_by_ticker(news_by_ticker or {})
+    enriched_rows = tuple(_attach_recent_news(row, normalized_news_by_ticker) for row in rows)
     decision_readout = _group_candidate_rows(
-        tuple(row for row in rows if not _is_smoke_candidate_row(row)),
+        tuple(row for row in enriched_rows if not _is_smoke_candidate_row(row)),
         thesis_history_by_ticker=thesis_history_by_ticker or {},
     )
     manual_review_queue = _normalize_manual_review_rows(
@@ -33,11 +36,7 @@ def build_today_candidates_view(
         str(group.get("ticker") or "").strip().upper(): group for group in decision_readout
     }
     manual_candidates = tuple(
-        {
-            **candidate_by_ticker.get(str(item.get("ticker") or "").strip().upper(), {}),
-            **item,
-            "ticker": str(item.get("ticker") or "").strip().upper(),
-        }
+        _manual_candidate_with_news(item, candidate_by_ticker, normalized_news_by_ticker)
         for item in manual_review_queue
     )
     agent_candidates = tuple(
@@ -47,7 +46,7 @@ def build_today_candidates_view(
     )
     # Most recent candidate-scoring run — the newest decision_time across the scored rows.
     last_run_at = max(
-        (row.get("decision_time") for row in rows if row.get("decision_time")),
+        (row.get("decision_time") for row in enriched_rows if row.get("decision_time")),
         default=None,
     )
     return {
@@ -61,7 +60,7 @@ def build_today_candidates_view(
         "manual_candidates": manual_candidates,
         "last_run_at": last_run_at,
         "decision_readout": decision_readout,
-        "rows": rows,
+        "rows": enriched_rows,
         "manual_requests": manual_requests,
         "active_universe_filter": active_universe_filter,
         "portfolio_intents": portfolio_intents,
@@ -86,6 +85,43 @@ def _thesis_at(history: tuple[Any, ...], when: Any) -> str | None:
         except TypeError:
             continue
     return None
+
+
+def _normalize_news_by_ticker(news_by_ticker: dict[str, Any]) -> dict[str, tuple[dict[str, Any], ...]]:
+    normalized: dict[str, tuple[dict[str, Any], ...]] = {}
+    for ticker, items in news_by_ticker.items():
+        ticker_symbol = str(ticker or "").strip().upper()
+        if not ticker_symbol:
+            continue
+        if isinstance(items, (list, tuple)):
+            normalized[ticker_symbol] = tuple(item for item in items if isinstance(item, dict))
+    return normalized
+
+
+def _attach_recent_news(
+    row: dict[str, Any],
+    news_by_ticker: dict[str, tuple[dict[str, Any], ...]],
+) -> dict[str, Any]:
+    ticker = str(row.get("ticker") or "").strip().upper()
+    return {
+        **row,
+        "news": tuple(news_by_ticker.get(ticker, ())),
+    }
+
+
+def _manual_candidate_with_news(
+    item: dict[str, Any],
+    candidate_by_ticker: dict[str, dict[str, Any]],
+    news_by_ticker: dict[str, tuple[dict[str, Any], ...]],
+) -> dict[str, Any]:
+    ticker = str(item.get("ticker") or "").strip().upper()
+    candidate = candidate_by_ticker.get(ticker, {})
+    return {
+        **candidate,
+        **item,
+        "ticker": ticker,
+        "news": tuple(candidate.get("news") or news_by_ticker.get(ticker, ())),
+    }
 
 
 def _group_candidate_rows(
@@ -128,6 +164,7 @@ def _group_candidate_rows(
                 "confidence": _candidate_confidence(primary),
                 "decision_time": primary.get("decision_time"),
                 "selection_reason": clean_copy(primary.get("selection_reason")),
+                "news": tuple(primary.get("news") or ()),
                 "signal_bullets": signal_bullets(primary.get("core_signal_evidence")),
                 "risk_tags": _labeled_bullets("Risk tags", primary.get("risk_tags")),
                 "invalidators": _labeled_bullets("Invalidators", primary.get("invalidators")),

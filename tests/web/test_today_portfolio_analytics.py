@@ -70,6 +70,12 @@ def test_build_portfolio_analytics_computes_series_geometry_and_metrics():
     assert payload["equity_end"] == 126.0
     assert payload["equity_min"] == 100.0
     assert payload["equity_max"] == 126.0
+    assert payload["series"] == (
+        {"date": datetime(2026, 6, 16, 13, 0, tzinfo=timezone.utc), "equity": 100.0, "day_pnl": 0.0},
+        {"date": datetime(2026, 6, 17, 13, 0, tzinfo=timezone.utc), "equity": 120.0, "day_pnl": 20.0},
+        {"date": datetime(2026, 6, 18, 13, 0, tzinfo=timezone.utc), "equity": 114.0, "day_pnl": -6.0},
+        {"date": datetime(2026, 6, 19, 13, 0, tzinfo=timezone.utc), "equity": 126.0, "day_pnl": 12.0},
+    )
     assert len(payload["equity_chart"]["points"].split()) == 4
     assert len(payload["pnl_chart"]["bars"]) == 4
     assert payload["pnl_chart"]["bar_width"] == pytest.approx(24.0)

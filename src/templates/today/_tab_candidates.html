@@ -23,7 +23,7 @@
                       {% if row.signal_bullets %}<ul class="history-card-listing">{% for bullet in row.signal_bullets %}<li>{{ bullet }}</li>{% endfor %}</ul>{% else %}<p class="detail-muted quiet-empty surface-empty-copy">No signals recorded.</p>{% endif %}
                     </div>
                     <div class="tab-panel" data-panel="risk">
-                      {% if row.risk_tags or row.invalidators %}<ul class="history-card-listing">{% for bullet in row.risk_tags %}<li>{{ bullet }}</li>{% endfor %}{% for bullet in row.invalidators %}<li>{{ bullet }}</li>{% endfor %}</ul>{% else %}<p class="detail-muted quiet-empty surface-empty-copy">No risk flags recorded.</p>{% endif %}
+                      {% if row.latest_block_reason or row.risk_tags or row.invalidators %}<ul class="history-card-listing">{% if row.latest_block_reason %}<li>{{ row.latest_block_reason }}</li>{% endif %}{% for bullet in row.risk_tags %}<li>{{ bullet }}</li>{% endfor %}{% for bullet in row.invalidators %}<li>{{ bullet }}</li>{% endfor %}</ul>{% else %}<p class="detail-muted quiet-empty surface-empty-copy">No risk flags recorded.</p>{% endif %}
                     </div>
                     <div class="tab-panel" data-panel="news">
                       {% set cand_news = (row.news | rejectattr('empty') | list) if row.news is defined and row.news else [] %}

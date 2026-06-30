@@ -334,6 +334,8 @@ class RiskManager:
                 approved_quantity=approved_quantity,
                 quantity_basis=quantity_basis,
                 quantity_unit_cost=quantity_denominator,
+                requested_weight=sizing.final_weight,
+                approved_weight=approved_weight,
                 portfolio_context=portfolio_context,
                 config=config,
                 portfolio_risk_intent=portfolio_risk_intent,
@@ -367,6 +369,8 @@ def _risk_decision_metadata(
     approved_quantity: float,
     quantity_basis: str,
     quantity_unit_cost: float,
+    requested_weight: float,
+    approved_weight: float,
     portfolio_context: PortfolioContext,
     config: RiskLimitConfig,
     portfolio_risk_intent: PortfolioRiskIntentRecord | None,
@@ -395,6 +399,14 @@ def _risk_decision_metadata(
             "sector_cap": sector_cap,
             "account_equity": portfolio_context.account_equity,
         },
+        "rule_checks": _risk_rule_checks(
+            request=request,
+            requested_weight=requested_weight,
+            approved_weight=approved_weight,
+            sector_weight_before=sector_weight_before,
+            sector_cap=sector_cap,
+            config=config,
+        ),
     }
     if binding_constraint is not None:
         metadata["binding_constraint"] = binding_constraint
@@ -406,6 +418,49 @@ def _risk_decision_metadata(
     metadata["approved_assignment_notional"] = approved_quantity * float(request.assignment_notional or 0.0)
     metadata["approved_premium_notional"] = approved_quantity * float(request.price or 0.0)
     return metadata
+
+
+def _risk_rule_checks(
+    *,
+    request: TradeRiskRequest,
+    requested_weight: float,
+    approved_weight: float,
+    sector_weight_before: float,
+    sector_cap: float,
+    config: RiskLimitConfig,
+) -> list[dict[str, object]]:
+    checks: list[dict[str, object]] = [
+        {
+            "label": "Single-name size",
+            "observed": _format_rule_pct(requested_weight),
+            "cap": f"{_format_rule_pct(config.max_single_name_weight)} cap",
+            "passed": requested_weight <= config.max_single_name_weight + 1e-9,
+        }
+    ]
+    if request.sector:
+        observed_sector_weight = sector_weight_before + requested_weight
+        checks.append(
+            {
+                "label": "Sector concentration",
+                "observed": _format_rule_pct(observed_sector_weight),
+                "cap": f"{_format_rule_pct(sector_cap)} cap",
+                "passed": observed_sector_weight <= sector_cap + 1e-9,
+            }
+        )
+    if approved_weight < requested_weight:
+        checks.append(
+            {
+                "label": "Approved size",
+                "observed": _format_rule_pct(approved_weight),
+                "cap": f"{_format_rule_pct(requested_weight)} requested",
+                "passed": False,
+            }
+        )
+    return checks
+
+
+def _format_rule_pct(value: float) -> str:
+    return f"{float(value) * 100:.1f}%"
 
 
 def _is_macro_only_bearish(request: TradeRiskRequest) -> bool:

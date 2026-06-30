@@ -61,6 +61,7 @@ from src.web.routers.loaders.risk_macro import (
     _risk_applied_rules,
     _risk_decision_binding_constraint,
     _risk_decision_lookahead_source,
+    _risk_rule_checks,
 )
 from src.web.routers.loaders.ticker_detail import (
     _append_news_snippet,
@@ -159,6 +160,7 @@ __all__ = [
     "_risk_applied_rules",
     "_risk_decision_binding_constraint",
     "_risk_decision_lookahead_source",
+    "_risk_rule_checks",
     "_safe_diff",
     "_safe_float",
     "_safe_pct",

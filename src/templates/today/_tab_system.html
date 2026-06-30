@@ -10,7 +10,7 @@
         <article class="summary-tile">
           <span class="metric-label">Strategy Pipeline</span>
           <strong>{{ system.learning_strategies.strategy_proposals | length }} proposal{% if system.learning_strategies.strategy_proposals|length != 1 %}s{% endif %}</strong>
-          <span class="detail-muted">{{ system.learning_strategies.strategy_performance | length }} tracked</span>
+          <span class="detail-muted">{{ system.learning_strategies.strategy_performance | length }} tracked strateg{% if system.learning_strategies.strategy_performance | length == 1 %}y{% else %}ies{% endif %}</span>
         </article>
         <article class="summary-tile">
           <span class="metric-label">LLM Spend</span>
@@ -25,12 +25,13 @@
         <article class="summary-tile">
           <span class="metric-label">Events / Exposure</span>
           <strong>{{ system.event_summary.count }}</strong>
-          <span class="detail-muted">{{ system.exposure_summary.total_exposure if system.exposure_summary.total_exposure is not none else "—" }} exposure</span>
+          <span class="detail-muted">{{ system.event_summary.count }} event{% if system.event_summary.count != 1 %}s{% endif %} · {{ system.exposure_summary.count }} factor{% if system.exposure_summary.count != 1 %}s{% endif %} · {{ system.exposure_summary.total_exposure if system.exposure_summary.total_exposure is not none else "—" }} exposure</span>
         </article>
       </div>
 
       {% if system.system_issues %}
       <div class="system-issue-bar">
+        <div class="section-label">System Issues</div>
         {% for row in system.system_issues %}<p><strong>{{ row.label }}</strong> — {{ row.summary }}</p>{% endfor %}
       </div>
       {% endif %}

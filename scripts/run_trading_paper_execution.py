@@ -138,6 +138,7 @@ def _build_trading_decision(
         usage_events=[],
         decision_time=as_of,
         available_for_decision_at=as_of,
+        paper_trade_authorized=True,
         metadata_json={"paper_trade_authorized": True},
     )
 

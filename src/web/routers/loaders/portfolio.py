@@ -1,6 +1,7 @@
 """Portfolio loader helpers for the today router."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 from src.db.models.trading import PaperOptionPosition, PaperPosition, PortfolioIntent, PortfolioSnapshot, RiskHedgeDecision
@@ -55,13 +56,14 @@ def _build_portfolio_view(
     }
 
 
-def _load_positions(session: Any) -> tuple[dict[str, Any], ...]:
+def _load_positions(session: Any, *, as_of: datetime | None = None) -> tuple[dict[str, Any], ...]:
     rows = (
         session.query(PaperPosition)
         .filter(PaperPosition.status == "open")
         .order_by(PaperPosition.updated_at.desc())
         .all()
     )
+    reference_time = as_of or datetime.now(timezone.utc)
     return tuple(
         {
             "ticker": row.ticker,
@@ -71,11 +73,55 @@ def _load_positions(session: Any) -> tuple[dict[str, Any], ...]:
             "strategy_label": strategy_label(row.strategy_id),
             "quantity": row.quantity,
             "avg_cost": getattr(row, "avg_cost", None),
+            "entry_price": getattr(row, "avg_cost", None),
+            "avg_fill_price": getattr(row, "avg_cost", None),
+            "filled_qty": row.quantity,
+            "current_price": getattr(row, "market_price", None),
+            "held_days": _held_days(getattr(row, "opened_at", None), reference_time),
+            "sleeve": trade_identity_label(row.trade_identity),
             "market_value": row.market_value,
             "unrealized_pnl": getattr(row, "unrealized_pnl", None),
+            "total_pnl_pct": _total_pnl_pct(
+                unrealized_pnl=getattr(row, "unrealized_pnl", None),
+                avg_cost=getattr(row, "avg_cost", None),
+                quantity=row.quantity,
+            ),
         }
         for row in rows
     )
+
+
+def _held_days(opened_at: Any, as_of: datetime) -> int | None:
+    if not isinstance(opened_at, datetime):
+        return None
+    opened = opened_at
+    reference = as_of
+    if opened.tzinfo is None:
+        opened = opened.replace(tzinfo=timezone.utc)
+    if reference.tzinfo is None:
+        reference = reference.replace(tzinfo=timezone.utc)
+    return max((reference - opened).days, 0)
+
+
+def _total_pnl_pct(*, unrealized_pnl: Any, avg_cost: Any, quantity: Any) -> float | None:
+    pnl = _safe_float(unrealized_pnl)
+    entry = _safe_float(avg_cost)
+    qty = _safe_float(quantity)
+    if pnl is None or entry is None or qty is None:
+        return None
+    denominator = abs(entry * qty)
+    if denominator <= 0:
+        return None
+    return pnl / denominator
+
+
+def _safe_float(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _load_recent_closed_positions(session: Any) -> tuple[dict[str, Any], ...]:

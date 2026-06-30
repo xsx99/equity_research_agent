@@ -84,7 +84,7 @@
               <p class="hero-decision">{{ latest_trade_decision.label or "No decision" }}</p>
               {% set _ord = pexec.order_status_label or pexec.order_status %}
               {% set show_order = _ord and _ord | lower != 'filled' %}
-              {% set show_fill = pexec.summary and '$' in pexec.summary %}
+              {% set show_fill = pexec.fill_price is defined and pexec.fill_price is not none %}
               <div class="table-scroll">
                 <table class="dtable trade-header-table">
                   <thead><tr>
@@ -107,7 +107,7 @@
                     {% if latest_trade_plan and latest_trade_plan.time_horizon %}<td>{{ latest_trade_plan.time_horizon }}</td>{% endif %}
                     {% if pexec.position_label %}<td>{{ pexec.position_label }}</td>{% endif %}
                     {% if show_order %}<td>{{ _ord }}</td>{% endif %}
-                    {% if show_fill %}<td class="num">{{ pexec.summary }}</td>{% endif %}
+                    {% if show_fill %}<td class="num">{{ fmt_currency(pexec.fill_price) }} avg{% if pexec.filled_qty is defined and pexec.filled_qty is not none %} · {{ fmt_number(pexec.filled_qty) }} sh{% endif %}</td>{% endif %}
                     {% if lc and lc.opened_at %}<td><time datetime="{{ lc.opened_at | iso_datetime }}" data-local-time-format="datetime">{{ lc.opened_at | local_time('datetime') }}</time></td>{% endif %}
                     {% if lc and lc.closed_at %}<td><time datetime="{{ lc.closed_at | iso_datetime }}" data-local-time-format="datetime">{{ lc.closed_at | local_time('datetime') }}</time></td>{% endif %}
                   </tr></tbody>
@@ -135,14 +135,10 @@
 
                 {# The reasoning behind the thesis: what supports it, what argues
                    against it, and what would break it — laid out side by side. #}
-                {% if (latest_bull_bear and (latest_bull_bear.bull_points or latest_bull_bear.bear_points)) or (latest_trade_plan and latest_trade_plan.invalidators) %}
+                {% if latest_bull_bear or (latest_trade_plan and latest_trade_plan.invalidators) %}
                 <div class="reasoning-grid">
-                  {% if latest_bull_bear and latest_bull_bear.bull_points %}
-                  <div><div class="section-label">Supporting Evidence</div><ul class="history-card-listing">{% for bullet in latest_bull_bear.bull_points %}<li>{{ bullet }}</li>{% endfor %}</ul></div>
-                  {% endif %}
-                  {% if latest_bull_bear and latest_bull_bear.bear_points %}
-                  <div><div class="section-label">Counterarguments</div><ul class="history-card-listing">{% for bullet in latest_bull_bear.bear_points %}<li>{{ bullet }}</li>{% endfor %}</ul></div>
-                  {% endif %}
+                  <div><div class="section-label">Supporting Evidence</div>{% if latest_bull_bear and latest_bull_bear.bull_points %}<ul class="history-card-listing">{% for bullet in latest_bull_bear.bull_points %}<li>{{ bullet }}</li>{% endfor %}</ul>{% else %}<p class="detail-muted quiet-empty surface-empty-copy">No bull points.</p>{% endif %}</div>
+                  <div><div class="section-label">Counterarguments</div>{% if latest_bull_bear and latest_bull_bear.bear_points %}<ul class="history-card-listing">{% for bullet in latest_bull_bear.bear_points %}<li>{{ bullet }}</li>{% endfor %}</ul>{% else %}<p class="detail-muted quiet-empty surface-empty-copy">No bear points.</p>{% endif %}</div>
                   {% if latest_trade_plan and latest_trade_plan.invalidators %}
                   <div><div class="section-label">Invalidators<span class="label-aside"> — what breaks the thesis</span></div><ul class="history-card-listing">{% for bullet in latest_trade_plan.invalidators %}<li>{{ bullet }}</li>{% endfor %}</ul></div>
                   {% endif %}
@@ -162,6 +158,8 @@
                     {% endfor %}
                   </div>
                 </div>
+                {% else %}
+                <p class="detail-muted quiet-empty surface-empty-copy">No signal groups.</p>
                 {% endif %}
               </div>
 
@@ -178,14 +176,14 @@
                 {% if risk.hedge_overlay_reason %}<p class="detail-body"><span class="section-label">Hedge overlay</span><br>{{ risk.hedge_overlay_reason }}</p>{% endif %}
                 {# Per-rule approval: what the risk manager checked, observed vs cap + verdict. #}
                 {% if risk.rule_checks %}
-                <div class="section-label">Rule checks</div>
+                <div class="section-label">Rule checks ({{ risk.rule_checks | length }})</div>
                 <ul class="rule-checks">
                   {% for rule in risk.rule_checks %}
                   <li><span class="rule-verdict {{ 'pass' if rule.passed else 'fail' }}">{{ '✓' if rule.passed else '✗' }}</span><span>{{ rule.label }} {{ rule.observed }} vs {{ rule.cap }}</span></li>
                   {% endfor %}
                 </ul>
                 {% elif risk.applied_rules %}
-                <div class="section-label">Applied rules</div>
+                <div class="section-label">Applied rules ({{ risk.applied_rules | length }})</div>
                 <div class="chip-row">{% for rule in risk.applied_rules %}<span class="detail-chip">{{ rule }}</span>{% endfor %}</div>
                 {% endif %}
                 {% else %}<p class="detail-muted quiet-empty">No additional risk notes.</p>{% endif %}
@@ -193,6 +191,7 @@
 
               {% if latest_trade_plan %}
               <div class="tab-panel" data-panel="plan" data-testid="trade-plan">
+                {% if latest_trade_plan.thesis %}<p class="detail-body">{{ latest_trade_plan.thesis }}</p>{% endif %}
                 {% set ns = namespace(cols=[]) %}
                 {% if latest_trade_plan.target_weight is not none %}{% set ns.cols = ns.cols + [("Target Weight", fmt_number(latest_trade_plan.target_weight * 100, 1) ~ "%", true)] %}{% endif %}
                 {% if latest_trade_plan.max_loss_pct is not none %}{% set ns.cols = ns.cols + [("Max Loss", fmt_number(latest_trade_plan.max_loss_pct * 100, 1) ~ "%", true)] %}{% endif %}
@@ -238,7 +237,8 @@
 
               {% if detail.tabs is defined and detail.tabs.timeline %}
               <div class="tab-panel" data-panel="history" data-testid="history-highlights">
-                <table class="dtable history-table">
+                <div class="section-label">History Highlights</div>
+                <table class="dtable history-table history-hl">
                   <thead><tr><th>Time</th><th>Phase</th><th>Decision</th><th>Strategy</th><th>Conf</th><th>Reasoning</th></tr></thead>
                   <tbody>
                     {% for item in detail.tabs.timeline %}

@@ -442,7 +442,7 @@ def test_build_ticker_workspace_uses_latest_row_for_current_bucket_state():
                 "order_status": "pending",
                 "material_signal_change": True,
                 "confidence": 0.82,
-                "created_at": "2026-06-03T14:20:00Z",
+                "created_at": datetime(2026, 6, 3, 14, 20, tzinfo=timezone.utc),
             },
             {
                 "ticker": "NVDA",
@@ -706,7 +706,7 @@ def test_build_ticker_workspace_surfaces_lookahead_risk_source_and_hedge_overlay
                 "expression_bucket_id": "long_stock",
                 "confidence": 0.52,
                 "risk_status": "approved",
-                "created_at": "2026-06-03T14:20:00Z",
+                "created_at": datetime(2026, 6, 3, 14, 20, tzinfo=timezone.utc),
             },
         ],
         selected_ticker="NVDA",
@@ -718,6 +718,14 @@ def test_build_ticker_workspace_surfaces_lookahead_risk_source_and_hedge_overlay
                 "lookahead_risk_source": "own_event",
                 "generated_hedge_action": {"reason_code": "macro_high_overlay"},
                 "applied_rules": ("single_name_limit", "event_window_check"),
+                "rule_checks": (
+                    {
+                        "label": "Sector concentration",
+                        "observed": "9.0%",
+                        "cap": "15.0% cap",
+                        "passed": True,
+                    },
+                ),
                 "raw_json": {
                     "status": "approved",
                     "reason_code": "own_event_force_reduce",
@@ -737,7 +745,46 @@ def test_build_ticker_workspace_surfaces_lookahead_risk_source_and_hedge_overlay
     assert risk_summary["lookahead_risk_source"] == "own_event"
     assert risk_summary["hedge_overlay_reason"] == "macro_high_overlay"
     assert risk_summary["applied_rules"] == ("single_name_limit", "event_window_check")
+    assert risk_summary["rule_checks"] == (
+        {
+            "label": "Sector concentration",
+            "observed": "9.0%",
+            "cap": "15.0% cap",
+            "passed": True,
+        },
+    )
     assert "raw_json" not in workspace["detail"]["tabs"]["risk"]
+
+
+def test_build_ticker_workspace_surfaces_discrete_fill_price():
+    workspace = build_ticker_workspace(
+        trade_rows=[
+            {
+                "ticker": "NVDA",
+                "decision": "enter_long",
+                "selected_strategy_id": "breakout_v1",
+                "created_at": datetime(2026, 6, 5, 14, 31, tzinfo=timezone.utc),
+            },
+        ],
+        selected_ticker="NVDA",
+        positions_by_ticker={
+            "NVDA": {
+                "summary": "Open position, risk within limits",
+                "position_label": "Open",
+                "avg_fill_price": 521.58,
+                "filled_qty": 4,
+            }
+        },
+        risk_by_ticker={},
+        signal_history_by_ticker={},
+        news_by_ticker={},
+        fundamentals_by_ticker={},
+    )
+
+    position_execution = workspace["detail"]["latest_conclusion"]["position_execution"]
+
+    assert position_execution["fill_price"] == 521.58
+    assert position_execution["filled_qty"] == 4
 
 
 def test_build_ticker_workspace_detail_includes_entry_exit_reason_times_and_pnl():

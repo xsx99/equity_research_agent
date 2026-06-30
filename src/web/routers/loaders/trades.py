@@ -140,6 +140,11 @@ def _load_trade_detail(session: Any, decision_id: str) -> dict[str, Any] | None:
             "lookahead_risk_source": today_loaders._risk_decision_lookahead_source(risk_decision_obj),
             "applied_rules": today_loaders._risk_applied_rules(getattr(risk_decision_obj, "applied_rules_json", None)),
         }
+        rule_checks = today_loaders._risk_rule_checks(
+            dict(getattr(risk_decision_obj, "metadata_json", {}) or {}).get("rule_checks")
+        )
+        if rule_checks:
+            risk_decision["rule_checks"] = rule_checks
     prompt_run = getattr(row, "prompt_run", None)
     return {
         "trading_decision_id": str(row.trading_decision_id),
@@ -266,6 +271,8 @@ def _merge_audit_detail_into_workspace_detail(
             risk_summary["hedge_overlay_reason"] = generated_hedge_action.get("reason_code")
     if not risk_summary.get("applied_rules") and isinstance(audit_detail.get("risk_decision"), dict):
         risk_summary["applied_rules"] = audit_detail["risk_decision"].get("applied_rules") or ()
+    if not risk_summary.get("rule_checks") and isinstance(audit_detail.get("risk_decision"), dict):
+        risk_summary["rule_checks"] = audit_detail["risk_decision"].get("rule_checks") or ()
 
     latest_conclusion["trade_decision"] = trade_decision
     latest_conclusion["trade_plan"] = trade_plan
