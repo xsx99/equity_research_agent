@@ -267,14 +267,6 @@ class ReflectionRepositoryMixin:
         row.metadata_json = dict(reflection.metadata_json)
         self.session.flush()
     def save_learning_factor(self, learning_factor: Any) -> None:
-        row = self.session.query(LearningFactor).filter_by(
-            learning_factor_id=_to_uuid(learning_factor.learning_factor_id)
-        ).one_or_none()
-        if row is None:
-            row = LearningFactor(learning_factor_id=_to_uuid(learning_factor.learning_factor_id))
-            self.session.add(row)
-        row.factor_key = learning_factor.factor_key
-        row.trade_date = learning_factor.trade_date
         source_daily_reflection_id = _to_uuid_or_none(learning_factor.source_daily_reflection_id)
         if source_daily_reflection_id is not None:
             reflection = self.session.query(DailyReflection).filter_by(
@@ -286,6 +278,14 @@ class ReflectionRepositoryMixin:
                 ).one_or_none()
             if reflection is not None:
                 source_daily_reflection_id = reflection.daily_reflection_id
+        row = self.session.query(LearningFactor).filter_by(
+            learning_factor_id=_to_uuid(learning_factor.learning_factor_id)
+        ).one_or_none()
+        if row is None:
+            row = LearningFactor(learning_factor_id=_to_uuid(learning_factor.learning_factor_id))
+            self.session.add(row)
+        row.factor_key = learning_factor.factor_key
+        row.trade_date = learning_factor.trade_date
         row.daily_reflection_id = source_daily_reflection_id
         row.title = learning_factor.title
         row.factor_type = learning_factor.factor_type

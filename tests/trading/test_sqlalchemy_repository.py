@@ -107,6 +107,18 @@ class _FakeSession:
         self.flush_calls += 1
 
 
+class _AutoflushFakeSession(_FakeSession):
+    def query(self, model: type) -> _FakeQuery:
+        self.flush()
+        return super().query(model)
+
+    def flush(self) -> None:
+        for row in self.rows_by_type.get(LearningFactor, []):
+            if getattr(row, "title", None) is None:
+                raise AssertionError("autoflush attempted before learning factor fields were populated")
+        super().flush()
+
+
 def _matches_filter_criterion(row: object, criterion: Any) -> bool:
     if isinstance(criterion, BooleanClauseList):
         clauses = list(criterion.clauses)
@@ -1453,6 +1465,52 @@ def test_sqlalchemy_repository_save_learning_factor_maps_retried_reflection_to_e
 
     factors = session.rows_by_type[LearningFactor]
     assert len(factors) == 1
+    assert factors[0].daily_reflection_id == existing_id
+
+
+def test_sqlalchemy_repository_save_learning_factor_resolves_reflection_before_autoflush():
+    trade_date = date(2026, 6, 30)
+    existing_id = uuid.uuid4()
+    session = _AutoflushFakeSession()
+    repository = SqlAlchemyTradingRepository(session)
+    session.rows_by_type[DailyReflection] = [
+        SimpleNamespace(
+            daily_reflection_id=existing_id,
+            trade_date=trade_date,
+            prompt_run_id=None,
+            status="succeeded",
+            portfolio_summary_json={},
+            reflection_json={},
+            strategy_proposal_hints_json=[],
+            metadata_json={},
+            created_at=datetime(2026, 6, 30, 20, 20, tzinfo=timezone.utc),
+        )
+    ]
+
+    repository.save_learning_factor(
+        LearningFactorRecord(
+            learning_factor_id=str(uuid.uuid4()),
+            factor_key="lf-2026-06-30-autoflush",
+            trade_date=trade_date,
+            title="Autoflush-safe factor",
+            factor_type="observation",
+            scope="portfolio",
+            status="observation",
+            strategy_id=None,
+            condition="retry",
+            recommendation="observe",
+            confidence=0.5,
+            activation_policy="observation",
+            effect_tags=(),
+            evidence=(),
+            source_daily_reflection_id=str(uuid.uuid4()),
+            metadata_json={},
+        )
+    )
+
+    factors = session.rows_by_type[LearningFactor]
+    assert len(factors) == 1
+    assert factors[0].title == "Autoflush-safe factor"
     assert factors[0].daily_reflection_id == existing_id
 
 
