@@ -166,6 +166,65 @@ def test_reflection_agent_accepts_prompted_analysis_sections(tmp_path):
     ] is True
 
 
+def test_reflection_agent_normalizes_loose_production_sections(tmp_path):
+    registry = _write_prompt(tmp_path)
+
+    agent = ReflectionAgent(
+        tool_registry=None,
+        prompt_registry=registry,
+        model_name="gpt-5",
+        agent_runner=lambda prompt, model_name: {
+            "content": {
+                "trade_date": "2026-06-02",
+                "portfolio_summary": {"realized_pnl": 120.0},
+                "portfolio_analysis": {},
+                "confidence_calibration": {},
+                "factor_concentration": {},
+                "candidate_misses": {},
+                "manual_ticker_requests_evaluation": {},
+                "what_worked": [
+                    {
+                        "ticker": "APP",
+                        "analysis": "Entry discipline improved the trade outcome.",
+                    }
+                ],
+                "what_failed": [
+                    {
+                        "ticker": "MRVL",
+                        "analysis": "Scanner signal acquisition missed follow-through.",
+                    }
+                ],
+                "attribution": {
+                    "portfolio_pnl": 120.0,
+                    "drivers": ["APP carried the session."],
+                },
+                "learning_factors": [
+                    {
+                        "factor_type": "data_completeness",
+                        "scope": "scanner_signal_acquisition",
+                        "title": "Improve scanner signal coverage",
+                        "description": "Rejected candidates lacked enough quantitative signals.",
+                        "application": "Refine signal acquisition before scoring.",
+                        "confidence": "high",
+                    }
+                ],
+                "strategy_proposal_hints": [],
+                "schema_version": "v1",
+                "generated_at": "2026-06-02T22:00:00+00:00",
+            }
+        },
+    )
+
+    result = agent.run(_payload(), context=None)
+
+    assert result.success is True
+    assert isinstance(result.output_data["what_worked"][0], str)
+    assert result.output_data["attribution"][0]["strategy_id"] == "portfolio"
+    assert result.output_data["learning_factors"][0]["scope"] == "portfolio"
+    assert result.output_data["learning_factors"][0]["activation_policy"] == "observation"
+    assert result.output_data["learning_factors"][0]["confidence"] == 0.8
+
+
 def test_reflection_agent_returns_safe_fallback_after_retry_failure(tmp_path):
     registry = _write_prompt(tmp_path)
 

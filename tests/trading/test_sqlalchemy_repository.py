@@ -51,13 +51,14 @@ from src.trading.risk.hedges import RiskHedgeDecisionRecord
 from src.trading.risk.options import OptionRiskSnapshotRecord
 from src.trading.options.strategy import OptionStrategyDecisionRecord, OptionStrategyLegRecord
 from src.trading.portfolio.state import PortfolioSnapshot, StockPosition
-from src.trading.post_close.reflection import LearningFactorRecord
+from src.trading.post_close.reflection import DailyReflectionRecord, LearningFactorRecord
 from src.trading.repositories.sqlalchemy import SqlAlchemyTradingRepository, _trading_decision_payload
 from src.trading.runtime.trade_day import local_day_bounds_utc
 from src.trading.workflows.paper_execution import PaperExecutionWorkflow
 from src.trading.manual_review.requests import ManualTickerRequestService
 from src.trading.risk import HedgeActionRecord, PortfolioRiskIntentRecord, PositionRiskActionRecord, RiskDecisionRecord
 from src.trading.workflows.trading_decision import TradingDecisionRecord
+from src.agents.trading import PromptRunRecord
 
 
 class _FakeQuery:
@@ -1355,6 +1356,59 @@ def test_sqlalchemy_repository_loads_active_and_shadow_learning_factors():
 
     assert [row.factor_key for row in rows] == ["lf-active", "lf-shadow"]
     assert all(isinstance(row, LearningFactorRecord) for row in rows)
+
+
+def test_sqlalchemy_repository_save_daily_reflection_updates_existing_trade_date():
+    trade_date = date(2026, 6, 30)
+    now = datetime(2026, 6, 30, 20, 20, tzinfo=timezone.utc)
+    existing_id = uuid.uuid4()
+    session = _FakeSession()
+    repository = SqlAlchemyTradingRepository(session)
+    session.rows_by_type[DailyReflection] = [
+        SimpleNamespace(
+            daily_reflection_id=existing_id,
+            trade_date=trade_date,
+            prompt_run_id=None,
+            status="fallback",
+            portfolio_summary_json={"day_pnl": 100.0},
+            reflection_json={"fallback_action": "reflection_failed"},
+            strategy_proposal_hints_json=[],
+            metadata_json={"fallback_action": "reflection_failed"},
+            created_at=now,
+        )
+    ]
+
+    replacement_id = uuid.uuid4()
+    repository.save_daily_reflection(
+        DailyReflectionRecord(
+            daily_reflection_id=str(replacement_id),
+            trade_date=trade_date,
+            status="succeeded",
+            prompt_template=None,
+            prompt_run=PromptRunRecord(
+                pipeline_name="reflection",
+                rendered_prompt_hash="hash",
+                rendered_prompt_redacted="prompt",
+                input_context_json={},
+                raw_output_text="{}",
+                parsed_output_json={},
+                parse_status="succeeded",
+                validation_errors_json=[],
+                fallback_action=None,
+                error_message=None,
+            ),
+            usage_events=[],
+            reflection_json={"what_worked": ["fixed"]},
+            strategy_proposal_hints=(),
+            metadata_json={"portfolio_outcome": {"day_pnl": 120.0}},
+        )
+    )
+
+    rows = session.rows_by_type[DailyReflection]
+    assert len(rows) == 1
+    assert rows[0].daily_reflection_id == replacement_id
+    assert rows[0].status == "succeeded"
+    assert rows[0].reflection_json == {"what_worked": ["fixed"]}
 
 
 def test_sqlalchemy_repository_load_reflection_inputs_matches_expected_result_set_within_utc_day():

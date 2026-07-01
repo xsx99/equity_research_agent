@@ -1,21 +1,61 @@
 """Pydantic contracts for PR09 reflection and learning factors."""
 from __future__ import annotations
 
+import json
 from datetime import date, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 LearningFactorScope = Literal["strategy", "portfolio", "trade", "watchlist", "risk"]
 ActivationPolicy = Literal["candidate", "observation", "shadow", "auto_risk_tightening"]
 ReflectionFallbackAction = Literal["reflection_failed"]
+_LEARNING_FACTOR_SCOPES = {"strategy", "portfolio", "trade", "watchlist", "risk"}
+_CONFIDENCE_LABELS = {"low": 0.3, "medium": 0.5, "high": 0.8}
+
+
+def _json_summary(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        ticker = value.get("ticker") or value.get("symbol")
+        analysis = value.get("analysis") or value.get("summary") or value.get("description")
+        if ticker and analysis:
+            return f"{ticker}: {analysis}"
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+
+
+def _normalize_attribution_item(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {
+            "strategy_id": "portfolio",
+            "result": "mixed",
+            "root_cause": str(value),
+            "evidence": [],
+        }
+    root_cause = (
+        value.get("root_cause")
+        or value.get("analysis")
+        or value.get("summary")
+        or value.get("description")
+        or _json_summary(value)
+    )
+    evidence = value.get("evidence")
+    if not isinstance(evidence, list):
+        evidence = value.get("drivers") if isinstance(value.get("drivers"), list) else []
+    return {
+        "strategy_id": str(value.get("strategy_id") or value.get("ticker") or value.get("symbol") or "portfolio"),
+        "result": str(value.get("result") or value.get("outcome") or "mixed"),
+        "root_cause": str(root_cause),
+        "evidence": [str(item) for item in evidence],
+    }
 
 
 class ReflectionLearningFactorInput(BaseModel):
     """Structured learning-factor proposal emitted by reflection."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     factor_type: str
     scope: LearningFactorScope
@@ -23,10 +63,39 @@ class ReflectionLearningFactorInput(BaseModel):
     strategy_id: str | None = None
     condition: str
     recommendation: str
-    confidence: float = Field(ge=0, le=1)
-    activation_policy: ActivationPolicy
+    confidence: float = Field(default=0.5, ge=0, le=1)
+    activation_policy: ActivationPolicy = "observation"
     effect_tags: list[str] = Field(default_factory=list)
     evidence: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_loose_factor(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        data = dict(value)
+        description = data.get("description")
+        application = data.get("application")
+        if not data.get("title"):
+            data["title"] = description or data.get("condition") or "Reflection observation"
+        if not data.get("factor_type"):
+            data["factor_type"] = "observation"
+        if data.get("scope") not in _LEARNING_FACTOR_SCOPES:
+            data["scope"] = "portfolio"
+        if not data.get("condition"):
+            data["condition"] = description or data["title"]
+        if not data.get("recommendation"):
+            data["recommendation"] = application or description or data["title"]
+        if not data.get("activation_policy"):
+            data["activation_policy"] = "observation"
+        return data
+
+    @field_validator("confidence", mode="before")
+    @classmethod
+    def normalize_confidence(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            return _CONFIDENCE_LABELS.get(value.strip().lower(), value)
+        return value
 
 
 class ReflectionAttributionItem(BaseModel):
@@ -91,6 +160,22 @@ class ReflectionOutput(BaseModel):
     strategy_proposal_hints: list[dict[str, Any]] = Field(default_factory=list)
     schema_version: str
     generated_at: datetime
+
+    @field_validator("what_worked", "what_failed", mode="before")
+    @classmethod
+    def normalize_summary_points(cls, value: Any) -> Any:
+        if value is None:
+            return []
+        items = value if isinstance(value, list) else [value]
+        return [_json_summary(item) for item in items]
+
+    @field_validator("attribution", mode="before")
+    @classmethod
+    def normalize_attribution(cls, value: Any) -> Any:
+        if value is None:
+            return []
+        items = value if isinstance(value, list) else [value]
+        return [_normalize_attribution_item(item) for item in items]
 
 
 class ReflectionOutputFallback(BaseModel):

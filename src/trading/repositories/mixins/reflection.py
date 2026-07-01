@@ -249,12 +249,17 @@ class ReflectionRepositoryMixin:
             ),
         }
     def save_daily_reflection(self, reflection: Any) -> None:
+        reflection_id = _to_uuid(reflection.daily_reflection_id)
         row = self.session.query(DailyReflection).filter_by(
-            daily_reflection_id=_to_uuid(reflection.daily_reflection_id)
+            daily_reflection_id=reflection_id
         ).one_or_none()
         if row is None:
-            row = DailyReflection(daily_reflection_id=_to_uuid(reflection.daily_reflection_id))
+            row = self.session.query(DailyReflection).filter_by(trade_date=reflection.trade_date).one_or_none()
+        if row is None:
+            row = DailyReflection(daily_reflection_id=reflection_id)
             self.session.add(row)
+        else:
+            row.daily_reflection_id = reflection_id
         row.trade_date = reflection.trade_date
         row.prompt_run_id = None
         row.status = reflection.status
