@@ -363,7 +363,12 @@ def _dashboard_payload() -> dict:
                             {"chart_type": "Price / Key Level Trend", "summary": "Higher highs into the open"},
                         ),
                         "news_snippets": (
-                            {"title": "Raised guidance", "summary": "Demand improved across core products"},
+                            {
+                                "title": "Raised guidance",
+                                "summary": "Demand improved across core products",
+                                "source_ticker": "MU",
+                                "readthrough_label": "Readthrough from MU",
+                            },
                         ),
                         "fundamental_snippets": (
                             {"title": "Margin outlook", "summary": "Gross margin remains stable"},
@@ -807,6 +812,7 @@ class TestTodayDashboard:
             response = client.get("/today?tab=portfolio")
 
         assert response.status_code == 200
+        assert 'href="/static/style.css?v=' in response.text
         assert "<h1>Today</h1>" in response.text
         assert "today-shell" in response.text
         assert "kpi-cards" in response.text
@@ -918,6 +924,7 @@ class TestTodayDashboard:
         assert "Enter Long" in response.text
         assert "Event / News Summary" in response.text
         assert "Raised guidance: Demand improved across core products." in response.text
+        assert "Readthrough from MU" in response.text
         assert "Risk Manager" in response.text
         assert "Applied rules (2)" in response.text
         assert "Lookahead risk" in response.text
@@ -986,6 +993,24 @@ class TestTodayDashboard:
         assert "block_open" not in response.text
         assert "trades-canvas" not in response.text
         assert "AI Infrastructure" not in response.text
+
+    def test_risk_macro_tab_explains_unwired_economic_calendar(self, client):
+        payload = _dashboard_payload()
+        payload["selected_tab"] = "risk-macro"
+        payload["risk_macro"] = {
+            **payload["risk_macro"],
+            "events": tuple(
+                row
+                for row in payload["risk_macro"]["events"]
+                if "earn" in str(row.get("event_type_label") or row.get("event_type") or "").lower()
+            ),
+        }
+        with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
+            response = client.get("/today?tab=risk-macro")
+
+        assert response.status_code == 200
+        assert "No economic-calendar feed is wired yet." in response.text
+        assert "No economic calendar rows are currently visible." not in response.text
 
     def test_portfolio_tab_omits_attention_modules(self, client):
         # Attention (review / alerts / material changes) now lives on the
@@ -1197,6 +1222,14 @@ class TestTodayDashboard:
                 ),
                 "risk_tags": ("Risk tags: gap risk, momentum.",),
                 "invalidators": ("Invalidators: loses VWAP.",),
+                "news": (
+                    {
+                        "title": "Micron raises guidance",
+                        "summary": "Memory demand improved across AI infrastructure.",
+                        "source_ticker": "MU",
+                        "readthrough_label": "Readthrough from MU",
+                    },
+                ),
                 "evaluation_count": 2,
                 "evaluations": (
                     {
@@ -1258,6 +1291,7 @@ class TestTodayDashboard:
         assert 'data-local-time-format="datetime"' in response.text
         assert ">2026-06-16T13:35:00Z<" not in response.text
         assert "Technical: 20d return 8.26%, relative volume 0.78." in response.text
+        assert "Readthrough from MU" in response.text
         assert "Risk tags: gap risk, momentum." in response.text
         assert "Invalidators: loses VWAP." in response.text
         assert "Duplicate Rows" not in response.text
@@ -1401,12 +1435,14 @@ class TestTodayDashboard:
     def test_system_tab_aggregate_lines_render_for_risk_exposure_and_llm_usage(self, client):
         payload = _dashboard_payload()
         payload["selected_tab"] = "system"
+        payload["system"]["exposure_summary"]["total_exposure"] = Decimal("50157.226068")
         with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
             response = client.get("/today?tab=system")
 
         assert response.status_code == 200
         assert "1 factor" in response.text
-        assert "5.2757000000000005" in response.text
+        assert "$50,157.23 exposure" in response.text
+        assert "50157.226068 exposure" not in response.text
         assert "1 event" in response.text
         assert "$12.30 estimated cost" in response.text
         assert "surface-block" in response.text
@@ -2006,21 +2042,24 @@ class TestTodayDashboard:
         from src.web.routers.today import _load_candidate_rows
 
         session = MagicMock()
-        session.query.return_value = _ListQuery(
-            [
-                SimpleNamespace(
-                    ticker="UBER",
-                    selection_source="direct_negative_catalyst",
-                    rejection_reason="blocked_by_missing_data",
-                    candidate_status="blocked",
-                    strategy_id="valuation_repair_quality_software_v1",
-                    trade_classifications=[],
-                    watch_candidates=[SimpleNamespace(result_status="blocked_by_missing_data")],
-                    decision_time=datetime(2026, 6, 3, 23, 25, 34, tzinfo=timezone.utc),
-                    candidate_score=Decimal("0.32"),
-                )
-            ]
-        )
+        session.query.side_effect = [
+            _ListQuery(
+                [
+                    SimpleNamespace(
+                        ticker="UBER",
+                        selection_source="direct_negative_catalyst",
+                        rejection_reason="blocked_by_missing_data",
+                        candidate_status="blocked",
+                        strategy_id="valuation_repair_quality_software_v1",
+                        trade_classifications=[],
+                        watch_candidates=[SimpleNamespace(result_status="blocked_by_missing_data")],
+                        decision_time=datetime(2026, 6, 3, 23, 25, 34, tzinfo=timezone.utc),
+                        candidate_score=Decimal("0.32"),
+                    )
+                ]
+            ),
+            _ListQuery([]),
+        ]
 
         rows = _load_candidate_rows(session)
 
@@ -2052,6 +2091,44 @@ class TestTodayDashboard:
                 },
             },
         )
+
+    def test_load_candidate_rows_prefers_latest_trading_decision_over_classifier_status(self):
+        from src.web.routers.today import _load_candidate_rows
+
+        session = MagicMock()
+        session.query.side_effect = [
+            _ListQuery(
+                [
+                    SimpleNamespace(
+                        ticker="APP",
+                        selection_source="scanner",
+                        rejection_reason=None,
+                        candidate_status="selected",
+                        strategy_id="gap_continuation_v1",
+                        trade_classifications=[SimpleNamespace(result_status="actionable_trade", trade_identity="tactical_stock_trade")],
+                        watch_candidates=[],
+                        decision_time=datetime(2026, 6, 3, 13, 0, tzinfo=timezone.utc),
+                        candidate_score=Decimal("0.72"),
+                    )
+                ]
+            ),
+            _ListQuery(
+                [
+                    SimpleNamespace(
+                        ticker="APP",
+                        decision="no_trade",
+                        paper_trade_authorized=False,
+                        decision_time=datetime(2026, 6, 3, 13, 5, tzinfo=timezone.utc),
+                    )
+                ]
+            ),
+        ]
+
+        rows = _load_candidate_rows(session)
+
+        assert rows[0]["result_status"] == "no_trade"
+        assert rows[0]["current_outcome_label"] == "No clean entry, so no trade"
+        assert "Actionable Trade" not in rows[0]["operator_summary"]
 
     def test_load_manual_requests_translates_operator_queue_copy(self):
         from src.web.routers.today import _load_manual_requests
@@ -2401,6 +2478,8 @@ class TestTodayDashboard:
                 [
                     SimpleNamespace(
                         ticker="UBER",
+                        source_ticker="MU",
+                        explicit_ticker_mention_flag=False,
                         headline="Uber layoffs: HR and workplace division cut 23%",
                         summary="The cuts affect recruitment and HR staff.",
                         published_at=datetime(2026, 6, 3, 0, 0, tzinfo=timezone.utc),
@@ -2419,6 +2498,39 @@ class TestTodayDashboard:
             "Valuation Percentile",
         ]
         assert news["UBER"][0]["title"] == "Uber layoffs: HR and workplace division cut 23%"
+        assert news["UBER"][0]["source_ticker"] == "MU"
+        assert news["UBER"][0]["readthrough_label"] == "Readthrough from MU"
+        assert news["UBER"][0]["explicit_ticker_mention"] is False
+
+    def test_load_live_alerts_preserves_readthrough_metadata(self):
+        from src.web.routers.today import _load_live_alerts
+
+        session = MagicMock()
+        session.query.return_value = _ListQuery(
+            [
+                SimpleNamespace(
+                    ticker="NVDA",
+                    severity="high",
+                    headline="Micron raises guidance",
+                    summary="Memory demand improved.",
+                    source_ticker="MU",
+                    readthrough_source_ticker="MU",
+                )
+            ]
+        )
+
+        alerts = _load_live_alerts(session)
+
+        assert alerts == (
+            {
+                "ticker": "NVDA",
+                "severity": "high",
+                "headline": "Micron raises guidance",
+                "summary": "Memory demand improved.",
+                "source_ticker": "MU",
+                "readthrough_source_ticker": "MU",
+            },
+        )
 
 
 class TestTodayDashboardMutations:
@@ -2735,6 +2847,27 @@ def test_build_attention_feed_merges_by_ticker():
     assert by_ticker["AAPL"]["primary_kind"] == "signal"
     # alert-primary ticker sorts ahead of signal-primary ticker
     assert feed[0]["ticker"] == "NVDA"
+
+
+def test_build_attention_feed_excludes_readthrough_news_alerts():
+    from src.web.presenters.today_overview import _build_attention_feed
+
+    feed = _build_attention_feed(
+        needs_review=(),
+        live_alerts=(
+            {
+                "ticker": "NVDA",
+                "severity": "high",
+                "headline": "Micron raises guidance",
+                "source_ticker": "MU",
+                "readthrough_source_ticker": "MU",
+            },
+            {"ticker": "AAPL", "severity": "medium", "headline": "AAPL raises guidance"},
+        ),
+        material_changes=(),
+    )
+
+    assert [entry["ticker"] for entry in feed] == ["AAPL"]
 
 
 @contextmanager

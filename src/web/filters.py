@@ -3,9 +3,12 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
 from typing import Any, Optional
 
 from src.web.presenters.today_copy import strategy_label
+
+_STATIC_DIR = Path(__file__).resolve().parents[1] / "static"
 
 
 def pct(value: Optional[float]) -> str:
@@ -84,6 +87,15 @@ def local_time(value: Any, display: str = "datetime") -> str:
     return local_dt.strftime("%Y-%m-%d %H:%M %Z")
 
 
+def _asset_version(filename: str) -> str:
+    path = _STATIC_DIR / filename
+    try:
+        stat = path.stat()
+    except OSError:
+        return "dev"
+    return str(int(stat.st_mtime))
+
+
 def register(templates) -> None:
     """Register all filters and globals on a Jinja2Templates instance."""
     templates.env.globals["pct"] = pct
@@ -91,5 +103,6 @@ def register(templates) -> None:
     templates.env.globals["fmt_currency"] = fmt_currency
     templates.env.globals["fmt_number"] = fmt_number
     templates.env.globals["strategy_label"] = strategy_label
+    templates.env.globals["asset_version"] = _asset_version("style.css")
     templates.env.filters["iso_datetime"] = iso_datetime
     templates.env.filters["local_time"] = local_time

@@ -322,6 +322,10 @@ def _build_snippets(items: Any) -> list[dict[str, Any]]:
                 "importance": item.get("importance"),
                 "source": item.get("source"),
                 "sentiment": item.get("sentiment"),
+                "source_ticker": item.get("source_ticker"),
+                "readthrough_source_ticker": item.get("readthrough_source_ticker"),
+                "readthrough_label": item.get("readthrough_label"),
+                "explicit_ticker_mention": item.get("explicit_ticker_mention"),
                 "empty": False,
             }
         )

@@ -100,6 +100,8 @@ def _load_news_by_ticker(session: Any) -> dict[str, list[dict[str, Any]]]:
             published_at=row.published_at,
             source=getattr(row, "source", None),
             sentiment=getattr(row, "sentiment", None),
+            source_ticker=getattr(row, "source_ticker", None),
+            readthrough_source_ticker=getattr(row, "readthrough_source_ticker", None),
         )
     for row in event_rows:
         ticker = str(row.ticker or "").strip().upper()
@@ -116,6 +118,8 @@ def _load_news_by_ticker(session: Any) -> dict[str, list[dict[str, Any]]]:
             importance=getattr(row, "importance", None),
             source=getattr(row, "provider", None),
             sentiment=getattr(row, "sentiment", None),
+            source_ticker=getattr(row, "source_ticker", None),
+            explicit_ticker_mention=getattr(row, "explicit_ticker_mention_flag", None),
         )
     return grouped
 
@@ -317,6 +321,9 @@ def _append_news_snippet(
     importance: Any = None,
     source: Any = None,
     sentiment: Any = None,
+    source_ticker: Any = None,
+    readthrough_source_ticker: Any = None,
+    explicit_ticker_mention: Any = None,
 ) -> None:
     normalized_title = str(title or "").strip()
     if not normalized_title:
@@ -327,6 +334,10 @@ def _append_news_snippet(
     if dedupe_key in seen:
         return
     seen.add(dedupe_key)
+    normalized_source_ticker = str(source_ticker or "").strip().upper() or None
+    normalized_readthrough_source = str(readthrough_source_ticker or "").strip().upper() or None
+    if normalized_readthrough_source is None and normalized_source_ticker and normalized_source_ticker != ticker:
+        normalized_readthrough_source = normalized_source_ticker
     grouped.setdefault(ticker, []).append(
         {
             "title": normalized_title,
@@ -336,5 +347,9 @@ def _append_news_snippet(
             "importance": str(importance or "").strip() or None,
             "source": str(source or "").strip() or None,
             "sentiment": str(sentiment or "").strip() or None,
+            "source_ticker": normalized_source_ticker,
+            "readthrough_source_ticker": normalized_readthrough_source,
+            "readthrough_label": f"Readthrough from {normalized_readthrough_source}" if normalized_readthrough_source else None,
+            "explicit_ticker_mention": explicit_ticker_mention,
         }
     )

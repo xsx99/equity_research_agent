@@ -226,3 +226,82 @@ def test_today_risk_macro_presenter_marks_missing_macro_as_availability_issue():
             "summary": "Global macro regime data is unavailable.",
         },
     )
+
+
+def test_today_risk_macro_presenter_dedupes_accumulated_audit_rows():
+    older = datetime(2026, 6, 16, 13, 0, tzinfo=timezone.utc)
+    newer = datetime(2026, 6, 16, 14, 0, tzinfo=timezone.utc)
+    stale_event = CalendarEventRecord(
+        calendar_event_id="event-stale",
+        event_key="earnings:GOOGL:2026-07-22",
+        event_type="earnings",
+        ticker="GOOGL",
+        event_time=datetime(2026, 7, 22, 20, 0, tzinfo=timezone.utc),
+        published_at=older,
+        available_for_decision_at=older,
+        title="GOOGL earnings within 28 day(s)",
+        severity_hint="high",
+        source="fixture",
+        metadata_json={},
+    )
+    latest_event = CalendarEventRecord(
+        calendar_event_id="event-latest",
+        event_key="earnings:GOOGL:2026-07-16",
+        event_type="earnings",
+        ticker="GOOGL",
+        event_time=datetime(2026, 7, 16, 20, 0, tzinfo=timezone.utc),
+        published_at=newer,
+        available_for_decision_at=newer,
+        title="GOOGL earnings within 22 day(s)",
+        severity_hint="high",
+        source="fixture",
+        metadata_json={},
+    )
+    stale_assessment = PortfolioEventRiskAssessmentRecord(
+        portfolio_event_risk_assessment_id="assessment-stale",
+        calendar_event_id="event-stale",
+        portfolio_risk_snapshot_id="risk-1",
+        decision_time=older,
+        available_for_decision_at=older,
+        ticker="NVDA",
+        risk_source="company_specific",
+        severity="medium",
+        event_type="readthrough",
+        days_until_event=0,
+        affects_existing_position=False,
+        affects_pending_trade=True,
+        recommended_action="monitor",
+        rationale="NVDA monitor duplicate from older run.",
+        metadata_json={},
+    )
+    latest_assessment = PortfolioEventRiskAssessmentRecord(
+        portfolio_event_risk_assessment_id="assessment-latest",
+        calendar_event_id="event-latest",
+        portfolio_risk_snapshot_id="risk-1",
+        decision_time=newer,
+        available_for_decision_at=newer,
+        ticker="NVDA",
+        risk_source="company_specific",
+        severity="medium",
+        event_type="readthrough",
+        days_until_event=0,
+        affects_existing_position=False,
+        affects_pending_trade=True,
+        recommended_action="monitor",
+        rationale="NVDA monitor duplicate from latest run.",
+        metadata_json={},
+    )
+
+    payload = build_today_risk_macro_payload(
+        latest_risk=None,
+        latest_intent=None,
+        risk_macro_context={
+            "calendar_events": (stale_event, latest_event),
+            "portfolio_event_risk_assessments": (stale_assessment, latest_assessment),
+        },
+        exposures=(),
+        as_of=older,
+    )
+
+    assert [event["risk_mechanism"] for event in payload["events"]] == ["GOOGL earnings within 22 day(s)"]
+    assert [row["rationale"] for row in payload["risk_sources"]] == ["NVDA monitor duplicate from latest run."]

@@ -79,7 +79,7 @@ def build_portfolio_analytics(
         if equity_values[i - 1]
     ]
     sharpe_ratio = None
-    if len(daily_returns) >= 2:
+    if len(daily_returns) >= 20:
         mean_return = sum(daily_returns) / len(daily_returns)
         variance = sum((r - mean_return) ** 2 for r in daily_returns) / (len(daily_returns) - 1)
         std_return = variance ** 0.5

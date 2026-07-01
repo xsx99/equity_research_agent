@@ -162,6 +162,8 @@ def _build_attention_feed(
         )
 
     for row in live_alerts or ():
+        if _is_readthrough_alert(row):
+            continue
         _add(row.get("ticker"), "alert", str(row.get("severity") or "Alert"), row.get("headline") or row.get("summary"))
     for row in needs_review or ():
         _add(row.get("ticker"), "review", "Review", row.get("summary"))
@@ -183,6 +185,12 @@ def _build_attention_feed(
         )
     feed.sort(key=lambda entry: _ATTENTION_PRIORITY.get(entry["primary_kind"], 9))
     return tuple(feed)
+
+
+def _is_readthrough_alert(row: dict[str, Any]) -> bool:
+    ticker = str(row.get("ticker") or "").strip().upper()
+    source_ticker = str(row.get("readthrough_source_ticker") or row.get("source_ticker") or "").strip().upper()
+    return bool(ticker and source_ticker and source_ticker != ticker)
 
 
 def _build_command_center(

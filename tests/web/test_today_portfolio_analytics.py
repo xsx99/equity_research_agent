@@ -90,6 +90,22 @@ def test_build_portfolio_analytics_computes_series_geometry_and_metrics():
     assert payload["metrics"]["daily_profit_factor"] == pytest.approx(32.0 / 6.0)
 
 
+def test_build_portfolio_analytics_suppresses_sharpe_for_small_samples():
+    payload = build_portfolio_analytics(
+        [
+            {
+                "time": datetime(2026, 6, 1, 13, 0, tzinfo=timezone.utc) + timedelta(days=offset),
+                "equity": 100.0 + (offset * 2.0 if offset % 2 else offset * 0.5),
+                "day_pnl": float(offset),
+            }
+            for offset in range(10)
+        ]
+    )
+
+    assert payload is not None
+    assert payload["metrics"]["sharpe_ratio"] is None
+
+
 def test_build_portfolio_analytics_scales_bar_width_for_dense_series():
     payload = build_portfolio_analytics(
         [

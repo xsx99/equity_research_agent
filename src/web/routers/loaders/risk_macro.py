@@ -61,6 +61,8 @@ def _load_live_alerts(session: Any) -> tuple[dict[str, Any], ...]:
             "severity": row.severity,
             "headline": row.headline,
             "summary": row.summary,
+            "source_ticker": getattr(row, "source_ticker", None),
+            "readthrough_source_ticker": getattr(row, "readthrough_source_ticker", None),
         }
         for row in rows
     )

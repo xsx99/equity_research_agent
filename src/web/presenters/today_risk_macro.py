@@ -24,8 +24,8 @@ def build_today_risk_macro_payload(
 ) -> dict[str, Any]:
     context = risk_macro_context or {}
     macro_snapshot = context.get("macro_snapshot")
-    calendar_events = tuple(context.get("calendar_events") or ())
-    event_assessments = tuple(context.get("portfolio_event_risk_assessments") or ())
+    calendar_events = _dedupe_calendar_events(tuple(context.get("calendar_events") or ()))
+    event_assessments = _dedupe_risk_assessments(tuple(context.get("portfolio_event_risk_assessments") or ()))
 
     binding_constraints = tuple(
         getattr(latest_intent, "binding_constraints", None)
@@ -100,6 +100,55 @@ def _risk_status(*, latest_intent: object | None) -> str:
     if aggregate in {"", "risk_normalized"}:
         return "Within Limits"
     return _humanize_identifier(aggregate)
+
+
+def _dedupe_calendar_events(events: tuple[object, ...]) -> tuple[object, ...]:
+    deduped: dict[tuple[Any, ...], object] = {}
+    for event in events:
+        key = _calendar_event_key(event)
+        current = deduped.get(key)
+        if current is None or _sort_timestamp(getattr(event, "available_for_decision_at", None)) >= _sort_timestamp(
+            getattr(current, "available_for_decision_at", None)
+        ):
+            deduped[key] = event
+    return tuple(deduped.values())
+
+
+def _calendar_event_key(event: object) -> tuple[Any, ...]:
+    event_type = str(getattr(event, "event_type", "") or "").strip().lower()
+    ticker = str(getattr(event, "ticker", "") or "").strip().upper()
+    if "earn" in event_type and ticker:
+        return ("earnings", ticker)
+    event_key = str(getattr(event, "event_key", "") or "").strip()
+    if event_key:
+        return ("event_key", event_key)
+    return (event_type, ticker, getattr(event, "event_time", None))
+
+
+def _dedupe_risk_assessments(assessments: tuple[object, ...]) -> tuple[object, ...]:
+    deduped: dict[tuple[Any, ...], object] = {}
+    for assessment in assessments:
+        key = (
+            str(getattr(assessment, "ticker", "") or "").strip().upper(),
+            str(getattr(assessment, "risk_source", "") or "").strip().lower(),
+            str(getattr(assessment, "event_type", "") or "").strip().lower(),
+            str(getattr(assessment, "recommended_action", "") or "").strip().lower(),
+        )
+        current = deduped.get(key)
+        if current is None or _sort_timestamp(getattr(assessment, "available_for_decision_at", None)) >= _sort_timestamp(
+            getattr(current, "available_for_decision_at", None)
+        ):
+            deduped[key] = assessment
+    return tuple(deduped.values())
+
+
+def _sort_timestamp(value: Any) -> tuple[int, str]:
+    if hasattr(value, "timestamp"):
+        try:
+            return (1, f"{value.timestamp():020.6f}")
+        except (OSError, OverflowError, ValueError):
+            pass
+    return (0, str(value or ""))
 
 
 def _top_risk_sources(
