@@ -76,6 +76,7 @@ class ReflectionAgent(BaseAgent):
             try:
                 parsed_output_json = _coerce_json_object(raw_output_text)
                 output = ReflectionOutput.model_validate(parsed_output_json)
+                output = output.model_copy(update={"generated_at": datetime.now(timezone.utc)})
                 prompt_run = PromptRunRecord(
                     pipeline_name="reflection",
                     rendered_prompt_hash=rendered.rendered_prompt_hash,

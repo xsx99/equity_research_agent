@@ -166,6 +166,39 @@ def test_reflection_agent_accepts_prompted_analysis_sections(tmp_path):
     ] is True
 
 
+def test_reflection_agent_overwrites_llm_generated_at_with_system_time(tmp_path):
+    registry = _write_prompt(tmp_path)
+    stale_llm_timestamp = "2023-10-27T10:00:00Z"
+
+    agent = ReflectionAgent(
+        tool_registry=None,
+        prompt_registry=registry,
+        model_name="gpt-5",
+        agent_runner=lambda prompt, model_name: {
+            "content": {
+                "trade_date": "2026-06-02",
+                "portfolio_summary": {"realized_pnl": 120.0},
+                "what_worked": [],
+                "what_failed": [],
+                "attribution": [],
+                "learning_factors": [],
+                "strategy_proposal_hints": [],
+                "schema_version": "v1",
+                "generated_at": stale_llm_timestamp,
+            }
+        },
+    )
+
+    before = datetime.now(timezone.utc)
+    result = agent.run(_payload(), context=None)
+    after = datetime.now(timezone.utc)
+
+    generated_at = datetime.fromisoformat(result.output_data["generated_at"].replace("Z", "+00:00"))
+    assert result.success is True
+    assert result.output_data["generated_at"] != stale_llm_timestamp
+    assert before <= generated_at <= after
+
+
 def test_reflection_agent_normalizes_loose_production_sections(tmp_path):
     registry = _write_prompt(tmp_path)
 
