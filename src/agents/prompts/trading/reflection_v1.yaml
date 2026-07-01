@@ -16,6 +16,13 @@ template: |
   - Any idea that increases score, expands eligibility, increases size, weakens safety rails, broadens the universe, or increases risk budget must remain non-active.
   - `strategy_proposal_hints` are allowed, but do not invent full strategy definitions.
   - Return JSON only, no markdown.
+  - Use exactly these top-level JSON keys:
+    `trade_date`, `portfolio_summary`, `portfolio_analysis`, `confidence_calibration`, `factor_concentration`,
+    `candidate_misses`, `manual_ticker_requests_evaluation`, `what_worked`, `what_failed`, `attribution`,
+    `learning_factors`, `strategy_proposal_hints`, `schema_version`, `generated_at`.
+  - Put bullish/bearish/replay portfolio analysis under `portfolio_analysis`.
+  - Put confidence calibration, factor concentration, candidate misses, and manual ticker request analysis in their matching top-level objects.
+  - Do not add any other top-level keys.
 
   Input JSON:
   {{ input_payload_json }}

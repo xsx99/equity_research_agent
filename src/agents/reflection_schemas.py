@@ -79,6 +79,11 @@ class ReflectionOutput(BaseModel):
 
     trade_date: date
     portfolio_summary: dict[str, Any] = Field(default_factory=dict)
+    portfolio_analysis: dict[str, Any] = Field(default_factory=dict)
+    confidence_calibration: dict[str, Any] = Field(default_factory=dict)
+    factor_concentration: dict[str, Any] = Field(default_factory=dict)
+    candidate_misses: dict[str, Any] = Field(default_factory=dict)
+    manual_ticker_requests_evaluation: dict[str, Any] = Field(default_factory=dict)
     what_worked: list[str] = Field(default_factory=list)
     what_failed: list[str] = Field(default_factory=list)
     attribution: list[ReflectionAttributionItem] = Field(default_factory=list)

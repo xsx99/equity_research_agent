@@ -114,6 +114,58 @@ def test_reflection_agent_retries_once_and_returns_validated_output(tmp_path):
     assert "previous validation error" in calls[1].lower()
 
 
+def test_reflection_agent_accepts_prompted_analysis_sections(tmp_path):
+    registry = _write_prompt(tmp_path)
+
+    agent = ReflectionAgent(
+        tool_registry=None,
+        prompt_registry=registry,
+        model_name="gpt-5",
+        agent_runner=lambda prompt, model_name: {
+            "content": {
+                "trade_date": "2026-06-02",
+                "portfolio_summary": {
+                    "realized_pnl": 120.0,
+                    "unrealized_pnl": -10.0,
+                    "benchmark_return": 0.01,
+                },
+                "portfolio_analysis": {
+                    "bullish_catalyst_trades": [],
+                    "bearish_or_risk_off_calls": [],
+                    "replay_outcome_rows": [],
+                },
+                "confidence_calibration": {
+                    "overall_confidence": 0.5,
+                    "bullish_confidence": None,
+                    "bearish_confidence": None,
+                },
+                "factor_concentration": {"factors": {}},
+                "candidate_misses": {"missed_candidates": []},
+                "manual_ticker_requests_evaluation": {
+                    "AAPL": {
+                        "was_catalyst_watch_appropriate": True,
+                    }
+                },
+                "what_worked": ["Waited for confirmation before chasing momentum."],
+                "what_failed": ["Missed a catalyst watch escalation."],
+                "attribution": [],
+                "learning_factors": [],
+                "strategy_proposal_hints": [],
+                "schema_version": "v1",
+                "generated_at": "2026-06-02T22:00:00+00:00",
+            }
+        },
+    )
+
+    result = agent.run(_payload(), context=None)
+
+    assert result.success is True
+    assert result.output_data["portfolio_analysis"]["replay_outcome_rows"] == []
+    assert result.output_data["manual_ticker_requests_evaluation"]["AAPL"][
+        "was_catalyst_watch_appropriate"
+    ] is True
+
+
 def test_reflection_agent_returns_safe_fallback_after_retry_failure(tmp_path):
     registry = _write_prompt(tmp_path)
 
