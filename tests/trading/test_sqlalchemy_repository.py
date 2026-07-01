@@ -1378,10 +1378,9 @@ def test_sqlalchemy_repository_save_daily_reflection_updates_existing_trade_date
         )
     ]
 
-    replacement_id = uuid.uuid4()
     repository.save_daily_reflection(
         DailyReflectionRecord(
-            daily_reflection_id=str(replacement_id),
+            daily_reflection_id=str(uuid.uuid4()),
             trade_date=trade_date,
             status="succeeded",
             prompt_template=None,
@@ -1406,9 +1405,55 @@ def test_sqlalchemy_repository_save_daily_reflection_updates_existing_trade_date
 
     rows = session.rows_by_type[DailyReflection]
     assert len(rows) == 1
-    assert rows[0].daily_reflection_id == replacement_id
+    assert rows[0].daily_reflection_id == existing_id
     assert rows[0].status == "succeeded"
     assert rows[0].reflection_json == {"what_worked": ["fixed"]}
+
+
+def test_sqlalchemy_repository_save_learning_factor_maps_retried_reflection_to_existing_trade_date():
+    trade_date = date(2026, 6, 30)
+    existing_id = uuid.uuid4()
+    session = _FakeSession()
+    repository = SqlAlchemyTradingRepository(session)
+    session.rows_by_type[DailyReflection] = [
+        SimpleNamespace(
+            daily_reflection_id=existing_id,
+            trade_date=trade_date,
+            prompt_run_id=None,
+            status="succeeded",
+            portfolio_summary_json={},
+            reflection_json={},
+            strategy_proposal_hints_json=[],
+            metadata_json={},
+            created_at=datetime(2026, 6, 30, 20, 20, tzinfo=timezone.utc),
+        )
+    ]
+    generated_retry_id = uuid.uuid4()
+
+    repository.save_learning_factor(
+        LearningFactorRecord(
+            learning_factor_id=str(uuid.uuid4()),
+            factor_key="lf-2026-06-30-01",
+            trade_date=trade_date,
+            title="Retry-safe factor",
+            factor_type="observation",
+            scope="portfolio",
+            status="observation",
+            strategy_id=None,
+            condition="retry",
+            recommendation="observe",
+            confidence=0.5,
+            activation_policy="observation",
+            effect_tags=(),
+            evidence=(),
+            source_daily_reflection_id=str(generated_retry_id),
+            metadata_json={},
+        )
+    )
+
+    factors = session.rows_by_type[LearningFactor]
+    assert len(factors) == 1
+    assert factors[0].daily_reflection_id == existing_id
 
 
 def test_sqlalchemy_repository_load_reflection_inputs_matches_expected_result_set_within_utc_day():

@@ -180,7 +180,7 @@ def test_reflection_agent_normalizes_loose_production_sections(tmp_path):
                 "portfolio_analysis": {},
                 "confidence_calibration": {},
                 "factor_concentration": {},
-                "candidate_misses": {},
+                "candidate_misses": [],
                 "manual_ticker_requests_evaluation": {},
                 "what_worked": [
                     {

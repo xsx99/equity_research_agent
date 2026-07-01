@@ -258,8 +258,6 @@ class ReflectionRepositoryMixin:
         if row is None:
             row = DailyReflection(daily_reflection_id=reflection_id)
             self.session.add(row)
-        else:
-            row.daily_reflection_id = reflection_id
         row.trade_date = reflection.trade_date
         row.prompt_run_id = None
         row.status = reflection.status
@@ -276,8 +274,19 @@ class ReflectionRepositoryMixin:
             row = LearningFactor(learning_factor_id=_to_uuid(learning_factor.learning_factor_id))
             self.session.add(row)
         row.factor_key = learning_factor.factor_key
-        row.daily_reflection_id = _to_uuid_or_none(learning_factor.source_daily_reflection_id)
         row.trade_date = learning_factor.trade_date
+        source_daily_reflection_id = _to_uuid_or_none(learning_factor.source_daily_reflection_id)
+        if source_daily_reflection_id is not None:
+            reflection = self.session.query(DailyReflection).filter_by(
+                daily_reflection_id=source_daily_reflection_id
+            ).one_or_none()
+            if reflection is None:
+                reflection = self.session.query(DailyReflection).filter_by(
+                    trade_date=learning_factor.trade_date
+                ).one_or_none()
+            if reflection is not None:
+                source_daily_reflection_id = reflection.daily_reflection_id
+        row.daily_reflection_id = source_daily_reflection_id
         row.title = learning_factor.title
         row.factor_type = learning_factor.factor_type
         row.scope = learning_factor.scope

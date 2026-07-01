@@ -52,6 +52,16 @@ def _normalize_attribution_item(value: Any) -> dict[str, Any]:
     }
 
 
+def _normalize_object_section(value: Any) -> dict[str, Any]:
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, list):
+        return {"items": value}
+    return {"value": value}
+
+
 class ReflectionLearningFactorInput(BaseModel):
     """Structured learning-factor proposal emitted by reflection."""
 
@@ -160,6 +170,18 @@ class ReflectionOutput(BaseModel):
     strategy_proposal_hints: list[dict[str, Any]] = Field(default_factory=list)
     schema_version: str
     generated_at: datetime
+
+    @field_validator(
+        "portfolio_analysis",
+        "confidence_calibration",
+        "factor_concentration",
+        "candidate_misses",
+        "manual_ticker_requests_evaluation",
+        mode="before",
+    )
+    @classmethod
+    def normalize_object_sections(cls, value: Any) -> dict[str, Any]:
+        return _normalize_object_section(value)
 
     @field_validator("what_worked", "what_failed", mode="before")
     @classmethod
