@@ -258,6 +258,46 @@ def test_reflection_agent_normalizes_loose_production_sections(tmp_path):
     assert result.output_data["learning_factors"][0]["confidence"] == 0.8
 
 
+def test_reflection_agent_normalizes_wrapped_learning_factors(tmp_path):
+    registry = _write_prompt(tmp_path)
+
+    agent = ReflectionAgent(
+        tool_registry=None,
+        prompt_registry=registry,
+        model_name="gpt-5",
+        agent_runner=lambda prompt, model_name: {
+            "content": {
+                "trade_date": "2026-06-02",
+                "portfolio_summary": {"realized_pnl": 120.0},
+                "what_worked": [],
+                "what_failed": [],
+                "attribution": [],
+                "learning_factors": {
+                    "factors": [
+                        {
+                            "category": "process",
+                            "title": "Do not treat hold decisions as trade failures",
+                            "description": "Intraday decisions can correctly hold after fresh analysis.",
+                            "application": "Separate execution absence from model failure during reflection.",
+                            "confidence": "medium",
+                        }
+                    ]
+                },
+                "strategy_proposal_hints": [],
+                "schema_version": "v1",
+                "generated_at": "2026-06-02T22:00:00+00:00",
+            }
+        },
+    )
+
+    result = agent.run(_payload(), context=None)
+
+    assert result.success is True
+    assert result.output_data["learning_factors"][0]["title"] == "Do not treat hold decisions as trade failures"
+    assert result.output_data["learning_factors"][0]["factor_type"] == "observation"
+    assert result.output_data["learning_factors"][0]["confidence"] == 0.5
+
+
 def test_reflection_agent_returns_safe_fallback_after_retry_failure(tmp_path):
     registry = _write_prompt(tmp_path)
 

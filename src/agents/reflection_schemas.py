@@ -199,6 +199,15 @@ class ReflectionOutput(BaseModel):
         items = value if isinstance(value, list) else [value]
         return [_normalize_attribution_item(item) for item in items]
 
+    @field_validator("learning_factors", mode="before")
+    @classmethod
+    def normalize_learning_factors(cls, value: Any) -> Any:
+        if value is None:
+            return []
+        if isinstance(value, dict) and isinstance(value.get("factors"), list):
+            return value["factors"]
+        return value
+
 
 class ReflectionOutputFallback(BaseModel):
     """Safe fallback artifact persisted when the LLM output is unusable."""
