@@ -235,12 +235,16 @@ def _coerce_json_object(raw_response: Any) -> dict[str, Any]:
         blobs.append(text[left : right + 1])
 
     for blob in blobs:
-        try:
-            parsed = json.loads(blob)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(parsed, dict):
-            return parsed
+        blob_candidates = [blob]
+        if "\\'" in blob:
+            blob_candidates.append(blob.replace("\\'", "'"))
+        for blob_candidate in blob_candidates:
+            try:
+                parsed = json.loads(blob_candidate)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(parsed, dict):
+                return parsed
     raise ValueError("llm_response_is_not_valid_json_object")
 
 

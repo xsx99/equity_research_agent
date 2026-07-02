@@ -3,7 +3,7 @@ from types import ModuleType, SimpleNamespace
 import sys
 
 from src.agents.prompt_registry import PromptRegistry
-from src.agents.trading import TradingAgent, _default_agent_runner
+from src.agents.trading import TradingAgent, _coerce_json_object, _default_agent_runner
 from src.tools.context import ToolContext
 
 
@@ -242,6 +242,12 @@ def test_trading_agent_normalizes_common_model_output_shape_mismatches(tmp_path)
     assert result.output_data["thesis"] == "Relative strength remains intact."
     assert result.output_data["entry_plan"] == '{"price":null,"type":"limit_order"}'
     assert result.output_data["exit_plan"] == '{"price":null,"type":"stop_loss"}'
+
+
+def test_trading_json_parser_tolerates_model_escaped_single_quote():
+    result = _coerce_json_object('{"ticker": "DELL", "thesis": "DELL\\\'s momentum remains intact."}')
+
+    assert result == {"ticker": "DELL", "thesis": "DELL's momentum remains intact."}
 
 
 def test_default_trading_agent_runner_uses_phi_agent(monkeypatch):

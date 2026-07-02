@@ -605,6 +605,9 @@ def _normalize_intraday_rebalance_output_candidate(payload: dict[str, Any]) -> d
     if str(normalized.get("schema_version", "")).strip() in {"1", "1.0", "1.0.0"}:
         normalized["schema_version"] = "v1"
 
+    if normalized.get("max_loss_pct") is None:
+        normalized["max_loss_pct"] = 0.0
+
     return normalized
 
 
