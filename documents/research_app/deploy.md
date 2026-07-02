@@ -88,7 +88,7 @@ The certificate is generated automatically on first nginx startup and stored in 
 
 | Job                    | Schedule (ET, weekdays) | Config env vars                                          |
 |------------------------|------------------------|----------------------------------------------------------|
-| SEC EDGAR collection   | 2:00 AM daily          | `SEC_EDGAR_SCHEDULE_HOUR`, `SEC_EDGAR_SCHEDULE_MINUTE`   |
+| SEC EDGAR collection   | 2:00 AM daily          | `SEC_EDGAR_SCHEDULE_HOUR`, `SEC_EDGAR_SCHEDULE_MINUTE`, `SEC_EDGAR_TARGET_DAY_OFFSET` |
 | Research (pre-open)    | 9:20 AM Mon–Fri        | `RESEARCH_SCHEDULE_HOUR`, `RESEARCH_SCHEDULE_MINUTE` |
 | Eval                   | 4:10 PM Mon–Fri        | `EVAL_SCHEDULE_HOUR`, `EVAL_SCHEDULE_MINUTE`             |
 | Trading pre-open       | 8:45 AM Mon–Fri        | fixed in code, `America/New_York`                        |
@@ -98,6 +98,8 @@ The certificate is generated automatically on first nginx startup and stored in 
 | Strategy evolution     | 4:50 PM Mon–Fri        | fixed in code, `America/New_York`                        |
 
 Set `RESEARCH_RUN_ON_STARTUP=true` or `EVAL_RUN_ON_STARTUP=true` in the env file to trigger a run immediately when the scheduler container starts.
+
+SEC EDGAR collection defaults `SEC_EDGAR_TARGET_DAY_OFFSET=-1`, so the 2:00 AM ET run collects the previous calendar day's Form 4 filings.
 
 The scheduler service now constructs its default job set through `src/scheduler/service.py::build_scheduler_jobs()`, so ad-hoc runs and deployed runs use the same job registry.
 

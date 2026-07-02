@@ -15,6 +15,9 @@ from src.trading.risk.context import (
 )
 from src.trading.risk.lookahead import HedgeActionRecord, PortfolioRiskIntentRecord, PositionRiskActionRecord
 
+_BLOCKING_SIGNAL_STATUSES = frozenset({"missing", "stale", "failed"})
+_INSIDER_REQUIRED_STRATEGIES = frozenset({"insider_accumulation_momentum_v1"})
+
 
 class RiskManager:
     """Final deterministic risk gate before later broker wiring."""
@@ -472,7 +475,16 @@ def _is_macro_only_bearish(request: TradeRiskRequest) -> bool:
 
 
 def _has_missing_or_stale_signals(request: TradeRiskRequest) -> bool:
-    return any(status in {"missing", "stale", "failed"} for status in request.signal_freshness.values())
+    for signal_family, status in request.signal_freshness.items():
+        if status not in _BLOCKING_SIGNAL_STATUSES:
+            continue
+        if (
+            signal_family == "insider"
+            and request.candidate.strategy_id not in _INSIDER_REQUIRED_STRATEGIES
+        ):
+            continue
+        return True
+    return False
 
 
 def _effective_sector_cap(request: TradeRiskRequest, config: RiskLimitConfig) -> float:

@@ -16,14 +16,18 @@ from src.trading.strategies.classifier import TradeClassificationRecord
 from src.trading.strategies.matching import CandidateScoreRecord
 
 
-def _candidate(*, direction: str = "bullish") -> CandidateScoreRecord:
+def _candidate(
+    *,
+    direction: str = "bullish",
+    strategy_id: str = "relative_strength_rotation_v1",
+) -> CandidateScoreRecord:
     now = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
     return CandidateScoreRecord(
         candidate_score_id="candidate-1",
         strategy_run_id="run-1",
         signal_snapshot_id="snapshot-1",
         ticker="TSLA",
-        strategy_id="relative_strength_rotation_v1",
+        strategy_id=strategy_id,
         strategy_version="v1",
         strategy_definition_id="strategy-def-1",
         candidate_score=0.8,
@@ -47,14 +51,18 @@ def _candidate(*, direction: str = "bullish") -> CandidateScoreRecord:
     )
 
 
-def _classification(*, trade_identity: str = "tactical_stock_trade") -> TradeClassificationRecord:
+def _classification(
+    *,
+    trade_identity: str = "tactical_stock_trade",
+    strategy_id: str = "relative_strength_rotation_v1",
+) -> TradeClassificationRecord:
     now = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
     return TradeClassificationRecord(
         trade_classification_id="classification-1",
         candidate_score_id="candidate-1",
         strategy_run_id="run-1",
         ticker="TSLA",
-        selected_strategy_id="relative_strength_rotation_v1",
+        selected_strategy_id=strategy_id,
         selected_strategy_version="v1",
         expression_bucket_id="long_stock",
         expression_bucket_version="v1",
@@ -73,14 +81,16 @@ def _classification(*, trade_identity: str = "tactical_stock_trade") -> TradeCla
 def _request(
     *,
     direction: str = "bullish",
+    strategy_id: str = "relative_strength_rotation_v1",
     trade_identity: str = "tactical_stock_trade",
     sector: str = "Consumer Discretionary",
     direct_company_negative_evidence: bool = False,
     bearish_signal_sources: tuple[str, ...] = (),
+    signal_freshness: dict[str, str] | None = None,
 ) -> TradeRiskRequest:
     return TradeRiskRequest(
-        candidate=_candidate(direction=direction),
-        classification=_classification(trade_identity=trade_identity),
+        candidate=_candidate(direction=direction, strategy_id=strategy_id),
+        classification=_classification(trade_identity=trade_identity, strategy_id=strategy_id),
         instrument_type="stock",
         target_weight=0.08,
         confidence=0.75,
@@ -93,7 +103,8 @@ def _request(
         price=200,
         atr_pct=0.03,
         average_daily_dollar_volume=50_000_000,
-        signal_freshness={"technical": "fresh", "fundamental": "fresh", "events_news": "fresh"},
+        signal_freshness=signal_freshness
+        or {"technical": "fresh", "fundamental": "fresh", "events_news": "fresh"},
         estimated_margin_requirement=4_000,
         estimated_buying_power_effect=8_000,
         estimated_initial_margin_requirement=4_000,
@@ -239,6 +250,52 @@ def test_risk_manager_rejects_macro_only_bearish_single_name_short():
 
     assert decision.status == "rejected"
     assert decision.reason_code == "macro_only_bearish_single_name_blocked"
+
+
+def test_risk_manager_allows_tactical_trade_when_only_insider_source_is_missing():
+    portfolio = _portfolio()
+    config = RiskConfigResolver().resolve(
+        risk_appetite=RiskAppetiteProfile.BALANCED,
+        portfolio_context=portfolio,
+        macro_risk_budget_multiplier=1.0,
+    )
+    request = _request(
+        signal_freshness={
+            "technical": "fresh",
+            "fundamental": "fresh",
+            "events_news": "fresh",
+            "insider": "missing",
+        },
+    )
+    sizing = PositionSizer().size_position(request, portfolio, config)
+
+    decision = RiskManager().evaluate(request, sizing, portfolio, config)
+
+    assert decision.status == "approved"
+
+
+def test_risk_manager_still_rejects_insider_strategy_when_insider_source_is_missing():
+    portfolio = _portfolio()
+    config = RiskConfigResolver().resolve(
+        risk_appetite=RiskAppetiteProfile.BALANCED,
+        portfolio_context=portfolio,
+        macro_risk_budget_multiplier=1.0,
+    )
+    request = _request(
+        strategy_id="insider_accumulation_momentum_v1",
+        signal_freshness={
+            "technical": "fresh",
+            "fundamental": "fresh",
+            "events_news": "fresh",
+            "insider": "missing",
+        },
+    )
+    sizing = PositionSizer().size_position(request, portfolio, config)
+
+    decision = RiskManager().evaluate(request, sizing, portfolio, config)
+
+    assert decision.status == "rejected"
+    assert decision.reason_code == "missing_or_stale_signals"
 
 
 def test_risk_manager_reduces_trade_when_sector_cap_would_be_exceeded():

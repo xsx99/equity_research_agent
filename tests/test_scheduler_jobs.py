@@ -3,6 +3,8 @@
 Verifies that job instances have the expected job_id, trigger, trigger_kwargs,
 and run_on_startup values without touching the database or any external API.
 """
+from datetime import date, datetime, timezone
+
 import pytest
 from zoneinfo import ZoneInfoNotFoundError
 
@@ -178,6 +180,17 @@ class TestAllJobIdsDistinct:
         ]
         ids = [j.config.job_id for j in jobs]
         assert len(ids) == len(set(ids)), f"Duplicate job IDs found: {ids}"
+
+
+class TestSECEdgarJob:
+    def test_target_date_defaults_to_previous_scheduler_day(self):
+        job = SECEdgarJob()
+
+        target_date = job._get_target_date(
+            datetime(2026, 7, 2, 2, 0, tzinfo=timezone.utc)
+        )
+
+        assert target_date == date(2026, 7, 1)
 
 
 class TestTradingPreopenJob:
