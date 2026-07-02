@@ -332,7 +332,9 @@ class IntradayRebalancePipeline:
             raw_output_text, usage = _normalize_runner_response(response, self.model_name)
             usage_events.append(UsageEventRecord(retry_count=attempt, status="succeeded", **usage))
             try:
-                parsed_output_json = _coerce_json_object(raw_output_text)
+                parsed_output_json = _normalize_intraday_rebalance_output_candidate(
+                    _coerce_json_object(raw_output_text)
+                )
                 output = IntradayRebalanceOutput.model_validate(parsed_output_json)
                 prompt_run = PromptRunRecord(
                     pipeline_name="intraday_rebalance",
@@ -563,6 +565,49 @@ def _repair_prompt(rendered_text: str, validation_error: str) -> str:
         f"{validation_error}\n\n"
         "Return only one corrected JSON object with no markdown."
     )
+
+
+def _normalize_intraday_rebalance_output_candidate(payload: dict[str, Any]) -> dict[str, Any]:
+    """Accept common semantic labels while preserving schema validation for unknown values."""
+    normalized = dict(payload)
+
+    confidence = normalized.get("confidence")
+    if isinstance(confidence, str):
+        confidence_key = confidence.strip().lower().replace(" ", "_").replace("-", "_")
+        confidence_map = {
+            "none": 0.0,
+            "very_low": 0.1,
+            "low": 0.25,
+            "medium": 0.5,
+            "moderate": 0.5,
+            "high": 0.75,
+            "very_high": 0.9,
+        }
+        if confidence_key in confidence_map:
+            normalized["confidence"] = confidence_map[confidence_key]
+
+    urgency = normalized.get("urgency")
+    if isinstance(urgency, str):
+        urgency_key = urgency.strip().lower().replace(" ", "_").replace("-", "_")
+        if urgency_key in {"neutral", "none", "watch", "watch_only", "no_action"}:
+            normalized["urgency"] = "low"
+    elif isinstance(urgency, (int, float)):
+        urgency_value = float(urgency)
+        if urgency_value >= 0.8:
+            normalized["urgency"] = "critical"
+        elif urgency_value >= 0.6:
+            normalized["urgency"] = "high"
+        elif urgency_value >= 0.3:
+            normalized["urgency"] = "medium"
+        else:
+            normalized["urgency"] = "low"
+
+    if str(normalized.get("schema_version", "")).strip() in {"1", "1.0", "1.0.0"}:
+        normalized["schema_version"] = "v1"
+
+    return normalized
+
+
 def _execution_summary(
     *,
     attempts: list[ExecutionAttemptRecord],

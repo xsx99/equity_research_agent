@@ -175,6 +175,42 @@ def test_intraday_rebalance_pipeline_falls_back_to_hold_after_validation_failure
     assert len(repository.intraday_rebalance_decisions) == 1
 
 
+def test_intraday_rebalance_pipeline_normalizes_llm_confidence_and_urgency_labels(tmp_path):
+    repository = InMemoryTradingRepository()
+    registry = _write_prompt(tmp_path)
+    ledger = PortfolioLedger(starting_cash_balance=100000.0)
+    pipeline = IntradayRebalancePipeline(
+        repository=repository,
+        prompt_registry=registry,
+        model_name="gpt-5-mini",
+        agent_runner=lambda prompt, model: {
+            "content": {
+                "ticker": "AAPL",
+                "action": "hold",
+                "thesis": "No existing position and no immediate action required.",
+                "confidence": "low",
+                "target_weight": 0.0,
+                "max_loss_pct": 0.0,
+                "urgency": "neutral",
+                "schema_version": "1.0.0",
+                "generated_at": "2026-06-02T15:30:00+00:00",
+            }
+        },
+    )
+
+    result = pipeline.run(
+        rebalance_requests=(_request(existing_position=False, allow_open_new=False),),
+        portfolio_context=ledger.build_portfolio_context(as_of=datetime(2026, 6, 2, 15, 30, tzinfo=timezone.utc)),
+        risk_appetite="balanced",
+    )
+
+    assert result.decisions[0].action == "hold"
+    assert result.decisions[0].status == "approved"
+    assert result.decisions[0].confidence == 0.25
+    assert result.decisions[0].urgency == "low"
+    assert repository.llm_prompt_runs[0].parse_status == "succeeded"
+
+
 def test_intraday_rebalance_pipeline_blocks_open_new_without_permission(tmp_path):
     repository = InMemoryTradingRepository()
     registry = _write_prompt(tmp_path)
