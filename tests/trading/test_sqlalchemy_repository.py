@@ -16,6 +16,9 @@ from src.db.models.trading import (
     DailyReflection,
     IntradayRebalanceDecision,
     LearningFactor,
+    LlmPromptRun,
+    LlmPromptTemplate,
+    LlmUsageEvent,
     ManualTickerRequest,
     MacroSnapshot,
     NewsAlert,
@@ -59,6 +62,8 @@ from src.trading.manual_review.requests import ManualTickerRequestService
 from src.trading.risk import HedgeActionRecord, PortfolioRiskIntentRecord, PositionRiskActionRecord, RiskDecisionRecord
 from src.trading.workflows.trading_decision import TradingDecisionRecord
 from src.agents.trading import PromptRunRecord
+from src.agents.trading import UsageEventRecord
+from src.agents.prompt_registry import PromptTemplate
 
 
 class _FakeQuery:
@@ -117,6 +122,61 @@ class _AutoflushFakeSession(_FakeSession):
             if getattr(row, "title", None) is None:
                 raise AssertionError("autoflush attempted before learning factor fields were populated")
         super().flush()
+
+
+def test_sqlalchemy_repository_persists_llm_prompt_telemetry_rows():
+    session = _FakeSession()
+    repo = SqlAlchemyTradingRepository(session)
+    template = PromptTemplate(
+        prompt_id="intraday_rebalance",
+        prompt_version="v1",
+        pipeline_name="intraday_rebalance",
+        output_schema_id="IntradayRebalanceOutput",
+        output_schema_version="v1",
+        template="Decide {{ ticker }}",
+        template_path="agents/prompts/trading/intraday_rebalance_v1.yaml",
+        template_hash="template-hash",
+    )
+    prompt_run = PromptRunRecord(
+        pipeline_name="intraday_rebalance",
+        rendered_prompt_hash="rendered-hash",
+        rendered_prompt_redacted="Decide AAPL",
+        input_context_json={"ticker": "AAPL"},
+        raw_output_text="{bad json",
+        parsed_output_json={"ticker": "AAPL", "action": "hold"},
+        parse_status="failed",
+        validation_errors_json=["action field required"],
+        fallback_action="hold",
+        error_message="action field required",
+    )
+    usage_event = UsageEventRecord(
+        provider="google",
+        model="gemini-2.5-flash-lite",
+        prompt_tokens=10,
+        completion_tokens=5,
+        total_tokens=15,
+        estimated_cost=0.001,
+        latency_ms=1234,
+        retry_count=1,
+        status="succeeded",
+    )
+
+    repo.save_prompt_template(template)
+    repo.save_prompt_run(prompt_run)
+    repo.save_usage_events([usage_event])
+
+    template_rows = session.rows_by_type.get(LlmPromptTemplate, [])
+    run_rows = session.rows_by_type.get(LlmPromptRun, [])
+    usage_rows = session.rows_by_type.get(LlmUsageEvent, [])
+    assert len(template_rows) == 1
+    assert len(run_rows) == 1
+    assert len(usage_rows) == 1
+    assert run_rows[0].prompt_template_id == template_rows[0].prompt_template_id
+    assert run_rows[0].pipeline_name == "intraday_rebalance"
+    assert run_rows[0].parse_status == "failed"
+    assert run_rows[0].validation_errors_json == ["action field required"]
+    assert usage_rows[0].prompt_run_id == run_rows[0].prompt_run_id
+    assert usage_rows[0].retry_count == 1
 
 
 def _matches_filter_criterion(row: object, criterion: Any) -> bool:

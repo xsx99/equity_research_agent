@@ -7,6 +7,9 @@ from typing import Any
 
 from src.db.models.trading import (
     ExecutionAttempt,
+    LlmPromptRun,
+    LlmPromptTemplate,
+    LlmUsageEvent,
     ManualTickerRequest,
     PaperExecution,
     PaperOrder,
@@ -147,11 +150,72 @@ class RuntimeMiscRepositoryMixin:
             symbol_row.metadata_json = {}
         self.session.flush()
     def save_prompt_template(self, template: object) -> None:
-        return None
+        row = self.session.query(LlmPromptTemplate).filter_by(
+            prompt_id=str(template.prompt_id),
+            prompt_version=str(template.prompt_version),
+        ).one_or_none()
+        if row is None:
+            row = LlmPromptTemplate(prompt_template_id=uuid.uuid4())
+            self.session.add(row)
+        row.prompt_id = str(template.prompt_id)
+        row.prompt_version = str(template.prompt_version)
+        row.pipeline_name = str(template.pipeline_name)
+        row.template_path = str(template.template_path)
+        row.template_hash = str(template.template_hash)
+        row.git_commit = None
+        row.output_schema_id = str(template.output_schema_id)
+        row.output_schema_version = str(template.output_schema_version)
+        row.lifecycle_status = "active"
+        self.session.flush()
+        self._last_prompt_template_id = row.prompt_template_id
+
     def save_prompt_run(self, prompt_run: object) -> None:
-        return None
+        prompt_template_id = getattr(self, "_last_prompt_template_id", None)
+        if prompt_template_id is None:
+            raise RuntimeError("prompt_template_must_be_saved_before_prompt_run")
+        row = LlmPromptRun(
+            prompt_run_id=uuid.uuid4(),
+            prompt_template_id=prompt_template_id,
+            pipeline_name=str(prompt_run.pipeline_name),
+            pipeline_run_id=None,
+            rendered_prompt_hash=str(prompt_run.rendered_prompt_hash),
+            rendered_prompt_redacted=str(prompt_run.rendered_prompt_redacted),
+            input_context_json=dict(prompt_run.input_context_json or {}),
+            raw_output_text=str(prompt_run.raw_output_text),
+            parsed_output_json=dict(prompt_run.parsed_output_json or {}),
+            parse_status=str(prompt_run.parse_status),
+            validation_errors_json=list(prompt_run.validation_errors_json or ()),
+            fallback_action=_string_or_none(prompt_run.fallback_action),
+            error_message=_string_or_none(prompt_run.error_message),
+        )
+        self.session.add(row)
+        self.session.flush()
+        self._last_prompt_run_id = row.prompt_run_id
+
     def save_usage_events(self, usage_events: list[object] | tuple[object, ...]) -> None:
-        return None
+        if not usage_events:
+            return
+        prompt_run_id = getattr(self, "_last_prompt_run_id", None)
+        if prompt_run_id is None:
+            raise RuntimeError("prompt_run_must_be_saved_before_usage_events")
+        for event in usage_events:
+            self.session.add(
+                LlmUsageEvent(
+                    llm_usage_event_id=uuid.uuid4(),
+                    prompt_run_id=prompt_run_id,
+                    provider=str(event.provider),
+                    model=str(event.model),
+                    prompt_tokens=int(event.prompt_tokens),
+                    completion_tokens=int(event.completion_tokens),
+                    total_tokens=int(event.total_tokens),
+                    estimated_cost=Decimal(str(event.estimated_cost)),
+                    latency_ms=int(event.latency_ms),
+                    retry_count=int(event.retry_count),
+                    status=str(event.status),
+                )
+            )
+        self.session.flush()
+
     def save_trading_decision(self, decision: TradingDecisionRecord) -> None:
         row = self.session.query(TradingDecision).filter_by(
             trading_decision_id=_to_uuid(decision.trading_decision_id)
