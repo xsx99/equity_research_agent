@@ -1,6 +1,14 @@
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
-from src.trading.risk import HedgeActionRecord, PortfolioRiskIntentRecord, RiskDecisionRecord
+from src.trading.risk import (
+    HedgeActionRecord,
+    PortfolioContext,
+    PortfolioRiskIntentRecord,
+    RiskAppetiteProfile,
+    RiskConfigResolver,
+    RiskDecisionRecord,
+)
 from src.trading.runtime.lookahead_risk import LookaheadRiskWorkflowHelper
 
 
@@ -145,3 +153,58 @@ def test_lookahead_helper_materializes_close_hedge_for_assignment_target_without
     assert materialized[0].generated_hedge_action["action"] == "close_hedge"
     assert materialized[0].generated_hedge_action["option_strategy_type"] == "long_call"
     assert materialized[0].generated_hedge_action["protected_notional"] == 15000.0
+
+
+def test_lookahead_helper_blocks_tactical_open_from_events_news_earnings_proximity():
+    decision_time = datetime(2026, 6, 14, 13, 0, tzinfo=timezone.utc)
+    portfolio_context = PortfolioContext(
+        as_of=decision_time,
+        account_equity=100_000,
+        cash_balance=40_000,
+        buying_power=180_000,
+        excess_liquidity=70_000,
+        positions=(),
+        open_strategy_exposure={},
+        current_factor_exposure=(),
+        stock_margin_requirement=0,
+        option_margin_requirement=0,
+        total_margin_requirement=0,
+    )
+    config = RiskConfigResolver().resolve(
+        risk_appetite=RiskAppetiteProfile.BALANCED,
+        portfolio_context=portfolio_context,
+        macro_risk_budget_multiplier=1.0,
+    )
+    helper = LookaheadRiskWorkflowHelper()
+
+    intent = helper.build_preopen_portfolio_risk_intent(
+        candidates=(
+            SimpleNamespace(
+                candidate_score_id="candidate-ASAN",
+                signal_snapshot_id="snapshot-ASAN",
+                ticker="ASAN",
+            ),
+        ),
+        classifications=(
+            SimpleNamespace(
+                candidate_score_id="candidate-ASAN",
+                trade_identity="tactical_stock_trade",
+            ),
+        ),
+        signal_by_id={
+            "snapshot-ASAN": SimpleNamespace(
+                signal_json={
+                    "events_news": {"earnings_in_days": 2},
+                    "fundamental": {"sector": "Technology"},
+                }
+            )
+        },
+        portfolio_context=portfolio_context,
+        config=config,
+        decision_time=decision_time,
+        portfolio_risk_snapshot_id="risk-snapshot-1",
+    )
+
+    assert intent.position_actions[0].ticker == "ASAN"
+    assert intent.position_actions[0].action == "block_open"
+    assert intent.position_actions[0].reason_code == "own_event_block"

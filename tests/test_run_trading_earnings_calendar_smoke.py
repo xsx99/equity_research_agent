@@ -5,46 +5,25 @@ from datetime import date
 from scripts import run_trading_earnings_calendar_smoke
 
 
-def test_run_trading_earnings_calendar_smoke_exits_non_zero_without_finnhub_key(
+def test_run_trading_earnings_calendar_smoke_prints_nasdaq_result(
     monkeypatch,
     capsys,
 ):
-    monkeypatch.delenv("FINNHUB_API_KEY", raising=False)
     monkeypatch.setattr(run_trading_earnings_calendar_smoke, "load_dotenv", lambda: None)
 
-    exit_code = run_trading_earnings_calendar_smoke.main([])
-
-    captured = capsys.readouterr()
-    assert exit_code == 1
-    assert "FINNHUB_API_KEY not set" in captured.err
-    assert "earnings events cannot be generated" in captured.err
-
-
-def test_run_trading_earnings_calendar_smoke_prints_finnhub_result(
-    monkeypatch,
-    capsys,
-):
-    monkeypatch.setenv("FINNHUB_API_KEY", "test-key")
-    monkeypatch.setattr(run_trading_earnings_calendar_smoke, "load_dotenv", lambda: None)
-
-    class _StubProvider:
-        def __init__(self) -> None:
-            self.closed = False
-
-        def _fetch_earnings_in_days_from_finnhub(self, ticker: str):
+    class _StubCalendar:
+        def next_earnings_date(self, ticker: str, as_of: date):
             assert ticker == "MU"
-            return {"earnings_in_days": 4, "earnings_date": date(2026, 6, 25)}
-
-        def close(self) -> None:
-            self.closed = True
+            assert as_of == date(2026, 6, 21)
+            return date(2026, 6, 25)
 
     monkeypatch.setattr(
         run_trading_earnings_calendar_smoke,
-        "AlpacaMarketDataProvider",
-        _StubProvider,
+        "NasdaqEarningsCalendar",
+        lambda horizon_days: _StubCalendar(),
     )
 
-    exit_code = run_trading_earnings_calendar_smoke.main([])
+    exit_code = run_trading_earnings_calendar_smoke.main(["MU", "--as-of", "2026-06-21"])
 
     captured = capsys.readouterr()
     assert exit_code == 0

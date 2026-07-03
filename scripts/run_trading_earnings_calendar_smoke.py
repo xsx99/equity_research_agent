@@ -1,27 +1,11 @@
 #!/usr/bin/env python3
-"""Diagnose missing earnings events for the trading Event Risk surface.
-
-Failure causes and how to tell them apart:
-1. ``FINNHUB_API_KEY`` missing: this script prints
-   ``FINNHUB_API_KEY not set — earnings events cannot be generated`` and exits
-   non-zero. The runtime cannot fetch Finnhub earnings data, so no earnings
-   event can be built.
-2. Finnhub returns no upcoming earnings data for the ticker: the key is set,
-   the request succeeds, but ``earnings_in_days`` / ``earnings_date`` are
-   ``null``. That usually means the event is outside the provider's 45-day
-   window, the symbol is wrong, or Finnhub has no row.
-3. Finnhub returns earnings data but the ticker still does not appear on
-   ``/today``: the ticker likely was not part of the scored pre-open
-   candidate set, so the pre-open calendar builder never emitted an event for
-   it.
-"""
+"""Diagnose Nasdaq earnings-calendar availability for the Event Risk surface."""
 from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -29,36 +13,43 @@ from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.providers.market_data import AlpacaMarketDataProvider
+from src.providers.market_data.nasdaq_earnings import NasdaqEarningsCalendar
 
 
-def run_smoke(ticker: str = "MU") -> dict[str, Any]:
-    provider = AlpacaMarketDataProvider()
-    try:
-        payload = provider._fetch_earnings_in_days_from_finnhub(ticker)
-    finally:
-        provider.close()
+def run_smoke(
+    ticker: str = "MU",
+    *,
+    as_of: date | None = None,
+    horizon_days: int = 45,
+) -> dict[str, Any]:
+    as_of_date = as_of or datetime.now(timezone.utc).date()
+    calendar = NasdaqEarningsCalendar(horizon_days=horizon_days)
+    earnings_date = calendar.next_earnings_date(ticker, as_of_date)
+    if earnings_date is not None:
+        earnings_in_days = (earnings_date - as_of_date).days
+    else:
+        earnings_in_days = None
     return {
         "ticker": ticker.upper(),
-        "earnings_in_days": payload.get("earnings_in_days"),
-        "earnings_date": payload.get("earnings_date"),
+        "as_of": as_of_date,
+        "earnings_in_days": earnings_in_days,
+        "earnings_date": earnings_date,
+        "horizon_days": horizon_days,
+        "source": "nasdaq",
     }
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("ticker", nargs="?", default="MU")
+    parser.add_argument("--as-of", dest="as_of", help="Calendar lookup date in YYYY-MM-DD format")
+    parser.add_argument("--horizon-days", type=int, default=45)
     args = parser.parse_args(argv)
 
     load_dotenv()
-    if not os.getenv("FINNHUB_API_KEY"):
-        print(
-            "FINNHUB_API_KEY not set — earnings events cannot be generated",
-            file=sys.stderr,
-        )
-        return 1
+    as_of = date.fromisoformat(args.as_of) if args.as_of else None
 
-    result = run_smoke(args.ticker)
+    result = run_smoke(args.ticker, as_of=as_of, horizon_days=args.horizon_days)
     print(json.dumps(result, default=_json_default, indent=2, sort_keys=True))
     return 0
 

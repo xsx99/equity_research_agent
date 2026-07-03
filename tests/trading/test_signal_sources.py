@@ -1,6 +1,7 @@
 from datetime import date, datetime, timezone
 
 from src.trading.repositories.in_memory import InMemoryTradingRepository
+from src.trading.signals.event_news import build_event_news_signals
 from src.trading.signals.sources import InMemorySignalSourceRepository, SourceRecord
 from src.trading.signals.source_ingestion import SourceIngestionService
 
@@ -85,6 +86,16 @@ class _FakeNewsProvider:
                 "signal_type": "analyst_rating",
             }
         ]
+
+
+class _FakeEarningsCalendar:
+    def __init__(self, earnings_date: date | None) -> None:
+        self.earnings_date = earnings_date
+        self.calls: list[tuple[str, date]] = []
+
+    def next_earnings_date(self, ticker: str, as_of: date) -> date | None:
+        self.calls.append((ticker, as_of))
+        return self.earnings_date
 
 
 def _fake_global_context(as_of):
@@ -288,6 +299,77 @@ def test_source_ingestion_service_serializes_date_fields_in_fundamental_metrics(
     assert snapshot.normalized_metrics_json["known_event_date"] == "2026-06-18"
     assert record.payload["earnings_date"] == "2026-06-20"
     assert record.payload["known_event_date"] == "2026-06-18"
+
+
+def test_source_ingestion_service_patches_fundamental_earnings_fields_from_calendar():
+    now = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+    source_repository = InMemorySignalSourceRepository()
+    artifact_repository = InMemoryTradingRepository()
+    earnings_calendar = _FakeEarningsCalendar(date(2026, 6, 18))
+
+    result = SourceIngestionService(
+        market_provider=_FakeMarketProvider(),
+        news_provider=None,
+        earnings_calendar=earnings_calendar,
+        source_repository=source_repository,
+        artifact_repository=artifact_repository,
+        provider_name="fixture",
+        now=lambda: now,
+        sleeper=lambda seconds: None,
+    ).refresh_tickers(("AAPL",), as_of=now, run_type="targeted", source_families=("fundamental",))
+
+    snapshot = result.fundamental_snapshots[0]
+    record = source_repository.records_for_ticker("AAPL")[0]
+
+    assert earnings_calendar.calls == [("AAPL", date(2026, 6, 1))]
+    assert snapshot.normalized_metrics_json["earnings_date"] == "2026-06-18"
+    assert snapshot.normalized_metrics_json["known_event_date"] == "2026-06-18"
+    assert snapshot.normalized_metrics_json["earnings_in_days"] == 17
+    assert record.payload["earnings_date"] == "2026-06-18"
+    assert record.payload["known_event_date"] == "2026-06-18"
+    assert record.payload["earnings_in_days"] == 17
+
+
+def test_source_ingestion_service_emits_calendar_earnings_event_without_news_provider():
+    now = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+    source_repository = InMemorySignalSourceRepository()
+    artifact_repository = InMemoryTradingRepository()
+    earnings_calendar = _FakeEarningsCalendar(date(2026, 6, 3))
+
+    result = SourceIngestionService(
+        market_provider=_FakeMarketProvider(),
+        news_provider=None,
+        earnings_calendar=earnings_calendar,
+        source_repository=source_repository,
+        artifact_repository=artifact_repository,
+        provider_name="fixture",
+        now=lambda: now,
+        sleeper=lambda seconds: None,
+    ).refresh_tickers(("AAPL",), as_of=now, run_type="targeted", source_families=("events_news",))
+
+    records = source_repository.latest_available_by_family("AAPL", "events_news", now)
+    signals = build_event_news_signals(records, decision_time=now)
+
+    assert result.ingestion_run.coverage_json == {
+        "tickers_requested": 1,
+        "source_records": 1,
+        "fundamental_snapshots": 0,
+        "event_news_items": 1,
+        "social_macro_items": 0,
+    }
+    assert earnings_calendar.calls == [("AAPL", date(2026, 6, 1))]
+    assert result.event_news_items[0].event_type == "own_earnings_upcoming"
+    assert result.event_news_items[0].dedupe_key == "AAPL|earnings|2026-06-03"
+    assert result.event_news_items[0].metadata_json["earnings_in_days"] == 2
+    assert result.event_news_items[0].metadata_json["known_event_date"] == "2026-06-03"
+    assert records[0].source_record_id == "earnings:AAPL:2026-06-03"
+    assert records[0].payload["event_type"] == "own_earnings_upcoming"
+    assert signals.values["earnings_in_days"] == 2
+    assert signals.values["known_event_date"] == "2026-06-03"
+    assert signals.values["own_earnings_event_type"] == "own_earnings_upcoming"
+    assert "earnings_in_days" not in signals.missing
+    assert "known_event_date" not in signals.missing
+    assert "own_earnings_event_type" not in signals.missing
 
 
 def test_source_ingestion_service_adapts_option_chain_rows_when_provider_supports_it():

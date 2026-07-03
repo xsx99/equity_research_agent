@@ -202,7 +202,7 @@ def test_fetch_option_chain_requests_alpaca_chain_endpoint_and_normalizes_contra
     assert call["params"]["limit"] == 1000
 
 
-def test_fetch_context_enriches_fundamental_scores_from_finnhub_payloads():
+def test_fetch_context_enriches_fundamental_scores_from_finnhub_payloads_without_earnings():
     client = _RoutingClient(
         {
             "stock/profile2": {
@@ -222,11 +222,6 @@ def test_fetch_context_enriches_fundamental_scores_from_finnhub_payloads():
                     "psTTM": 7.0,
                 }
             },
-            "calendar/earnings": {
-                "earningsCalendar": [
-                    {"date": "2026-07-10"},
-                ]
-            },
         }
     )
     provider = AlpacaMarketDataProvider(
@@ -241,8 +236,9 @@ def test_fetch_context_enriches_fundamental_scores_from_finnhub_payloads():
     assert context["company_name"] == "Apple Inc."
     assert context["sector"] == "Technology"
     assert context["market_cap"] == pytest.approx(3_000_000_000_000.0)
-    assert context["earnings_date"] == date(2026, 7, 10)
-    assert context["earnings_in_days"] is not None
+    assert context["earnings_date"] is None
+    assert context["earnings_in_days"] is None
+    assert context["known_event_date"] is None
     assert context["revenue_growth_score"] is not None
     assert context["margin_trend_score"] is not None
     assert context["quality_score"] is not None
@@ -250,6 +246,10 @@ def test_fetch_context_enriches_fundamental_scores_from_finnhub_payloads():
     assert context["ev_sales_percentile"] is not None
     assert context["fcf_margin_score"] is not None
     assert context["short_interest_pct_float"] == pytest.approx(1.2)
+    assert [call["url"] for call in client.calls] == [
+        "https://finnhub.io/api/v1/stock/profile2",
+        "https://finnhub.io/api/v1/stock/metric",
+    ]
 
 
 def test_fetch_context_backfills_fundamental_scores_from_yfinance_when_finnhub_missing(monkeypatch):
@@ -379,11 +379,6 @@ def test_fetch_context_caches_finnhub_payloads_per_ticker():
                     "psTTM": 7.0,
                 }
             },
-            "calendar/earnings": {
-                "earningsCalendar": [
-                    {"date": "2026-07-10"},
-                ]
-            },
         }
     )
     provider = AlpacaMarketDataProvider(
@@ -397,13 +392,13 @@ def test_fetch_context_caches_finnhub_payloads_per_ticker():
     second = provider.fetch_context("aapl")
 
     assert first == second
-    assert len(client.calls) == 3
+    assert len(client.calls) == 2
 
     first["company_name"] = "mutated"
     third = provider.fetch_context("AAPL")
 
     assert third["company_name"] == "Apple Inc."
-    assert len(client.calls) == 3
+    assert len(client.calls) == 2
 
 
 def test_fetch_daily_closes_range_returns_chronological_closes():
