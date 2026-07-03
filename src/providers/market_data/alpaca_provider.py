@@ -18,6 +18,7 @@ from src.providers.market_data.helpers import (
     _to_int_or_none,
 )
 from src.providers.market_data.types import DailyBar
+from src.providers.market_data.yfinance_fundamentals import YFinanceFundamentalsProvider
 
 DEFAULT_ALPACA_DATA_BASE_URL = "https://data.alpaca.markets"
 DEFAULT_ALPACA_TRADING_BASE_URL = "https://paper-api.alpaca.markets"
@@ -34,6 +35,7 @@ class AlpacaMarketDataProvider:
         data_base_url: Optional[str] = None,
         trading_base_url: Optional[str] = None,
         finnhub_api_key: Optional[str] = None,
+        fundamentals_provider: Optional[YFinanceFundamentalsProvider] = None,
         client: Optional[httpx.Client] = None,
         timeout: float = 10.0,
     ) -> None:
@@ -47,6 +49,7 @@ class AlpacaMarketDataProvider:
         self._client = client or httpx.Client(timeout=timeout)
         self._owns_client = client is None
         self._context_cache: dict[str, dict[str, Any]] = {}
+        self._fundamentals_provider = fundamentals_provider or YFinanceFundamentalsProvider()
 
     def _auth_headers(self) -> dict[str, str]:
         if not self.api_key or not self.secret_key:
@@ -300,6 +303,7 @@ class AlpacaMarketDataProvider:
                 ceiling=25.0,
             ),
         }
+        context_payload = self._backfill_from_yfinance(symbol, context_payload)
         self._context_cache[symbol] = dict(context_payload)
         return dict(context_payload)
 
@@ -452,6 +456,86 @@ class AlpacaMarketDataProvider:
                 nearest_delta = delta
                 nearest_date = event_date
         return {"earnings_in_days": nearest_delta, "earnings_date": nearest_date}
+
+    def _backfill_from_yfinance(self, symbol: str, payload: dict[str, Any]) -> dict[str, Any]:
+        gap_fields = (
+            "sector",
+            "company_name",
+            "market_cap",
+            "valuation_percentile",
+            "ev_sales_percentile",
+            "fcf_margin_score",
+            "short_interest_pct_float",
+            "revenue_growth_score",
+            "margin_trend_score",
+            "quality_score",
+        )
+        if all(payload.get(field) is not None for field in gap_fields):
+            return payload
+        try:
+            yf_data = self._fundamentals_provider.fetch(symbol)
+        except Exception:
+            return payload
+        if not isinstance(yf_data, dict):
+            return payload
+
+        for key in ("sector", "company_name", "market_cap", "short_interest_pct_float"):
+            if payload.get(key) is None and yf_data.get(key) is not None:
+                payload[key] = yf_data[key]
+
+        pe_ratio = payload.get("pe_ratio")
+        if pe_ratio is None:
+            pe_ratio = yf_data.get("pe_ratio")
+            payload["pe_ratio"] = pe_ratio
+
+        ps_ratio = payload.get("ps_ratio")
+        if ps_ratio is None:
+            ps_ratio = yf_data.get("ps_ratio")
+            payload["ps_ratio"] = ps_ratio
+
+        if payload.get("valuation_percentile") is None:
+            payload["valuation_percentile"] = _valuation_percentile(
+                pe_ratio=pe_ratio,
+                ps_ratio=ps_ratio,
+            )
+
+        if payload.get("ev_sales_percentile") is None:
+            payload["ev_sales_percentile"] = _normalize_ratio_score(
+                yf_data.get("ev_sales_multiple"),
+                floor=0.0,
+                ceiling=15.0,
+            )
+        if payload.get("fcf_margin_score") is None:
+            payload["fcf_margin_score"] = _normalize_ratio_score(
+                yf_data.get("fcf_margin_pct"),
+                floor=0.0,
+                ceiling=25.0,
+            )
+        if payload.get("revenue_growth_score") is None:
+            payload["revenue_growth_score"] = _normalize_ratio_score(
+                yf_data.get("revenue_growth_pct"),
+                floor=-10.0,
+                ceiling=25.0,
+            )
+        if payload.get("margin_trend_score") is None:
+            payload["margin_trend_score"] = _normalize_ratio_score(
+                yf_data.get("operating_margin_pct"),
+                floor=0.0,
+                ceiling=35.0,
+            )
+        if payload.get("quality_score") is None:
+            payload["quality_score"] = _average_scores(
+                (
+                    _normalize_ratio_score(
+                        yf_data.get("operating_margin_pct"),
+                        floor=0.0,
+                        ceiling=35.0,
+                    ),
+                    _normalize_ratio_score(yf_data.get("roe_pct"), floor=0.0, ceiling=30.0),
+                    _normalize_ratio_score(yf_data.get("roa_pct"), floor=0.0, ceiling=12.0),
+                )
+            )
+        return payload
 
     def close(self) -> None:
         if self._owns_client:

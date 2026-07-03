@@ -17,4 +17,5 @@ openai==1.52.0
 google-generativeai==0.8.5
 alpaca-py==0.43.2
 finnhub-python==2.4.27
+yfinance>=0.2.50
 # Marketaux is used via direct HTTP API (no official PyPI SDK).
