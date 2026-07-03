@@ -57,6 +57,16 @@ class _RoutingClient:
         raise AssertionError(f"unexpected_url:{url}")
 
 
+class _FakeFundamentalsProvider:
+    def __init__(self, payload: dict[str, Any]) -> None:
+        self.payload = payload
+        self.calls: list[str] = []
+
+    def fetch(self, ticker: str) -> dict[str, Any]:
+        self.calls.append(ticker)
+        return dict(self.payload)
+
+
 def test_alpaca_provider_reads_secret_key_from_env(monkeypatch):
     monkeypatch.setenv("ALPACA_API_KEY", "test-key")
     monkeypatch.setenv("ALPACA_SECRET_KEY", "test-secret")
@@ -240,6 +250,113 @@ def test_fetch_context_enriches_fundamental_scores_from_finnhub_payloads():
     assert context["ev_sales_percentile"] is not None
     assert context["fcf_margin_score"] is not None
     assert context["short_interest_pct_float"] == pytest.approx(1.2)
+
+
+def test_fetch_context_backfills_fundamental_scores_from_yfinance_when_finnhub_missing(monkeypatch):
+    monkeypatch.delenv("FINNHUB_API_KEY", raising=False)
+    fundamentals = _FakeFundamentalsProvider(
+        {
+            "sector": "Technology",
+            "company_name": "Example Inc.",
+            "market_cap": 123_456_789.0,
+            "pe_ratio": 29.0,
+            "ps_ratio": 7.0,
+            "ev_sales_multiple": 7.5,
+            "fcf_margin_pct": 24.0,
+            "short_interest_pct_float": 3.5,
+            "revenue_growth_pct": 18.0,
+            "operating_margin_pct": 31.0,
+            "roe_pct": 15.0,
+            "roa_pct": 6.0,
+        }
+    )
+    provider = AlpacaMarketDataProvider(
+        api_key="test-key",
+        secret_key="test-secret",
+        finnhub_api_key=None,
+        client=_CapturingClient({"bars": {"AAPL": []}}),
+        fundamentals_provider=fundamentals,
+    )
+
+    context = provider.fetch_context("aapl")
+
+    assert fundamentals.calls == ["AAPL"]
+    assert context["company_name"] == "Example Inc."
+    assert context["sector"] == "Technology"
+    assert context["market_cap"] == pytest.approx(123_456_789.0)
+    assert context["pe_ratio"] == pytest.approx(29.0)
+    assert context["ps_ratio"] == pytest.approx(7.0)
+    assert context["short_interest_pct_float"] == pytest.approx(3.5)
+    assert context["valuation_percentile"] == pytest.approx(((29.0 - 5.0) / 45.0 + (7.0 - 1.0) / 14.0) / 2)
+    assert context["ev_sales_percentile"] == pytest.approx(0.5)
+    assert context["fcf_margin_score"] == pytest.approx(0.96)
+    assert context["revenue_growth_score"] == pytest.approx(0.8)
+    assert context["margin_trend_score"] == pytest.approx(31.0 / 35.0)
+    assert context["quality_score"] == pytest.approx(((31.0 / 35.0) + 0.5 + 0.5) / 3)
+    assert context["earnings_in_days"] is None
+    assert context["earnings_date"] is None
+    assert context["known_event_date"] is None
+
+
+def test_fetch_context_yfinance_backfill_preserves_finnhub_supplied_values():
+    client = _RoutingClient(
+        {
+            "stock/profile2": {
+                "name": "Finnhub Name",
+                "finnhubIndustry": "Finnhub Sector",
+                "marketCapitalization": 3000000,
+            },
+            "stock/metric": {
+                "metric": {
+                    "revenueGrowthTTMYoy": 18.0,
+                    "operatingMarginTTM": 31.0,
+                    "roeTTM": 15.0,
+                    "roaTTM": 6.0,
+                    "shortPercentOfFloat": 1.2,
+                    "peTTM": 29.0,
+                    "psTTM": 7.0,
+                }
+            },
+            "calendar/earnings": {"earningsCalendar": []},
+        }
+    )
+    fundamentals = _FakeFundamentalsProvider(
+        {
+            "sector": "YFinance Sector",
+            "company_name": "YFinance Name",
+            "market_cap": 1.0,
+            "pe_ratio": 5.0,
+            "ps_ratio": 1.0,
+            "ev_sales_multiple": 7.5,
+            "fcf_margin_pct": 24.0,
+            "short_interest_pct_float": 20.0,
+            "revenue_growth_pct": -10.0,
+            "operating_margin_pct": 0.0,
+            "roe_pct": 0.0,
+            "roa_pct": 0.0,
+        }
+    )
+    provider = AlpacaMarketDataProvider(
+        api_key="test-key",
+        secret_key="test-secret",
+        finnhub_api_key="finnhub-key",
+        client=client,
+        fundamentals_provider=fundamentals,
+    )
+
+    context = provider.fetch_context("AAPL")
+
+    assert fundamentals.calls == ["AAPL"]
+    assert context["company_name"] == "Finnhub Name"
+    assert context["sector"] == "Finnhub Sector"
+    assert context["market_cap"] == pytest.approx(3_000_000_000_000.0)
+    assert context["pe_ratio"] == pytest.approx(29.0)
+    assert context["ps_ratio"] == pytest.approx(7.0)
+    assert context["short_interest_pct_float"] == pytest.approx(1.2)
+    assert context["revenue_growth_score"] == pytest.approx(0.8)
+    assert context["margin_trend_score"] == pytest.approx(31.0 / 35.0)
+    assert context["ev_sales_percentile"] == pytest.approx(0.5)
+    assert context["fcf_margin_score"] == pytest.approx(0.96)
 
 
 def test_fetch_context_caches_finnhub_payloads_per_ticker():
