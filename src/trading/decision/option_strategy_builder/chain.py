@@ -8,7 +8,7 @@ from src.trading.options.strategy import OptionLegDefinition
 from src.trading.signals import SignalSnapshotResult
 from src.trading.signals.sources import SourceRecord
 from src.trading.strategies.matching import StrategyDefinitionRecord
-from src.trading.workflows.option_strategy_builder_policy import _expression_option_policy
+from src.trading.decision.option_strategy_builder.policy import _expression_option_policy
 
 
 def _infer_option_underlying_price(signal_snapshot: SignalSnapshotResult) -> float:

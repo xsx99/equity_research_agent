@@ -145,7 +145,7 @@ the flat `_policy/_chain/_payload/_evidence` paths.
 
 **Files:** Create `tests/trading/test_pr40_structural_splits.py`
 
-- [ ] Step 1: Write a test asserting the new canonical paths exist and export the public pipeline
+- [x] Step 1: Write a test asserting the new canonical paths exist and export the public pipeline
   surface:
   - `from src.trading.decision import TradingDecisionPipeline, TradingDecisionPipelineResult, TradingDecisionRecord`
   - `from src.trading.decision.pipeline import TradingDecisionPipeline`
@@ -155,17 +155,17 @@ the flat `_policy/_chain/_payload/_evidence` paths.
   - `from src.trading.decision.option_strategy_builder.payload import _build_option_strategy_payload`
   - `from src.trading.decision.option_strategy_builder.evidence import _WINDOWED_EVENT_NEWS_FIELDS, _news_evidence_limit`
 
-- [ ] Step 2: Write a test asserting the **old shim paths still resolve and preserve identity**:
+- [x] Step 2: Write a test asserting the **old shim paths still resolve and preserve identity**:
   - `from src.trading.workflows.trading_decision import TradingDecisionPipeline, TradingDecisionPipelineResult, TradingDecisionRecord, _build_option_strategy_payloads`
   - `from src.trading.workflows.option_strategy_builder import _build_option_strategy_payload, _build_option_strategy_payloads, _decision_action_for_expression`
   - assert `workflows.trading_decision._build_option_strategy_payloads is workflows.option_strategy_builder._build_option_strategy_payloads`
   - assert `workflows.trading_decision.TradingDecisionPipeline is decision.pipeline.TradingDecisionPipeline`
 
-- [ ] Step 3: Add an import-smoke test importing `src.trading.runtime.preopen_risk`,
+- [x] Step 3: Add an import-smoke test importing `src.trading.runtime.preopen_risk`,
   `src.trading.workflows.paper_execution`, `src.trading.repositories.sqlalchemy`, and
   `src.trading.runtime.preopen_dependencies`.
 
-- [ ] Step 4: Run
+- [x] Step 4: Run
   `source ~/.venv/bin/activate && pytest tests/trading/test_pr40_structural_splits.py -q`
   Expected: fails only because `src.trading.decision` does not exist yet.
 
@@ -174,7 +174,7 @@ the flat `_policy/_chain/_payload/_evidence` paths.
 **Files:** Create the 5 `src/trading/decision/option_strategy_builder/*.py` files.
 **Test:** `tests/trading/test_pr40_structural_splits.py`, `tests/trading/test_pr34_structural_splits.py`
 
-- [ ] Step 1: `git mv` each flat file into the subpackage with the prefix dropped, to preserve
+- [x] Step 1: `git mv` each flat file into the subpackage with the prefix dropped, to preserve
   history:
   - `option_strategy_builder_policy.py` → `decision/option_strategy_builder/policy.py`
   - `option_strategy_builder_chain.py` → `decision/option_strategy_builder/chain.py`
@@ -183,14 +183,14 @@ the flat `_policy/_chain/_payload/_evidence` paths.
   (These leave the flat `workflows/` paths gone; the hub shim is rebuilt in Task 3, and the four
   flat paths are intentionally not re-created — see File Map.)
 
-- [ ] Step 2: Rewrite the intra-family imports to the new subpackage paths:
+- [x] Step 2: Rewrite the intra-family imports to the new subpackage paths:
   - in `chain.py`: `from src.trading.workflows.option_strategy_builder_policy import _expression_option_policy`
     → `from src.trading.decision.option_strategy_builder.policy import _expression_option_policy`
   - in `payload.py`: the `from src.trading.workflows.option_strategy_builder_chain import (…)` and
     `from src.trading.workflows.option_strategy_builder_policy import (…)` blocks → the corresponding
     `src.trading.decision.option_strategy_builder.{chain,policy}` paths.
 
-- [ ] Step 3: Create `decision/option_strategy_builder/__init__.py` as the hub: import the same
+- [x] Step 3: Create `decision/option_strategy_builder/__init__.py` as the hub: import the same
   names from `.policy`, `.chain`, `.payload`, `.evidence` that the current
   `workflows/option_strategy_builder.py` re-exports, and declare an **explicit** `__all__` list
   (NOT the `globals()` pattern — PR 35 banned it and a test enforces the ban). Copy the exact
@@ -198,7 +198,7 @@ the flat `_policy/_chain/_payload/_evidence` paths.
   (`git show HEAD:src/trading/workflows/option_strategy_builder.py` — it is already an explicit,
   alphabetized list of 37 names after PR 35).
 
-- [ ] Step 4: Run
+- [x] Step 4: Run
   `source ~/.venv/bin/activate && pytest tests/trading/test_pr40_structural_splits.py::<the new-canonical test> -q`
   (the canonical-path test from Task 1 Step 1 should now pass; shim tests still fail until Task 3).
 
@@ -209,18 +209,18 @@ the flat `_policy/_chain/_payload/_evidence` paths.
 **Test:** `tests/trading/test_pr40_structural_splits.py`, `tests/trading/test_pr32_structural_splits.py`,
 `tests/trading/test_runtime_live.py`
 
-- [ ] Step 1: `git mv src/trading/workflows/trading_decision.py src/trading/decision/pipeline.py`.
+- [x] Step 1: `git mv src/trading/workflows/trading_decision.py src/trading/decision/pipeline.py`.
 
-- [ ] Step 2: In `pipeline.py`, repoint its builder import (was line ~29
+- [x] Step 2: In `pipeline.py`, repoint its builder import (was line ~29
   `from src.trading.workflows.option_strategy_builder import (…)`) to
   `from src.trading.decision.option_strategy_builder import (…)`. Keep the imported name list
   identical. No other edits to the file body.
 
-- [ ] Step 3: Create `decision/__init__.py` re-exporting
+- [x] Step 3: Create `decision/__init__.py` re-exporting
   `TradingDecisionPipeline, TradingDecisionPipelineResult, TradingDecisionRecord` from `.pipeline`,
   and the builder hub (`from . import option_strategy_builder`). Add an explicit `__all__`.
 
-- [ ] Step 4: Rewrite `workflows/trading_decision.py` as a shim:
+- [x] Step 4: Rewrite `workflows/trading_decision.py` as a shim:
   `from src.trading.decision.pipeline import (TradingDecisionPipeline, TradingDecisionPipelineResult, TradingDecisionRecord)`
   plus `from src.trading.decision.pipeline import _build_option_strategy_payloads` (and any other
   private name the pre-move module exposed that callers/tests rely on — confirm against
@@ -228,18 +228,18 @@ the flat `_policy/_chain/_payload/_evidence` paths.
   `from __future__ import annotations`. This preserves the monkeypatch target
   `src.trading.workflows.trading_decision.TradingDecisionPipeline`.
 
-- [ ] Step 5: Rewrite `workflows/option_strategy_builder.py` as a shim that re-exports the hub
+- [x] Step 5: Rewrite `workflows/option_strategy_builder.py` as a shim that re-exports the hub
   surface from the new subpackage with an **explicit** `from src.trading.decision.option_strategy_builder import (…)`
   name list and an **explicit** `__all__` (the same 37-name list). Do NOT use the `globals()`
   pattern and do NOT use `import *` — `test_compatibility_hub_all_lists_only_intended_exports` reads
   this file and asserts `"globals()"` is absent and that the names are in `__all__`. Preserve
   `preopen_risk.py`'s import surface (line ~510 list).
 
-- [ ] Step 6: Run
+- [x] Step 6: Run
   `source ~/.venv/bin/activate && pytest tests/trading/test_pr40_structural_splits.py tests/trading/test_pr32_structural_splits.py -q`
   Expected: all pass (canonical + shim + identity contracts hold).
 
-- [ ] Step 7: Run the monkeypatch-seam regression — this is the highest-risk check:
+- [x] Step 7: Run the monkeypatch-seam regression — this is the highest-risk check:
   `source ~/.venv/bin/activate && pytest tests/trading/test_runtime_live.py -q`
   Expected: all pass. If the `TradingDecisionPipeline` monkeypatch test fails, the shim is not
   exposing the class as a real module attribute, or a caller was accidentally migrated to the new
@@ -249,7 +249,7 @@ the flat `_policy/_chain/_payload/_evidence` paths.
 
 **Files:** Modify `tests/trading/test_pr34_structural_splits.py`, `plan/progress_tracker.md`
 
-- [ ] Step 1: In `test_pr34_structural_splits.py`, repoint only the 3 flat-sibling imports in
+- [x] Step 1: In `test_pr34_structural_splits.py`, repoint only the 3 flat-sibling imports in
   `test_option_strategy_builder_split_modules_exist_and_export_representative_helpers` (lines ~5–11)
   to the new subpackage modules:
   `src.trading.decision.option_strategy_builder.{chain,evidence,payload,policy}`. Leave unchanged:
@@ -260,22 +260,22 @@ the flat `_policy/_chain/_payload/_evidence` paths.
   satisfies), `test_repository_mixins_do_not_star_import_repository_base` (unrelated), and the
   import-smoke test.
 
-- [ ] Step 2: `source ~/.venv/bin/activate && python -m compileall -q src`
+- [x] Step 2: `source ~/.venv/bin/activate && python -m compileall -q src`
 
-- [ ] Step 3: Import smoke:
+- [x] Step 3: Import smoke:
   `source ~/.venv/bin/activate && python -c "import src.trading.decision, src.trading.decision.pipeline, src.trading.decision.option_strategy_builder, src.trading.workflows.trading_decision, src.trading.workflows.option_strategy_builder, src.trading.runtime.preopen_risk, src.trading.runtime.preopen_dependencies, src.trading.workflows.paper_execution, src.trading.repositories.sqlalchemy; print('imports ok')"`
 
-- [ ] Step 4: Focused regression suite:
+- [x] Step 4: Focused regression suite:
   `source ~/.venv/bin/activate && pytest tests/trading/test_pr40_structural_splits.py tests/trading/test_pr34_structural_splits.py tests/trading/test_pr32_structural_splits.py tests/trading/test_navigation_imports.py tests/trading/test_runtime_live.py tests/trading/test_trading_decision_repository.py tests/trading/test_strategy_lifecycle.py tests/trading/test_paper_stock_broker.py tests/trading/test_sqlalchemy_repository.py -q`
 
-- [ ] Step 5: Confirm no stray references to the deleted flat paths remain:
+- [x] Step 5: Confirm no stray references to the deleted flat paths remain:
   `grep -rn --include="*.py" "option_strategy_builder_policy\|option_strategy_builder_chain\|option_strategy_builder_payload\|option_strategy_builder_evidence" src tests scripts`
   Expected: zero matches (the prefix-named flat modules are gone; everything goes through the hub or
   the subpackage).
 
-- [ ] Step 6: `git diff --check`
+- [x] Step 6: `git diff --check`
 
-- [ ] Step 7: Prepend a dated entry to `plan/progress_tracker.md` summarizing the PR 40 extraction,
+- [x] Step 7: Prepend a dated entry to `plan/progress_tracker.md` summarizing the PR 40 extraction,
   touched files, and verification commands/results.
 
 Expected result: trade-decision logic lives in `src/trading/decision/`, the builder family is a

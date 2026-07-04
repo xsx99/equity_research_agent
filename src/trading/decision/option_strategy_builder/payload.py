@@ -14,13 +14,13 @@ from src.trading.signals import SignalSnapshotResult
 from src.trading.signals.sources import SourceRecord
 from src.trading.strategies.classifier import TradeClassificationRecord
 from src.trading.strategies.matching import CandidateScoreRecord, StrategyDefinitionRecord
-from src.trading.workflows.option_strategy_builder_chain import (
+from src.trading.decision.option_strategy_builder.chain import (
     _build_option_leg_definitions,
     _infer_option_underlying_price,
     _option_iv_context,
     _select_option_chain_legs,
 )
-from src.trading.workflows.option_strategy_builder_policy import (
+from src.trading.decision.option_strategy_builder.policy import (
     _apply_expression_policy_to_option_payload,
     _choose_option_strategy_type,
     _event_through_expiry,

@@ -2,13 +2,13 @@ from __future__ import annotations
 
 
 def test_option_strategy_builder_split_modules_exist_and_export_representative_helpers():
-    from src.trading.workflows.option_strategy_builder_chain import _select_option_chain_legs
-    from src.trading.workflows.option_strategy_builder_evidence import (
+    from src.trading.decision.option_strategy_builder.chain import _select_option_chain_legs
+    from src.trading.decision.option_strategy_builder.evidence import (
         _WINDOWED_EVENT_NEWS_FIELDS,
         _news_evidence_limit,
     )
-    from src.trading.workflows.option_strategy_builder_payload import _build_option_strategy_payload
-    from src.trading.workflows.option_strategy_builder_policy import (
+    from src.trading.decision.option_strategy_builder.payload import _build_option_strategy_payload
+    from src.trading.decision.option_strategy_builder.policy import (
         _classification_instrument_type,
         _decision_action_for_expression,
         _resolve_expression_fallback_plan,
