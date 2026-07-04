@@ -100,7 +100,8 @@ def test_today_risk_macro_presenter_builds_command_center_from_canonical_rows():
     assert payload["summary"]["top_risk_sources"][0]["label"] == "Own event window"
     assert payload["macro"]["blocked_strategy_tags"] == ("gap_and_go_v1",)
     assert payload["events"][0]["affected_ticker"] == "AAPL"
-    assert payload["events"][0]["scheduled_at"] == "Jun 16, 2026"
+    assert payload["events"][0]["scheduled_at"] == decision_time
+    assert payload["events"][0]["scheduled_at_label"] == "Jun 16, 2026"
     assert payload["risk_sources"][0]["recommended_action_label"] == "Block New Entry"
     assert payload["command_center"]["exposure_usage_pct"] == 42.0
 
@@ -128,7 +129,98 @@ def test_today_risk_macro_presenter_formats_event_dates_without_raw_timestamps()
         exposures=(),
     )
 
-    assert payload["events"][0]["scheduled_at"] == "Jul 31, 2026"
+    assert payload["events"][0]["scheduled_at"] == datetime(2026, 7, 31, 20, 0, 12, 123456, tzinfo=timezone.utc)
+    assert payload["events"][0]["scheduled_at_label"] == "Jul 31, 2026"
+
+
+def test_today_risk_macro_presenter_keeps_latest_refreshed_earnings_per_ticker():
+    as_of = datetime(2026, 7, 4, 20, 0, tzinfo=timezone.utc)
+    stale_near_event = CalendarEventRecord(
+        calendar_event_id="event-stale-near",
+        event_key="earnings:AAPL:2026-07-29",
+        event_type="earnings",
+        ticker="AAPL",
+        event_time=datetime(2026, 7, 29, 20, 0, tzinfo=timezone.utc),
+        published_at=as_of.replace(hour=19),
+        available_for_decision_at=as_of.replace(hour=19),
+        title="AAPL earnings",
+        severity_hint="high",
+        source="fixture",
+        metadata_json={},
+    )
+    latest_event = CalendarEventRecord(
+        calendar_event_id="event-latest",
+        event_key="earnings:AAPL:2026-07-30",
+        event_type="earnings",
+        ticker="AAPL",
+        event_time=datetime(2026, 7, 30, 20, 0, tzinfo=timezone.utc),
+        published_at=as_of,
+        available_for_decision_at=as_of,
+        title="AAPL earnings",
+        severity_hint="high",
+        source="fixture",
+        metadata_json={},
+    )
+
+    payload = build_today_risk_macro_payload(
+        latest_risk=None,
+        latest_intent=None,
+        risk_macro_context={"calendar_events": (stale_near_event, latest_event)},
+        exposures=(),
+        as_of=as_of,
+    )
+
+    assert [event["scheduled_at_label"] for event in payload["events"]] == ["Jul 30, 2026"]
+
+
+def test_today_risk_macro_presenter_exposes_assessment_fields_needed_to_filter_earnings_actions():
+    decision_time = datetime(2026, 7, 4, 20, 0, tzinfo=timezone.utc)
+    own_event = PortfolioEventRiskAssessmentRecord(
+        portfolio_event_risk_assessment_id="assessment-own-event",
+        calendar_event_id="event-aapl",
+        portfolio_risk_snapshot_id="risk-1",
+        decision_time=decision_time,
+        available_for_decision_at=decision_time,
+        ticker="AAPL",
+        risk_source="own_event",
+        severity="high",
+        event_type="earnings",
+        days_until_event=26,
+        affects_existing_position=False,
+        affects_pending_trade=True,
+        recommended_action="monitor",
+        rationale="AAPL earnings maps to own_event risk within 26 day(s).",
+        metadata_json={},
+    )
+    news_event = PortfolioEventRiskAssessmentRecord(
+        portfolio_event_risk_assessment_id="assessment-news",
+        calendar_event_id="event-news",
+        portfolio_risk_snapshot_id="risk-1",
+        decision_time=decision_time,
+        available_for_decision_at=decision_time,
+        ticker="AAPL",
+        risk_source="company_specific",
+        severity="medium",
+        event_type="company_specific",
+        days_until_event=0,
+        affects_existing_position=False,
+        affects_pending_trade=True,
+        recommended_action="review_position",
+        rationale="News headline should not render inside the earnings tile.",
+        metadata_json={},
+    )
+
+    payload = build_today_risk_macro_payload(
+        latest_risk=None,
+        latest_intent=None,
+        risk_macro_context={"portfolio_event_risk_assessments": (own_event, news_event)},
+        exposures=(),
+    )
+
+    assert payload["risk_sources"][0]["calendar_event_id"] == "event-aapl"
+    assert payload["risk_sources"][0]["event_type"] == "earnings"
+    assert payload["risk_sources"][0]["days_until_event"] == 26
+    assert payload["risk_sources"][1]["risk_source"] == "company_specific"
 
 
 def test_today_risk_macro_presenter_hides_past_events_when_as_of_is_provided():

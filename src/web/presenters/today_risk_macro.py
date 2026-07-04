@@ -24,7 +24,7 @@ def build_today_risk_macro_payload(
 ) -> dict[str, Any]:
     context = risk_macro_context or {}
     macro_snapshot = context.get("macro_snapshot")
-    calendar_events = _dedupe_calendar_events(tuple(context.get("calendar_events") or ()))
+    calendar_events = _dedupe_calendar_events(tuple(context.get("calendar_events") or ()), as_of=as_of)
     event_assessments = _dedupe_risk_assessments(tuple(context.get("portfolio_event_risk_assessments") or ()))
 
     binding_constraints = tuple(
@@ -102,14 +102,12 @@ def _risk_status(*, latest_intent: object | None) -> str:
     return _humanize_identifier(aggregate)
 
 
-def _dedupe_calendar_events(events: tuple[object, ...]) -> tuple[object, ...]:
+def _dedupe_calendar_events(events: tuple[object, ...], *, as_of: datetime | None = None) -> tuple[object, ...]:
     deduped: dict[tuple[Any, ...], object] = {}
     for event in events:
         key = _calendar_event_key(event)
         current = deduped.get(key)
-        if current is None or _sort_timestamp(getattr(event, "available_for_decision_at", None)) >= _sort_timestamp(
-            getattr(current, "available_for_decision_at", None)
-        ):
+        if current is None or _prefer_calendar_event(event, current, as_of=as_of):
             deduped[key] = event
     return tuple(deduped.values())
 
@@ -123,6 +121,24 @@ def _calendar_event_key(event: object) -> tuple[Any, ...]:
     if event_key:
         return ("event_key", event_key)
     return (event_type, ticker, getattr(event, "event_time", None))
+
+
+def _prefer_calendar_event(candidate: object, current: object, *, as_of: datetime | None) -> bool:
+    if _calendar_event_key(candidate)[0] == "earnings":
+        candidate_upcoming = _is_upcoming_event(candidate, as_of)
+        current_upcoming = _is_upcoming_event(current, as_of)
+        if candidate_upcoming != current_upcoming:
+            return candidate_upcoming
+        candidate_available = _sort_timestamp(getattr(candidate, "available_for_decision_at", None))
+        current_available = _sort_timestamp(getattr(current, "available_for_decision_at", None))
+        if candidate_available != current_available:
+            return candidate_available >= current_available
+        return _sort_timestamp(getattr(candidate, "event_time", None)) < _sort_timestamp(
+            getattr(current, "event_time", None)
+        )
+    return _sort_timestamp(getattr(candidate, "available_for_decision_at", None)) >= _sort_timestamp(
+        getattr(current, "available_for_decision_at", None)
+    )
 
 
 def _dedupe_risk_assessments(assessments: tuple[object, ...]) -> tuple[object, ...]:
@@ -202,8 +218,11 @@ def _availability(*, macro_snapshot: object | None, latest_intent: object | None
 
 
 def _event_row(event: object) -> dict[str, Any]:
+    event_time = getattr(event, "event_time", None)
     return {
-        "scheduled_at": _format_event_date(getattr(event, "event_time", None)),
+        "calendar_event_id": getattr(event, "calendar_event_id", None),
+        "scheduled_at": event_time,
+        "scheduled_at_label": _format_event_date(event_time),
         "event_type": getattr(event, "event_type", None),
         "event_type_label": event_type_label(getattr(event, "event_type", None)),
         "importance": getattr(event, "severity_hint", None),
@@ -218,10 +237,13 @@ def _event_row(event: object) -> dict[str, Any]:
 def _risk_source_row(assessment: object) -> dict[str, Any]:
     metadata_json = dict(getattr(assessment, "metadata_json", {}) or {})
     return {
+        "calendar_event_id": getattr(assessment, "calendar_event_id", None),
         "ticker": getattr(assessment, "ticker", None),
         "risk_source": getattr(assessment, "risk_source", None),
         "risk_source_label": risk_source_label(getattr(assessment, "risk_source", None)),
         "severity": getattr(assessment, "severity", None),
+        "event_type": getattr(assessment, "event_type", None),
+        "days_until_event": getattr(assessment, "days_until_event", None),
         "recommended_action": getattr(assessment, "recommended_action", None),
         "recommended_action_label": recommended_action_label(getattr(assessment, "recommended_action", None)),
         "rationale": getattr(assessment, "rationale", None),

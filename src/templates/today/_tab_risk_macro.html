@@ -118,7 +118,7 @@
               {% endfor %}
             </div>
             {% else %}
-            <p class="detail-muted quiet-empty surface-empty-copy">No economic-calendar feed is wired yet.</p>
+            <p class="detail-muted quiet-empty surface-empty-copy">No economic-calendar events are available for this decision window.</p>
             {% endif %}
           </section>
           <section class="risk-calendar-section" data-testid="upcoming-earnings">
@@ -134,8 +134,8 @@
                   <strong>{{ row.affected_ticker or row.event_type_label or row.event_type }}</strong>
                   {% if row.importance %}<span class="impact-badge impact-{{ row.importance | lower }}">{{ row.importance | upper }}</span>{% endif %}
                 </div>
-                <div class="et-meta">{% if row.scheduled_at %}<time datetime="{{ row.scheduled_at | iso_datetime }}" data-local-time-format="month_day">{{ row.scheduled_at | local_time('month_day') }}</time>{% endif %}{% if row.risk_mechanism %} · {{ row.risk_mechanism }}{% endif %}</div>
-                {% for rs in risk_macro.risk_sources if (rs.ticker or "") | upper == (row.affected_ticker or "") | upper %}
+                <div class="et-meta">{% if row.scheduled_at %}<time datetime="{{ row.scheduled_at | iso_datetime }}" data-local-time-format="month_day">{{ row.scheduled_at | local_time('month_day') }}</time>{% elif row.scheduled_at_label %}{{ row.scheduled_at_label }}{% endif %}{% if row.risk_mechanism %} · {{ row.risk_mechanism }}{% endif %}</div>
+                {% for rs in risk_macro.risk_sources if (rs.ticker or "") | upper == (row.affected_ticker or "") | upper and (rs.risk_source or "") == "own_event" and (rs.event_type or "") == "earnings" and (not row.calendar_event_id or not rs.calendar_event_id or rs.calendar_event_id == row.calendar_event_id) %}
                 <div class="et-action"><span class="detail-chip">{{ rs.recommended_action_label or rs.recommended_action }}</span> <span>{{ rs.rationale }}</span></div>
                 {% endfor %}
               </article>

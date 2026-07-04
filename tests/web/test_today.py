@@ -474,15 +474,17 @@ def _dashboard_payload() -> dict:
             },
             "events": (
                 {
+                    "calendar_event_id": "event-aapl-earnings",
                     "scheduled_at": datetime(2026, 6, 3, 18, 0, tzinfo=timezone.utc),
-                    "event_type": "own_company_earnings",
-                    "event_type_label": "Own Company Earnings",
+                    "event_type": "earnings",
+                    "event_type_label": "Earnings",
                     "importance": "high",
                     "portfolio_risk_level": "high",
                     "affected_ticker": "AAPL",
                     "risk_mechanism": "direct earnings gap risk",
                 },
                 {
+                    "calendar_event_id": "event-us-cpi",
                     "scheduled_at": datetime(2026, 6, 3, 13, 30, tzinfo=timezone.utc),
                     "event_type": "macro",
                     "event_type_label": "Macro Event",
@@ -494,10 +496,13 @@ def _dashboard_payload() -> dict:
             ),
             "risk_sources": (
                 {
+                    "calendar_event_id": "event-aapl-earnings",
                     "ticker": "AAPL",
                     "risk_source": "own_event",
                     "risk_source_label": "Own Event",
                     "severity": "high",
+                    "event_type": "earnings",
+                    "days_until_event": 0,
                     "recommended_action": "block_open",
                     "recommended_action_label": "Block New Entry",
                     "rationale": "Own-event risk is inside the active trade horizon.",
@@ -1009,7 +1014,7 @@ class TestTodayDashboard:
             response = client.get("/today?tab=risk-macro")
 
         assert response.status_code == 200
-        assert "No economic-calendar feed is wired yet." in response.text
+        assert "No economic-calendar events are available for this decision window." in response.text
         assert "No economic calendar rows are currently visible." not in response.text
 
     def test_portfolio_tab_omits_attention_modules(self, client):
