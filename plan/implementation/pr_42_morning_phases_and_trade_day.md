@@ -99,21 +99,21 @@ Create: `tests/trading/test_pr42_structural_splits.py`. Modify `plan/progress_tr
 paths; repoint importers.
 **Test:** `test_pr36_trade_day_window.py`, `test_pr42_structural_splits.py` (new), `test_runtime_reflection_live.py`
 
-- [ ] Step 1: Write a failing `test_pr42_structural_splits.py` asserting
+- [x] Step 1: Write a failing `test_pr42_structural_splits.py` asserting
   `from src.trading.trade_day import trade_date_for, local_day_bounds_utc` and
   `from src.trading.risk.lookahead_risk import <public surface>` resolve, and that the old
   `runtime.trade_day` / `runtime.lookahead_risk` paths still resolve to the same objects.
-- [ ] Step 2: `git mv src/trading/runtime/trade_day.py src/trading/trade_day.py`. Repoint the four
+- [x] Step 2: `git mv src/trading/runtime/trade_day.py src/trading/trade_day.py`. Repoint the four
   repository mixins (`signals,strategy,intraday,risk`) and `runtime/reflection.py` to
   `from src.trading.trade_day import …`. Write a shim at `runtime/trade_day.py`.
-- [ ] Step 3: `git mv src/trading/runtime/lookahead_risk.py src/trading/risk/lookahead_risk.py`;
+- [x] Step 3: `git mv src/trading/runtime/lookahead_risk.py src/trading/risk/lookahead_risk.py`;
   repoint its importers; write a shim at `runtime/lookahead_risk.py`.
-- [ ] Step 4: Try removing `__getattr__` from `runtime/__init__.py` (restore eager
+- [x] Step 4: Try removing `__getattr__` from `runtime/__init__.py` (restore eager
   `from .facade import …` / `from .smoke import …`). Run the import smoke
   (`python -c "import src.trading.repositories.sqlalchemy, src.trading.runtime, src.trading.runtime.reflection"`).
   If it raises a circular import, revert to the lazy `__getattr__` and leave a comment that PR 43
   finishes the cleanup.
-- [ ] Step 5: Run
+- [x] Step 5: Run
   `source ~/.venv/bin/activate && pytest tests/trading/test_pr42_structural_splits.py tests/trading/test_pr36_trade_day_window.py tests/trading/test_runtime_reflection_live.py tests/trading/test_navigation_imports.py -q`.
 
 ## Task 2: `phases/preopen/`
@@ -122,16 +122,16 @@ paths; repoint importers.
 shims at the four `runtime/preopen*.py` paths.
 **Test:** `test_pr42_structural_splits.py`, `test_runtime_live.py`
 
-- [ ] Step 1: `git mv` the four files into `phases/preopen/` with prefixes dropped; the public facade
+- [x] Step 1: `git mv` the four files into `phases/preopen/` with prefixes dropped; the public facade
   (`run_preopen_once`, `run_live_preopen_once`, `build_live_preopen_dependencies`) lives in
   `phases/preopen/__init__.py` (or `phases/preopen/facade.py` re-exported by `__init__`).
-- [ ] Step 2: Repoint intra-preopen imports to the new subpackage paths. Leave imports of capability
+- [x] Step 2: Repoint intra-preopen imports to the new subpackage paths. Leave imports of capability
   packages (`signals`, `strategies`, `risk`, `execution`, `portfolio`, `decision`, `risk.lookahead_risk`)
   on their canonical paths.
-- [ ] Step 3: Write shims at `runtime/{preopen,preopen_runner,preopen_dependencies,preopen_risk}.py`
+- [x] Step 3: Write shims at `runtime/{preopen,preopen_runner,preopen_dependencies,preopen_risk}.py`
   with explicit re-export lists + `__all__`. These preserve the `dispatch.py` and scheduler-job
   import paths and any `test_runtime_live.py` monkeypatch targets.
-- [ ] Step 4: Run
+- [x] Step 4: Run
   `source ~/.venv/bin/activate && pytest tests/trading/test_pr42_structural_splits.py tests/trading/test_runtime_live.py -q`.
 
 ## Task 3: `phases/manual_review/`
@@ -140,13 +140,13 @@ shims at the four `runtime/preopen*.py` paths.
 `runtime/manual_review.py` and `manual_review/{requests,sqlalchemy}.py`.
 **Test:** `test_pr42_structural_splits.py`, `test_runtime_manual_review_live.py`
 
-- [ ] Step 1: `git mv runtime/manual_review.py` and the `manual_review/` feature folder into
+- [x] Step 1: `git mv runtime/manual_review.py` and the `manual_review/` feature folder into
   `phases/manual_review/`.
-- [ ] Step 2: Repoint `build_live_manual_review_dependencies()`'s call to
+- [x] Step 2: Repoint `build_live_manual_review_dependencies()`'s call to
   `build_live_preopen_dependencies` to the new `phases/preopen/` canonical path (Task 2). This is the
   reuse seam — verify it binds the real function, not a shim attribute.
-- [ ] Step 3: Write shims at the old `runtime/manual_review.py` and `manual_review/*.py` paths.
-- [ ] Step 4: Run
+- [x] Step 3: Write shims at the old `runtime/manual_review.py` and `manual_review/*.py` paths.
+- [x] Step 4: Run
   `source ~/.venv/bin/activate && pytest tests/trading/test_pr42_structural_splits.py tests/trading/test_runtime_manual_review_live.py -q`.
 
 ## Task 4: `phases/intraday/`, then full verification
@@ -155,17 +155,17 @@ shims at the four `runtime/preopen*.py` paths.
 shims at the `runtime/intraday_refresh*.py` and `intraday/*.py` paths. Modify `plan/progress_tracker.md`.
 **Test:** `test_pr42_structural_splits.py`, `test_runtime_intraday_live.py`, `test_intraday_rebalance.py`
 
-- [ ] Step 1: `git mv` the four `runtime/intraday_refresh*.py` files and the three `intraday/*.py`
+- [x] Step 1: `git mv` the four `runtime/intraday_refresh*.py` files and the three `intraday/*.py`
   files into `phases/intraday/` with prefixes dropped; repoint intra-phase imports.
-- [ ] Step 2: Write shims at all old `runtime/intraday_refresh*.py` and `intraday/{rebalance,news_alerts,signals}.py`
+- [x] Step 2: Write shims at all old `runtime/intraday_refresh*.py` and `intraday/{rebalance,news_alerts,signals}.py`
   paths (note: `intraday/rebalance.py` is imported by several callers and `test_pr35`/`test_intraday_rebalance`
   — preserve its surface incl. `IntradayRebalancePipeline` and the `execution.attempts` re-exports it uses).
-- [ ] Step 3: `source ~/.venv/bin/activate && python -m compileall -q src`.
-- [ ] Step 4: Import smoke importing every new `phases/` module + every shim + the three scheduler
+- [x] Step 3: `source ~/.venv/bin/activate && python -m compileall -q src`.
+- [x] Step 4: Import smoke importing every new `phases/` module + every shim + the three scheduler
   jobs + `runtime.dispatch`.
-- [ ] Step 5: Focused regression suite:
+- [x] Step 5: Focused regression suite:
   `source ~/.venv/bin/activate && pytest tests/trading/test_pr42_structural_splits.py tests/trading/test_pr41_structural_splits.py tests/trading/test_pr40_structural_splits.py tests/trading/test_navigation_imports.py tests/trading/test_runtime_live.py tests/trading/test_runtime_intraday_live.py tests/trading/test_runtime_manual_review_live.py tests/trading/test_intraday_rebalance.py tests/trading/test_pr35_execution_attempts.py tests/test_scheduler_jobs.py -q`.
-- [ ] Step 6: `git diff --check`; prepend a dated `plan/progress_tracker.md` entry.
+- [x] Step 6: `git diff --check`; prepend a dated `plan/progress_tracker.md` entry.
 
 Expected result: the three morning workflows read top-down under `phases/`; `trade_day` and
 `lookahead_risk` are in neutral capability homes; the scheduler entry surface, the preopen↔manual

@@ -8,7 +8,7 @@ from src.db.models.trading import EventNewsItem, SignalSnapshot
 from src.trading.signals import SignalSnapshotResult
 from src.trading.signals.sources import EventNewsItemRecord
 from src.trading.repositories._base_common import _to_uuid, _to_uuid_or_none
-from src.trading.runtime.trade_day import local_day_bounds_utc
+from src.trading.trade_day import local_day_bounds_utc
 
 
 def _trade_day_window(trade_date: date) -> tuple[object, object]:

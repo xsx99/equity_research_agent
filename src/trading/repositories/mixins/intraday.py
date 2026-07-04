@@ -21,7 +21,7 @@ from src.trading.intraday.news_alerts import NewsAlertRecord
 from src.trading.intraday.signals import IntradaySignalScanRecord, IntradaySignalSnapshotRecord
 from src.trading.repositories._base_common import _to_uuid, _to_uuid_or_none
 from src.trading.repositories._base_manual_review import _intraday_context_metadata
-from src.trading.runtime.trade_day import local_day_bounds_utc
+from src.trading.trade_day import local_day_bounds_utc
 
 
 def _trade_day_window(trade_date: date) -> tuple[object, object]:

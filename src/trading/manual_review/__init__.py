@@ -1,5 +1,5 @@
 """Manual review request contracts and services."""
-from src.trading.manual_review.requests import (
+from src.trading.phases.manual_review.requests import (
     ACTIVE_STATUS,
     REQUEST_MODES,
     ManualTickerRequest,

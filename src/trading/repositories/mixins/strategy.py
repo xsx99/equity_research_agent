@@ -31,7 +31,7 @@ from src.trading.repositories._base_records import (
     _daily_reflection_record,
     _learning_factor_record,
 )
-from src.trading.runtime.trade_day import local_day_bounds_utc
+from src.trading.trade_day import local_day_bounds_utc
 
 
 def _trade_day_window(trade_date: date) -> tuple[object, object]:

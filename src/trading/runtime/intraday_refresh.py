@@ -1,69 +1,24 @@
-"""Public facade for the live intraday refresh runtime."""
+"""Compatibility shim for the intraday refresh phase facade."""
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Callable
+import sys
 
-from .intraday_refresh_dependencies import (
-    LiveIntradayRefreshDependencies,
-    _RepositoryBaselineLoader,
-    _RepositoryIntradayRequestContextLoader,
-    _RepositoryIntradayScopeLoader,
-    _RepositoryPreviousIntradaySnapshotLoader,
-    build_live_intraday_refresh_dependencies,
-)
-from .intraday_refresh_helpers import (
-    _build_intraday_refresh_payload,
-    _build_rebalance_request,
-    _event_item_from_source_record,
-    _load_event_items,
-    _position_by_ticker,
-)
-from .intraday_refresh_runner import LiveIntradayRefreshRuntime
+from src.trading.phases import intraday as _canonical
 
-
-def run_live_intraday_refresh_once(
-    *,
-    dependencies: LiveIntradayRefreshDependencies | None = None,
-    execute_paper_orders: bool = False,
-    execute_paper_option_orders: bool = False,
-    now: Callable[[], datetime] | None = None,
-) -> dict[str, object]:
-    """Execute one live intraday refresh run with injected dependencies."""
-    return run_intraday_refresh_once(
-        dependencies=dependencies,
-        execute_paper_orders=execute_paper_orders,
-        execute_paper_option_orders=execute_paper_option_orders,
-        now=now,
-    )
-
-
-def run_intraday_refresh_once(
-    *,
-    dependencies: LiveIntradayRefreshDependencies | None = None,
-    execute_paper_orders: bool = False,
-    execute_paper_option_orders: bool = False,
-    now: Callable[[], datetime] | None = None,
-) -> dict[str, object]:
-    """Execute one live intraday refresh run with injected dependencies."""
-    if dependencies is not None:
-        return LiveIntradayRefreshRuntime(
-            dependencies=dependencies,
-            now=now,
-            execute_paper_orders=execute_paper_orders,
-            execute_paper_option_orders=execute_paper_option_orders,
-        ).run()
-
-    from src.db.connection import get_session
-
-    with get_session() as session:
-        return LiveIntradayRefreshRuntime(
-            dependencies=build_live_intraday_refresh_dependencies(session),
-            now=now,
-            execute_paper_orders=execute_paper_orders,
-            execute_paper_option_orders=execute_paper_option_orders,
-        ).run()
-
+LiveIntradayRefreshDependencies = _canonical.LiveIntradayRefreshDependencies
+LiveIntradayRefreshRuntime = _canonical.LiveIntradayRefreshRuntime
+_RepositoryBaselineLoader = _canonical._RepositoryBaselineLoader
+_RepositoryIntradayRequestContextLoader = _canonical._RepositoryIntradayRequestContextLoader
+_RepositoryIntradayScopeLoader = _canonical._RepositoryIntradayScopeLoader
+_RepositoryPreviousIntradaySnapshotLoader = _canonical._RepositoryPreviousIntradaySnapshotLoader
+_build_intraday_refresh_payload = _canonical._build_intraday_refresh_payload
+_build_rebalance_request = _canonical._build_rebalance_request
+_event_item_from_source_record = _canonical._event_item_from_source_record
+_load_event_items = _canonical._load_event_items
+_position_by_ticker = _canonical._position_by_ticker
+build_live_intraday_refresh_dependencies = _canonical.build_live_intraday_refresh_dependencies
+run_intraday_refresh_once = _canonical.run_intraday_refresh_once
+run_live_intraday_refresh_once = _canonical.run_live_intraday_refresh_once
 
 __all__ = [
     "LiveIntradayRefreshDependencies",
@@ -81,3 +36,6 @@ __all__ = [
     "run_intraday_refresh_once",
     "run_live_intraday_refresh_once",
 ]
+
+_canonical.__all__ = __all__
+sys.modules[__name__] = _canonical

@@ -7,7 +7,7 @@ from typing import Any, Callable
 
 from src.core import config as app_config
 from src.trading.post_close.reflection import ReflectionPipeline, ReflectionPipelineRequest
-from src.trading.runtime.trade_day import local_day_bounds_utc, trade_date_for
+from src.trading.trade_day import local_day_bounds_utc, trade_date_for
 from src.trading.runtime.support import build_runtime_report
 
 
