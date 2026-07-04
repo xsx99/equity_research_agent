@@ -25,7 +25,7 @@ from src.trading.execution.attempts import (
     REASON_RISK_REJECTED,
 )
 from src.trading.risk import PortfolioRiskIntentRecord, PositionRiskActionRecord, RiskConfigResolver, RiskDecisionRecord
-from src.trading.runtime.support import summarize_execution_attempts
+from src.trading.phases._shell.support import summarize_execution_attempts
 from src.trading.workflows.paper_execution import PaperExecutionWorkflow
 from src.trading.workflows.trading_decision import TradingDecisionRecord
 

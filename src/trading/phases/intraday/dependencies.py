@@ -56,7 +56,7 @@ def build_live_intraday_refresh_dependencies(session: Any | None = None) -> Live
     from src.trading.repositories.sqlalchemy import SqlAlchemyTradingRepository
     from src.trading.risk import PortfolioHedgePlanner
     from src.trading.risk.lookahead_risk import LookaheadRiskWorkflowHelper
-    from src.trading.runtime.support import build_default_news_provider
+    from src.trading.phases._shell.support import build_default_news_provider
     from src.trading.signals.source_ingestion import SourceIngestionService
     from src.trading.workflows.portfolio_sync import BrokerPortfolioSyncWorkflow
 

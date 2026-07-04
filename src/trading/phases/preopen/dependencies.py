@@ -10,7 +10,7 @@ from src.research.repositories.research_repository import get_active_tickers
 from src.trading.learning.apply import build_learning_adjustments
 from src.trading.risk.lookahead_risk import LookaheadRiskWorkflowHelper
 from src.trading.phases.preopen.risk import _LiveRiskWorkflow
-from src.trading.runtime.support import (
+from src.trading.phases._shell.support import (
     build_default_news_provider,
     seed_default_universe_filter_config,
     seed_initial_strategy_definitions,

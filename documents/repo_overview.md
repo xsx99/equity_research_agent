@@ -28,7 +28,7 @@ The remaining trading workflow implementations now live in their capability pack
 
 ## Trading Phase Packages
 
-Morning scheduler orchestration now lives under `src/trading/phases/`.
+Scheduler orchestration now lives under `src/trading/phases/`.
 
 - `src/trading/phases/preopen/` owns the live preopen facade, runner, dependency assembly, and
   preopen risk wiring.
@@ -37,8 +37,20 @@ Morning scheduler orchestration now lives under `src/trading/phases/`.
   builder directly.
 - `src/trading/phases/intraday/` owns the live intraday refresh facade, runner, dependency assembly,
   payload helpers, rebalance pipeline, news alerts, and intraday signal records.
+- `src/trading/phases/reflection/` owns the live post-close reflection runtime and reflection
+  pipeline/learning-factor records.
+- `src/trading/phases/strategy_evolution/` owns the live post-close strategy-evolution runtime and
+  proposal/lifecycle pipeline records.
+- `src/trading/phases/replay/` owns historical replay and outcome evaluation. It is smoke-only
+  today, not wired as a scheduler phase.
+- `src/trading/phases/_shell/` owns the cross-phase scheduler facade, dispatch table, runtime
+  support helpers, and smoke entrypoints/modes.
 - Old `src/trading/runtime/preopen*`, `runtime/manual_review.py`, `runtime/intraday_refresh*`,
-  `src/trading/manual_review/*`, and `src/trading/intraday/*` paths are compatibility shims that
-  preserve existing caller imports and monkeypatch seams.
+  `runtime/reflection.py`, `runtime/strategy_evolution.py`, `runtime/{facade,dispatch,support,smoke*}`,
+  `src/trading/manual_review/*`, `src/trading/intraday/*`, `src/trading/post_close/*`, and
+  `src/trading/replay/*` paths are compatibility shims that preserve existing caller imports and
+  monkeypatch seams.
 - `src/trading/trade_day.py` and `src/trading/risk/lookahead_risk.py` are the canonical homes for
   the shared trade-day and lookahead-risk utilities; old `runtime.*` paths remain shims.
+- `src/trading/strategies/policy.py` is the canonical home for shared strategy policy helpers such
+  as `experimental_strategy_weight_cap`; `post_close/strategy_policy.py` remains a shim.

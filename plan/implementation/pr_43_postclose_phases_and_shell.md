@@ -91,16 +91,16 @@ Modify `plan/progress_tracker.md`.
 **Files:** Create `tests/trading/test_pr43_structural_splits.py`, `strategies/policy.py`; shim
 `post_close/strategy_policy.py`.
 
-- [ ] Step 1: Write a failing test asserting the new canonical paths resolve
+- [x] Step 1: Write a failing test asserting the new canonical paths resolve
   (`phases.reflection`, `phases.strategy_evolution`, `phases.replay`, `phases._shell.facade`,
   `phases._shell.dispatch`, `strategies.policy`) and that the old `runtime.*` / `post_close.*` /
   `replay.*` paths still resolve to the same objects. Include an assertion that
   `from src.trading.runtime import run_job_phase, run_smoke_mode, TRADING_JOB_PHASES, AVAILABLE_SMOKE_MODES`
   still works.
-- [ ] Step 2: `git mv src/trading/post_close/strategy_policy.py src/trading/strategies/policy.py`;
+- [x] Step 2: `git mv src/trading/post_close/strategy_policy.py src/trading/strategies/policy.py`;
   repoint `risk/sizing.py` to `from src.trading.strategies.policy import experimental_strategy_weight_cap`;
   write a shim at `post_close/strategy_policy.py`.
-- [ ] Step 3: Run
+- [x] Step 3: Run
   `source ~/.venv/bin/activate && pytest tests/trading/test_pr43_structural_splits.py tests/trading/test_navigation_imports.py -q`
   — expect failure only on the not-yet-created phase/_shell paths.
 
@@ -111,17 +111,17 @@ Modify `plan/progress_tracker.md`.
 **Test:** `test_pr43_structural_splits.py`, `test_reflection_pipeline.py`, `test_strategy_evolution.py`,
 `test_runtime_reflection_live.py`, `test_runtime_strategy_evolution_live.py`
 
-- [ ] Step 1: `git mv runtime/reflection.py` + `post_close/reflection.py` into `phases/reflection/`;
+- [x] Step 1: `git mv runtime/reflection.py` + `post_close/reflection.py` into `phases/reflection/`;
   `git mv runtime/strategy_evolution.py` + `post_close/strategy_evolution.py` into
   `phases/strategy_evolution/`. Drop prefixes; the runtime facade lives in each subpackage `__init__`.
-- [ ] Step 2: Repoint intra-phase imports. `phases/strategy_evolution/` consumes reflection record
+- [x] Step 2: Repoint intra-phase imports. `phases/strategy_evolution/` consumes reflection record
   types and `replay.outcomes` — point those at `phases/reflection/` (sibling) and the
   `replay.outcomes` shim (or the new `phases/replay/` if Task 3 done first); leave capability imports
   (`strategies`, `repositories`) canonical.
-- [ ] Step 3: Write shims at `post_close/reflection.py` and `post_close/strategy_evolution.py` with
+- [x] Step 3: Write shims at `post_close/reflection.py` and `post_close/strategy_evolution.py` with
   **explicit** re-export lists covering the full record-type surface the repository/learning callers
   import (see Guardrails). Write shims at `runtime/{reflection,strategy_evolution}.py`.
-- [ ] Step 4: Run
+- [x] Step 4: Run
   `source ~/.venv/bin/activate && pytest tests/trading/test_pr43_structural_splits.py tests/trading/test_reflection_pipeline.py tests/trading/test_strategy_evolution.py tests/trading/test_runtime_reflection_live.py tests/trading/test_runtime_strategy_evolution_live.py tests/trading/test_learning_apply.py tests/trading/test_learning_factors.py -q`.
 
 ## Task 3: `phases/replay/`
@@ -130,12 +130,12 @@ Modify `plan/progress_tracker.md`.
 **Test:** `test_pr43_structural_splits.py`, `test_historical_replay.py`, `test_outcome_evaluator.py`,
 `test_confidence_calibration.py`, `test_candidate_repository.py`
 
-- [ ] Step 1: `git mv replay/historical.py replay/outcomes.py` into `phases/replay/`. Add a docstring
+- [x] Step 1: `git mv replay/historical.py replay/outcomes.py` into `phases/replay/`. Add a docstring
   in `phases/replay/__init__.py` stating it is smoke-only / not scheduler-wired (backlog #6).
-- [ ] Step 2: Write shims at `replay/historical.py` and `replay/outcomes.py` with explicit re-export
+- [x] Step 2: Write shims at `replay/historical.py` and `replay/outcomes.py` with explicit re-export
   lists covering `CandidateOutcomeEvaluationRecord`, `OutcomeEvaluator`, `PricePoint`, the replay
   runner/result types, and any helper the repository/calibration callers use.
-- [ ] Step 3: Run
+- [x] Step 3: Run
   `source ~/.venv/bin/activate && pytest tests/trading/test_pr43_structural_splits.py tests/trading/test_historical_replay.py tests/trading/test_outcome_evaluator.py tests/trading/test_confidence_calibration.py tests/trading/test_candidate_repository.py -q`.
 
 ## Task 4: `phases/_shell/`, reduce `runtime/` to a compatibility surface, full verification
@@ -144,28 +144,28 @@ Modify `plan/progress_tracker.md`.
 rewrite `runtime/__init__.py`. Modify `plan/progress_tracker.md`.
 **Test:** `test_scheduler_jobs.py`, `test_run_trading_smoke_test.py`, full structural suite
 
-- [ ] Step 1: `git mv` the eight shell files into `phases/_shell/`. In `phases/_shell/dispatch.py`,
+- [x] Step 1: `git mv` the eight shell files into `phases/_shell/`. In `phases/_shell/dispatch.py`,
   repoint the phase-handler imports to the canonical `phases/{preopen,manual_review,intraday,reflection,strategy_evolution}/`
   paths (and `phases/replay/` for the smoke handler). In `phases/_shell/smoke_fixture_modes.py` /
   `smoke_post_close_modes.py` / `smoke_support.py`, repoint phase/dependency imports to canonical
   `phases/*` paths.
-- [ ] Step 2: Write shims at `runtime/{facade,dispatch,support,smoke,smoke_entrypoints,smoke_fixture_modes,smoke_post_close_modes,smoke_support}.py`.
-- [ ] Step 3: Rewrite `runtime/__init__.py` to re-export the stable surface from `phases/_shell/`
+- [x] Step 2: Write shims at `runtime/{facade,dispatch,support,smoke,smoke_entrypoints,smoke_fixture_modes,smoke_post_close_modes,smoke_support}.py`.
+- [x] Step 3: Rewrite `runtime/__init__.py` to re-export the stable surface from `phases/_shell/`
   (`from src.trading.phases._shell.facade import TRADING_JOB_PHASES, run_job_phase, run_smoke_mode`,
   `from src.trading.phases._shell.smoke import AVAILABLE_SMOKE_MODES`). Since PR 42 relocated
   `trade_day` (so repositories no longer import `runtime`), the `repositories → runtime` cycle is
   gone — **attempt eager imports and remove the `__getattr__` hack**. Verify with import smoke; if a
   cycle still appears, keep the lazy form and document why.
-- [ ] Step 4: `source ~/.venv/bin/activate && python -m compileall -q src`.
-- [ ] Step 5: Import smoke: import the three scheduler jobs, `src.trading.runtime` (assert the four
+- [x] Step 4: `source ~/.venv/bin/activate && python -m compileall -q src`.
+- [x] Step 5: Import smoke: import the three scheduler jobs, `src.trading.runtime` (assert the four
   public names), every `phases/_shell/*` and phase module, and the repository layer.
-- [ ] Step 6: Full focused regression suite:
+- [x] Step 6: Full focused regression suite:
   `source ~/.venv/bin/activate && pytest tests/trading/test_pr43_structural_splits.py tests/trading/test_pr42_structural_splits.py tests/trading/test_pr41_structural_splits.py tests/trading/test_pr40_structural_splits.py tests/trading/test_navigation_imports.py tests/test_scheduler_jobs.py tests/scripts/test_run_trading_smoke_test.py tests/trading/test_runtime_live.py tests/trading/test_runtime_intraday_live.py tests/trading/test_runtime_reflection_live.py tests/trading/test_runtime_strategy_evolution_live.py tests/trading/test_runtime_manual_review_live.py -q`,
   then a full `source ~/.venv/bin/activate && pytest -q` (note any external-DB tests blocked by the
   sandbox, consistent with prior slices).
-- [ ] Step 7: `grep -rn --include="*.py" "def \|class " src/trading/runtime/` and
+- [x] Step 7: `grep -rn --include="*.py" "def \|class " src/trading/runtime/` and
   `… src/trading/post_close/ src/trading/replay/` — confirm only shim re-exports remain (no bodies).
-- [ ] Step 8: `git diff --check`; prepend a dated `plan/progress_tracker.md` entry noting the topology
+- [x] Step 8: `git diff --check`; prepend a dated `plan/progress_tracker.md` entry noting the topology
   refactor (PR 40–43) is structurally complete.
 
 Expected result: all six workflows read top-down under `phases/`; `_shell` owns the scheduler

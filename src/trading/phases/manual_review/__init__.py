@@ -5,7 +5,11 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any, Callable
 
-from src.trading.runtime.support import build_execution_report, build_runtime_report, summarize_execution_attempts
+from src.trading.phases._shell.support import (
+    build_execution_report,
+    build_runtime_report,
+    summarize_execution_attempts,
+)
 
 
 @dataclass(frozen=True)

@@ -1,7 +1,8 @@
-"""Focused post-close policy helpers reused outside pipeline modules."""
+"""Compatibility shim for strategy policy helpers."""
 from __future__ import annotations
 
+from src.trading.strategies.policy import experimental_strategy_weight_cap
 
-def experimental_strategy_weight_cap(base_cap: float) -> float:
-    """Apply the stricter sizing cap used for experimental strategies."""
-    return min(base_cap * 0.25, 0.02)
+__all__ = [
+    "experimental_strategy_weight_cap",
+]
