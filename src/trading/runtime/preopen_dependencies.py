@@ -104,7 +104,10 @@ def build_live_preopen_dependencies(session: Any | None = None) -> LivePreopenDe
     from src.agents.prompt_registry import PromptRegistry
     from src.agents.trading import _default_agent_runner
     from src.providers.global_context import get_global_context
+
     from src.providers.market_data import AlpacaMarketDataProvider, FMPEconomicCalendar
+    from src.providers.market_data.nasdaq_earnings import NasdaqEarningsCalendar
+
     from src.trading.brokers.paper_option import (
         DEFAULT_ALPACA_PAPER_TRADING_BASE_URL,
         PaperOptionBroker,
@@ -138,6 +141,7 @@ def build_live_preopen_dependencies(session: Any | None = None) -> LivePreopenDe
     source_repository = SQLAlchemySignalSourceRepository(session)
     manual_request_service = SQLAlchemyManualTickerRequestService(session)
     market_provider = AlpacaMarketDataProvider()
+    earnings_calendar = NasdaqEarningsCalendar()
     news_provider = build_default_news_provider()
     broker = PaperStockBroker()
     option_broker = PaperOptionBroker(
@@ -146,6 +150,7 @@ def build_live_preopen_dependencies(session: Any | None = None) -> LivePreopenDe
     signal_ingestion = SourceIngestionService(
         market_provider=market_provider,
         news_provider=news_provider,
+        earnings_calendar=earnings_calendar,
         global_context_fetcher=lambda as_of: get_global_context(as_of=as_of, limit=5),
         source_repository=source_repository,
         artifact_repository=source_repository,

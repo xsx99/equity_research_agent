@@ -60,6 +60,13 @@ class SourceIngestionArtifactRepository(Protocol):
         """Persist one normalized social/policy row."""
 
 
+class EarningsCalendarProvider(Protocol):
+    """Ticker lookup surface for upcoming earnings dates."""
+
+    def next_earnings_date(self, ticker: str, as_of: date) -> date | None:
+        """Return the next earnings date for ticker as of the supplied date."""
+
+
 @dataclass(frozen=True)
 class SourceIngestionResult:
     """Result returned by a targeted or scheduled source ingestion refresh."""
@@ -85,10 +92,11 @@ class SourceIngestionService:
         *,
         market_provider: MarketDataProvider,
         news_provider: NewsProvider | None,
-        global_context_fetcher: Callable[[datetime], dict[str, Any]] | None = None,
         source_repository: SignalSourceWriter,
         artifact_repository: SourceIngestionArtifactRepository,
         provider_name: str,
+        earnings_calendar: EarningsCalendarProvider | None = None,
+        global_context_fetcher: Callable[[datetime], dict[str, Any]] | None = None,
         lookback_days: int = 252,
         news_limit: int = 5,
         max_requests_per_endpoint: int = 100,
@@ -97,6 +105,7 @@ class SourceIngestionService:
     ) -> None:
         self.market_provider = market_provider
         self.news_provider = news_provider
+        self.earnings_calendar = earnings_calendar
         self.global_context_fetcher = global_context_fetcher
         self.source_repository = source_repository
         self.artifact_repository = artifact_repository
@@ -207,7 +216,7 @@ class SourceIngestionService:
                         source_records.append(option_chain_record)
                 except Exception as exc:
                     errors.append(exc)
-            if "events_news" in families and self.news_provider is not None:
+            if "events_news" in families:
                 try:
                     refresh_result = self._refresh_events_news(
                         ticker,
@@ -319,6 +328,10 @@ class SourceIngestionService:
         context = policy.execute(ticker, lambda: self.market_provider.fetch_context(ticker))
         if not isinstance(context, dict) or not context:
             return None
+        calendar_payload = self._calendar_earnings_payload(ticker, as_of)
+        if calendar_payload is not None:
+            context = dict(context)
+            context.update(calendar_payload)
         snapshot_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"fundamental:{ticker}:{as_of.isoformat()}"))
         metrics = {
             key: _json_safe_value(value)
@@ -399,20 +412,17 @@ class SourceIngestionService:
         *,
         company_name: str | None = None,
     ) -> _EventsNewsRefreshResult:
-        if self.news_provider is None:
-            return _EventsNewsRefreshResult(
-                items=(),
-                summary=_empty_news_condensation_summary(),
+        records: list[EventNewsItemRecord] = []
+        summary = _empty_news_condensation_summary()
+        if self.news_provider is not None:
+            items = policy.execute(
+                ticker,
+                lambda: self.news_provider.fetch_recent(ticker=ticker, limit=self.news_limit),
             )
-        items = policy.execute(
-            ticker,
-            lambda: self.news_provider.fetch_recent(ticker=ticker, limit=self.news_limit),
-        )
+        else:
+            items = []
         if not isinstance(items, list):
-            return _EventsNewsRefreshResult(
-                items=(),
-                summary=_empty_news_condensation_summary(),
-            )
+            items = []
         if _news_condenser_enabled():
             condensed = condense_news_items(
                 ticker=ticker,
@@ -420,34 +430,54 @@ class SourceIngestionService:
                 items=items,
                 as_of=as_of,
             )
-            records = tuple(
+            records.extend(
                 _event_news_item_from_condensed(ticker, item, as_of, self.provider_name)
                 for item in condensed.kept_items
             )
-            return _EventsNewsRefreshResult(
-                items=records,
-                summary={
-                    "raw_news_item_count": condensed.raw_news_item_count,
-                    "kept_news_item_count": condensed.kept_news_item_count,
-                    "dropped_low_signal_count": condensed.dropped_low_signal_count,
-                    "dropped_duplicate_count": condensed.dropped_duplicate_count,
-                    "dropped_irrelevant_count": condensed.dropped_irrelevant_count,
-                },
-            )
-        records: list[EventNewsItemRecord] = []
-        for item in items:
-            if isinstance(item, dict):
-                records.append(_event_news_item_from_provider(ticker, item, as_of, self.provider_name))
-        return _EventsNewsRefreshResult(
-            items=tuple(records),
-            summary={
+            summary = {
+                "raw_news_item_count": condensed.raw_news_item_count,
+                "kept_news_item_count": condensed.kept_news_item_count,
+                "dropped_low_signal_count": condensed.dropped_low_signal_count,
+                "dropped_duplicate_count": condensed.dropped_duplicate_count,
+                "dropped_irrelevant_count": condensed.dropped_irrelevant_count,
+            }
+        else:
+            for item in items:
+                if isinstance(item, dict):
+                    records.append(_event_news_item_from_provider(ticker, item, as_of, self.provider_name))
+            summary = {
                 "raw_news_item_count": len(items),
                 "kept_news_item_count": len(records),
                 "dropped_low_signal_count": 0,
                 "dropped_duplicate_count": 0,
                 "dropped_irrelevant_count": 0,
-            },
+            }
+        earnings_payload = self._calendar_earnings_payload(ticker, as_of)
+        if earnings_payload is not None:
+            records.append(_earnings_event_news_item(ticker, earnings_payload, as_of, self.provider_name))
+        return _EventsNewsRefreshResult(
+            items=tuple(records),
+            summary=summary,
         )
+
+    def _calendar_earnings_payload(self, ticker: str, as_of: datetime) -> dict[str, Any] | None:
+        if self.earnings_calendar is None:
+            return None
+        as_of_date = as_of.date()
+        try:
+            earnings_date = self.earnings_calendar.next_earnings_date(ticker, as_of_date)
+        except Exception:
+            return None
+        if earnings_date is None:
+            return None
+        earnings_in_days = (earnings_date - as_of_date).days
+        if earnings_in_days < 0:
+            return None
+        return {
+            "earnings_in_days": earnings_in_days,
+            "earnings_date": earnings_date,
+            "known_event_date": earnings_date,
+        }
 
     def _refresh_social_macro(
         self,
@@ -585,6 +615,49 @@ def _event_news_item_from_condensed(
         available_for_decision_at=item.available_for_decision_at,
         raw_payload_ref=item.url,
         metadata_json=metadata_json,
+    )
+
+
+def _earnings_event_news_item(
+    ticker: str,
+    payload: dict[str, Any],
+    as_of: datetime,
+    provider_name: str,
+) -> EventNewsItemRecord:
+    earnings_date = payload.get("earnings_date")
+    if not isinstance(earnings_date, date):
+        raise ValueError("earnings_date_required")
+    date_text = earnings_date.isoformat()
+    item_id = f"earnings:{ticker.upper()}:{date_text}"
+    return EventNewsItemRecord(
+        event_news_item_id=item_id,
+        ticker=ticker,
+        source_ticker=ticker,
+        event_type="own_earnings_upcoming",
+        direction=None,
+        sentiment=None,
+        importance="high",
+        headline=f"{ticker.upper()} earnings expected {date_text}",
+        summary=None,
+        provider=provider_name,
+        source_refs_json=[
+            {
+                "source": "nasdaq",
+                "source_table": "earnings_calendar",
+                "source_record_id": item_id,
+            }
+        ],
+        dedupe_key=f"{ticker.upper()}|earnings|{date_text}",
+        event_time=as_of,
+        published_at=as_of,
+        ingested_at=as_of,
+        available_for_decision_at=as_of,
+        raw_payload_ref=None,
+        metadata_json={
+            "earnings_in_days": payload["earnings_in_days"],
+            "known_event_date": date_text,
+            "earnings_date": date_text,
+        },
     )
 
 

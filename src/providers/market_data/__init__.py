@@ -6,7 +6,10 @@ from typing import Optional
 
 from src.core.logging import get_logger
 from src.providers.market_data.alpaca_provider import AlpacaMarketDataProvider, DEFAULT_ALPACA_DATA_BASE_URL
+
 from src.providers.market_data.fmp_economic_calendar import FMPEconomicCalendar
+from src.providers.market_data.nasdaq_earnings import NasdaqEarningsCalendar
+
 from src.providers.market_data.helpers import (
     MARKET_TIMEZONE,
     REGULAR_MARKET_CLOSE,
@@ -35,6 +38,7 @@ __all__ = [
     "MarketSnapshot",
     "MARKET_TIMEZONE",
     "MomentumSignals",
+    "NasdaqEarningsCalendar",
     "REGULAR_MARKET_CLOSE",
     "REGULAR_MARKET_OPEN",
     "TechnicalSignals",
