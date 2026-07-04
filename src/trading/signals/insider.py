@@ -32,9 +32,25 @@ def build_insider_signals(
     records: list[SourceRecord] | tuple[SourceRecord, ...],
     *,
     decision_time: datetime,
+    data_covered: bool = False,
 ) -> InsiderSignals:
     """Aggregate structured insider rows into deterministic trading-side signals."""
     if not records:
+        if data_covered:
+            return InsiderSignals(
+                values={
+                    "purchase_count_30d": 0,
+                    "sale_count_30d": 0,
+                    "insider_net_buy_value_30d": 0.0,
+                    "insider_net_buy_value_90d": 0.0,
+                    "insider_cluster_buy_count_90d": 0,
+                    "officer_buy_flag": False,
+                    "director_buy_flag": False,
+                    "sale_concentration_score": 0.0,
+                    "recent_form4_filing_at": None,
+                },
+                missing=(),
+            )
         return InsiderSignals(values={}, missing=REQUIRED_INSIDER_FIELDS)
 
     thirty_day_cutoff = decision_time - timedelta(days=30)

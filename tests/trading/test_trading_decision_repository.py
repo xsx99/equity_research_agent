@@ -5,6 +5,7 @@ from src.trading.manual_review.requests import ManualTickerRequestService
 from src.trading.repositories.in_memory import InMemoryTradingRepository
 from src.trading.risk import RiskDecisionRecord
 from src.trading.signals import SignalSnapshotResult, build_signal_snapshot
+from src.trading.signals.insider import REQUIRED_INSIDER_FIELDS
 from src.trading.signals.sources import EventNewsItemRecord, InMemorySignalSourceRepository, SourceRecord
 from src.trading.strategies.classifier import TradeClassificationRecord
 from src.trading.strategies.matching import CandidateScoreRecord, StrategyDefinitionRecord
@@ -231,6 +232,161 @@ def test_trading_decision_pipeline_persists_decisions_and_manual_request_status(
     assert len(repository.llm_prompt_runs) == 1
     assert len(repository.llm_usage_events) == 1
     assert manual_service.load_active()[0].latest_result_status == "actionable_trade"
+
+
+def test_trading_decision_pipeline_collapses_full_insider_missing_family_for_llm(tmp_path):
+    now = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+    registry = _write_prompt(tmp_path)
+    repository = InMemoryTradingRepository()
+    repository.save_signal_snapshot(
+        _snapshot(
+            now,
+            signal_json={
+                "technical": {"rs_vs_spy_1d": 0.02, "relative_volume": 1.8},
+                "fundamental": {"quality_score": 0.91},
+                "events_news": {"catalyst_quality_score": 0.88},
+                "insider": {},
+            },
+        )
+    )
+    snapshot = repository.signal_snapshots[0]
+    repository.signal_snapshots[0] = SignalSnapshotResult(
+        signal_snapshot_id=snapshot.signal_snapshot_id,
+        ticker=snapshot.ticker,
+        snapshot_type=snapshot.snapshot_type,
+        decision_time=snapshot.decision_time,
+        available_for_decision_at=snapshot.available_for_decision_at,
+        max_input_available_for_decision_at=snapshot.max_input_available_for_decision_at,
+        signal_json=snapshot.signal_json,
+        source_freshness_json={**snapshot.source_freshness_json, "insider": "missing"},
+        missing_signals_json=[f"insider.{field}" for field in REQUIRED_INSIDER_FIELDS],
+        stale_signals_json=snapshot.stale_signals_json,
+        source_record_refs_json=snapshot.source_record_refs_json,
+        source_available_times_json=snapshot.source_available_times_json,
+        excluded_future_source_count=snapshot.excluded_future_source_count,
+        point_in_time_passed=snapshot.point_in_time_passed,
+        selection_source=snapshot.selection_source,
+        manual_request_id=snapshot.manual_request_id,
+    )
+    candidate = CandidateScoreRecord(
+        candidate_score_id="candidate-1",
+        strategy_run_id="run-1",
+        signal_snapshot_id="snapshot-1",
+        ticker="NVDA",
+        strategy_id="relative_strength_rotation_v1",
+        strategy_version="v1",
+        strategy_definition_id="definition-1",
+        candidate_score=0.81,
+        direction="bullish",
+        action="enter_long",
+        typical_horizon="2w-3m",
+        core_signal_evidence={"technical.trend_slope": 1.2},
+        missing_required_signals=[],
+        unsupported_missing_signal_families=[],
+        invalidators=[],
+        risk_tags=[],
+        macro_compatibility="allowed",
+        selection_source="scanner",
+        manual_request_id=None,
+        selection_reason="relative strength",
+        rejection_reason=None,
+        benchmark_context={"primary_benchmark": "QQQ"},
+        decision_time=now,
+        available_for_decision_at=now,
+        source_record_refs_json=[],
+    )
+    classification = TradeClassificationRecord(
+        trade_classification_id="classification-1",
+        candidate_score_id="candidate-1",
+        strategy_run_id="run-1",
+        ticker="NVDA",
+        selected_strategy_id="relative_strength_rotation_v1",
+        selected_strategy_version="v1",
+        expression_bucket_id="long_stock",
+        expression_bucket_version="v1",
+        trade_identity="tactical_stock_trade",
+        watch_type=None,
+        direction="bullish",
+        intended_horizon="2w-3m",
+        exit_policy="close_or_invalidator",
+        result_status="actionable_trade",
+        classification_reason="eligible",
+        selected_strategy_context_json={},
+        decision_time=now,
+    )
+    risk = RiskDecisionRecord(
+        risk_decision_id="risk-1",
+        candidate_score_id="candidate-1",
+        trade_classification_id="classification-1",
+        position_sizing_decision_id="sizing-1",
+        ticker="NVDA",
+        status="approved",
+        reason_code="within_limits",
+        approved_weight=0.04,
+        approved_notional=4_000,
+        approved_quantity=20,
+        portfolio_risk_snapshot_id="snapshot-risk-1",
+        applied_rules=[],
+        generated_hedge_action=None,
+        decision_time=now,
+        metadata_json={},
+    )
+    prompts: list[str] = []
+
+    def runner(prompt: str, model_name: str):
+        prompts.append(prompt)
+        return {
+            "content": {
+                "ticker": "NVDA",
+                "decision": "enter_long",
+                "strategy_id": "relative_strength_rotation_v1",
+                "expression_bucket_id": "long_stock",
+                "trade_identity": "tactical_stock_trade",
+                "instrument_type": "stock",
+                "selection_source": "scanner",
+                "manual_request_id": None,
+                "confidence": 0.74,
+                "confidence_basis": {},
+                "benchmark_context": {"primary_benchmark": "QQQ"},
+                "target_weight": 0.04,
+                "max_loss_pct": 0.02,
+                "time_horizon": "2w-3m",
+                "entry_plan": "market_open",
+                "exit_plan": "close_or_invalidator",
+                "thesis": "Relative strength remains intact.",
+                "key_drivers": ["sector_relative_strength"],
+                "counterarguments": ["Insider data not yet available for this window."],
+                "risk_checks": [],
+                "invalidators": [],
+                "learning_factors_used": [],
+                "schema_version": "v1",
+                "generated_at": now.isoformat(),
+            },
+            "usage": {
+                "provider": "openai",
+                "model": model_name,
+                "prompt_tokens": 12,
+                "completion_tokens": 20,
+                "total_tokens": 32,
+                "estimated_cost": 0.002,
+                "latency_ms": 75,
+            },
+        }
+
+    TradingDecisionPipeline(
+        repository=repository,
+        prompt_registry=registry,
+        model_name="gpt-5-mini",
+        agent_runner=runner,
+    ).run(
+        candidates=(candidate,),
+        classifications=(classification,),
+        risk_decisions=(risk,),
+        decision_time=now,
+    )
+
+    assert "insider_family_unavailable" in prompts[0]
+    assert "insider.purchase_count_30d" not in prompts[0]
 
 
 def test_trading_decision_pipeline_persists_resolved_expression_fallback_plan(tmp_path):

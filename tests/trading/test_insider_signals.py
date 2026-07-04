@@ -79,3 +79,48 @@ def test_build_insider_signals_aggregates_cluster_buys_and_sales():
     assert signals.values["sale_concentration_score"] == 0.1333
     assert signals.values["recent_form4_filing_at"] == five_days_ago.isoformat()
 
+
+def test_build_insider_signals_treats_covered_empty_records_as_no_activity():
+    decision_time = datetime(2026, 6, 15, 13, 0, tzinfo=timezone.utc)
+
+    signals = build_insider_signals(
+        (),
+        decision_time=decision_time,
+        data_covered=True,
+    )
+
+    assert signals.values == {
+        "purchase_count_30d": 0,
+        "sale_count_30d": 0,
+        "insider_net_buy_value_30d": 0.0,
+        "insider_net_buy_value_90d": 0.0,
+        "insider_cluster_buy_count_90d": 0,
+        "officer_buy_flag": False,
+        "director_buy_flag": False,
+        "sale_concentration_score": 0.0,
+        "recent_form4_filing_at": None,
+    }
+    assert signals.missing == ()
+
+
+def test_build_insider_signals_keeps_uncovered_empty_records_missing():
+    decision_time = datetime(2026, 6, 15, 13, 0, tzinfo=timezone.utc)
+
+    signals = build_insider_signals(
+        (),
+        decision_time=decision_time,
+        data_covered=False,
+    )
+
+    assert signals.values == {}
+    assert signals.missing == (
+        "purchase_count_30d",
+        "sale_count_30d",
+        "insider_net_buy_value_30d",
+        "insider_net_buy_value_90d",
+        "insider_cluster_buy_count_90d",
+        "officer_buy_flag",
+        "director_buy_flag",
+        "sale_concentration_score",
+        "recent_form4_filing_at",
+    )

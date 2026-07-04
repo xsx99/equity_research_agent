@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Protocol
 
+from src.trading.signals.coverage import is_insider_data_covered
 from src.trading.manual_review.requests import ManualTickerRequestService
 from src.trading.signals import SignalSnapshotResult, build_signal_snapshot
 from src.trading.data_sources.universe import UniverseSnapshotResult
@@ -14,6 +15,9 @@ class SignalSourceRepositoryProtocol(Protocol):
 
     def records_for_ticker(self, ticker: str) -> tuple[object, ...]:
         """Load source records for one ticker."""
+
+    def latest_insider_filing_at(self) -> datetime | None:
+        """Return the latest market-wide insider filing time, when available."""
 
 
 class SourceIngestionServiceProtocol(Protocol):
@@ -72,6 +76,10 @@ class SignalPipeline:
                 run_type="pre_open",
                 source_families=("technical", "fundamental", "events_news", "social_macro", "option_chain"),
             )
+        insider_data_covered = _insider_data_covered(
+            self.source_repository,
+            decision_time,
+        )
         snapshots: list[SignalSnapshotResult] = []
         for ticker in tickers:
             manual_request = manual_by_ticker.get(ticker)
@@ -83,6 +91,7 @@ class SignalPipeline:
                 snapshot_type="pre_open",
                 selection_source="manual_request" if manual_request is not None else "scanner",
                 manual_request_id=manual_request.request_id if manual_request is not None else None,
+                insider_data_covered=insider_data_covered,
             )
             snapshots.append(snapshot)
             if self.snapshot_repository is not None:
@@ -111,3 +120,16 @@ def _manual_requests_by_ticker(
             raise RuntimeError(f"duplicate_active_manual_requests:{ticker}")
         manual_by_ticker[ticker] = request
     return manual_by_ticker
+
+
+def _insider_data_covered(
+    source_repository: SignalSourceRepositoryProtocol,
+    decision_time: datetime,
+) -> bool:
+    latest_loader = getattr(source_repository, "latest_insider_filing_at", None)
+    if latest_loader is None:
+        return False
+    return is_insider_data_covered(
+        latest_loader(),
+        decision_time=decision_time,
+    )

@@ -370,6 +370,49 @@ def test_sqlalchemy_signal_source_repository_reconstructs_legacy_insider_trade_r
     assert rows[0].available_for_decision_at > created_at
 
 
+def test_sqlalchemy_signal_source_repository_returns_latest_global_insider_filing_at():
+    session = _FakeSession()
+    repository = SQLAlchemySignalSourceRepository(session)
+    older_filing_date = date(2026, 6, 2)
+    latest_filing_date = date(2026, 6, 5)
+    created_at = datetime(2026, 6, 5, 13, 15, tzinfo=timezone.utc)
+    for row_id, ticker, filing_date in (
+        (101, "NVDA", older_filing_date),
+        (102, "MSFT", latest_filing_date),
+    ):
+        session.add(
+            InsiderTrade(
+                id=row_id,
+                accession_number=f"0000000000-26-{row_id:06d}",
+                transaction_index=0,
+                ticker=ticker,
+                company_name=f"{ticker} Corp",
+                company_cik="0001045810",
+                insider_name="Jane Doe",
+                insider_title="Chief Executive Officer",
+                insider_cik="0000123456",
+                is_director=False,
+                is_officer=True,
+                is_ten_percent_owner=False,
+                transaction_type="P",
+                transaction_date=filing_date,
+                shares=1000,
+                price_per_share=125.0,
+                total_value=125000.0,
+                shares_owned_after=200000,
+                filing_date=filing_date,
+                filing_url="https://www.sec.gov/Archives/edgar/data/1045810/form4.xml",
+                raw_data={"footnotes": []},
+                created_at=created_at,
+            )
+        )
+
+    latest = repository.latest_insider_filing_at()
+
+    assert latest is not None
+    assert latest.date() == latest_filing_date
+
+
 def test_source_ingestion_service_persists_provider_requests_after_ingestion_run_exists():
     now = datetime(2026, 6, 3, 12, 45, tzinfo=timezone.utc)
     provider_name = f"test_provider_{uuid.uuid4().hex}"

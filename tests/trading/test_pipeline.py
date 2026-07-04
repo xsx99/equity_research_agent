@@ -201,6 +201,43 @@ def test_signal_pipeline_can_refresh_source_records_before_building_snapshots():
     assert artifact_repository.social_macro_items[0].category == "trump_update"
 
 
+def test_signal_pipeline_threads_global_insider_coverage_into_snapshots():
+    now = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+    universe = UniverseScanPipeline(
+        provider=_FakeUniverseProvider(),
+        config=UniverseFilterConfig(manual_exclude=("MSFT",)),
+        now=lambda: now,
+    ).run()
+    source_repository = InMemorySignalSourceRepository()
+    source_repository.add(
+        SourceRecord(
+            "MSFT",
+            "insider",
+            "fixture",
+            "insider_trades",
+            "MSFT-insider",
+            now,
+            now,
+            now,
+            now,
+            {"transaction_type": "P", "total_value": 100_000.0},
+        )
+    )
+
+    snapshots = SignalPipeline(
+        source_repository=source_repository,
+        manual_request_service=ManualTickerRequestService(now=lambda: now),
+    ).build_pre_open_snapshots(
+        universe_result=universe,
+        decision_time=now,
+    )
+
+    assert [snapshot.ticker for snapshot in snapshots] == ["AAPL"]
+    assert snapshots[0].source_freshness_json["insider"] == "fresh"
+    assert snapshots[0].signal_json["insider"]["purchase_count_30d"] == 0
+    assert not any(item.startswith("insider.") for item in snapshots[0].missing_signals_json)
+
+
 def test_signal_pipeline_requests_option_chain_during_preopen_refresh():
     now = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
     universe = UniverseScanPipeline(

@@ -19,6 +19,7 @@ from src.trading.options.strategy import (
 from src.trading.risk import RiskDecisionRecord
 from src.trading.signals import SignalSnapshotResult
 from src.trading.signals.event_news import build_event_news_signals
+from src.trading.signals.insider import REQUIRED_INSIDER_FIELDS
 from src.trading.signals.sources import (
     EventNewsItemRecord,
     SourceRecord,
@@ -316,7 +317,9 @@ class TradingDecisionPipeline:
                 "available_for_decision_at": signal_snapshot.available_for_decision_at,
                 "signal_json": self._build_llm_signal_json(signal_snapshot, windowed_news_items),
                 "source_freshness_json": signal_snapshot.source_freshness_json,
-                "missing_signals_json": signal_snapshot.missing_signals_json,
+                "missing_signals_json": _collapse_missing_signals_for_llm(
+                    signal_snapshot.missing_signals_json
+                ),
                 "stale_signals_json": signal_snapshot.stale_signals_json,
                 "evidence_items": self._build_evidence_items(windowed_news_items, signal_snapshot),
             },
@@ -627,3 +630,21 @@ class TradingDecisionPipeline:
             if request.request_id == request_id:
                 return request.mode
         return None
+
+
+def _collapse_missing_signals_for_llm(missing_signals: list[str]) -> list[str]:
+    full_insider_missing = {f"insider.{field}" for field in REQUIRED_INSIDER_FIELDS}
+    missing_set = set(missing_signals)
+    if not full_insider_missing.issubset(missing_set):
+        return list(missing_signals)
+
+    collapsed: list[str] = []
+    inserted_insider_marker = False
+    for item in missing_signals:
+        if item in full_insider_missing:
+            if not inserted_insider_marker:
+                collapsed.append("insider_family_unavailable")
+                inserted_insider_marker = True
+            continue
+        collapsed.append(item)
+    return collapsed

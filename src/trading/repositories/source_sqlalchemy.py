@@ -219,6 +219,15 @@ class SQLAlchemySignalSourceRepository:
         latest = max(record.available_for_decision_at for record in records)
         return tuple(record for record in records if record.available_for_decision_at == latest)
 
+    def latest_insider_filing_at(self) -> datetime | None:
+        published_times = [
+            source_record_from_insider_trade(row).published_at
+            for row in self.session.query(InsiderTrade).all()
+        ]
+        if not published_times:
+            return None
+        return max(published_times)
+
     def _to_fundamental_record(self, row: FundamentalSnapshot) -> FundamentalSnapshotRecord:
         return FundamentalSnapshotRecord(
             fundamental_snapshot_id=str(row.fundamental_snapshot_id),

@@ -45,6 +45,7 @@ def build_signal_snapshot(
     snapshot_type: str,
     selection_source: str = "scanner",
     manual_request_id: str | None = None,
+    insider_data_covered: bool = False,
 ) -> SignalSnapshotResult:
     """Build a replayable PR02 signal snapshot from PIT-filtered source rows."""
     audit = filter_point_in_time_records(tuple(source_records), decision_time)
@@ -58,6 +59,7 @@ def build_signal_snapshot(
     insider = build_insider_signals(
         records_by_family.get("insider", ()),
         decision_time=decision_time,
+        data_covered=insider_data_covered,
     )
     social_macro = build_social_macro_signals(
         records_by_family.get("social_macro", ()),
@@ -77,6 +79,8 @@ def build_signal_snapshot(
         family: ("fresh" if family in records_by_family else "missing")
         for family in ("technical", "fundamental", "events_news", "insider", "social_macro")
     }
+    if insider_data_covered:
+        source_freshness["insider"] = "fresh"
     available_for_decision_at = audit.max_input_available_for_decision_at or decision_time
     return SignalSnapshotResult(
         signal_snapshot_id=str(uuid.uuid4()),

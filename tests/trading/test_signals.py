@@ -1,7 +1,8 @@
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from src.trading.signals.sources import SourceRecord
 from src.trading.signals import build_signal_snapshot
+from src.trading.signals.coverage import is_insider_data_covered
 
 
 def test_build_signal_snapshot_combines_five_signal_families_and_pit_audit():
@@ -119,3 +120,55 @@ def test_build_signal_snapshot_combines_five_signal_families_and_pit_audit():
     assert snapshot.excluded_future_source_count == 1
     assert snapshot.point_in_time_passed is True
     assert snapshot.max_input_available_for_decision_at == available_at
+
+
+def test_build_signal_snapshot_marks_covered_empty_insider_as_fresh_no_activity():
+    decision_time = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+
+    snapshot = build_signal_snapshot(
+        ticker="AAPL",
+        decision_time=decision_time,
+        source_records=[],
+        snapshot_type="pre_open",
+        insider_data_covered=True,
+    )
+
+    assert snapshot.source_freshness_json["insider"] == "fresh"
+    assert snapshot.signal_json["insider"]["purchase_count_30d"] == 0
+    assert snapshot.signal_json["insider"]["recent_form4_filing_at"] is None
+    assert not any(item.startswith("insider.") for item in snapshot.missing_signals_json)
+
+
+def test_build_signal_snapshot_keeps_uncovered_empty_insider_missing():
+    decision_time = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+
+    snapshot = build_signal_snapshot(
+        ticker="AAPL",
+        decision_time=decision_time,
+        source_records=[],
+        snapshot_type="pre_open",
+        insider_data_covered=False,
+    )
+
+    assert snapshot.source_freshness_json["insider"] == "missing"
+    assert "insider.purchase_count_30d" in snapshot.missing_signals_json
+
+
+def test_is_insider_data_covered_uses_latest_global_filing_boundary():
+    decision_time = datetime(2026, 6, 5, 12, 0, tzinfo=timezone.utc)
+
+    assert is_insider_data_covered(
+        decision_time - timedelta(days=4),
+        decision_time=decision_time,
+        coverage_window_days=4,
+    ) is True
+    assert is_insider_data_covered(
+        decision_time - timedelta(days=4, seconds=1),
+        decision_time=decision_time,
+        coverage_window_days=4,
+    ) is False
+    assert is_insider_data_covered(
+        None,
+        decision_time=decision_time,
+        coverage_window_days=4,
+    ) is False

@@ -330,3 +330,13 @@ class InMemorySignalSourceRepository:
             return ()
         latest = max(record.available_for_decision_at for record in records)
         return tuple(record for record in records if record.available_for_decision_at == latest)
+
+    def latest_insider_filing_at(self) -> datetime | None:
+        insider_records = [
+            record.published_at
+            for record in self._records
+            if record.source_family == "insider"
+        ]
+        if not insider_records:
+            return None
+        return max(insider_records)
