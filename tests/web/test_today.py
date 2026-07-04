@@ -989,12 +989,13 @@ class TestTodayDashboard:
         assert 'data-testid="upcoming-earnings"' in response.text
         assert 'data-local-time-format="month_day_time"' in response.text
         assert 'data-local-time-format="month_day"' in response.text
-        assert "direct earnings gap risk" in response.text
         assert "AAPL" in response.text
         assert "HIGH" in response.text
         assert "US CPI" in response.text
         assert ">2026-06-03T18:00:00Z<" not in response.text
-        assert "Block New Entry" in response.text
+        assert "direct earnings gap risk" not in response.text
+        assert "Block New Entry" not in response.text
+        assert "Own-event risk is inside the active trade horizon." not in response.text
         assert "block_open" not in response.text
         assert "trades-canvas" not in response.text
         assert "AI Infrastructure" not in response.text
