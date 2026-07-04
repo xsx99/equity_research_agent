@@ -6,6 +6,7 @@ from typing import Optional
 
 from src.core.logging import get_logger
 from src.providers.market_data.alpaca_provider import AlpacaMarketDataProvider, DEFAULT_ALPACA_DATA_BASE_URL
+from src.providers.market_data.fmp_economic_calendar import FMPEconomicCalendar
 from src.providers.market_data.helpers import (
     MARKET_TIMEZONE,
     REGULAR_MARKET_CLOSE,
@@ -42,6 +43,7 @@ __all__ = [
     "fetch_open_to_close_return",
     "fetch_price_at_or_before",
     "fetch_return_over_range",
+    "FMPEconomicCalendar",
     "get_market_snapshot",
 ]
 

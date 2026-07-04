@@ -30,6 +30,7 @@ ALPACA_SECRET_KEY=your_alpaca_secret
 # Optional news enrichment
 FINNHUB_API_KEY=your_finnhub_key
 MARKETAUX_API_KEY=your_marketaux_key
+FMP_API_KEY=your_fmp_key            # optional economic calendar
 ```
 
 ## First-time Setup

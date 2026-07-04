@@ -20,7 +20,11 @@ from src.trading.runtime.preopen_dependencies import (
     _ConfiguredLiveUniverseScanPipeline,
     _RepositoryUniverseFilterLoader,
 )
-from src.trading.runtime.preopen_risk import _LiveRiskWorkflow, _build_trade_risk_request
+from src.trading.runtime.preopen_risk import (
+    _LiveRiskWorkflow,
+    _build_preopen_calendar_events,
+    _build_trade_risk_request,
+)
 from src.trading.runtime.preopen import (
     LivePreopenDependencies,
     LivePreopenRuntime,
@@ -521,6 +525,9 @@ def test_build_live_preopen_dependencies_wires_fallback_reapproval_into_paper_ex
     class _OptionRiskManager:
         pass
 
+    class _EconomicCalendar:
+        pass
+
     class _PromptRegistry:
         @staticmethod
         def get_default():
@@ -568,6 +575,7 @@ def test_build_live_preopen_dependencies_wires_fallback_reapproval_into_paper_ex
     monkeypatch.setattr("src.trading.risk.sizing.PositionSizer", lambda: _PositionSizer())
     monkeypatch.setattr("src.trading.risk.manager.RiskManager", lambda: _RiskManager())
     monkeypatch.setattr("src.trading.risk.options.OptionRiskManager", lambda: _OptionRiskManager())
+    monkeypatch.setattr("src.providers.market_data.FMPEconomicCalendar", _EconomicCalendar)
     monkeypatch.setattr("src.trading.signals.source_ingestion.SourceIngestionService", lambda **kwargs: ("signal-ingestion", kwargs))
     monkeypatch.setattr("src.trading.workflows.signal_snapshot.SignalPipeline", _SignalPipeline)
     monkeypatch.setattr("src.trading.workflows.strategy_scoring.StrategyPipeline", _StrategyPipeline)
@@ -590,6 +598,7 @@ def test_build_live_preopen_dependencies_wires_fallback_reapproval_into_paper_ex
     assert captured["paper_execution_kwargs"]["option_risk_manager"].__class__ is _OptionRiskManager
     assert captured["paper_execution_kwargs"]["option_broker"].__class__ is _OptionBroker
     assert captured["option_broker_kwargs"]["trading_base_url"] == "https://paper-api.alpaca.markets"
+    assert dependencies.risk_workflow.economic_calendar.__class__ is _EconomicCalendar
 
 
 def test_repository_universe_filter_loader_merges_active_watchlist_tickers():
@@ -605,6 +614,71 @@ def test_repository_universe_filter_loader_merges_active_watchlist_tickers():
     config = loader.load_active()
 
     assert config.manual_include == ("AAPL", "MSFT", "NVDA", "TSLA")
+
+
+def test_build_preopen_calendar_events_adds_macro_calendar_once_per_run():
+    decision_time = datetime(2026, 7, 3, 13, 0, tzinfo=timezone.utc)
+    calls: list[dict[str, object]] = []
+
+    class _CalendarEventPipeline:
+        def build_events(self, **kwargs):
+            calls.append(kwargs)
+            if kwargs.get("macro_events"):
+                return tuple(
+                    SimpleNamespace(
+                        calendar_event_id=f"calendar-macro-{index}",
+                        event_key=f"macro:{payload['event_code']}:{payload['event_time'].date().isoformat()}",
+                        event_type="macro",
+                        ticker=None,
+                    )
+                    for index, payload in enumerate(kwargs["macro_events"])
+                )
+            return ()
+
+    class _EconomicCalendar:
+        def __init__(self) -> None:
+            self.calls: list[date] = []
+
+        def macro_events(self, as_of: date):
+            self.calls.append(as_of)
+            return (
+                {
+                    "event_code": "cpi_yoy",
+                    "event_time": datetime(2026, 7, 10, 12, 30, tzinfo=timezone.utc),
+                    "title": "CPI (YoY)",
+                    "severity_hint": "high",
+                    "source": "fmp_economic_calendar",
+                },
+                {
+                    "event_code": "fomc_rate_decision",
+                    "event_time": datetime(2026, 7, 15, 18, 0, tzinfo=timezone.utc),
+                    "title": "FOMC Rate Decision",
+                    "severity_hint": "medium",
+                    "source": "fmp_economic_calendar",
+                },
+            )
+
+    economic_calendar = _EconomicCalendar()
+    events = _build_preopen_calendar_events(
+        calendar_event_pipeline=_CalendarEventPipeline(),
+        economic_calendar=economic_calendar,
+        candidates=(
+            SimpleNamespace(ticker="AAPL", signal_snapshot_id="snapshot-aapl"),
+            SimpleNamespace(ticker="MSFT", signal_snapshot_id="snapshot-msft"),
+            SimpleNamespace(ticker="NVDA", signal_snapshot_id="snapshot-nvda"),
+        ),
+        signal_by_id={},
+        decision_time=decision_time,
+    )
+
+    assert economic_calendar.calls == [decision_time.date()]
+    assert [call["ticker"] for call in calls] == ["AAPL", "MSFT", "NVDA", "MARKET"]
+    assert calls[-1]["macro_events"][0]["event_code"] == "cpi_yoy"
+    assert len(events) == 2
+    assert {event.event_key for event in events} == {
+        "macro:cpi_yoy:2026-07-10",
+        "macro:fomc_rate_decision:2026-07-15",
+    }
 
 
 def test_configured_live_universe_scan_pipeline_prefers_targeted_symbols_for_manual_scope():

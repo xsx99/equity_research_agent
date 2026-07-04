@@ -26,6 +26,7 @@ class _LiveRiskWorkflow:
         lookahead_helper: Any | None = None,
         macro_snapshot_pipeline: MacroSnapshotPipeline | None = None,
         calendar_event_pipeline: CalendarEventPipeline | None = None,
+        economic_calendar: Any | None = None,
         event_risk_pipeline: PortfolioEventRiskAssessmentPipeline | None = None,
         learning_adjustments: "LearningAdjustments | None" = None,
     ) -> None:
@@ -38,6 +39,7 @@ class _LiveRiskWorkflow:
         self.lookahead_helper = lookahead_helper or LookaheadRiskWorkflowHelper()
         self.macro_snapshot_pipeline = macro_snapshot_pipeline
         self.calendar_event_pipeline = calendar_event_pipeline
+        self.economic_calendar = economic_calendar
         self.event_risk_pipeline = event_risk_pipeline
         self.learning_adjustments = learning_adjustments
 
@@ -83,6 +85,7 @@ class _LiveRiskWorkflow:
         self.repository.save_risk_factor_exposures(exposures)
         calendar_events = _build_preopen_calendar_events(
             calendar_event_pipeline=self.calendar_event_pipeline,
+            economic_calendar=self.economic_calendar,
             candidates=candidates,
             signal_by_id=signal_by_id,
             decision_time=decision_time,
@@ -286,6 +289,7 @@ class _LiveRiskWorkflow:
 def _build_preopen_calendar_events(
     *,
     calendar_event_pipeline: CalendarEventPipeline | None,
+    economic_calendar: Any | None = None,
     candidates: tuple[object, ...],
     signal_by_id: dict[str, object],
     decision_time: datetime,
@@ -303,6 +307,16 @@ def _build_preopen_calendar_events(
                 earnings_date=_earnings_date(snapshot),
             )
         )
+    if economic_calendar is not None:
+        macro_events = economic_calendar.macro_events(decision_time.date())
+        if macro_events:
+            events.extend(
+                calendar_event_pipeline.build_events(
+                    ticker="MARKET",
+                    decision_time=decision_time,
+                    macro_events=macro_events,
+                )
+            )
     return tuple(events)
 
 

@@ -104,7 +104,7 @@ def build_live_preopen_dependencies(session: Any | None = None) -> LivePreopenDe
     from src.agents.prompt_registry import PromptRegistry
     from src.agents.trading import _default_agent_runner
     from src.providers.global_context import get_global_context
-    from src.providers.market_data import AlpacaMarketDataProvider
+    from src.providers.market_data import AlpacaMarketDataProvider, FMPEconomicCalendar
     from src.trading.brokers.paper_option import (
         DEFAULT_ALPACA_PAPER_TRADING_BASE_URL,
         PaperOptionBroker,
@@ -193,6 +193,7 @@ def build_live_preopen_dependencies(session: Any | None = None) -> LivePreopenDe
                 global_context_fetcher=lambda as_of: get_global_context(as_of=as_of, limit=5),
             ),
             calendar_event_pipeline=CalendarEventPipeline(),
+            economic_calendar=FMPEconomicCalendar(),
             event_risk_pipeline=PortfolioEventRiskAssessmentPipeline(),
             learning_adjustments=learning_adjustments,
         ),

@@ -45,6 +45,7 @@ SEC_EDGAR_RUN_ON_STARTUP = os.getenv(
 SEC_ATOM_PAGE_SIZE = int(os.getenv("SEC_ATOM_PAGE_SIZE", "100"))
 
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+FMP_API_KEY = os.getenv("FMP_API_KEY")
 APP_ENV = os.getenv("APP_ENV", "development").lower()
 RESEARCH_MODEL_NAME = os.getenv("RESEARCH_MODEL_NAME", "gemini-2.5-flash-lite")
 DEFAULT_FAST_MODEL_NAME = os.getenv("DEFAULT_FAST_MODEL_NAME", RESEARCH_MODEL_NAME)
