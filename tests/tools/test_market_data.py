@@ -512,6 +512,35 @@ def test_fetch_price_at_or_before_returns_provider_price():
     assert result == pytest.approx(512.25)
 
 
+def test_alpaca_provider_fetches_latest_premarket_price_before_cutoff():
+    client = _CapturingClient(
+        {
+            "bars": {
+                "AAPL": [
+                    {"t": "2026-06-01T08:15:00Z", "c": 103.2},
+                    {"t": "2026-06-01T12:59:00Z", "c": 106.4},
+                    {"t": "2026-06-01T13:05:00Z", "c": 107.0},
+                ]
+            }
+        }
+    )
+    provider = AlpacaMarketDataProvider(api_key="k", secret_key="s", client=client)
+
+    price = provider.fetch_premarket_price(
+        "aapl",
+        datetime(2026, 6, 1, 13, 0, tzinfo=timezone.utc),
+    )
+
+    assert price == pytest.approx(106.4)
+    call = client.calls[0]
+    assert call["url"] == "https://data.alpaca.markets/v2/stocks/bars"
+    assert call["params"]["symbols"] == "AAPL"
+    assert call["params"]["timeframe"] == "1Min"
+    assert call["params"]["start"] == "2026-06-01T08:00:00+00:00"
+    assert call["params"]["end"] == "2026-06-01T13:00:00+00:00"
+    assert call["params"]["feed"] == "iex"
+
+
 def test_get_market_snapshot_includes_return_since_market_open_during_session():
     class _StubProvider:
         def fetch_daily_bars(self, ticker, lookback_days):

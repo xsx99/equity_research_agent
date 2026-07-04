@@ -89,6 +89,9 @@ class MarketDataProvider(Protocol):
     def fetch_price_at_or_before(self, ticker: str, as_of: datetime) -> Optional[float]:
         """Return the latest observed price at or before *as_of*."""
 
+    def fetch_premarket_price(self, ticker: str, as_of: datetime) -> Optional[float]:
+        """Return the latest premarket price at or before *as_of* when available."""
+
     def fetch_context(self, ticker: str) -> dict[str, Any]:
         """Return optional context fields such as sector and earnings distance."""
 

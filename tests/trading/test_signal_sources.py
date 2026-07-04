@@ -31,6 +31,16 @@ class _FakeMarketProvider:
 
     def fetch_daily_bars(self, ticker: str, lookback_days: int):
         self.bar_calls.append((ticker, lookback_days))
+        if ticker == "SPY":
+            return [
+                {"date": date(2026, 5, 29), "open": 400.0, "high": 402.0, "low": 399.0, "close": 400.0, "volume": 10_000_000},
+                {"date": date(2026, 5, 30), "open": 400.0, "high": 406.0, "low": 399.0, "close": 404.0, "volume": 12_000_000},
+            ]
+        if ticker == "QQQ":
+            return [
+                {"date": date(2026, 5, 29), "open": 350.0, "high": 352.0, "low": 349.0, "close": 350.0, "volume": 9_000_000},
+                {"date": date(2026, 5, 30), "open": 350.0, "high": 354.0, "low": 349.0, "close": 357.0, "volume": 11_000_000},
+            ]
         return [
             {"date": date(2026, 5, 29), "open": 100.0, "high": 102.0, "low": 99.0, "close": 100.0, "volume": 1_000_000},
             {"date": date(2026, 5, 30), "open": 100.0, "high": 104.0, "low": 99.0, "close": 103.0, "volume": 2_000_000},
@@ -204,10 +214,97 @@ def test_source_ingestion_service_adapts_existing_providers_and_records_metadata
         "succeeded",
         "succeeded",
         "succeeded",
+        "succeeded",
+        "succeeded",
     ]
-    assert market_provider.bar_calls == [("AAPL", 252)]
+    technical_payload = source_repository.latest_available_by_family("AAPL", "technical", now)[0].payload
+    assert technical_payload["benchmark_returns"] == {"SPY": 0.01, "QQQ": 0.02}
+    assert technical_payload["premarket_gap_pct"] is None
+    assert market_provider.bar_calls == [("AAPL", 252), ("SPY", 5), ("QQQ", 5)]
     assert market_provider.context_calls == ["AAPL"]
     assert news_provider.calls == [("AAPL", 5)]
+
+
+def test_source_ingestion_service_reuses_benchmark_returns_across_technical_tickers():
+    now = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+    market_provider = _FakeMarketProvider()
+    source_repository = InMemorySignalSourceRepository()
+    artifact_repository = InMemoryTradingRepository()
+
+    result = SourceIngestionService(
+        market_provider=market_provider,
+        news_provider=None,
+        source_repository=source_repository,
+        artifact_repository=artifact_repository,
+        provider_name="fixture",
+        now=lambda: now,
+        sleeper=lambda seconds: None,
+    ).refresh_tickers(("AAPL", "MSFT"), as_of=now, run_type="targeted", source_families=("technical",))
+
+    payloads = {
+        record.ticker: record.payload
+        for record in result.source_records
+        if record.source_family == "technical"
+    }
+    assert payloads["AAPL"]["benchmark_returns"] == {"SPY": 0.01, "QQQ": 0.02}
+    assert payloads["MSFT"]["benchmark_returns"] == {"SPY": 0.01, "QQQ": 0.02}
+    assert market_provider.bar_calls == [
+        ("AAPL", 252),
+        ("SPY", 5),
+        ("QQQ", 5),
+        ("MSFT", 252),
+    ]
+
+
+def test_source_ingestion_service_computes_premarket_gap_when_provider_supports_it():
+    now = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+
+    class _PremarketMarketProvider(_FakeMarketProvider):
+        def __init__(self) -> None:
+            super().__init__()
+            self.premarket_calls: list[tuple[str, datetime]] = []
+
+        def fetch_premarket_price(self, ticker: str, as_of: datetime):
+            self.premarket_calls.append((ticker, as_of))
+            return 106.09
+
+    market_provider = _PremarketMarketProvider()
+    source_repository = InMemorySignalSourceRepository()
+    artifact_repository = InMemoryTradingRepository()
+
+    result = SourceIngestionService(
+        market_provider=market_provider,
+        news_provider=None,
+        source_repository=source_repository,
+        artifact_repository=artifact_repository,
+        provider_name="fixture",
+        now=lambda: now,
+        sleeper=lambda seconds: None,
+    ).refresh_tickers(("AAPL",), as_of=now, run_type="targeted", source_families=("technical",))
+
+    payload = result.source_records[0].payload
+    assert payload["premarket_gap_pct"] == (106.09 - 103.0) / 103.0
+    assert market_provider.premarket_calls == [("AAPL", now)]
+
+
+def test_source_ingestion_service_leaves_premarket_gap_empty_when_price_unavailable():
+    now = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+
+    class _NoPremarketPriceProvider(_FakeMarketProvider):
+        def fetch_premarket_price(self, ticker: str, as_of: datetime):
+            return None
+
+    result = SourceIngestionService(
+        market_provider=_NoPremarketPriceProvider(),
+        news_provider=None,
+        source_repository=InMemorySignalSourceRepository(),
+        artifact_repository=InMemoryTradingRepository(),
+        provider_name="fixture",
+        now=lambda: now,
+        sleeper=lambda seconds: None,
+    ).refresh_tickers(("AAPL",), as_of=now, run_type="targeted", source_families=("technical",))
+
+    assert result.source_records[0].payload["premarket_gap_pct"] is None
 
 
 def test_source_ingestion_service_condenses_news_and_records_run_metadata():

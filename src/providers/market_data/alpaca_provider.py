@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import os
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Optional
 
 import httpx
@@ -198,6 +198,50 @@ class AlpacaMarketDataProvider:
                 "symbols": symbol,
                 "timeframe": "1Min",
                 "start": session_open.isoformat(),
+                "end": cutoff.isoformat(),
+                "sort": "asc",
+                "adjustment": "split",
+                "feed": "iex",
+            },
+            headers=self._auth_headers(),
+        )
+        response.raise_for_status()
+        payload = response.json()
+        bars_payload = payload.get("bars", {})
+        if isinstance(bars_payload, dict):
+            bars = bars_payload.get(symbol, [])
+        elif isinstance(bars_payload, list):
+            bars = bars_payload
+        else:
+            bars = []
+
+        latest_price: Optional[float] = None
+        for item in sorted(bars, key=lambda bar: str(bar.get("t", ""))):
+            bar_time = _parse_bar_timestamp(item.get("t"))
+            close_raw = item.get("c")
+            if bar_time is None or close_raw is None or bar_time > cutoff:
+                continue
+            latest_price = float(close_raw)
+        return latest_price
+
+    def fetch_premarket_price(self, ticker: str, as_of: datetime) -> Optional[float]:
+        """Return the latest extended-hours premarket bar close at or before *as_of*."""
+        symbol = ticker.upper()
+        cutoff = _normalized_now(as_of)
+        session_day = cutoff.astimezone(MARKET_TIMEZONE).date()
+        premarket_open = datetime.combine(
+            session_day,
+            time(4, 0),
+            tzinfo=MARKET_TIMEZONE,
+        ).astimezone(timezone.utc)
+        if cutoff <= premarket_open:
+            return None
+        response = self._client.get(
+            f"{self.data_base_url}/v2/stocks/bars",
+            params={
+                "symbols": symbol,
+                "timeframe": "1Min",
+                "start": premarket_open.isoformat(),
                 "end": cutoff.isoformat(),
                 "sort": "asc",
                 "adjustment": "split",

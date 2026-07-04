@@ -436,7 +436,17 @@ def test_source_ingestion_service_persists_provider_requests_after_ingestion_run
                 .filter_by(source_ingestion_run_id=uuid.UUID(result.ingestion_run.source_ingestion_run_id))
                 .all()
             )
-            assert len(provider_requests) == 3
+            assert len(provider_requests) == 5
+            assert {
+                (request.endpoint, dict(request.scope_json or {}).get("scope"))
+                for request in provider_requests
+            } == {
+                ("market_bars", "AAPL"),
+                ("market_bars", "benchmark:SPY:1d"),
+                ("market_bars", "benchmark:QQQ:1d"),
+                ("market_context", "AAPL"),
+                ("news", "AAPL"),
+            }
     finally:
         with get_session() as session:
             session.query(ProviderRequestRun).filter_by(provider=provider_name).delete(synchronize_session=False)

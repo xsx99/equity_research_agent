@@ -212,6 +212,8 @@ def _technical_preview(records: tuple[SourceRecord, ...]) -> dict[str, Any]:
         "bar_count": len(bars),
         "latest_date": latest_bar.get("date"),
         "latest_close": latest_bar.get("close"),
+        "benchmark_returns": record.payload.get("benchmark_returns") or {},
+        "premarket_gap_pct": record.payload.get("premarket_gap_pct"),
     }
 
 

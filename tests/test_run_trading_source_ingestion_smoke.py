@@ -84,8 +84,16 @@ def test_run_trading_source_ingestion_smoke_uses_fake_providers_without_network(
         "fundamental": 1,
         "technical": 1,
     }
-    assert result["provider_request_statuses"] == ["succeeded", "succeeded", "succeeded"]
+    assert result["provider_request_statuses"] == [
+        "succeeded",
+        "succeeded",
+        "succeeded",
+        "succeeded",
+        "succeeded",
+    ]
     assert result["technical_preview"]["bar_count"] == 2
+    assert result["technical_preview"]["benchmark_returns"] == {"QQQ": 0.03, "SPY": 0.03}
+    assert result["technical_preview"]["premarket_gap_pct"] is None
     assert "source_records" not in result
     assert result["event_news_preview"] == [
         {

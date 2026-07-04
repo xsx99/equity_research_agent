@@ -87,6 +87,8 @@ class _EventsNewsRefreshResult:
 class SourceIngestionService:
     """Adapt existing market/news providers into replayable SignalPipeline rows."""
 
+    _BENCHMARK_SYMBOLS = ("SPY", "QQQ")
+
     def __init__(
         self,
         *,
@@ -115,6 +117,7 @@ class SourceIngestionService:
         self.max_requests_per_endpoint = max_requests_per_endpoint
         self.now = now or (lambda: datetime.now(timezone.utc))
         self.sleeper = sleeper or (lambda seconds: None)
+        self._benchmark_returns_cache: dict[str, dict[str, float]] = {}
 
     def refresh_tickers(
         self,
@@ -306,6 +309,8 @@ class SourceIngestionService:
         if not normalized_bars:
             return None
         event_time = _latest_bar_event_time(normalized_bars, fallback=as_of)
+        benchmark_returns = self._benchmark_returns_1d(as_of, policy)
+        premarket_gap_pct = self._premarket_gap_pct(ticker, as_of, normalized_bars, policy)
         return SourceRecord(
             ticker=ticker,
             source_family="technical",
@@ -316,8 +321,65 @@ class SourceIngestionService:
             published_at=as_of,
             ingested_at=as_of,
             available_for_decision_at=as_of,
-            payload={"bars": normalized_bars},
+            payload={
+                "bars": normalized_bars,
+                "benchmark_returns": benchmark_returns,
+                "premarket_gap_pct": premarket_gap_pct,
+            },
         )
+
+    def _benchmark_returns_1d(
+        self,
+        as_of: datetime,
+        policy: ProviderResiliencePolicy,
+    ) -> dict[str, float]:
+        cache_key = as_of.date().isoformat()
+        cached = self._benchmark_returns_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        returns: dict[str, float] = {}
+        for symbol in self._BENCHMARK_SYMBOLS:
+            bars = policy.execute(
+                f"benchmark:{symbol}:1d",
+                lambda symbol=symbol: self.market_provider.fetch_daily_bars(symbol, lookback_days=5),
+            )
+            if not isinstance(bars, list):
+                continue
+            closes = [
+                float(bar["close"])
+                for bar in bars
+                if isinstance(bar, dict) and isinstance(bar.get("close"), (int, float))
+            ]
+            if len(closes) >= 2 and closes[-2] != 0:
+                returns[symbol] = (closes[-1] - closes[-2]) / closes[-2]
+        self._benchmark_returns_cache[cache_key] = returns
+        return returns
+
+    def _premarket_gap_pct(
+        self,
+        ticker: str,
+        as_of: datetime,
+        bars: list[dict[str, Any]],
+        policy: ProviderResiliencePolicy,
+    ) -> float | None:
+        prior_close = None
+        last_bar = bars[-1] if bars else None
+        if isinstance(last_bar, dict) and isinstance(last_bar.get("close"), (int, float)):
+            prior_close = float(last_bar["close"])
+        if prior_close in (None, 0):
+            return None
+
+        premarket_fetch = getattr(self.market_provider, "fetch_premarket_price", None)
+        if premarket_fetch is None:
+            return None
+        premarket_price = policy.execute(
+            f"{ticker}:premarket_price",
+            lambda: premarket_fetch(ticker, as_of),
+        )
+        if not isinstance(premarket_price, (int, float)):
+            return None
+        return (float(premarket_price) - prior_close) / prior_close
 
     def _refresh_fundamental(
         self,
