@@ -1,45 +1,51 @@
-"""Option strategy helper functions for the trading decision workflow."""
+"""Option strategy helper functions for the trading decision pipeline."""
 from __future__ import annotations
 
-from src.trading.decision.option_strategy_builder import (
+from src.trading.decision.option_strategy_builder.chain import (
     _build_option_leg_definitions,
     _contract_expiry,
+    _flatten_option_chain_contracts,
+    _infer_option_underlying_price,
+    _is_viable_option_chain_contract,
+    _option_chain_contract_score,
+    _option_iv_context,
+    _option_leg_from_chain_contract,
+    _policy_float,
+    _select_option_chain_legs,
+)
+from src.trading.decision.option_strategy_builder.evidence import (
     _EVIDENCE_IMPORTANCE_PRIORITY,
     _WINDOWED_EVENT_NEWS_FIELDS,
-    _apply_expression_policy_to_option_payload,
+    _evidence_priority,
+    _news_evidence_limit,
+    _render_news_source_text,
+    _round_nested_floats,
+)
+from src.trading.decision.option_strategy_builder.payload import (
     _build_option_strategy_payload,
     _build_option_strategy_payloads,
+    _reject_option_payload,
+    _serialize_option_strategy_payload,
+)
+from src.trading.decision.option_strategy_builder.policy import (
+    _apply_expression_policy_to_option_payload,
     _choose_option_strategy_type,
     _classification_instrument_type,
     _decision_action_for_expression,
     _event_through_expiry,
-    _evidence_priority,
     _expression_earnings_policy,
     _expression_option_policy,
     _expression_requires_implied_volatility,
-    _flatten_option_chain_contracts,
-    _infer_option_underlying_price,
     _instrument_type_for_expression_definition,
     _instrument_type_from_trade_identity,
-    _is_viable_option_chain_contract,
-    _news_evidence_limit,
     _option_assignment_plan,
-    _option_chain_contract_score,
     _option_close_conditions,
     _option_days_to_expiry,
-    _option_iv_context,
-    _option_leg_from_chain_contract,
     _option_max_loss_rule,
     _option_profit_target_pct,
     _option_roll_conditions,
     _option_strategy_pairing_method,
-    _policy_float,
-    _reject_option_payload,
-    _render_news_source_text,
     _resolve_expression_fallback_plan,
-    _round_nested_floats,
-    _select_option_chain_legs,
-    _serialize_option_strategy_payload,
 )
 
 
