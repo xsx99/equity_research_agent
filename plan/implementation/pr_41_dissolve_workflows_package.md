@@ -108,15 +108,15 @@ Modify: `plan/progress_tracker.md`. Unchanged on purpose: `workflows/__init__.py
 
 **Files:** Create `tests/trading/test_pr41_structural_splits.py`
 
-- [ ] Step 1: Assert the new canonical paths exist and export their public surface (one import block
+- [x] Step 1: Assert the new canonical paths exist and export their public surface (one import block
   per moved module, per the Moves table).
-- [ ] Step 2: Assert the old shim paths still resolve and preserve identity, including the
+- [x] Step 2: Assert the old shim paths still resolve and preserve identity, including the
   `paper_execution._build_option_order_request is paper_execution_options._build_option_order_request`
   contract that `test_pr32` relies on, and
   `workflows.paper_execution.PaperExecutionWorkflow is execution.paper_execution.PaperExecutionWorkflow`.
-- [ ] Step 3: Import-smoke `runtime/preopen_dependencies.py`,
+- [x] Step 3: Import-smoke `runtime/preopen_dependencies.py`,
   `runtime/intraday_refresh_dependencies.py`, `intraday/rebalance.py`, and `workflows.__init__`.
-- [ ] Step 4: Run `source ~/.venv/bin/activate && pytest tests/trading/test_pr41_structural_splits.py -q`
+- [x] Step 4: Run `source ~/.venv/bin/activate && pytest tests/trading/test_pr41_structural_splits.py -q`
   — expect failure only because the canonical modules don't exist yet.
 
 ## Task 2: Move `paper_execution*` into `execution/`
@@ -125,17 +125,17 @@ Modify: `plan/progress_tracker.md`. Unchanged on purpose: `workflows/__init__.py
 two `workflows/` files as shims.
 **Test:** `test_pr41_structural_splits.py`, `test_pr32_structural_splits.py`, `test_pr35_execution_attempts.py`
 
-- [ ] Step 1: `git mv src/trading/workflows/paper_execution_options.py src/trading/execution/paper_execution_options.py`
+- [x] Step 1: `git mv src/trading/workflows/paper_execution_options.py src/trading/execution/paper_execution_options.py`
   and `git mv src/trading/workflows/paper_execution.py src/trading/execution/paper_execution.py`.
-- [ ] Step 2: In `execution/paper_execution.py`, repoint the `paper_execution_options` import to
+- [x] Step 2: In `execution/paper_execution.py`, repoint the `paper_execution_options` import to
   `src.trading.execution.paper_execution_options` and the `portfolio_sync` import to
   `src.trading.portfolio.sync` (the latter lands in Task 4 — if doing tasks strictly in order,
   temporarily point at the `workflows.portfolio_sync` shim and fix in Task 4, or do Task 4's move
   first; note the ordering in your commit).
-- [ ] Step 3: Write `workflows/paper_execution.py` and `workflows/paper_execution_options.py` as
+- [x] Step 3: Write `workflows/paper_execution.py` and `workflows/paper_execution_options.py` as
   shims with explicit re-export lists + explicit `__all__` (preserve the surface in the Moves table
   and the `test_pr32` identity helpers). No `import *`, no `globals()`.
-- [ ] Step 4: Run
+- [x] Step 4: Run
   `source ~/.venv/bin/activate && pytest tests/trading/test_pr41_structural_splits.py tests/trading/test_pr32_structural_splits.py tests/trading/test_pr35_execution_attempts.py -q`.
 
 ## Task 3: Move the three pipeline adapters into their capability packages
@@ -144,14 +144,14 @@ two `workflows/` files as shims.
 three `workflows/` files as shims.
 **Test:** `test_pr41_structural_splits.py`, `test_pipeline.py`, `test_portfolio_sync.py`
 
-- [ ] Step 1: `git mv` each: `signal_snapshot.py` → `signals/pipeline.py`,
+- [x] Step 1: `git mv` each: `signal_snapshot.py` → `signals/pipeline.py`,
   `strategy_scoring.py` → `strategies/scoring.py`, `portfolio_sync.py` → `portfolio/sync.py`.
-- [ ] Step 2: Fix any now-relative import each moved file makes (e.g. if `signal_snapshot.py`
+- [x] Step 2: Fix any now-relative import each moved file makes (e.g. if `signal_snapshot.py`
   imported a `signals/` sibling via the absolute `src.trading.signals.*` path, that still resolves;
   only repoint imports of *other moved files*). Repoint `data_sources` imports as needed — those
   files stay, so `src.trading.data_sources.*` keeps resolving.
-- [ ] Step 3: Write the three `workflows/` shims (explicit re-export + `__all__`).
-- [ ] Step 4: Run
+- [x] Step 3: Write the three `workflows/` shims (explicit re-export + `__all__`).
+- [x] Step 4: Run
   `source ~/.venv/bin/activate && pytest tests/trading/test_pr41_structural_splits.py tests/trading/test_pipeline.py tests/trading/test_portfolio_sync.py -q`.
 
 ## Task 4: Move `universe_scan` into `data_sources/`, then full verification
@@ -159,18 +159,18 @@ three `workflows/` files as shims.
 **Files:** Create `data_sources/universe_scan.py`; rewrite `workflows/universe_scan.py` as a shim.
 Modify `plan/progress_tracker.md`.
 
-- [ ] Step 1: `git mv src/trading/workflows/universe_scan.py src/trading/data_sources/universe_scan.py`;
+- [x] Step 1: `git mv src/trading/workflows/universe_scan.py src/trading/data_sources/universe_scan.py`;
   fix any sibling import; write the `workflows/universe_scan.py` shim.
-- [ ] Step 2: Confirm `execution/paper_execution.py`'s `portfolio_sync` import points at
+- [x] Step 2: Confirm `execution/paper_execution.py`'s `portfolio_sync` import points at
   `src.trading.portfolio.sync` (resolve the Task 2 Step 2 ordering note).
-- [ ] Step 3: `source ~/.venv/bin/activate && python -m compileall -q src`.
-- [ ] Step 4: Import smoke (one line importing all six new canonical modules + the six shims +
+- [x] Step 3: `source ~/.venv/bin/activate && python -m compileall -q src`.
+- [x] Step 4: Import smoke (one line importing all six new canonical modules + the six shims +
   `runtime.preopen_dependencies`, `runtime.intraday_refresh_dependencies`, `workflows`).
-- [ ] Step 5: Focused regression suite:
+- [x] Step 5: Focused regression suite:
   `source ~/.venv/bin/activate && pytest tests/trading/test_pr41_structural_splits.py tests/trading/test_pr40_structural_splits.py tests/trading/test_pr35_execution_attempts.py tests/trading/test_pr32_structural_splits.py tests/trading/test_navigation_imports.py tests/trading/test_pipeline.py tests/trading/test_portfolio_sync.py tests/trading/test_runtime_live.py tests/trading/test_runtime_intraday_live.py -q`.
-- [ ] Step 6: `grep -rn --include="*.py" "def \|class " src/trading/workflows/` — confirm only shim
+- [x] Step 6: `grep -rn --include="*.py" "def \|class " src/trading/workflows/` — confirm only shim
   re-exports remain (no class/function bodies left in `workflows/`).
-- [ ] Step 7: `git diff --check`; prepend a dated `plan/progress_tracker.md` entry.
+- [x] Step 7: `git diff --check`; prepend a dated `plan/progress_tracker.md` entry.
 
 Expected result: `workflows/` contains only shims; `execution/` now owns the paper-execution
 workflow next to `attempts.py`; the pipeline adapters live in their capability packages; all old

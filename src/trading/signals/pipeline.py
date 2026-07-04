@@ -1,0 +1,135 @@
+"""Signal snapshot workflow."""
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Protocol
+
+from src.trading.signals.coverage import is_insider_data_covered
+from src.trading.manual_review.requests import ManualTickerRequestService
+from src.trading.signals import SignalSnapshotResult, build_signal_snapshot
+from src.trading.data_sources.universe import UniverseSnapshotResult
+
+
+class SignalSourceRepositoryProtocol(Protocol):
+    """Minimal source repository API consumed by the SignalPipeline."""
+
+    def records_for_ticker(self, ticker: str) -> tuple[object, ...]:
+        """Load source records for one ticker."""
+
+    def latest_insider_filing_at(self) -> datetime | None:
+        """Return the latest market-wide insider filing time, when available."""
+
+
+class SourceIngestionServiceProtocol(Protocol):
+    """Minimal ingestion service API consumed by the SignalPipeline."""
+
+    def refresh_tickers(
+        self,
+        tickers: tuple[str, ...],
+        *,
+        as_of: datetime,
+        run_type: str,
+        source_families: tuple[str, ...] | None = None,
+    ) -> object:
+        """Refresh source rows for the requested tickers."""
+
+
+class SignalSnapshotWriter(Protocol):
+    """Optional snapshot persistence hook for DB-backed manual-review workflows."""
+
+    def save_signal_snapshot(self, snapshot: SignalSnapshotResult) -> None:
+        """Persist one signal snapshot."""
+
+
+class SignalPipeline:
+    """Build pre-open signal snapshots for scanner and active manual tickers."""
+
+    def __init__(
+        self,
+        *,
+        source_repository: SignalSourceRepositoryProtocol,
+        manual_request_service: ManualTickerRequestService,
+        source_ingestion_service: SourceIngestionServiceProtocol | None = None,
+        snapshot_repository: SignalSnapshotWriter | None = None,
+    ) -> None:
+        self.source_repository = source_repository
+        self.manual_request_service = manual_request_service
+        self.source_ingestion_service = source_ingestion_service
+        self.snapshot_repository = snapshot_repository
+
+    def build_pre_open_snapshots(
+        self,
+        *,
+        universe_result: UniverseSnapshotResult,
+        decision_time: datetime,
+    ) -> tuple[SignalSnapshotResult, ...]:
+        included_symbols = list(universe_result.included_symbols)
+        manual_requests = self.manual_request_service.load_active()
+        manual_by_ticker = _manual_requests_by_ticker(manual_requests)
+        tickers = included_symbols + [
+            ticker for ticker in sorted(manual_by_ticker) if ticker not in included_symbols
+        ]
+        if self.source_ingestion_service is not None:
+            self.source_ingestion_service.refresh_tickers(
+                tuple(tickers),
+                as_of=decision_time,
+                run_type="pre_open",
+                source_families=("technical", "fundamental", "events_news", "social_macro", "option_chain"),
+            )
+        insider_data_covered = _insider_data_covered(
+            self.source_repository,
+            decision_time,
+        )
+        snapshots: list[SignalSnapshotResult] = []
+        for ticker in tickers:
+            manual_request = manual_by_ticker.get(ticker)
+            source_records = self.source_repository.records_for_ticker(ticker)
+            snapshot = build_signal_snapshot(
+                ticker=ticker,
+                decision_time=decision_time,
+                source_records=source_records,
+                snapshot_type="pre_open",
+                selection_source="manual_request" if manual_request is not None else "scanner",
+                manual_request_id=manual_request.request_id if manual_request is not None else None,
+                insider_data_covered=insider_data_covered,
+            )
+            snapshots.append(snapshot)
+            if self.snapshot_repository is not None:
+                self.snapshot_repository.save_signal_snapshot(snapshot)
+            if manual_request is not None:
+                result_status = (
+                    "blocked_by_missing_data"
+                    if snapshot.source_freshness_json.get("technical") == "missing"
+                    else "ordinary_watch"
+                )
+                self.manual_request_service.record_evaluation(
+                    manual_request.request_id,
+                    result_status=result_status,
+                    signal_snapshot_id=snapshot.signal_snapshot_id,
+                )
+        return tuple(snapshots)
+
+
+def _manual_requests_by_ticker(
+    manual_requests: tuple[object, ...],
+) -> dict[str, object]:
+    manual_by_ticker: dict[str, object] = {}
+    for request in manual_requests:
+        ticker = str(getattr(request, "ticker", "") or "").strip().upper()
+        if ticker in manual_by_ticker:
+            raise RuntimeError(f"duplicate_active_manual_requests:{ticker}")
+        manual_by_ticker[ticker] = request
+    return manual_by_ticker
+
+
+def _insider_data_covered(
+    source_repository: SignalSourceRepositoryProtocol,
+    decision_time: datetime,
+) -> bool:
+    latest_loader = getattr(source_repository, "latest_insider_filing_at", None)
+    if latest_loader is None:
+        return False
+    return is_insider_data_covered(
+        latest_loader(),
+        decision_time=decision_time,
+    )
