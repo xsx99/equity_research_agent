@@ -37,6 +37,21 @@ def test_fred_economic_calendar_normalizes_high_signal_release_dates():
                         "date": "2026-07-08",
                     },
                     {
+                        "release_id": 101,
+                        "release_name": "FOMC Press Release",
+                        "date": "2026-07-08",
+                    },
+                    {
+                        "release_id": 345,
+                        "release_name": "Research Consumer Price Index",
+                        "date": "2026-07-14",
+                    },
+                    {
+                        "release_id": 92,
+                        "release_name": "Selected Real Retail Sales Series",
+                        "date": "2026-07-16",
+                    },
+                    {
                         "release_id": 999,
                         "release_name": "Broken Date",
                         "date": "not-a-date",

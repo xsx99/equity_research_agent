@@ -16,28 +16,18 @@ logger = get_logger(__name__)
 FRED_RELEASE_DATES_URL = "https://api.stlouisfed.org/fred/releases/dates"
 DEFAULT_RELEASE_TIME_UTC = time(13, 30, tzinfo=timezone.utc)
 
-_HIGH_SIGNAL_PATTERNS = (
-    "consumer price index",
-    "producer price index",
-    "employment situation",
-    "gross domestic product",
-    "retail sales",
-    "fomc",
-    "beige book",
-)
-_MEDIUM_SIGNAL_PATTERNS = (
-    "industrial production",
-    "capacity utilization",
-    "consumer sentiment",
-    "personal income",
-    "personal consumption",
-    "durable goods",
-    "housing starts",
-    "new residential construction",
-    "new residential sales",
-    "ism",
-    "pmi",
-)
+_HIGH_SIGNAL_RELEASE_IDS = {
+    9,  # Advance Monthly Sales for Retail and Food Services
+    10,  # Consumer Price Index
+    46,  # Producer Price Index
+    50,  # Employment Situation
+    53,  # Gross Domestic Product
+}
+_MEDIUM_SIGNAL_RELEASE_IDS = {
+    13,  # G.17 Industrial Production and Capacity Utilization
+    27,  # New Residential Construction
+    323,  # Consumer Sentiment
+}
 
 
 class FREDEconomicCalendar:
@@ -75,7 +65,7 @@ class FREDEconomicCalendar:
                 title = str(row.get("release_name") or "").strip()
                 if not title:
                     continue
-                severity = self._severity(title)
+                severity = self._severity(row.get("release_id"))
                 if severity is None:
                     continue
                 event_time = datetime.combine(event_date, DEFAULT_RELEASE_TIME_UTC)
@@ -126,13 +116,20 @@ class FREDEconomicCalendar:
             return None
 
     @staticmethod
-    def _severity(title: str) -> str | None:
-        normalized = title.strip().lower()
-        if any(pattern in normalized for pattern in _HIGH_SIGNAL_PATTERNS):
+    def _severity(release_id: Any) -> str | None:
+        normalized = FREDEconomicCalendar._release_id(release_id)
+        if normalized in _HIGH_SIGNAL_RELEASE_IDS:
             return "high"
-        if any(pattern in normalized for pattern in _MEDIUM_SIGNAL_PATTERNS):
+        if normalized in _MEDIUM_SIGNAL_RELEASE_IDS:
             return "medium"
         return None
+
+    @staticmethod
+    def _release_id(value: Any) -> int | None:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
 
     @staticmethod
     def _slug(value: str) -> str:
