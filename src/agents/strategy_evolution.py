@@ -29,7 +29,7 @@ from src.tools.registry import ToolRegistry
 
 logger = get_logger(__name__)
 
-DEFAULT_MODEL_NAME = app_config.REFLECTION_MODEL_NAME
+DEFAULT_MODEL_NAME = app_config.STRATEGY_EVOLUTION_MODEL_NAME
 DEFAULT_PROMPT_VERSION = "v1"
 
 AgentRunner = Callable[[str, str], Any]

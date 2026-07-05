@@ -106,7 +106,7 @@ def build_live_strategy_evolution_dependencies(session: Any | None = None) -> Li
         strategy_evolution_pipeline=StrategyEvolutionPipeline(
             repository=repository,
             prompt_registry=PromptRegistry.get_default(),
-            model_name=app_config.REFLECTION_MODEL_NAME,
+            model_name=app_config.STRATEGY_EVOLUTION_MODEL_NAME,
             agent_runner=_default_agent_runner,
         ),
     )

@@ -1,5 +1,17 @@
 # Repository Overview
 
+## Agent LLM Configuration
+
+Agent model selection is centralized in `src/core/config.py`, with provider construction in
+`src/agents/llm_models.py`.
+
+- Research and trading-decision agents default to `gemini-2.5-flash-lite` through
+  `RESEARCH_MODEL_NAME` and `TRADING_MODEL_NAME`.
+- Post-close reflection and strategy evolution default to OpenRouter's `moonshotai/kimi-k2.6`
+  through `REFLECTION_MODEL_NAME` and `STRATEGY_EVOLUTION_MODEL_NAME`.
+- Gemini models use `GOOGLE_API_KEY`; OpenRouter-hosted models use `OPENROUTER_API_KEY` and
+  `OPENROUTER_BASE_URL`.
+
 ## Trading Decision Package
 
 Trade-decision generation now lives under `src/trading/decision/`.

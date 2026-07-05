@@ -49,7 +49,7 @@ class ReflectionAgent(BaseAgent):
         if app_config.APP_ENV in {"prod", "production"} and not app_config.REFLECTION_MODEL_CONFIGURED:
             logger.warning(
                 "reflection_model_not_configured_for_production",
-                fallback_model=app_config.DEFAULT_FAST_MODEL_NAME,
+                default_model=app_config.REFLECTION_MODEL_NAME,
             )
 
     def run(self, input_payload: dict[str, Any], context: ToolContext | None) -> AgentResult:

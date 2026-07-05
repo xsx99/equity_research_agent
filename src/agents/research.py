@@ -2,11 +2,15 @@
 from __future__ import annotations
 
 import json
-import os
 from typing import Any, Callable, Optional
 
 from pydantic import ValidationError
 
+from src.agents.llm_models import (
+    build_phi_model,
+    get_google_api_key,
+    should_use_gemini_backend,
+)
 from src.agents.prompt_registry import PromptRegistry
 from src.agents.base import AgentResult, BaseAgent
 from src.agents.research_schemas import ResearchInputPayload, StructuredResearchOutput
@@ -124,30 +128,15 @@ class ResearchAgent(BaseAgent):
 
 
 def _should_use_gemini_backend(model_name: str) -> bool:
-    return model_name.strip().lower().startswith("gemini")
+    return should_use_gemini_backend(model_name)
 
 
 def _get_google_api_key() -> Optional[str]:
-    return os.getenv("GOOGLE_API_KEY") or getattr(app_config, "GOOGLE_API_KEY", None)
+    return get_google_api_key()
 
 
 def _build_phi_model(model_name: str) -> Any:
-    if _should_use_gemini_backend(model_name):
-        try:
-            from phi.model.google import Gemini
-        except Exception as exc:
-            raise RuntimeError(
-                "Gemini model support requires `google-generativeai` and GOOGLE_API_KEY."
-            ) from exc
-        return Gemini(id=model_name, api_key=_get_google_api_key())
-
-    try:
-        from phi.model.openai import OpenAIChat
-    except Exception as exc:
-        raise RuntimeError(
-            "OpenAI model support requires the `openai` package and OPENAI_API_KEY."
-        ) from exc
-    return OpenAIChat(id=model_name)
+    return build_phi_model(model_name)
 
 
 def _default_agent_runner(prompt: str, model_name: str) -> Any:

@@ -21,7 +21,11 @@ POSTGRES_PASSWORD=your_password
 
 # LLM
 GOOGLE_API_KEY=your_google_api_key
-RESEARCH_MODEL_NAME=gemini-2.5-flash-lite   # optional, this is the default
+OPENROUTER_API_KEY=your_openrouter_api_key
+RESEARCH_MODEL_NAME=gemini-2.5-flash-lite              # optional, this is the default
+TRADING_MODEL_NAME=gemini-2.5-flash-lite               # optional, this is the default
+REFLECTION_MODEL_NAME=moonshotai/kimi-k2.6             # optional, this is the default
+STRATEGY_EVOLUTION_MODEL_NAME=moonshotai/kimi-k2.6     # optional, this is the default
 
 # Market data (required for research pipeline)
 ALPACA_API_KEY=your_alpaca_key
