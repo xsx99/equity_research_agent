@@ -979,6 +979,7 @@ class TestTodayDashboard:
         assert response.status_code == 200
         assert "Risk Status" in response.text
         assert "Top Risk Sources" in response.text
+        assert "Other Risk Actions" not in response.text
         assert "Data / Model Availability" in response.text
         assert "Advanced Risk Audit" not in response.text
         assert "Within Limits" in response.text
@@ -990,6 +991,8 @@ class TestTodayDashboard:
         assert 'data-local-time-format="month_day_time"' in response.text
         assert 'data-local-time-format="month_day"' in response.text
         assert "AAPL" in response.text
+        assert "earnings-tag" in response.text
+        assert "earnings-tile" not in response.text
         assert "HIGH" in response.text
         assert "US CPI" in response.text
         assert ">2026-06-03T18:00:00Z<" not in response.text
@@ -1000,7 +1003,7 @@ class TestTodayDashboard:
         assert "trades-canvas" not in response.text
         assert "AI Infrastructure" not in response.text
 
-    def test_risk_macro_tab_explains_unwired_economic_calendar(self, client):
+    def test_risk_macro_tab_explains_missing_economic_calendar(self, client):
         payload = _dashboard_payload()
         payload["selected_tab"] = "risk-macro"
         payload["risk_macro"] = {
@@ -1015,7 +1018,7 @@ class TestTodayDashboard:
             response = client.get("/today?tab=risk-macro")
 
         assert response.status_code == 200
-        assert "No economic-calendar events are available for this decision window." in response.text
+        assert "No upcoming US macro events are loaded for this decision window." in response.text
         assert "No economic calendar rows are currently visible." not in response.text
 
     def test_portfolio_tab_omits_attention_modules(self, client):

@@ -33,9 +33,6 @@
       {% if imp == "high" %}{% set ev.cal_high = ev.cal_high + 1 %}{% endif %}
       {% endif %}
       {% endfor %}
-      {% set other = namespace(rows=()) %}
-      {% for row in risk_macro.risk_sources or () %}{% if (row.ticker or "") | upper not in ev.earn_tickers %}{% set other.rows = other.rows + (row,) %}{% endif %}{% endfor %}
-
       {# Risk context — macro read + the three short risk lists, grouped and aligned. #}
       <section class="surface-block">
         {% if mc and mc.operator_note %}
@@ -52,14 +49,6 @@
               {% for row in risk_macro.summary.top_risk_sources %}<li><strong>{{ row.label }}</strong> — {{ row.summary }}</li>{% endfor %}
             </ul>
             {% else %}<p class="detail-muted quiet-empty surface-empty-copy">No concentrated risk sources.</p>{% endif %}
-          </div>
-          <div class="risk-context-col">
-            <div class="section-label">Other Risk Actions</div>
-            {% if other.rows %}
-            <ul class="summary-points">
-              {% for row in other.rows %}<li><strong>{{ row.ticker or "Portfolio" }}</strong> <span class="detail-chip">{{ row.recommended_action_label or row.recommended_action }}</span> — {{ row.rationale }}</li>{% endfor %}
-            </ul>
-            {% else %}<p class="detail-muted quiet-empty surface-empty-copy">No standalone risk actions.</p>{% endif %}
           </div>
           <div class="risk-context-col">
             <div class="section-label">Data / Model Availability</div>
@@ -118,7 +107,7 @@
               {% endfor %}
             </div>
             {% else %}
-            <p class="detail-muted quiet-empty surface-empty-copy">No economic-calendar events are available for this decision window.</p>
+            <p class="detail-muted quiet-empty surface-empty-copy">No upcoming US macro events are loaded for this decision window.</p>
             {% endif %}
           </section>
           <section class="risk-calendar-section" data-testid="upcoming-earnings">
@@ -127,15 +116,13 @@
               <span class="detail-muted cal-count">{{ ev.earnings | length }} report{% if ev.earnings|length != 1 %}s{% endif %}{% if ev.earn_high %} · {{ ev.earn_high }} high-impact{% endif %}</span>
             </div>
             {% if ev.earnings %}
-            <div class="earnings-tile-grid">
+            <div class="earnings-tag-list">
               {% for row in ev.earnings %}
-              <article class="earnings-tile">
-                <div class="et-head">
-                  <strong>{{ row.affected_ticker or row.event_type_label or row.event_type }}</strong>
-                  {% if row.importance %}<span class="impact-badge impact-{{ row.importance | lower }}">{{ row.importance | upper }}</span>{% endif %}
-                </div>
-                <div class="et-meta">{% if row.scheduled_at %}<time datetime="{{ row.scheduled_at | iso_datetime }}" data-local-time-format="month_day">{{ row.scheduled_at | local_time('month_day') }}</time>{% elif row.scheduled_at_label %}{{ row.scheduled_at_label }}{% endif %}</div>
-              </article>
+              <span class="earnings-tag">
+                <strong>{{ row.affected_ticker or row.event_type_label or row.event_type }}</strong>
+                <span>{% if row.scheduled_at %}<time datetime="{{ row.scheduled_at | iso_datetime }}" data-local-time-format="month_day">{{ row.scheduled_at | local_time('month_day') }}</time>{% elif row.scheduled_at_label %}{{ row.scheduled_at_label }}{% endif %}</span>
+                {% if row.importance %}<span class="impact-badge impact-{{ row.importance | lower }}">{{ row.importance | upper }}</span>{% endif %}
+              </span>
               {% endfor %}
             </div>
             {% else %}

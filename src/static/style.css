@@ -1066,6 +1066,20 @@ pre {
 .earnings-tile .et-head strong { font-family: var(--mono); }
 .earnings-tile .et-meta { font-size: var(--fs-xs); color: var(--text-muted); }
 .earnings-tile .et-action { display: flex; align-items: baseline; gap: 0.4rem; margin-top: 0.15rem; font-size: var(--fs-xs); color: var(--text-dim); }
+.earnings-tag-list { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
+.earnings-tag {
+  display: inline-flex; align-items: center; gap: 0.4rem;
+  max-width: 100%;
+  padding: 0.32rem 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev-3);
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  line-height: 1.2;
+}
+.earnings-tag strong { color: var(--text); font-family: var(--mono); }
+.earnings-tag .impact-badge { padding: 0.12rem 0.38rem; font-size: 10px; }
 /* System tab grouping */
 .sys-group-head { margin: 1.6rem 0 0.9rem; padding-bottom: 0.45rem; border-bottom: 1px solid var(--border-strong); font-size: var(--fs-md); font-weight: 600; color: var(--text); letter-spacing: 0.01em; }
 .sys-group-head:first-of-type { margin-top: 1.2rem; }

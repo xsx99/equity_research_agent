@@ -97,7 +97,10 @@ def test_today_risk_macro_presenter_builds_command_center_from_canonical_rows():
     assert payload["command_center"]["event_risk_level"] == "High"
     assert payload["command_center"]["hedge_posture"]["target_underlier"] == "QQQ"
     assert payload["summary"]["risk_status"] == "Macro High Risk"
-    assert payload["summary"]["top_risk_sources"][0]["label"] == "Own event window"
+    assert payload["summary"]["top_risk_sources"][0]["label"] == "Technology event risk"
+    assert payload["summary"]["top_risk_sources"][0]["summary"] == (
+        "High-impact portfolio events are driving tactical caution."
+    )
     assert payload["macro"]["blocked_strategy_tags"] == ("gap_and_go_v1",)
     assert payload["events"][0]["affected_ticker"] == "AAPL"
     assert payload["events"][0]["scheduled_at"] == decision_time
@@ -171,6 +174,46 @@ def test_today_risk_macro_presenter_keeps_latest_refreshed_earnings_per_ticker()
     )
 
     assert [event["scheduled_at_label"] for event in payload["events"]] == ["Jul 30, 2026"]
+
+
+def test_today_risk_macro_presenter_sorts_visible_events_by_date():
+    as_of = datetime(2026, 7, 4, 20, 0, tzinfo=timezone.utc)
+    later_event = CalendarEventRecord(
+        calendar_event_id="event-later",
+        event_key="earnings:AMD:2026-08-03",
+        event_type="earnings",
+        ticker="AMD",
+        event_time=datetime(2026, 8, 3, 20, 0, tzinfo=timezone.utc),
+        published_at=as_of,
+        available_for_decision_at=as_of,
+        title="AMD earnings",
+        severity_hint="high",
+        source="fixture",
+        metadata_json={},
+    )
+    earlier_event = CalendarEventRecord(
+        calendar_event_id="event-earlier",
+        event_key="earnings:GOOGL:2026-07-22",
+        event_type="earnings",
+        ticker="GOOGL",
+        event_time=datetime(2026, 7, 22, 20, 0, tzinfo=timezone.utc),
+        published_at=as_of,
+        available_for_decision_at=as_of,
+        title="GOOGL earnings",
+        severity_hint="high",
+        source="fixture",
+        metadata_json={},
+    )
+
+    payload = build_today_risk_macro_payload(
+        latest_risk=None,
+        latest_intent=None,
+        risk_macro_context={"calendar_events": (later_event, earlier_event)},
+        exposures=(),
+        as_of=as_of,
+    )
+
+    assert [event["affected_ticker"] for event in payload["events"]] == ["GOOGL", "AMD"]
 
 
 def test_today_risk_macro_presenter_exposes_assessment_fields_needed_to_filter_earnings_actions():
@@ -301,6 +344,63 @@ def test_today_risk_macro_presenter_converts_notional_gross_exposure_to_equity_p
     )
 
     assert payload["command_center"]["exposure_usage_pct"] == 4.92
+
+
+def test_today_risk_macro_presenter_turns_own_event_source_into_portfolio_risk():
+    decision_time = datetime(2026, 7, 4, 20, 0, tzinfo=timezone.utc)
+    latest_intent = SimpleNamespace(
+        aggregate_risk_state="risk_normalized",
+        binding_constraints=("own_event_block",),
+        metadata_json={"top_risk_sources": ("own_event",)},
+    )
+    assessment = PortfolioEventRiskAssessmentRecord(
+        portfolio_event_risk_assessment_id="assessment-nvda",
+        calendar_event_id="event-nvda",
+        portfolio_risk_snapshot_id="risk-1",
+        decision_time=decision_time,
+        available_for_decision_at=decision_time,
+        ticker="NVDA",
+        risk_source="own_event",
+        severity="high",
+        event_type="earnings",
+        days_until_event=0,
+        affects_existing_position=True,
+        affects_pending_trade=False,
+        recommended_action="block_open",
+        rationale="NVDA earnings maps to own_event risk within 0 day(s).",
+        metadata_json={},
+    )
+
+    payload = build_today_risk_macro_payload(
+        latest_risk=None,
+        latest_intent=latest_intent,
+        risk_macro_context={"portfolio_event_risk_assessments": (assessment,)},
+        exposures=({"factor_type": "sector", "factor_name": "Semiconductors", "exposure": 0.35},),
+    )
+
+    assert payload["summary"]["top_risk_sources"] == (
+        {
+            "label": "Semiconductors event risk",
+            "summary": "High-impact portfolio events are driving tactical caution.",
+        },
+    )
+
+
+def test_today_risk_macro_presenter_ignores_directional_exposure_names_for_event_risk():
+    latest_intent = SimpleNamespace(
+        aggregate_risk_state="risk_normalized",
+        binding_constraints=(),
+        metadata_json={"top_risk_sources": ("own_event",)},
+    )
+
+    payload = build_today_risk_macro_payload(
+        latest_risk=None,
+        latest_intent=latest_intent,
+        risk_macro_context={},
+        exposures=({"factor_type": "direction", "factor_name": "long", "exposure": 0.35},),
+    )
+
+    assert payload["summary"]["top_risk_sources"][0]["label"] == "Portfolio event risk"
 
 
 def test_today_risk_macro_presenter_marks_missing_macro_as_availability_issue():

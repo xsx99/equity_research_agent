@@ -83,7 +83,7 @@ def build_today_risk_macro_payload(
         },
         "events": tuple(
             _event_row(event)
-            for event in calendar_events
+            for event in sorted(calendar_events, key=_event_sort_key)
             if _default_visible_event(event) and _is_upcoming_event(event, as_of)
         ),
         "risk_sources": tuple(_risk_source_row(assessment) for assessment in event_assessments if _default_visible_assessment(assessment)),
@@ -167,6 +167,13 @@ def _sort_timestamp(value: Any) -> tuple[int, str]:
     return (0, str(value or ""))
 
 
+def _event_sort_key(event: object) -> tuple[tuple[int, str], str]:
+    return (
+        _sort_timestamp(getattr(event, "event_time", None)),
+        str(getattr(event, "event_key", "") or ""),
+    )
+
+
 def _top_risk_sources(
     *,
     latest_intent: object | None,
@@ -180,6 +187,9 @@ def _top_risk_sources(
         source_keys = [str(getattr(item, "risk_source", "")) for item in event_assessments if getattr(item, "risk_source", None)]
     rows: list[dict[str, Any]] = []
     for index, source_key in enumerate(source_keys[:3]):
+        if _normalized_source_key(source_key) == "own_event":
+            rows.append(_portfolio_event_risk_source_row(event_assessments=event_assessments, exposures=exposures))
+            continue
         summary = binding_constraints[index] if index < len(binding_constraints) else _risk_source_summary(source_key)
         rows.append({"label": _risk_source_label(source_key, exposures=exposures), "summary": operator_text(summary)})
     if not rows and exposures:
@@ -193,6 +203,34 @@ def _top_risk_sources(
     elif not rows and binding_constraints:
         rows.extend({"label": "Constraint pressure", "summary": operator_text(item)} for item in binding_constraints[:3])
     return tuple(rows)
+
+
+def _portfolio_event_risk_source_row(
+    *,
+    event_assessments: tuple[object, ...],
+    exposures: tuple[dict[str, Any], ...],
+) -> dict[str, str]:
+    factor_name = _portfolio_risk_factor_name(exposures) or "Portfolio"
+    high_impact = any(
+        _normalized_source_key(getattr(item, "risk_source", None)) == "own_event"
+        and str(getattr(item, "severity", "") or "").strip().lower() in {"critical", "high"}
+        for item in event_assessments
+    )
+    summary = (
+        "High-impact portfolio events are driving tactical caution."
+        if high_impact
+        else "Portfolio event windows are driving tactical caution."
+    )
+    return {"label": f"{factor_name} event risk", "summary": summary}
+
+
+def _portfolio_risk_factor_name(exposures: tuple[dict[str, Any], ...]) -> str | None:
+    for exposure in exposures:
+        factor_type = str(exposure.get("factor_type") or "").strip().lower()
+        factor_name = str(exposure.get("factor_name") or "").strip()
+        if factor_type in {"sector", "industry", "theme", "factor"} and factor_name:
+            return factor_name
+    return None
 
 
 def _availability(*, macro_snapshot: object | None, latest_intent: object | None, latest_risk: object | None) -> dict[str, Any]:
@@ -359,11 +397,11 @@ def _macro_metadata(macro_snapshot: object | None) -> dict[str, Any]:
 
 
 def _risk_source_label(source_key: str, *, exposures: tuple[dict[str, Any], ...]) -> str:
-    normalized = str(source_key or "").strip().lower()
+    normalized = _normalized_source_key(source_key)
     if normalized == "macro":
         return "Macro regime"
     if normalized == "own_event":
-        return "Own event window"
+        return _portfolio_event_risk_source_row(event_assessments=(), exposures=exposures)["label"]
     if normalized in {"sector_event_cluster", "event_cluster"}:
         first = exposures[0] if exposures else {}
         factor_name = str(first.get("factor_name") or "Portfolio").strip()
@@ -372,14 +410,18 @@ def _risk_source_label(source_key: str, *, exposures: tuple[dict[str, Any], ...]
 
 
 def _risk_source_summary(source_key: str) -> str:
-    normalized = str(source_key or "").strip().lower()
+    normalized = _normalized_source_key(source_key)
     if normalized == "macro":
         return "Macro regime is constraining risk appetite."
     if normalized == "own_event":
-        return "Upcoming own-event risk is driving tactical caution."
+        return "Portfolio event windows are driving tactical caution."
     if normalized in {"sector_event_cluster", "event_cluster"}:
         return "Clustered event risk is driving hedge posture."
     return _humanize_identifier(normalized)
+
+
+def _normalized_source_key(value: object) -> str:
+    return str(value or "").strip().lower()
 
 
 def _availability_summary(value: str) -> str:
