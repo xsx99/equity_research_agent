@@ -34,6 +34,7 @@ from src.web.presenters.today_workspace_format import (
 )
 from src.web.presenters.today_workspace_timeline import (
     _build_decision_list,
+    _build_history_highlights,
     _build_lifecycle,
     _build_risk_history,
     _build_timeline,
@@ -157,14 +158,16 @@ def _build_detail(
     if not latest_conclusion["trade_plan"]["exit_plan"]:
         latest_conclusion["trade_plan"]["exit_plan"] = operator_text(metadata_json.get("exit_plan")) or None
 
+    timeline = _build_timeline(
+        signal_history=signal_history,
+        decisions=decision_history,
+        risk_history=risk_history,
+        latest_signal_summary=signal_summary,
+        latest_risk_summary=latest_risk_summary,
+    )
     tabs = {
-        "timeline": _build_timeline(
-            signal_history=signal_history,
-            decisions=decision_history,
-            risk_history=risk_history,
-            latest_signal_summary=signal_summary,
-            latest_risk_summary=latest_risk_summary,
-        ),
+        "timeline": timeline,
+        "history_highlights": _build_history_highlights(timeline),
         "trend": {
             "technical": technical_charts,
             "news": news_snippets,

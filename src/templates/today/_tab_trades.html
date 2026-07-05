@@ -242,7 +242,8 @@
                 <table class="dtable history-table history-hl">
                   <thead><tr><th>Time</th><th>Phase</th><th>Decision</th><th>Strategy</th><th>Conf</th><th>Reasoning</th></tr></thead>
                   <tbody>
-                    {% for item in detail.tabs.timeline %}
+                    {% set history_items = detail.tabs.history_highlights if detail.tabs.history_highlights is defined else detail.tabs.timeline %}
+                    {% for item in history_items %}
                     {% set hl_class = "entry" if item.change_type == "baseline" else ("risk" if item.change_type == "material_change" else "decision") %}
                     {% set hl_tag = "Baseline" if item.change_type == "baseline" else ("Change" if item.change_type == "material_change" else "Latest") %}
                     {% set td = item.trade_decision %}

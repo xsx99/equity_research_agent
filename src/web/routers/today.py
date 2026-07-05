@@ -313,12 +313,22 @@ def load_today_dashboard(
     fundamentals_by_ticker = _load_fundamentals_by_ticker(session)
     candidate_rows = _load_candidate_rows(session)
     manual_requests = _load_manual_requests(session)
+    trade_rows = _filter_trade_rows_for_display(trade_rows, manual_requests)
+    candidate_surface_rows, trade_surface_candidate_rows = _split_candidate_rows_by_display_owner(
+        candidate_rows,
+        manual_requests=manual_requests,
+        trade_rows=trade_rows,
+    )
+    trade_workspace_rows = _trade_workspace_rows(
+        trade_rows,
+        trade_surface_candidate_rows,
+    )
     portfolio_intents = _load_portfolio_intents(session)
     relationships = _load_relationships(session)
     peer_baskets = _load_peer_baskets(session)
     themes = _load_themes(session)
     ticker_workspace = build_ticker_workspace(
-        trade_rows=trade_rows,
+        trade_rows=trade_workspace_rows,
         selected_ticker=selected_ticker,
         positions_by_ticker=positions_by_ticker,
         closed_positions_by_ticker=closed_positions_by_ticker,
@@ -327,13 +337,13 @@ def load_today_dashboard(
         news_by_ticker=news_by_ticker,
         fundamentals_by_ticker=fundamentals_by_ticker,
     )
-    trade_rows = _ensure_trade_rows_include_ticker(
+    trade_workspace_rows = _ensure_trade_rows_include_ticker(
         session,
-        trade_rows,
+        trade_workspace_rows,
         ticker_workspace.get("selected_ticker"),
     )
     ticker_workspace = build_ticker_workspace(
-        trade_rows=trade_rows,
+        trade_rows=trade_workspace_rows,
         selected_ticker=ticker_workspace.get("selected_ticker"),
         positions_by_ticker=positions_by_ticker,
         closed_positions_by_ticker=closed_positions_by_ticker,
@@ -346,7 +356,7 @@ def load_today_dashboard(
     audit_detail = _load_trade_detail(session, decision_id) if decision_id else None
     if audit_detail is None:
         selected_decision_id = _latest_trade_decision_id_for_ticker(
-            trade_rows,
+            trade_workspace_rows,
             ticker_workspace.get("selected_ticker"),
         )
         if selected_decision_id:
@@ -423,7 +433,7 @@ def load_today_dashboard(
             (row.get("decision_time"), thesis_text)
         )
     candidates = build_today_candidates_view(
-        rows=candidate_rows,
+        rows=candidate_surface_rows,
         manual_requests=manual_requests,
         themes=themes,
         active_universe_filter=_serialize_universe_filter(active_universe_filter),
@@ -486,7 +496,7 @@ def load_today_dashboard(
         "overview": overview,
         "portfolio": portfolio,
         "trades": {
-            "rows": trade_rows,
+            "rows": trade_workspace_rows,
             "selected_detail": audit_detail,
         },
         "ticker_workspace": ticker_workspace,
@@ -496,6 +506,117 @@ def load_today_dashboard(
         "ops_cost": ops_cost,
         "system": system,
     }
+
+
+def _filter_trade_rows_for_display(
+    trade_rows: list[dict[str, Any]],
+    manual_requests: tuple[dict[str, Any], ...],
+) -> list[dict[str, Any]]:
+    review_only_tickers = {
+        ticker
+        for ticker, mode in _manual_request_modes_by_ticker(manual_requests).items()
+        if mode == "review_only"
+    }
+    if not review_only_tickers:
+        return trade_rows
+    return [
+        row
+        for row in trade_rows
+        if _normalize_ticker_value(row.get("ticker")) not in review_only_tickers
+    ]
+
+
+def _split_candidate_rows_by_display_owner(
+    rows: tuple[dict[str, Any], ...],
+    *,
+    manual_requests: tuple[dict[str, Any], ...],
+    trade_rows: list[dict[str, Any]],
+) -> tuple[tuple[dict[str, Any], ...], tuple[dict[str, Any], ...]]:
+    manual_modes = _manual_request_modes_by_ticker(manual_requests)
+    trade_tickers = {
+        ticker
+        for row in trade_rows
+        if (ticker := _normalize_ticker_value(row.get("ticker")))
+    }
+    candidate_surface: list[dict[str, Any]] = []
+    trade_surface: list[dict[str, Any]] = []
+    for row in rows:
+        if _candidate_belongs_to_trade_surface(row, manual_modes=manual_modes, trade_tickers=trade_tickers):
+            trade_surface.append(row)
+        else:
+            candidate_surface.append(row)
+    return tuple(candidate_surface), tuple(trade_surface)
+
+
+def _candidate_belongs_to_trade_surface(
+    row: dict[str, Any],
+    *,
+    manual_modes: dict[str, str],
+    trade_tickers: set[str],
+) -> bool:
+    ticker = _normalize_ticker_value(row.get("ticker"))
+    mode = str(row.get("mode") or manual_modes.get(ticker, "")).strip().lower()
+    if mode == "review_only":
+        return False
+    if ticker in trade_tickers:
+        return True
+
+    result_status = str(row.get("result_status") or "").strip().lower()
+    if result_status in {"actionable_trade", "no_trade"}:
+        return True
+    if bool(row.get("action_required")):
+        return True
+
+    trade_identity = str(row.get("trade_identity") or "").strip().lower()
+    return bool(trade_identity and trade_identity not in {"watch_only", "none"})
+
+
+def _trade_workspace_rows(
+    trade_rows: list[dict[str, Any]],
+    trade_surface_candidate_rows: tuple[dict[str, Any], ...],
+) -> list[dict[str, Any]]:
+    existing_tickers = {
+        ticker
+        for row in trade_rows
+        if (ticker := _normalize_ticker_value(row.get("ticker")))
+    }
+    seed_rows = [
+        _candidate_row_to_trade_workspace_seed(row)
+        for row in trade_surface_candidate_rows
+        if _normalize_ticker_value(row.get("ticker")) not in existing_tickers
+    ]
+    return [*trade_rows, *seed_rows]
+
+
+def _candidate_row_to_trade_workspace_seed(row: dict[str, Any]) -> dict[str, Any]:
+    result_status = str(row.get("result_status") or "").strip().lower()
+    decision = "no_trade" if result_status == "no_trade" else "trade_candidate"
+    return {
+        "ticker": row.get("ticker"),
+        "decision": decision,
+        "selected_strategy_id": row.get("strategy_match") or row.get("strategy_id"),
+        "confidence": row.get("confidence", row.get("candidate_score")),
+        "created_at": row.get("decision_time"),
+        "decision_time": row.get("decision_time"),
+        "trade_identity": row.get("trade_identity"),
+        "material_signal_change": True,
+        "core_signal_evidence": row.get("core_signal_evidence") or {},
+        "selection_reason": row.get("selection_reason"),
+    }
+
+
+def _manual_request_modes_by_ticker(manual_requests: tuple[dict[str, Any], ...]) -> dict[str, str]:
+    modes: dict[str, str] = {}
+    for item in manual_requests:
+        ticker = _normalize_ticker_value(item.get("ticker"))
+        if not ticker:
+            continue
+        modes[ticker] = str(item.get("mode") or "").strip().lower()
+    return modes
+
+
+def _normalize_ticker_value(value: Any) -> str:
+    return str(value or "").strip().upper()
 
 
 def create_manual_request(session: Any, *, ticker: str, reason: str, mode: str) -> uuid.UUID:

@@ -1,7 +1,7 @@
 """Tests for the ticker-first today workspace presenter."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from src.web.presenters.today_workspace import build_ticker_workspace
 
@@ -1539,6 +1539,61 @@ def test_build_ticker_workspace_computes_history_cards_for_repeated_phase_runs()
     assert timeline[1]["change_summary"] == ("sentiment neutral -> negative", "risk approved -> reduced")
     assert timeline[1]["signal_summary"] == ("Sentiment negative", "Risk reduced")
     assert timeline[1]["source_refs"] == ("signal:2",)
+
+
+def test_build_ticker_workspace_limits_history_to_latest_entry_per_day_for_recent_10_days():
+    start = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    timeline_items = []
+    for offset in range(12):
+        day = start + timedelta(days=offset)
+        timeline_items.extend(
+            [
+                {
+                    "time": day.replace(hour=12, minute=45).isoformat().replace("+00:00", "Z"),
+                    "event_type": "signal_snapshot",
+                    "phase": "pre_open",
+                    "summary": f"Morning summary {offset}",
+                },
+                {
+                    "time": day.replace(hour=19, minute=15).isoformat().replace("+00:00", "Z"),
+                    "event_type": "signal_snapshot",
+                    "phase": "intraday",
+                    "summary": f"Latest summary {offset}",
+                },
+            ]
+        )
+
+    workspace = build_ticker_workspace(
+        trade_rows=[
+            {
+                "ticker": "NOK",
+                "decision": "no_trade",
+                "created_at": "2026-06-01T13:32:00Z",
+            },
+        ],
+        selected_ticker="NOK",
+        positions_by_ticker={},
+        risk_by_ticker={},
+        signal_history_by_ticker={"NOK": {"summary": ["Latest summary"], "timeline": timeline_items}},
+        news_by_ticker={},
+        fundamentals_by_ticker={},
+    )
+
+    timeline = workspace["detail"]["tabs"]["history_highlights"]
+
+    assert len(timeline) == 10
+    assert [item["time_label"] for item in timeline] == [
+        "2026-06-03 19:15 UTC",
+        "2026-06-04 19:15 UTC",
+        "2026-06-05 19:15 UTC",
+        "2026-06-06 19:15 UTC",
+        "2026-06-07 19:15 UTC",
+        "2026-06-08 19:15 UTC",
+        "2026-06-09 19:15 UTC",
+        "2026-06-10 19:15 UTC",
+        "2026-06-11 19:15 UTC",
+        "2026-06-12 19:15 UTC",
+    ]
 
 
 def test_build_ticker_workspace_truncates_signal_summary_and_groups_hidden_bullets():

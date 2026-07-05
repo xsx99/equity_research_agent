@@ -83,6 +83,22 @@ def _build_timeline(
     timeline.sort(key=lambda item: _sort_key(item.get("time")))
     return timeline or [_empty_timeline_item()]
 
+def _build_history_highlights(timeline: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    dated_by_day: dict[str, dict[str, Any]] = {}
+    undated: list[dict[str, Any]] = []
+    for item in timeline:
+        parsed = _parse_timestamp(item.get("time"))
+        if parsed is None:
+            undated.append(item)
+            continue
+        day_key = parsed.astimezone(timezone.utc).date().isoformat()
+        current = dated_by_day.get(day_key)
+        if current is None or _sort_key(item.get("time")) > _sort_key(current.get("time")):
+            dated_by_day[day_key] = item
+
+    limited_dated = sorted(dated_by_day.values(), key=lambda item: _sort_key(item.get("time")))[-10:]
+    return sorted([*limited_dated, *undated], key=lambda item: _sort_key(item.get("time")))
+
 def _build_signal_timeline_events(items: Any) -> list[dict[str, Any]]:
     if not isinstance(items, list):
         return []

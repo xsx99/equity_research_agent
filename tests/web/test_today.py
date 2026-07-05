@@ -1721,6 +1721,124 @@ class TestTodayDashboard:
         assert dashboard["trades"]["selected_detail"] is None
         load_trade_detail.assert_not_called()
 
+    def test_load_today_dashboard_splits_candidate_and_trade_surface_rows(self):
+        from src.web.routers.today import load_today_dashboard
+
+        session = _query_stub_session()
+        candidate_rows = (
+            {
+                "ticker": "REVIEW",
+                "selection_source": "manual_request",
+                "result_status": "actionable_trade",
+                "strategy_match": "breakout_v1",
+                "candidate_score": 0.88,
+                "decision_time": "2026-06-03T13:00:00Z",
+            },
+            {
+                "ticker": "PAPER",
+                "selection_source": "manual_request",
+                "result_status": "actionable_trade",
+                "strategy_match": "gap_continuation_v1",
+                "candidate_score": 0.82,
+                "decision_time": "2026-06-03T13:01:00Z",
+            },
+            {
+                "ticker": "SCAN",
+                "selection_source": "scanner",
+                "result_status": "actionable_trade",
+                "strategy_match": "catalyst_breakout_v1",
+                "candidate_score": 0.79,
+                "decision_time": "2026-06-03T13:02:00Z",
+            },
+            {
+                "ticker": "WATCH",
+                "selection_source": "scanner",
+                "result_status": "ordinary_watch",
+                "strategy_match": "oversold_bounce_v1",
+                "candidate_score": 0.41,
+                "decision_time": "2026-06-03T13:03:00Z",
+            },
+        )
+        manual_requests = (
+            {"ticker": "REVIEW", "mode": "review_only"},
+            {"ticker": "PAPER", "mode": "paper_trade_eligible"},
+        )
+        trade_rows = [
+            {
+                "ticker": "TRADE",
+                "decision": "no_trade",
+                "created_at": "2026-06-03T13:05:00Z",
+            }
+        ]
+
+        workspace_payload = {
+            "selected_ticker": None,
+            "buckets": {
+                "action_now": [],
+                "open_positions": [],
+                "closed_today": [],
+                "reviewing": [],
+                "watch": [],
+                "in_position": [],
+            },
+            "last_run_at": None,
+            "detail": None,
+        }
+
+        with ExitStack() as stack:
+            stack.enter_context(patch("src.web.routers.today._load_trade_rows", return_value=trade_rows))
+            stack.enter_context(patch("src.web.routers.today._load_positions", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_option_positions", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_hedge_overlays", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_live_alerts", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_material_changes", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_risk_exposures", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_candidate_rows", return_value=candidate_rows))
+            stack.enter_context(patch("src.web.routers.today._load_manual_requests", return_value=manual_requests))
+            stack.enter_context(patch("src.web.routers.today._load_portfolio_intents", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_relationships", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_peer_baskets", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_themes", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_learning_factors", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_strategy_performance", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_strategy_proposals", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_strategy_definitions", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_strategy_evaluation_results", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_llm_usage", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_trade_detail", return_value=None))
+            build_workspace = stack.enter_context(
+                patch("src.web.routers.today.build_ticker_workspace", return_value=workspace_payload)
+            )
+            build_candidates = stack.enter_context(
+                patch(
+                    "src.web.routers.today.build_today_candidates_view",
+                    return_value={
+                        "decision_readout": (),
+                        "action_queue": (),
+                        "manual_review_queue": (),
+                        "agent_candidates": (),
+                        "manual_candidates": (),
+                        "summary": {},
+                    },
+                )
+            )
+            load_today_dashboard(
+                session,
+                selected_tab="trades",
+                decision_id=None,
+                selected_ticker=None,
+            )
+
+        candidate_tickers = {
+            row["ticker"] for row in build_candidates.call_args.kwargs["rows"]
+        }
+        workspace_tickers = {
+            row["ticker"] for row in build_workspace.call_args.kwargs["trade_rows"]
+        }
+
+        assert candidate_tickers == {"REVIEW", "WATCH"}
+        assert workspace_tickers == {"TRADE", "PAPER", "SCAN"}
+
     def test_load_today_dashboard_populates_trade_bucket_recency_labels(self):
         from src.web.routers.today import load_today_dashboard
 
