@@ -208,6 +208,15 @@ class ReflectionOutput(BaseModel):
             return value["factors"]
         return value
 
+    @field_validator("strategy_proposal_hints", mode="before")
+    @classmethod
+    def normalize_strategy_proposal_hints(cls, value: Any) -> Any:
+        if value is None:
+            return []
+        if isinstance(value, dict):
+            return [value]
+        return value
+
 
 class ReflectionOutputFallback(BaseModel):
     """Safe fallback artifact persisted when the LLM output is unusable."""

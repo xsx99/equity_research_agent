@@ -150,7 +150,10 @@ def test_reflection_agent_accepts_prompted_analysis_sections(tmp_path):
                 "what_failed": ["Missed a catalyst watch escalation."],
                 "attribution": [],
                 "learning_factors": [],
-                "strategy_proposal_hints": [],
+                "strategy_proposal_hints": {
+                    "hint": "A volume-confirmed VWAP reclaim overlay may improve large-gap trades.",
+                    "scope": "overlay_only",
+                },
                 "schema_version": "v1",
                 "generated_at": "2026-06-02T22:00:00+00:00",
             }
@@ -182,7 +185,10 @@ def test_reflection_agent_overwrites_llm_generated_at_with_system_time(tmp_path)
                 "what_failed": [],
                 "attribution": [],
                 "learning_factors": [],
-                "strategy_proposal_hints": [],
+                "strategy_proposal_hints": {
+                    "hint": "A volume-confirmed VWAP reclaim overlay may improve large-gap trades.",
+                    "scope": "overlay_only",
+                },
                 "schema_version": "v1",
                 "generated_at": stale_llm_timestamp,
             }
@@ -241,7 +247,10 @@ def test_reflection_agent_normalizes_loose_production_sections(tmp_path):
                         "confidence": "high",
                     }
                 ],
-                "strategy_proposal_hints": [],
+                "strategy_proposal_hints": {
+                    "hint": "A volume-confirmed VWAP reclaim overlay may improve large-gap trades.",
+                    "scope": "overlay_only",
+                },
                 "schema_version": "v1",
                 "generated_at": "2026-06-02T22:00:00+00:00",
             }
@@ -256,6 +265,12 @@ def test_reflection_agent_normalizes_loose_production_sections(tmp_path):
     assert result.output_data["learning_factors"][0]["scope"] == "portfolio"
     assert result.output_data["learning_factors"][0]["activation_policy"] == "observation"
     assert result.output_data["learning_factors"][0]["confidence"] == 0.8
+    assert result.output_data["strategy_proposal_hints"] == [
+        {
+            "hint": "A volume-confirmed VWAP reclaim overlay may improve large-gap trades.",
+            "scope": "overlay_only",
+        }
+    ]
 
 
 def test_reflection_agent_normalizes_wrapped_learning_factors(tmp_path):
