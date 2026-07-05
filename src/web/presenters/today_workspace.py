@@ -150,10 +150,6 @@ def _build_ticker_items(
     for ticker_group in (
         positions_by_ticker,
         closed_positions_by_ticker,
-        risk_by_ticker,
-        signal_history_by_ticker,
-        news_by_ticker,
-        fundamentals_by_ticker,
     ):
         for ticker in ticker_group.keys():
             if ticker and ticker not in ticker_keys:

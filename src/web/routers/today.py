@@ -323,6 +323,11 @@ def load_today_dashboard(
         trade_rows,
         trade_surface_candidate_rows,
     )
+    trade_workspace_rows = _ensure_trade_rows_include_ticker(
+        session,
+        trade_workspace_rows,
+        selected_ticker,
+    )
     portfolio_intents = _load_portfolio_intents(session)
     relationships = _load_relationships(session)
     peer_baskets = _load_peer_baskets(session)

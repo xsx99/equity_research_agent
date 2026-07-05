@@ -281,6 +281,23 @@ def test_build_ticker_workspace_includes_position_only_ticker():
     assert workspace["selected_ticker"] == "TSLA"
 
 
+def test_build_ticker_workspace_does_not_seed_tickers_from_passive_context():
+    workspace = build_ticker_workspace(
+        trade_rows=[],
+        selected_ticker=None,
+        positions_by_ticker={},
+        risk_by_ticker={"MU": {"status": "approved", "reason": "within_limits"}},
+        signal_history_by_ticker={"SNDK": {"summary": ["Signal snapshot updated"], "timeline": []}},
+        news_by_ticker={"LITE": [{"title": "News item", "summary": "Context only."}]},
+        fundamentals_by_ticker={"AVGO": [{"title": "Quality", "summary": "0.82"}]},
+    )
+
+    assert workspace["selected_ticker"] is None
+    assert workspace["detail"] is None
+    assert all(not items for key, items in workspace["buckets"].items() if key != "in_position")
+    assert workspace["buckets"]["in_position"] == []
+
+
 def test_build_ticker_workspace_does_not_promote_directional_decision_without_actionable_state():
     rows = [
         {
