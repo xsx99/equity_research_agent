@@ -3098,6 +3098,15 @@ def test_today_styles_define_attention_feed_row_variants():
     assert ".attention-feed-row-signal" in stylesheet
 
 
+def test_today_kpi_values_scale_to_fit_card_width():
+    stylesheet = Path("src/static/style.css").read_text()
+
+    assert ".kpi-card .value" in stylesheet
+    assert "container-type: inline-size" in stylesheet
+    assert "@container (max-width: 230px)" in stylesheet
+    assert "overflow-wrap: anywhere" in stylesheet
+
+
 def test_build_attention_feed_merges_by_ticker():
     from src.web.presenters.today_overview import _build_attention_feed
 

@@ -1187,7 +1187,7 @@ details > summary:hover { color: var(--text); }
 
 /* KPI cards with a colored gradient accent on top */
 .kpi-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: var(--sp-3); }
-.kpi-card { position: relative; padding: 1rem 1.1rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-elev-2); overflow: hidden; }
+.kpi-card { position: relative; min-width: 0; container-type: inline-size; padding: 1rem 1.1rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-elev-2); overflow: hidden; }
 .kpi-card::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 2px; background: var(--accent); opacity: .9; }
 .kpi-card.k-blue::before   { background: linear-gradient(90deg,#4cc9f0,#5b8cff); }
 .kpi-card.k-violet::before { background: linear-gradient(90deg,#8b5cf6,#5b8cff); }
@@ -1196,10 +1196,16 @@ details > summary:hover { color: var(--text); }
 .kpi-card.k-pink::before   { background: linear-gradient(90deg,#f472b6,#fb7185); }
 .kpi-card.k-cyan::before   { background: linear-gradient(90deg,#22d3ee,#4cc9f0); }
 .kpi-card .label { font-size: var(--fs-2xs); text-transform: uppercase; letter-spacing: .08em; color: var(--text-muted); font-weight: 600; }
-.kpi-card .value { font-family: var(--mono); font-size: 1.75rem; font-weight: 600; line-height: 1.1; margin: .4rem 0 .15rem; color: var(--text); }
+.kpi-card .value { max-width: 100%; overflow-wrap: anywhere; font-family: var(--mono); font-size: 1.75rem; font-weight: 600; line-height: 1.1; margin: .4rem 0 .15rem; color: var(--text); }
 .kpi-card .sub { font-size: var(--fs-sm); color: var(--text-muted); font-family: var(--mono); }
 .kpi-card .value.pos, .kpi-card .sub.pos { color: var(--pos); }
 .kpi-card .value.neg, .kpi-card .sub.neg { color: var(--neg); }
+@container (max-width: 230px) {
+  .kpi-card .value { font-size: 1.55rem; }
+}
+@container (max-width: 205px) {
+  .kpi-card .value { font-size: 1.35rem; }
+}
 
 /* Generic panel (header + body) */
 .panel { border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-elev-2); margin-bottom: var(--sp-4); }
