@@ -7,7 +7,9 @@ from typing import Optional
 from src.core.logging import get_logger
 from src.providers.market_data.alpaca_provider import AlpacaMarketDataProvider, DEFAULT_ALPACA_DATA_BASE_URL
 
+from src.providers.market_data.economic_calendar import EconomicCalendarFallback
 from src.providers.market_data.fmp_economic_calendar import FMPEconomicCalendar
+from src.providers.market_data.fred_economic_calendar import FREDEconomicCalendar
 from src.providers.market_data.nasdaq_earnings import NasdaqEarningsCalendar
 
 from src.providers.market_data.helpers import (
@@ -33,7 +35,9 @@ from src.providers.market_data.types import (
 __all__ = [
     "AlpacaMarketDataProvider",
     "DailyBar",
+    "EconomicCalendarFallback",
     "DEFAULT_ALPACA_DATA_BASE_URL",
+    "FREDEconomicCalendar",
     "MarketDataProvider",
     "MarketSnapshot",
     "MARKET_TIMEZONE",

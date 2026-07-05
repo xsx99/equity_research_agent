@@ -286,6 +286,15 @@ python scripts/run_fmp_economic_calendar_smoke.py --as-of 2026-07-03 --horizon-d
 
 This smoke calls FMP only when `FMP_API_KEY` is configured; otherwise it returns `status=skipped` without making an external request.
 
+FRED economic release-calendar provider smoke:
+
+```bash
+source ~/.venv/bin/activate
+python scripts/run_fred_economic_calendar_smoke.py --as-of 2026-07-03 --horizon-days 14
+```
+
+This smoke calls FRED only when `FRED_API_KEY` is configured; otherwise it returns `status=skipped` without making an external request. Live preopen uses the FRED release calendar first, then falls back to FMP if FRED returns no forward macro releases.
+
 ## Macro/Event Degraded Mode
 
 - If macro fetch fails during live preopen or intraday refresh, `MacroSnapshotPipeline` persists a canonical `macro_snapshots` row with `regime=unavailable`, `risk_budget_multiplier=0.0`, `invalidators=["global_context_failed"]`, and blocked tactical tags. `/today` then shows an explicit macro availability issue instead of silently falling back to `unavailable` UI heuristics.
@@ -298,8 +307,8 @@ The DB smoke above only needs `DATABASE_URL`. Live macro/event enrichment during
 
 - `ALPACA_API_KEY` plus `ALPACA_SECRET_KEY` or `ALPACA_API_SECRET` for Alpaca market data and Alpaca news fallback.
 - `FINNHUB_API_KEY` to enable the preferred Finnhub company-news provider.
-- `FMP_API_KEY` to enable the forward-looking FMP economic calendar used by preopen event risk; when unset, scheduled macro events degrade to an empty calendar.
-- `FRED_API_KEY` is optional but recommended for fresher macro indicator reads; without it the global-context provider falls back to public CSV/Yahoo/GLD proxy paths where possible.
+- `FRED_API_KEY` to enable the forward-looking FRED release calendar used by preopen event risk and for fresher macro indicator reads; without it the global-context provider falls back to public CSV/Yahoo/GLD proxy paths where possible.
+- `FMP_API_KEY` to enable the paid FMP economic calendar fallback; when both FRED and FMP are unset or unavailable, scheduled macro events degrade to an empty calendar.
 - `ALPACA_DATA_BASE_URL` remains optional when you need to override Alpaca’s default data endpoint.
 
 This should return `decision_status="ready"` and `risk_status="approved"` for the whitelisted long-call fixture.

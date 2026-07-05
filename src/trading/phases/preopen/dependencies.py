@@ -105,7 +105,12 @@ def build_live_preopen_dependencies(session: Any | None = None) -> LivePreopenDe
     from src.agents.trading import _default_agent_runner
     from src.providers.global_context import get_global_context
 
-    from src.providers.market_data import AlpacaMarketDataProvider, FMPEconomicCalendar
+    from src.providers.market_data import (
+        AlpacaMarketDataProvider,
+        EconomicCalendarFallback,
+        FMPEconomicCalendar,
+        FREDEconomicCalendar,
+    )
     from src.providers.market_data.nasdaq_earnings import NasdaqEarningsCalendar
 
     from src.trading.brokers.paper_option import (
@@ -198,7 +203,10 @@ def build_live_preopen_dependencies(session: Any | None = None) -> LivePreopenDe
                 global_context_fetcher=lambda as_of: get_global_context(as_of=as_of, limit=5),
             ),
             calendar_event_pipeline=CalendarEventPipeline(),
-            economic_calendar=FMPEconomicCalendar(),
+            economic_calendar=EconomicCalendarFallback(
+                FREDEconomicCalendar(),
+                FMPEconomicCalendar(),
+            ),
             event_risk_pipeline=PortfolioEventRiskAssessmentPipeline(),
             learning_adjustments=learning_adjustments,
         ),

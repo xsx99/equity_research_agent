@@ -525,7 +525,10 @@ def test_build_live_preopen_dependencies_wires_fallback_reapproval_into_paper_ex
     class _OptionRiskManager:
         pass
 
-    class _EconomicCalendar:
+    class _FmpEconomicCalendar:
+        pass
+
+    class _FredEconomicCalendar:
         pass
 
     class _PromptRegistry:
@@ -575,7 +578,8 @@ def test_build_live_preopen_dependencies_wires_fallback_reapproval_into_paper_ex
     monkeypatch.setattr("src.trading.risk.sizing.PositionSizer", lambda: _PositionSizer())
     monkeypatch.setattr("src.trading.risk.manager.RiskManager", lambda: _RiskManager())
     monkeypatch.setattr("src.trading.risk.options.OptionRiskManager", lambda: _OptionRiskManager())
-    monkeypatch.setattr("src.providers.market_data.FMPEconomicCalendar", _EconomicCalendar)
+    monkeypatch.setattr("src.providers.market_data.FMPEconomicCalendar", _FmpEconomicCalendar)
+    monkeypatch.setattr("src.providers.market_data.FREDEconomicCalendar", _FredEconomicCalendar)
     monkeypatch.setattr("src.trading.signals.source_ingestion.SourceIngestionService", lambda **kwargs: ("signal-ingestion", kwargs))
     monkeypatch.setattr("src.trading.workflows.signal_snapshot.SignalPipeline", _SignalPipeline)
     monkeypatch.setattr("src.trading.workflows.strategy_scoring.StrategyPipeline", _StrategyPipeline)
@@ -598,7 +602,12 @@ def test_build_live_preopen_dependencies_wires_fallback_reapproval_into_paper_ex
     assert captured["paper_execution_kwargs"]["option_risk_manager"].__class__ is _OptionRiskManager
     assert captured["paper_execution_kwargs"]["option_broker"].__class__ is _OptionBroker
     assert captured["option_broker_kwargs"]["trading_base_url"] == "https://paper-api.alpaca.markets"
-    assert dependencies.risk_workflow.economic_calendar.__class__ is _EconomicCalendar
+    economic_calendar = dependencies.risk_workflow.economic_calendar
+    assert economic_calendar.__class__.__name__ == "EconomicCalendarFallback"
+    assert [provider.__class__ for provider in economic_calendar._providers] == [
+        _FredEconomicCalendar,
+        _FmpEconomicCalendar,
+    ]
 
 
 def test_repository_universe_filter_loader_merges_active_watchlist_tickers():
