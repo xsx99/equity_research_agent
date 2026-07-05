@@ -48,13 +48,21 @@
           <div>
             <div class="section-label">What Worked</div>
             {% if rf.what_worked %}
-            <ul class="summary-points pos-points">{% for item in rf.what_worked %}<li>{{ item }}</li>{% endfor %}</ul>
+            <ul class="summary-points pos-points">{% for item in rf.what_worked %}<li>
+              <strong>{{ item.summary if item.summary is defined else item }}</strong>
+              {% if item.tags is defined and item.tags %}<span class="reflection-tags">{% for tag in item.tags %}<span class="tag">{{ tag }}</span>{% endfor %}</span>{% endif %}
+              {% if item.reason is defined and item.reason %}<span class="reflection-reason">{{ item.reason }}</span>{% endif %}
+            </li>{% endfor %}</ul>
             {% else %}<p class="detail-muted quiet-empty surface-empty-copy">None recorded.</p>{% endif %}
           </div>
           <div>
             <div class="section-label">What Failed</div>
             {% if rf.what_failed %}
-            <ul class="summary-points neg-points">{% for item in rf.what_failed %}<li>{{ item }}</li>{% endfor %}</ul>
+            <ul class="summary-points neg-points">{% for item in rf.what_failed %}<li>
+              <strong>{{ item.summary if item.summary is defined else item }}</strong>
+              {% if item.tags is defined and item.tags %}<span class="reflection-tags">{% for tag in item.tags %}<span class="tag">{{ tag }}</span>{% endfor %}</span>{% endif %}
+              {% if item.reason is defined and item.reason %}<span class="reflection-reason">{{ item.reason }}</span>{% endif %}
+            </li>{% endfor %}</ul>
             {% else %}<p class="detail-muted quiet-empty surface-empty-copy">None recorded.</p>{% endif %}
           </div>
         </div>
@@ -63,7 +71,7 @@
         <div class="surface-table-wrap">
           <table class="compact-table">
             <thead><tr><th>Strategy</th><th>Result</th><th>Root Cause</th></tr></thead>
-            <tbody>{% for a in rf.attribution %}<tr><td>{{ a.strategy_id }}</td><td>{{ a.result }}</td><td>{{ a.root_cause }}</td></tr>{% endfor %}</tbody>
+            <tbody>{% for a in rf.attribution %}<tr><td>{{ a.strategy_id }}</td><td>{{ a.result }}</td><td>{{ a.root_cause_summary if a.root_cause_summary is defined else a.root_cause }}</td></tr>{% endfor %}</tbody>
           </table>
         </div>
         {% endif %}
@@ -105,11 +113,29 @@
             <span class="surface-block-count">{{ system.learning_strategies.strategy_proposals | length }}</span>
           </div>
           {% if system.learning_strategies.strategy_proposals %}
-          <div class="surface-table-wrap">
-            <table class="compact-table">
-              <thead><tr><th>Strategy</th><th>Status</th></tr></thead>
-              <tbody>{% for row in system.learning_strategies.strategy_proposals %}<tr><td>{{ row.proposed_strategy_id }}</td><td>{{ row.proposal_status_label or row.proposal_status }}</td></tr>{% endfor %}</tbody>
-            </table>
+          <div class="strategy-proposal-list">
+            {% for row in system.learning_strategies.strategy_proposals %}
+            <article class="strategy-proposal-card">
+              <div class="strategy-proposal-head">
+                <div>
+                  <strong>{{ row.display_name or row.proposed_strategy_id }}</strong>
+                  <span class="detail-muted">{{ row.proposed_strategy_id }}</span>
+                </div>
+                <span class="tag">{{ row.proposal_status_label or row.proposal_status }}{% if row.proposal_count is defined and row.proposal_count > 1 %} · ×{{ row.proposal_count }}{% endif %}</span>
+              </div>
+              {% if row.core_thesis %}<p>{{ row.core_thesis }}</p>{% endif %}
+              {% if row.evidence_summary %}<p class="detail-muted">{{ row.evidence_summary }}</p>{% endif %}
+              <div class="proposal-chip-grid">
+                {% if row.proposed_lifecycle_status_label %}<span class="tag">{{ row.proposed_lifecycle_status_label }}</span>{% endif %}
+                {% for signal in row.required_signals or () %}<span class="tag blue">Required: {{ signal }}</span>{% endfor %}
+                {% for signal in row.optional_signals or () %}<span class="tag">Optional: {{ signal }}</span>{% endfor %}
+                {% for tag in row.risk_tags or () %}<span class="tag amber">{{ tag }}</span>{% endfor %}
+                {% for invalidator in row.invalidators or () %}<span class="tag red">Invalidator: {{ invalidator }}</span>{% endfor %}
+                {% if row.duplicate_of_strategy_id %}<span class="tag amber">Duplicate of {{ row.duplicate_of_strategy_id }}</span>{% endif %}
+                {% if row.rejection_reason %}<span class="tag red">{{ row.rejection_reason }}</span>{% endif %}
+              </div>
+            </article>
+            {% endfor %}
           </div>
           {% else %}<p class="detail-muted quiet-empty">No strategy proposals.</p>{% endif %}
         </div>
@@ -123,7 +149,7 @@
             <table class="compact-table">
               <thead><tr><th>Title</th><th>Status</th><th>Scope</th><th>Today's Effect</th></tr></thead>
               <tbody>{% for row in system.learning_strategies.learning_factors %}<tr>
-                <td>{{ row.title }}{% if row.applied_today %} <span class="tag-today">TODAY</span>{% endif %}</td>
+                <td>{{ row.title }}{% if row.occurrence_count is defined and row.occurrence_count > 1 %} <span class="tag">×{{ row.occurrence_count }}</span>{% endif %}{% if row.applied_today %} <span class="tag-today">TODAY</span>{% endif %}</td>
                 <td>{{ row.status_label or row.status }}</td>
                 <td>{{ row.scope_label or row.scope }}</td>
                 <td>{% if row.applied_today and row.effect_summary %}{{ row.effect_summary }}{% else %}<span class="detail-muted">—</span>{% endif %}</td>
@@ -140,17 +166,31 @@
 
       <div class="sys-section">
         <div class="surface-block-head">
-          <div class="section-label">Usage Ledger</div>
-          <span class="surface-block-count">{{ system.ops_cost.llm_usage | length }}</span>
+          <div class="section-label">Usage Ledger Aggregates</div>
+          <span class="surface-block-count">{{ system.llm_usage_summary.count }}</span>
         </div>
-        {% if system.ops_cost.llm_usage %}
+        {% set llm_daily = system.llm_usage_daily if system.llm_usage_daily is defined else () %}
+        {% set llm_monthly = system.llm_usage_monthly if system.llm_usage_monthly is defined else () %}
+        {% if llm_daily or llm_monthly %}
         <p class="detail-muted">{{ system.llm_usage_summary.count }} event{% if system.llm_usage_summary.count != 1 %}s{% endif %} · {{ fmt_currency(system.llm_usage_summary.estimated_cost) if system.llm_usage_summary.estimated_cost is not none else "—" }} estimated cost</p>
+        {% if llm_daily %}
+        <div class="section-label">Daily</div>
         <div class="surface-table-wrap">
           <table class="compact-table">
-            <thead><tr><th>Pipeline</th><th>Provider</th><th>Model</th><th>Estimated Cost</th></tr></thead>
-            <tbody>{% for row in system.ops_cost.llm_usage %}<tr><td>{{ row.pipeline_name }}</td><td>{{ row.provider }}</td><td>{{ row.model }}</td><td>{{ fmt_currency(row.estimated_cost) }}</td></tr>{% endfor %}</tbody>
+            <thead><tr><th>Day</th><th>Pipeline</th><th>Provider / Model</th><th>Events</th><th>Tokens</th><th>Avg Latency</th><th>Estimated Cost</th></tr></thead>
+            <tbody>{% for row in llm_daily %}<tr><td>{{ row.period_label }}</td><td>{{ row.pipeline_name }}</td><td>{{ row.provider }} · {{ row.model }}</td><td>{{ row.event_count }}</td><td>{{ fmt_number(row.total_tokens, 0) }}</td><td>{% if row.avg_latency_ms is not none %}{{ fmt_number(row.avg_latency_ms, 0) }} ms{% else %}—{% endif %}</td><td>{{ fmt_currency(row.estimated_cost) }}</td></tr>{% endfor %}</tbody>
           </table>
         </div>
+        {% endif %}
+        {% if llm_monthly %}
+        <div class="section-label">Monthly</div>
+        <div class="surface-table-wrap">
+          <table class="compact-table">
+            <thead><tr><th>Month</th><th>Pipeline</th><th>Provider / Model</th><th>Events</th><th>Tokens</th><th>Avg Latency</th><th>Estimated Cost</th></tr></thead>
+            <tbody>{% for row in llm_monthly %}<tr><td>{{ row.period_label }}</td><td>{{ row.pipeline_name }}</td><td>{{ row.provider }} · {{ row.model }}</td><td>{{ row.event_count }}</td><td>{{ fmt_number(row.total_tokens, 0) }}</td><td>{% if row.avg_latency_ms is not none %}{{ fmt_number(row.avg_latency_ms, 0) }} ms{% else %}—{% endif %}</td><td>{{ fmt_currency(row.estimated_cost) }}</td></tr>{% endfor %}</tbody>
+          </table>
+        </div>
+        {% endif %}
         {% else %}<p class="detail-muted quiet-empty">No LLM usage events.</p>{% endif %}
       </div>
 

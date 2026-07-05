@@ -776,6 +776,32 @@ def _dashboard_payload() -> dict:
                 "count": 1,
                 "estimated_cost": Decimal("12.30"),
             },
+            "llm_usage_daily": (
+                {
+                    "period_label": "2026-07-04",
+                    "pipeline_name": "trading",
+                    "provider": "openai",
+                    "model": "gpt-5",
+                    "event_count": 1,
+                    "total_tokens": 1200,
+                    "estimated_cost": Decimal("12.30"),
+                    "avg_latency_ms": 800,
+                    "status_label": "Succeeded",
+                },
+            ),
+            "llm_usage_monthly": (
+                {
+                    "period_label": "2026-07",
+                    "pipeline_name": "trading",
+                    "provider": "openai",
+                    "model": "gpt-5",
+                    "event_count": 1,
+                    "total_tokens": 1200,
+                    "estimated_cost": Decimal("12.30"),
+                    "avg_latency_ms": 800,
+                    "status_label": "Succeeded",
+                },
+            ),
             "provider_usage_summary": {
                 "count": 1,
             },
@@ -2796,6 +2822,122 @@ def test_load_today_dashboard_includes_learning_observability():
     assert dashboard["learning_strategies"]["observability"]["funnel"][0]["count"] == 1
     assert dashboard["learning_strategies"]["observability"]["funnel"][4]["count"] == 1
     assert dashboard["learning_strategies"]["observability"]["weight_inputs"][0]["factor_key"] == "lf-risk"
+
+
+def test_build_system_view_aggregates_llm_usage_by_day_and_month():
+    from datetime import datetime, timezone
+
+    from src.web.routers.today import _build_system_view
+
+    system = _build_system_view(
+        overview={"command_center": {"system_issues": ()}},
+        learning_strategies={},
+        ops_cost={
+            "llm_usage": (
+                {
+                    "created_at": datetime(2026, 7, 4, 21, 0, tzinfo=timezone.utc),
+                    "pipeline_name": "intraday_rebalance",
+                    "provider": "gemini",
+                    "model": "gemini-2.5-flash-lite",
+                    "estimated_cost": Decimal("0.01"),
+                    "total_tokens": 100,
+                    "latency_ms": 500,
+                    "status": "succeeded",
+                },
+                {
+                    "created_at": datetime(2026, 7, 4, 22, 0, tzinfo=timezone.utc),
+                    "pipeline_name": "intraday_rebalance",
+                    "provider": "gemini",
+                    "model": "gemini-2.5-flash-lite",
+                    "estimated_cost": Decimal("0.02"),
+                    "total_tokens": 200,
+                    "latency_ms": 700,
+                    "status": "succeeded",
+                },
+                {
+                    "created_at": datetime(2026, 7, 5, 1, 0, tzinfo=timezone.utc),
+                    "pipeline_name": "reflection",
+                    "provider": "gemini",
+                    "model": "gemini-2.5-pro",
+                    "estimated_cost": Decimal("0.30"),
+                    "total_tokens": 900,
+                    "latency_ms": 1200,
+                    "status": "succeeded",
+                },
+            ),
+            "provider_usage": (),
+        },
+        risk_macro={"events": (), "exposures": ()},
+    )
+
+    daily = system["llm_usage_daily"]
+    monthly = system["llm_usage_monthly"]
+    assert daily[0]["period_label"] == "2026-07-05"
+    assert daily[0]["pipeline_name"] == "reflection"
+    assert daily[0]["event_count"] == 1
+    assert daily[1]["period_label"] == "2026-07-04"
+    assert daily[1]["event_count"] == 2
+    assert daily[1]["total_tokens"] == 300
+    assert daily[1]["estimated_cost"] == Decimal("0.03")
+    assert daily[1]["avg_latency_ms"] == 600
+    assert monthly == (
+        {
+            "period_label": "2026-07",
+            "pipeline_name": "intraday_rebalance",
+            "provider": "gemini",
+            "model": "gemini-2.5-flash-lite",
+            "event_count": 2,
+            "total_tokens": 300,
+            "estimated_cost": Decimal("0.03"),
+            "avg_latency_ms": 600,
+            "status_label": "Succeeded",
+        },
+        {
+            "period_label": "2026-07",
+            "pipeline_name": "reflection",
+            "provider": "gemini",
+            "model": "gemini-2.5-pro",
+            "event_count": 1,
+            "total_tokens": 900,
+            "estimated_cost": Decimal("0.30"),
+            "avg_latency_ms": 1200,
+            "status_label": "Succeeded",
+        },
+    )
+
+
+def test_load_strategy_proposals_exposes_user_readable_llm_output():
+    from src.web.routers.today import _load_strategy_proposals
+
+    row = SimpleNamespace(
+        proposed_strategy_id="post_gap_vwap_reclaim_v1",
+        display_name="Post-gap VWAP reclaim",
+        proposal_status="accepted",
+        proposed_lifecycle_status="shadow",
+        duplicate_of_strategy_id=None,
+        rejection_reason=None,
+        evidence_summary="Repeated reclaim setups outperformed after early gap failures.",
+        proposal_json={
+            "core_thesis": "Wait for a failed gap-down to reclaim VWAP before entering.",
+            "required_signals": ["opening_gap_pct", "vwap_reclaim"],
+            "optional_signals": ["news_sentiment"],
+            "risk_tags": ["gap_failure"],
+            "invalidators": ["Fails to hold VWAP"],
+        },
+    )
+    session = MagicMock()
+    session.query.return_value.order_by.return_value.limit.return_value.all.return_value = [row]
+
+    proposals = _load_strategy_proposals(session)
+
+    assert proposals[0]["display_name"] == "Post-gap VWAP reclaim"
+    assert proposals[0]["core_thesis"] == "Wait for a failed gap-down to reclaim VWAP before entering."
+    assert proposals[0]["required_signals"] == ("opening_gap_pct", "vwap_reclaim")
+    assert proposals[0]["optional_signals"] == ("news_sentiment",)
+    assert proposals[0]["risk_tags"] == ("gap_failure",)
+    assert proposals[0]["invalidators"] == ("Fails to hold VWAP",)
+    assert proposals[0]["evidence_summary"] == "Repeated reclaim setups outperformed after early gap failures."
+    assert proposals[0]["proposed_lifecycle_status_label"] == "Shadow"
 
 
 def test_load_strategy_performance_computes_win_rate_percentage():

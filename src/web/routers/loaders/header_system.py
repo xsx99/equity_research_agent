@@ -1,7 +1,8 @@
 """Header and system loader helpers for the today router."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from sqlalchemy.orm import Session as SQLAlchemySession
@@ -129,10 +130,116 @@ def _build_system_view(
             "count": len(llm_usage),
             "estimated_cost": today_loaders._safe_sum(llm_usage, "estimated_cost"),
         },
+        "llm_usage_daily": _aggregate_llm_usage(llm_usage, period="day"),
+        "llm_usage_monthly": _aggregate_llm_usage(llm_usage, period="month"),
         "provider_usage_summary": {
             "count": len(provider_usage),
         },
     }
+
+
+def _aggregate_llm_usage(
+    rows: tuple[dict[str, Any], ...],
+    *,
+    period: str,
+) -> tuple[dict[str, Any], ...]:
+    grouped: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+    for row in rows:
+        period_label = _usage_period_label(row.get("created_at"), period=period)
+        key = (
+            period_label,
+            str(row.get("pipeline_name") or "unknown"),
+            str(row.get("provider") or "unknown"),
+            str(row.get("model") or "unknown"),
+        )
+        bucket = grouped.setdefault(
+            key,
+            {
+                "period_label": period_label,
+                "pipeline_name": key[1],
+                "provider": key[2],
+                "model": key[3],
+                "event_count": 0,
+                "total_tokens": 0,
+                "estimated_cost": Decimal("0"),
+                "_latency_total": 0,
+                "_latency_count": 0,
+                "_statuses": set(),
+            },
+        )
+        bucket["event_count"] += 1
+        bucket["total_tokens"] += _int_or_zero(row.get("total_tokens"))
+        bucket["estimated_cost"] += _decimal_or_zero(row.get("estimated_cost"))
+        latency = _int_or_none(row.get("latency_ms"))
+        if latency is not None:
+            bucket["_latency_total"] += latency
+            bucket["_latency_count"] += 1
+        status = str(row.get("status") or "").strip()
+        if status:
+            bucket["_statuses"].add(status)
+
+    aggregates = []
+    for bucket in grouped.values():
+        latency_count = bucket.pop("_latency_count")
+        latency_total = bucket.pop("_latency_total")
+        statuses = bucket.pop("_statuses")
+        bucket["avg_latency_ms"] = round(latency_total / latency_count) if latency_count else None
+        bucket["status_label"] = _aggregate_status_label(statuses)
+        aggregates.append(bucket)
+
+    pipeline_sorted = sorted(
+        aggregates,
+        key=lambda row: (
+            str(row["pipeline_name"]),
+            str(row["provider"]),
+            str(row["model"]),
+        ),
+    )
+    return tuple(sorted(pipeline_sorted, key=lambda row: str(row["period_label"]), reverse=True))
+
+
+def _usage_period_label(value: Any, *, period: str) -> str:
+    if isinstance(value, datetime):
+        current = value.date()
+    elif isinstance(value, date):
+        current = value
+    else:
+        current = None
+    if current is None:
+        return "unknown"
+    if period == "month":
+        return f"{current:%Y-%m}"
+    return f"{current:%Y-%m-%d}"
+
+
+def _aggregate_status_label(statuses: set[str]) -> str:
+    if not statuses:
+        return "Unknown"
+    if len(statuses) == 1:
+        return generic_status_label(next(iter(statuses)))
+    return "Mixed"
+
+
+def _decimal_or_zero(value: Any) -> Decimal:
+    if value is None:
+        return Decimal("0")
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return Decimal("0")
+
+
+def _int_or_none(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _int_or_zero(value: Any) -> int:
+    return _int_or_none(value) or 0
 
 
 def _build_overview_command_center(
@@ -248,7 +355,15 @@ def _load_llm_usage(session: Any) -> tuple[dict[str, Any], ...]:
             "pipeline_name": getattr(row.prompt_run, "pipeline_name", None),
             "provider": row.provider,
             "model": row.model,
+            "created_at": row.created_at,
+            "prompt_tokens": row.prompt_tokens,
+            "completion_tokens": row.completion_tokens,
+            "total_tokens": row.total_tokens,
             "estimated_cost": row.estimated_cost,
+            "latency_ms": row.latency_ms,
+            "retry_count": row.retry_count,
+            "status": row.status,
+            "status_label": generic_status_label(row.status),
         }
         for row in rows
     )

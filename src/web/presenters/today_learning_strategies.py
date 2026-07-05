@@ -1,6 +1,7 @@
 """Presenter helpers for learning-factor and strategy-evolution observability."""
 from __future__ import annotations
 
+import json
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -14,6 +15,7 @@ def build_today_learning_strategies(
     strategy_definitions: tuple[dict[str, Any], ...],
     strategy_evaluation_results: tuple[dict[str, Any], ...],
 ) -> dict[str, Any]:
+    reflection_display = _normalize_reflection(reflection)
     strategy_performance_with_summary = tuple(
         {
             **row,
@@ -64,11 +66,13 @@ def build_today_learning_strategies(
         }
         for row in learning_factors
     )
+    learning_factors_display = _dedupe_learning_factors(learning_factors_enriched)
+    strategy_proposals_display = _dedupe_strategy_proposals(strategy_proposals)
     return {
-        "reflection": reflection,
-        "learning_factors": learning_factors_enriched,
+        "reflection": reflection_display,
+        "learning_factors": learning_factors_display,
         "strategy_performance": strategy_performance_with_summary,
-        "strategy_proposals": strategy_proposals,
+        "strategy_proposals": strategy_proposals_display,
         "strategy_definitions": strategy_definitions,
         "strategy_evaluation_results": strategy_evaluation_results,
         "learning_summary_text": _synthesize_learning_overview(
@@ -87,6 +91,170 @@ def build_today_learning_strategies(
             "weight_inputs": weight_inputs,
         },
     }
+
+
+def _dedupe_learning_factors(rows: tuple[dict[str, Any], ...]) -> tuple[dict[str, Any], ...]:
+    grouped: dict[tuple[Any, ...], dict[str, Any]] = {}
+    for row in rows:
+        key = (
+            str(row.get("title") or ""),
+            str(row.get("status") or ""),
+            str(row.get("scope") or ""),
+            str(row.get("effect_summary") or ""),
+            bool(row.get("applied_today")),
+        )
+        existing = grouped.get(key)
+        if existing is None:
+            grouped[key] = {**row, "occurrence_count": 1}
+        else:
+            existing["occurrence_count"] += 1
+    return tuple(grouped.values())
+
+
+def _dedupe_strategy_proposals(rows: tuple[dict[str, Any], ...]) -> tuple[dict[str, Any], ...]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        key = str(row.get("proposed_strategy_id") or row.get("display_name") or "").strip()
+        grouped.setdefault(key, []).append(row)
+
+    deduped = []
+    for items in grouped.values():
+        ranked_items = sorted(items, key=_proposal_status_rank)
+        preferred = ranked_items[0]
+        status_labels = _unique_labels(
+            item.get("proposal_status_label") or item.get("proposal_status") for item in ranked_items
+        )
+        deduped.append(
+            {
+                **preferred,
+                "proposal_status_label": " + ".join(status_labels),
+                "proposal_count": len(items),
+            }
+        )
+    return tuple(deduped)
+
+
+def _proposal_status_rank(row: dict[str, Any]) -> tuple[int, str]:
+    status = str(row.get("proposal_status") or "").strip().lower()
+    priority = {
+        "accepted": 0,
+        "promoted": 1,
+        "duplicate_rejected": 2,
+        "rejected": 3,
+        "proposal_failed": 4,
+    }
+    return (priority.get(status, 99), str(row.get("proposed_strategy_id") or ""))
+
+
+def _unique_labels(labels: Any) -> tuple[str, ...]:
+    seen = []
+    for label in labels:
+        text = str(label or "").strip()
+        if text and text not in seen:
+            seen.append(text)
+    return tuple(seen)
+
+
+def _normalize_reflection(reflection: dict[str, Any] | None) -> dict[str, Any] | None:
+    if reflection is None:
+        return None
+    return {
+        **reflection,
+        "what_worked": tuple(_normalize_reflection_point(item) for item in reflection.get("what_worked") or ()),
+        "what_failed": tuple(_normalize_reflection_point(item) for item in reflection.get("what_failed") or ()),
+        "attribution": tuple(_normalize_attribution(item) for item in reflection.get("attribution") or ()),
+    }
+
+
+def _normalize_reflection_point(item: Any) -> dict[str, Any]:
+    item = _parse_json_string(item)
+    if not isinstance(item, dict):
+        return {"summary": str(item), "reason": "", "tags": ()}
+
+    summary = _first_text(item, "contribution", "summary", "observation", "title", "result")
+    reason = _first_text(item, "reason", "rationale", "explanation")
+    tags = tuple(
+        tag
+        for tag in (
+            str(item.get("ticker") or "").strip().upper(),
+            _title_label(str(item.get("strategy") or item.get("strategy_id") or "")),
+        )
+        if tag
+    )
+    return {
+        "summary": summary or "Reflection observation",
+        "reason": reason,
+        "tags": tags,
+    }
+
+
+def _normalize_attribution(item: Any) -> dict[str, Any]:
+    if not isinstance(item, dict):
+        return {
+            "strategy_id": "portfolio",
+            "result": "",
+            "root_cause_summary": str(item),
+        }
+    return {
+        **item,
+        "root_cause_summary": _root_cause_summary(item.get("root_cause")),
+    }
+
+
+def _root_cause_summary(root_cause: Any) -> str:
+    root_cause = _parse_json_string(root_cause)
+    if not isinstance(root_cause, dict):
+        return str(root_cause or "").strip()
+
+    parts = []
+    for key, label in (
+        ("bullish_trades", "Bullish trades"),
+        ("bearish_trades", "Bearish trades"),
+        ("risk_off_trades", "Risk-off trades"),
+    ):
+        trades = tuple(root_cause.get(key) or ())
+        if not trades:
+            continue
+        parts.append(f"{label}: {', '.join(_trade_summary(trade) for trade in trades)}")
+
+    other_pnl = _format_decimal_value(root_cause.get("other_pnl"))
+    if other_pnl is not None:
+        parts.append(f"Other P&L: {other_pnl}")
+    return "; ".join(parts) if parts else "No specific root cause recorded."
+
+
+def _trade_summary(trade: Any) -> str:
+    if not isinstance(trade, dict):
+        return str(trade)
+    ticker = str(trade.get("ticker") or "Portfolio").strip().upper()
+    strategy = str(trade.get("strategy") or trade.get("strategy_id") or "").strip()
+    pnl = _format_decimal_value(trade.get("pnl"))
+    bits = [ticker]
+    if strategy:
+        bits.append(f"via {strategy}")
+    if pnl is not None:
+        bits.append(f"({pnl} P&L)")
+    return " ".join(bits)
+
+
+def _first_text(item: dict[str, Any], *keys: str) -> str:
+    for key in keys:
+        value = item.get(key)
+        if str(value or "").strip():
+            return str(value).strip()
+    return ""
+
+
+def _parse_json_string(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    if not (text.startswith("{") and text.endswith("}")):
+        return value
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return value
 
 
 def _synthesize_strategy_summary(
@@ -207,6 +375,14 @@ def _format_confidence(value: Any) -> str | None:
     return f"{number:.2f}"
 
 
+def _format_decimal_value(value: Any) -> str | None:
+    number = _decimal_or_none(value)
+    if number is None:
+        return None
+    sign = "+" if number > 0 else ""
+    return f"{sign}{number:.4f}"
+
+
 def _decimal_or_none(value: Any) -> Decimal | None:
     if value is None:
         return None
@@ -224,3 +400,8 @@ def _decimal_or_default(value: Any, default: Decimal) -> Decimal:
 def _humanize(value: str) -> str:
     text = value.strip().replace("-", " ").replace("_", " ")
     return " ".join(part.lower() for part in text.split())
+
+
+def _title_label(value: str) -> str:
+    text = value.strip().replace("-", " ").replace("_", " ")
+    return " ".join(part.capitalize() for part in text.split())

@@ -1096,6 +1096,15 @@ pre {
 .tag-today { display: inline-flex; align-items: center; padding: 0.05rem 0.4rem; border-radius: var(--radius-sm); background: var(--accent-soft); color: var(--accent); font-family: var(--mono); font-size: var(--fs-2xs); font-weight: 700; letter-spacing: 0.04em; vertical-align: middle; }
 .pos-points li::before { background: var(--pos) !important; opacity: 1 !important; }
 .neg-points li::before { background: var(--neg) !important; opacity: 1 !important; }
+.reflection-tags { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.35rem; }
+.reflection-reason { display: block; margin-top: 0.3rem; color: var(--text-muted); font-size: var(--fs-sm); line-height: 1.45; }
+.strategy-proposal-list { display: grid; gap: 0.7rem; }
+.strategy-proposal-card { display: grid; gap: 0.55rem; padding: 0.75rem 0.85rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-elev-2); }
+.strategy-proposal-head { display: flex; justify-content: space-between; gap: 0.8rem; align-items: start; }
+.strategy-proposal-head > div { min-width: 0; display: grid; gap: 0.15rem; }
+.strategy-proposal-head strong { color: var(--text); }
+.strategy-proposal-card p { margin: 0; color: var(--text-dim); line-height: 1.5; }
+.proposal-chip-grid { display: flex; flex-wrap: wrap; gap: 0.35rem; }
 
 /* ----------------------------------------------------- Surface blocks */
 .surface-block { display: grid; gap: 0.45rem; margin-top: 1rem; }

@@ -111,13 +111,31 @@ def _load_strategy_performance(session: Any) -> tuple[dict[str, Any], ...]:
 def _load_strategy_proposals(session: Any) -> tuple[dict[str, Any], ...]:
     rows = session.query(StrategyProposal).order_by(StrategyProposal.created_at.desc()).limit(20).all()
     return tuple(
-        {
-            "proposed_strategy_id": row.proposed_strategy_id,
-            "proposal_status": row.proposal_status,
-            "proposal_status_label": generic_status_label(row.proposal_status),
-        }
+        _serialize_strategy_proposal(row)
         for row in rows
     )
+
+
+def _serialize_strategy_proposal(row: StrategyProposal) -> dict[str, Any]:
+    proposal_json = row.proposal_json or {}
+    return {
+        "proposed_strategy_id": row.proposed_strategy_id,
+        "display_name": row.display_name,
+        "proposal_status": row.proposal_status,
+        "proposal_status_label": generic_status_label(row.proposal_status),
+        "proposed_lifecycle_status": row.proposed_lifecycle_status,
+        "proposed_lifecycle_status_label": generic_status_label(row.proposed_lifecycle_status),
+        "duplicate_of_strategy_id": row.duplicate_of_strategy_id,
+        "rejection_reason": row.rejection_reason,
+        "core_thesis": str(proposal_json.get("core_thesis") or "").strip(),
+        "typical_horizon": str(proposal_json.get("typical_horizon") or "").strip(),
+        "required_signals": tuple(proposal_json.get("required_signals") or ()),
+        "optional_signals": tuple(proposal_json.get("optional_signals") or ()),
+        "risk_tags": tuple(proposal_json.get("risk_tags") or ()),
+        "macro_blocked_regimes": tuple(proposal_json.get("macro_blocked_regimes") or ()),
+        "invalidators": tuple(proposal_json.get("invalidators") or ()),
+        "evidence_summary": row.evidence_summary,
+    }
 
 
 def _load_strategy_definitions(session: Any) -> tuple[dict[str, Any], ...]:
