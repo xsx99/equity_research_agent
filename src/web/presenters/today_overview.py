@@ -134,6 +134,7 @@ def build_today_overview(
 
 
 _ATTENTION_PRIORITY = {"alert": 0, "review": 1, "signal": 2}
+_ALERT_SEVERITY_PRIORITY = {"critical": 4, "high": 3, "medium": 2, "watch": 1, "low": 0}
 
 
 def _build_attention_feed(
@@ -161,10 +162,25 @@ def _build_attention_feed(
             {"kind": kind, "badge": badge, "text": str(text or "").strip()}
         )
 
+    alert_rows_by_ticker: dict[str, list[dict[str, Any]]] = {}
+    alert_order: list[str] = []
     for row in live_alerts or ():
         if _is_readthrough_alert(row):
             continue
-        _add(row.get("ticker"), "alert", str(row.get("severity") or "Alert"), row.get("headline") or row.get("summary"))
+        symbol = str(row.get("ticker") or "").strip().upper()
+        if not symbol:
+            continue
+        if symbol not in alert_rows_by_ticker:
+            alert_rows_by_ticker[symbol] = []
+            alert_order.append(symbol)
+        alert_rows_by_ticker[symbol].append(row)
+    for symbol in alert_order:
+        alert_rows = alert_rows_by_ticker[symbol]
+        top_alert = max(alert_rows, key=_alert_severity_rank)
+        alert_text = str(top_alert.get("headline") or top_alert.get("summary") or "").strip()
+        if len(alert_rows) > 1:
+            alert_text = f"{len(alert_rows)} alerts · {alert_text}" if alert_text else f"{len(alert_rows)} alerts"
+        _add(symbol, "alert", _alert_badge(top_alert), alert_text)
     for row in needs_review or ():
         _add(row.get("ticker"), "review", "Review", row.get("summary"))
     for row in material_changes or ():
@@ -185,6 +201,16 @@ def _build_attention_feed(
         )
     feed.sort(key=lambda entry: _ATTENTION_PRIORITY.get(entry["primary_kind"], 9))
     return tuple(feed)
+
+
+def _alert_severity_rank(row: dict[str, Any]) -> int:
+    severity = str(row.get("severity") or "").strip().lower()
+    return _ALERT_SEVERITY_PRIORITY.get(severity, -1)
+
+
+def _alert_badge(row: dict[str, Any]) -> str:
+    severity = str(row.get("severity") or "").strip().lower()
+    return severity if severity in _ALERT_SEVERITY_PRIORITY else "Alert"
 
 
 def _is_readthrough_alert(row: dict[str, Any]) -> bool:

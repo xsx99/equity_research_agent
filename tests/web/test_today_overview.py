@@ -76,6 +76,55 @@ def test_build_today_overview_exposes_operator_strip_and_metric_provenance():
     )
 
 
+def test_build_today_overview_collapses_same_ticker_alerts_to_highest_severity():
+    payload = build_today_overview(
+        header={
+            "trade_date": date(2026, 6, 16),
+            "market_phase": "Regular",
+            "macro_regime": "neutral",
+            "risk_appetite": "balanced",
+            "runtime_mode": "live",
+            "live_status": "live",
+            "open_alert_count": 3,
+            "material_signal_change_count": 1,
+            "buying_power": Decimal("245000.00"),
+            "gross_exposure": Decimal("0.41"),
+            "day_pnl": Decimal("12.34"),
+            "nav": Decimal("998250.00"),
+            "llm_cost_estimate": None,
+        },
+        job_timeline=(),
+        risk_macro={
+            "command_center": {
+                "updated_at": datetime(2026, 6, 16, 13, 31, tzinfo=timezone.utc),
+            },
+            "availability": {
+                "status": "available",
+                "issues": (),
+            },
+        },
+        live_alerts=(
+            {"ticker": "DELL", "severity": "high", "headline": "AI infrastructure demand improves"},
+            {"ticker": "DELL", "severity": "low", "headline": "Low-relevance cross-company mention"},
+            {"ticker": "DELL", "severity": "critical", "headline": "Critical direct thesis risk"},
+        ),
+        material_changes=(
+            {"ticker": "DELL", "summary": "technical, events_news"},
+        ),
+        positions=(),
+        option_positions=(),
+        closed_positions=(),
+    )
+
+    dell = payload["attention_feed"][0]
+
+    assert dell["ticker"] == "DELL"
+    assert dell["primary_kind"] == "alert"
+    assert tuple(facet["kind"] for facet in dell["facets"]) == ("alert", "signal")
+    assert dell["facets"][0]["badge"] == "critical"
+    assert dell["facets"][0]["text"] == "3 alerts · Critical direct thesis risk"
+
+
 def test_build_today_overview_dedupes_closed_positions_by_ticker_for_needs_review():
     payload = build_today_overview(
         header={
