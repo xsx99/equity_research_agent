@@ -6,6 +6,22 @@ from datetime import date, datetime, timezone
 from src.providers.market_data.fred_economic_calendar import FREDEconomicCalendar
 
 
+def test_fred_economic_calendar_default_timeout_is_long_enough_for_slow_release_calendar(
+    monkeypatch,
+):
+    captured_timeouts: list[float] = []
+
+    class _Client:
+        def __init__(self, *, timeout: float) -> None:
+            captured_timeouts.append(timeout)
+
+    monkeypatch.setattr("src.providers.market_data.fred_economic_calendar.httpx.Client", _Client)
+
+    FREDEconomicCalendar(api_key="fred-key")
+
+    assert captured_timeouts == [30.0]
+
+
 def test_fred_economic_calendar_normalizes_high_signal_release_dates():
     calls: list[tuple[str, dict[str, object]]] = []
 

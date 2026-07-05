@@ -40,7 +40,7 @@ class FREDEconomicCalendar:
         horizon_days: int = 14,
         client: httpx.Client | Any | None = None,
         row_fetcher: Callable[[date, date], list[dict[str, Any]]] | None = None,
-        timeout: float = 10.0,
+        timeout: float = 30.0,
     ) -> None:
         self._api_key = api_key or os.getenv("FRED_API_KEY")
         self._horizon_days = horizon_days
