@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import os
+import time
 from typing import Any, Optional
+
+import httpx
 
 from src.core import config as app_config
 
@@ -30,7 +33,6 @@ def build_phi_model(
     model_name: str,
     *,
     gemini_cls: type[Any] | None = None,
-    openai_chat_cls: type[Any] | None = None,
 ) -> Any:
     """Build a Phidata model for the configured provider."""
     if should_use_gemini_backend(model_name):
@@ -44,23 +46,64 @@ def build_phi_model(
             gemini_cls = Gemini
         return gemini_cls(id=model_name, api_key=get_google_api_key())
 
-    if openai_chat_cls is None:
-        try:
-            from phi.model.openai import OpenAIChat
-        except Exception as exc:
-            raise RuntimeError(
-                "OpenAI-compatible model support requires the `openai` package."
-            ) from exc
-        openai_chat_cls = OpenAIChat
-
     if should_use_openrouter_backend(model_name):
-        api_key = get_openrouter_api_key()
-        if not api_key:
-            raise RuntimeError("OpenRouter model support requires OPENROUTER_API_KEY.")
-        return openai_chat_cls(
-            id=model_name,
-            api_key=api_key,
-            base_url=app_config.OPENROUTER_BASE_URL,
+        raise RuntimeError(
+            "OpenRouter models use the direct OpenRouter runner, not a Phi model."
         )
 
-    return openai_chat_cls(id=model_name)
+    raise RuntimeError(f"Unsupported default LLM model for Phi runner: {model_name}")
+
+
+def run_openrouter_chat_completion(
+    prompt: str,
+    model_name: str,
+    *,
+    http_client_cls: type[Any] = httpx.Client,
+    now_ms: Any | None = None,
+    monotonic_ms: Any | None = None,
+) -> dict[str, Any]:
+    """Call OpenRouter directly through its OpenAI-compatible HTTP endpoint."""
+    api_key = get_openrouter_api_key()
+    if not api_key:
+        raise RuntimeError("OpenRouter model support requires OPENROUTER_API_KEY.")
+
+    start_ms = int(time.monotonic() * 1000) if now_ms is None else int(now_ms())
+    with http_client_cls(timeout=120) as client:
+        response = client.post(
+            f"{app_config.OPENROUTER_BASE_URL.rstrip('/')}/chat/completions",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": model_name,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0,
+            },
+        )
+    response.raise_for_status()
+    elapsed_ms = (
+        int(time.monotonic() * 1000) - start_ms
+        if monotonic_ms is None
+        else int(monotonic_ms()) - start_ms
+    )
+
+    payload = response.json()
+    choices = payload.get("choices") or ()
+    message = choices[0].get("message") if choices else {}
+    content = (message or {}).get("content")
+    if content is None:
+        content = ""
+    usage = payload.get("usage") or {}
+    return {
+        "content": content,
+        "usage": {
+            "provider": "openrouter",
+            "model": str(payload.get("model") or model_name),
+            "prompt_tokens": int(usage.get("prompt_tokens") or 0),
+            "completion_tokens": int(usage.get("completion_tokens") or 0),
+            "total_tokens": int(usage.get("total_tokens") or 0),
+            "estimated_cost": float(usage.get("estimated_cost", usage.get("cost") or 0.0)),
+            "latency_ms": max(elapsed_ms, 0),
+        },
+    }

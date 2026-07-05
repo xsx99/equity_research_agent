@@ -12,7 +12,9 @@ from src.agents.base import AgentResult, BaseAgent
 from src.agents.llm_models import (
     build_phi_model,
     get_google_api_key,
+    run_openrouter_chat_completion,
     should_use_gemini_backend,
+    should_use_openrouter_backend,
 )
 from src.agents.prompt_registry import PromptRegistry, PromptTemplate, RenderedPrompt
 from src.agents.trading_schemas import (
@@ -280,6 +282,9 @@ def _build_phi_model(model_name: str) -> Any:
 
 
 def _default_agent_runner(prompt: str, model_name: str) -> Any:
+    if should_use_openrouter_backend(model_name):
+        return run_openrouter_chat_completion(prompt, model_name)
+
     try:
         from phi.agent import Agent
     except Exception as exc:

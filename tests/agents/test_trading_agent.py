@@ -269,3 +269,21 @@ def test_default_trading_agent_runner_uses_phi_agent(monkeypatch):
     response = _default_agent_runner("trade prompt", "gpt-5-mini")
 
     assert response == '{"decision":"no_trade"}'
+
+
+def test_default_trading_agent_runner_uses_direct_openrouter_runner(monkeypatch):
+    calls: list[tuple[str, str]] = []
+
+    def fake_openrouter_runner(prompt: str, model_name: str):
+        calls.append((prompt, model_name))
+        return {"content": '{"ok": true}'}
+
+    monkeypatch.setattr(
+        "src.agents.trading.run_openrouter_chat_completion",
+        fake_openrouter_runner,
+    )
+
+    response = _default_agent_runner("reflect prompt", "moonshotai/kimi-k2.6")
+
+    assert response == {"content": '{"ok": true}'}
+    assert calls == [("reflect prompt", "moonshotai/kimi-k2.6")]
