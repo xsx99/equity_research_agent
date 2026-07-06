@@ -409,8 +409,10 @@ class InMemoryTradingRepository:
         self.risk_hedge_decisions.append(decision)
 
     def save_paper_order(self, order: PaperOrderRecord) -> None:
-        if order.paper_order_id not in {item.paper_order_id for item in self.paper_orders}:
-            self.paper_orders.append(order)
+        self.paper_orders = [
+            item for item in self.paper_orders if item.paper_order_id != order.paper_order_id
+        ]
+        self.paper_orders.append(order)
 
     def save_paper_execution(self, execution: PaperExecutionRecord) -> None:
         if execution.paper_execution_id not in {item.paper_execution_id for item in self.paper_executions}:

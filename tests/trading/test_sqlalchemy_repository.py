@@ -1138,6 +1138,44 @@ def test_sqlalchemy_repository_persists_pr7_option_artifacts():
     assert persisted_execution.broker_order_id == "alpaca-option-order-1"
 
 
+def test_sqlalchemy_repository_preserves_null_option_strategy_decision_for_broker_only_position():
+    now = datetime(2026, 7, 6, 16, 0, tzinfo=timezone.utc)
+    session = _FakeSession()
+    repository = SqlAlchemyTradingRepository(session)
+
+    repository.save_paper_option_position(
+        PaperOptionPosition(
+            paper_option_position_id="broker-only-option-position",
+            option_strategy_decision_id=None,
+            ticker="NVDA",
+            strategy_id="broker_option_position",
+            option_strategy_type="broker_option_position",
+            trade_identity="tactical_option_trade",
+            quantity=1,
+            opened_at=now,
+            updated_at=now,
+            status="open",
+            expiry=date(2026, 7, 17),
+            max_loss=1.0,
+            margin_requirement=1.0,
+            buying_power_effect=1.0,
+            assignment_notional=0.0,
+            metadata_json={
+                "broker_leg_refs": [
+                    {
+                        "contract_symbol": "NVDA260717P00110000",
+                        "position_intent": "broker_position",
+                    }
+                ]
+            },
+        )
+    )
+
+    loaded_position = repository.load_paper_option_positions()[0]
+
+    assert loaded_position.option_strategy_decision_id is None
+
+
 class _BrokerStub:
     def submit_order(self, request: Any) -> Any:
         return type(

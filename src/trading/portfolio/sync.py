@@ -4,7 +4,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
+import uuid
 
+from src.trading.brokers.paper_option import PaperOptionPosition
 from src.trading.portfolio.state import (
     OptionPosition,
     PortfolioSnapshot,
@@ -16,6 +18,8 @@ from src.trading.portfolio.state import (
     is_option_position_payload,
 )
 from src.trading.risk import PortfolioContext
+
+_BROKER_OPTION_POSITION_NAMESPACE = uuid.UUID("6e4d0f64-f761-4e8f-9b2e-410cc093ca3b")
 
 
 @dataclass(frozen=True)
@@ -76,6 +80,12 @@ class BrokerPortfolioSyncWorkflow:
                 local_option_positions=local_option_positions,
                 broker_positions=broker_positions,
             )
+            _persist_broker_option_positions(
+                repository=self.repository,
+                as_of=as_of,
+                broker_positions=broker_positions,
+                local_option_position_metadata=local_option_position_metadata,
+            )
             self.repository.replace_paper_positions(synced_positions)
             self.repository.save_portfolio_snapshot(snapshot)
         return BrokerPortfolioSyncResult(
@@ -102,6 +112,8 @@ def _local_option_position_metadata(local_option_positions: tuple[Any, ...]) -> 
                 continue
             metadata[contract_symbol.upper()] = {
                 "ticker": position.ticker,
+                "paper_option_position_id": position.paper_option_position_id,
+                "option_strategy_decision_id": position.option_strategy_decision_id,
                 "trade_identity": position.trade_identity,
                 "strategy_id": position.strategy_id,
                 "option_strategy_type": position.option_strategy_type,
@@ -111,6 +123,7 @@ def _local_option_position_metadata(local_option_positions: tuple[Any, ...]) -> 
                 "margin_requirement": position.margin_requirement,
                 "buying_power_effect": position.buying_power_effect,
                 "assignment_notional": position.assignment_notional,
+                "metadata_json": dict(position.metadata_json),
             }
     return metadata
 
@@ -160,5 +173,67 @@ def _reconcile_local_option_positions(
                     "reconciliation_status": "broker_position_missing",
                     "reconciled_at": as_of.isoformat(),
                 },
+            )
+        )
+
+
+def _persist_broker_option_positions(
+    *,
+    repository: Any,
+    as_of: datetime,
+    broker_positions: list[dict[str, Any]],
+    local_option_position_metadata: dict[str, dict[str, Any]],
+) -> None:
+    save_position = getattr(repository, "save_paper_option_position", None)
+    if not callable(save_position):
+        return
+    for payload in broker_positions:
+        if not is_option_position_payload(payload):
+            continue
+        contract_symbol = str(payload.get("symbol") or "").upper()
+        if not contract_symbol:
+            continue
+        position_metadata = local_option_position_metadata.get(contract_symbol, {})
+        if position_metadata and position_metadata.get("option_strategy_type") != "broker_option_position":
+            continue
+        option_positions = build_option_positions_from_broker(
+            broker_positions=[payload],
+            as_of=as_of,
+            local_option_position_metadata=local_option_position_metadata,
+        )
+        if not option_positions:
+            continue
+        option_position = option_positions[0]
+        metadata_json = dict(position_metadata.get("metadata_json") or {})
+        metadata_json["broker_leg_refs"] = [
+            {
+                "contract_symbol": contract_symbol,
+                "position_intent": "broker_position",
+            }
+        ]
+        save_position(
+            PaperOptionPosition(
+                paper_option_position_id=str(
+                    position_metadata.get("paper_option_position_id")
+                    or uuid.uuid5(
+                        _BROKER_OPTION_POSITION_NAMESPACE,
+                        contract_symbol,
+                    )
+                ),
+                option_strategy_decision_id=position_metadata.get("option_strategy_decision_id"),
+                ticker=option_position.ticker,
+                strategy_id=option_position.strategy_id or "broker_option_position",
+                option_strategy_type=option_position.option_strategy_type,
+                trade_identity=option_position.trade_identity,
+                quantity=option_position.quantity,
+                opened_at=option_position.opened_at,
+                updated_at=option_position.updated_at,
+                status="open",
+                expiry=option_position.expiry,
+                max_loss=option_position.max_loss,
+                margin_requirement=option_position.margin_requirement,
+                buying_power_effect=option_position.buying_power_effect,
+                assignment_notional=option_position.assignment_notional,
+                metadata_json=metadata_json,
             )
         )

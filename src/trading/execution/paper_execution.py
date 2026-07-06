@@ -541,6 +541,13 @@ class PaperExecutionWorkflow:
         orders.append(order)
         execution = self.broker.find_execution_by_order_id(order.paper_order_id)
         if execution is None:
+            refreshed_order = self._refresh_stock_order(order)
+            if refreshed_order is not order:
+                order = refreshed_order
+                orders[-1] = order
+                self.repository.save_paper_order(order)
+                execution = self.broker.find_execution_by_order_id(order.paper_order_id)
+        if execution is None:
             self._save_execution_attempt(
                 skipped(
                     trading_decision=trading_decision,
@@ -582,6 +589,12 @@ class PaperExecutionWorkflow:
             ),
             attempts=attempts,
         )
+
+    def _refresh_stock_order(self, order: PaperOrderRecord) -> PaperOrderRecord:
+        refresh_order = getattr(self.broker, "refresh_order", None)
+        if not callable(refresh_order):
+            return order
+        return refresh_order(order)
 
     def _save_execution_attempt(
         self,

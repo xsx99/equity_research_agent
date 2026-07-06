@@ -312,7 +312,11 @@ class ExecutionRepositoryMixin:
         positions = [
             PaperOptionPosition(
                 paper_option_position_id=str(row.paper_option_position_id),
-                option_strategy_decision_id=str(row.option_strategy_decision_id),
+                option_strategy_decision_id=(
+                    str(row.option_strategy_decision_id)
+                    if row.option_strategy_decision_id is not None
+                    else None
+                ),
                 ticker=row.ticker,
                 strategy_id=row.strategy_id,
                 option_strategy_type=row.option_strategy_type,

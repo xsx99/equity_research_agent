@@ -98,6 +98,36 @@ class _CapturingClient:
         raise AssertionError(f"unexpected_get:{url}")
 
 
+class _DelayedFillClient(_CapturingClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self._order_poll_count = 0
+
+    def get(self, url: str, *, params: dict[str, Any] | None = None, headers: dict[str, str]) -> _StubResponse:
+        if url.endswith("/v2/orders:by_client_order_id"):
+            self.gets.append({"url": url, "params": params, "headers": headers})
+            self._order_poll_count += 1
+            client_order_id = (params or {})["client_order_id"]
+            status = "filled" if self._order_poll_count >= 6 else "partially_filled"
+            return _StubResponse(
+                {
+                    "id": "broker-order-1",
+                    "client_order_id": client_order_id,
+                    "symbol": "AAPL",
+                    "qty": "0.01",
+                    "filled_qty": "0.01" if status == "filled" else "0.005",
+                    "filled_avg_price": "227.15" if status == "filled" else "227.10",
+                    "side": "buy",
+                    "type": "market",
+                    "time_in_force": "day",
+                    "status": status,
+                    "submitted_at": "2026-06-02T16:31:00+00:00",
+                    "filled_at": "2026-06-02T16:31:07+00:00" if status == "filled" else None,
+                }
+            )
+        return super().get(url, params=params, headers=headers)
+
+
 class _RecordingOptionBroker:
     def __init__(self, *, now: datetime) -> None:
         self._delegate = LocalPaperOptionBroker(now=lambda: now)
@@ -758,6 +788,32 @@ def test_paper_execution_workflow_persists_broker_sourced_order_account_and_posi
     assert repository.paper_positions[0].quantity == 0.01
     assert result.portfolio_snapshots[-1].cash_balance == 999997.73
     assert result.portfolio_snapshots[-1].buying_power == 1999995.46
+
+
+def test_paper_execution_workflow_reconciles_delayed_stock_fill_before_returning_no_fill():
+    now = datetime(2026, 6, 2, 16, 31, tzinfo=timezone.utc)
+    repository = InMemoryTradingRepository()
+    client = _DelayedFillClient()
+    workflow = PaperExecutionWorkflow(
+        repository=repository,
+        broker=PaperStockBroker(api_key="key", secret_key="secret", client=client),
+        manual_request_service=ManualTickerRequestService(now=lambda: now),
+    )
+
+    result = workflow.run(
+        trading_decisions=(_trading_decision(),),
+        risk_decisions=(_risk_decision(),),
+        trade_date=now,
+    )
+
+    assert result.paper_orders[0].status == "filled"
+    assert repository.paper_orders[0].status == "filled"
+    assert len(repository.paper_executions) == 1
+    assert repository.paper_positions[0].ticker == "AAPL"
+    assert repository.paper_positions[0].strategy_id == "relative_strength_rotation_v1"
+    attempts = repository.list_execution_attempts()
+    assert len(attempts) == 1
+    assert attempts[0].outcome == "submitted"
 
 
 def test_paper_execution_workflow_persists_option_artifacts_and_overlay():

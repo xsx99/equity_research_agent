@@ -155,6 +155,33 @@ def test_broker_portfolio_sync_workflow_uses_broker_option_positions_without_loc
     assert any(position.ticker == "NVDA" and position.assignment_notional == 11_000.0 for position in result.portfolio_context.positions)
 
 
+def test_broker_portfolio_sync_workflow_persists_broker_option_positions_without_local_overlay():
+    now = datetime(2026, 6, 2, 16, 31, tzinfo=timezone.utc)
+    repository = InMemoryTradingRepository()
+    workflow = BrokerPortfolioSyncWorkflow(
+        repository=repository,
+        broker=_BrokerWithOptionStub(),
+    )
+
+    workflow.run(as_of=now)
+    workflow.run(as_of=now)
+
+    option_positions = repository.load_paper_option_positions()
+    assert len(option_positions) == 1
+    position = option_positions[0]
+    assert position.ticker == "NVDA"
+    assert position.option_strategy_type == "broker_option_position"
+    assert position.trade_identity == "tactical_option_trade"
+    assert position.quantity == 1
+    assert position.status == "open"
+    assert position.metadata_json["broker_leg_refs"] == [
+        {
+            "contract_symbol": "NVDA260717P00110000",
+            "position_intent": "broker_position",
+        }
+    ]
+
+
 def test_broker_portfolio_sync_workflow_reconciles_missing_broker_option_positions():
     now = datetime(2026, 6, 2, 16, 31, tzinfo=timezone.utc)
     repository = InMemoryTradingRepository()

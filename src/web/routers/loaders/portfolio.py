@@ -67,6 +67,12 @@ def _load_positions(session: Any, *, as_of: datetime | None = None) -> tuple[dic
     positions = []
     for row in rows:
         avg_cost = getattr(row, "average_cost", getattr(row, "avg_cost", None))
+        unrealized_pnl = _position_unrealized_pnl(
+            explicit_value=getattr(row, "unrealized_pnl", None),
+            market_value=getattr(row, "market_value", None),
+            avg_cost=avg_cost,
+            quantity=getattr(row, "quantity", None),
+        )
         positions.append({
             "ticker": row.ticker,
             "trade_identity": row.trade_identity,
@@ -82,9 +88,9 @@ def _load_positions(session: Any, *, as_of: datetime | None = None) -> tuple[dic
             "held_days": _held_days(getattr(row, "opened_at", None), reference_time),
             "sleeve": trade_identity_label(row.trade_identity),
             "market_value": row.market_value,
-            "unrealized_pnl": getattr(row, "unrealized_pnl", None),
+            "unrealized_pnl": unrealized_pnl,
             "total_pnl_pct": _total_pnl_pct(
-                unrealized_pnl=getattr(row, "unrealized_pnl", None),
+                unrealized_pnl=unrealized_pnl,
                 avg_cost=avg_cost,
                 quantity=row.quantity,
             ),
@@ -114,6 +120,24 @@ def _total_pnl_pct(*, unrealized_pnl: Any, avg_cost: Any, quantity: Any) -> floa
     if denominator <= 0:
         return None
     return pnl / denominator
+
+
+def _position_unrealized_pnl(
+    *,
+    explicit_value: Any,
+    market_value: Any,
+    avg_cost: Any,
+    quantity: Any,
+) -> float | None:
+    explicit = _safe_float(explicit_value)
+    if explicit is not None:
+        return explicit
+    market = _safe_float(market_value)
+    entry = _safe_float(avg_cost)
+    qty = _safe_float(quantity)
+    if market is None or entry is None or qty is None:
+        return None
+    return market - (entry * qty)
 
 
 def _safe_float(value: Any) -> float | None:

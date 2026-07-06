@@ -173,6 +173,40 @@ class PaperStockBroker:
     def find_execution_by_order_id(self, paper_order_id: str) -> PaperExecutionRecord | None:
         return self._executions_by_order_id.get(paper_order_id)
 
+    def refresh_order(self, order: PaperOrderRecord) -> PaperOrderRecord:
+        response = self._client.get(
+            f"{self.trading_base_url}/v2/orders:by_client_order_id",
+            params={"client_order_id": order.client_order_id},
+            headers=self._auth_headers(),
+        )
+        response.raise_for_status()
+        latest_payload = self._poll_until_terminal(
+            client_order_id=order.client_order_id,
+            initial_payload=response.json(),
+        )
+        request = PaperOrderRequest(
+            trading_decision_id=order.trading_decision_id,
+            risk_decision_id=order.risk_decision_id,
+            ticker=order.ticker,
+            strategy_id=order.strategy_id,
+            action=order.action,
+            trade_date=order.trade_date,
+            quantity=order.quantity,
+            manual_request_mode=None,
+        )
+        return self._store_local_order(
+            request=request,
+            client_order_id=order.client_order_id,
+            broker_order_id=_string_or_none(latest_payload.get("id")),
+            status=str(latest_payload.get("status", order.status)),
+            rejection_reason=_string_or_none(latest_payload.get("reject_reason")),
+            filled_avg_price=_float_or_none(latest_payload.get("filled_avg_price")),
+            filled_qty=_float_or_none(latest_payload.get("filled_qty")),
+            submitted_at=_datetime_or_now(latest_payload.get("submitted_at"), fallback=order.created_at),
+            filled_at=_datetime_or_none(latest_payload.get("filled_at")),
+            paper_order_id=order.paper_order_id,
+        )
+
     def sync_account(self) -> dict[str, Any]:
         response = self._client.get(
             f"{self.trading_base_url}/v2/account",
@@ -229,9 +263,11 @@ class PaperStockBroker:
         filled_qty: float | None,
         submitted_at: datetime,
         filled_at: datetime | None,
+        paper_order_id: str | None = None,
     ) -> PaperOrderRecord:
+        existing = self._orders_by_key.get(client_order_id)
         order = PaperOrderRecord(
-            paper_order_id=str(uuid.uuid4()),
+            paper_order_id=paper_order_id or (existing.paper_order_id if existing else str(uuid.uuid4())),
             broker_order_id=broker_order_id,
             client_order_id=client_order_id,
             trading_decision_id=request.trading_decision_id,
@@ -246,9 +282,20 @@ class PaperStockBroker:
             rejection_reason=rejection_reason,
             created_at=submitted_at,
         )
-        self.orders.append(order)
+        if existing is None:
+            self.orders.append(order)
+        else:
+            self.orders = [
+                order if item.client_order_id == client_order_id else item
+                for item in self.orders
+            ]
         self._orders_by_key[client_order_id] = order
-        if status == "filled" and filled_qty not in (None, 0) and filled_avg_price not in (None, 0):
+        if (
+            status == "filled"
+            and filled_qty not in (None, 0)
+            and filled_avg_price not in (None, 0)
+            and order.paper_order_id not in self._executions_by_order_id
+        ):
             execution = PaperExecutionRecord(
                 paper_execution_id=str(uuid.uuid4()),
                 paper_order_id=order.paper_order_id,

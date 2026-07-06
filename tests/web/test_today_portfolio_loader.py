@@ -60,3 +60,26 @@ def test_load_positions_exposes_enriched_stock_position_fields():
     assert position["total_pnl_pct"] == pytest.approx(0.25)
     assert position["sleeve"] == "Tactical Stock Trade"
     assert position["filled_qty"] == 10
+
+
+def test_load_positions_computes_unrealized_pnl_when_row_has_no_column():
+    row = SimpleNamespace(
+        ticker="NOK",
+        trade_identity="tactical_stock_trade",
+        strategy_id="catalyst_breakout_v1",
+        quantity=100,
+        average_cost=12.50,
+        market_price=12.75,
+        market_value=1275,
+        opened_at=datetime(2026, 7, 6, 15, 30, tzinfo=timezone.utc),
+        updated_at=datetime(2026, 7, 6, 16, 0, tzinfo=timezone.utc),
+    )
+
+    positions = _load_positions(
+        _FakeSession([row]),
+        as_of=datetime(2026, 7, 6, 16, 0, tzinfo=timezone.utc),
+    )
+
+    position = positions[0]
+    assert position["unrealized_pnl"] == pytest.approx(25.0)
+    assert position["total_pnl_pct"] == pytest.approx(0.02)
