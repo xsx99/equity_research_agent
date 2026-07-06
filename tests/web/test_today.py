@@ -830,6 +830,39 @@ def test_build_header_converts_notional_gross_exposure_to_ratio():
     assert header["gross_exposure"] == pytest.approx(0.0491706164)
 
 
+def test_build_header_uses_open_position_unrealized_pnl_when_available():
+    from src.web.routers.today import _build_header
+
+    latest_portfolio = SimpleNamespace(
+        snapshot_time=datetime(2026, 7, 6, 16, 0, tzinfo=timezone.utc),
+        net_liquidation_value=Decimal("100000"),
+        account_equity=Decimal("100000"),
+        cash_balance=Decimal("50000"),
+        day_pnl=Decimal("0"),
+        realized_pnl=Decimal("0"),
+        unrealized_pnl=Decimal("0"),
+        buying_power=Decimal("100000"),
+        stock_market_value=Decimal("3025"),
+        option_market_value=Decimal("0"),
+        total_margin_requirement=Decimal("0"),
+    )
+    positions = (
+        {"ticker": "CRDO", "unrealized_pnl": Decimal("25.25")},
+        {"ticker": "LITE", "unrealized_pnl": Decimal("-5.00")},
+    )
+
+    header = _build_header(
+        latest_portfolio=latest_portfolio,
+        latest_risk=None,
+        trade_rows=[],
+        latest_reflection=None,
+        latest_macro_snapshot=None,
+        positions=positions,
+    )
+
+    assert header["unrealized_pnl"] == Decimal("20.25")
+
+
 class TestTodayDashboard:
     def test_root_redirects_to_today(self, client):
         response = client.get("/", follow_redirects=False)

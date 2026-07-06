@@ -33,6 +33,7 @@ def _build_header(
     trade_rows: list[dict[str, Any]],
     latest_reflection: DailyReflection | None,
     latest_macro_snapshot: object | None = None,
+    positions: tuple[dict[str, Any], ...] = (),
 ) -> dict[str, Any]:
     trade_date = None
     if latest_portfolio:
@@ -41,6 +42,8 @@ def _build_header(
         trade_date = latest_risk.decision_time.date()
     elif latest_reflection:
         trade_date = latest_reflection.trade_date
+
+    position_unrealized_pnl = today_loaders._safe_sum(positions, "unrealized_pnl")
 
     return {
         "trade_date": trade_date,
@@ -67,7 +70,11 @@ def _build_header(
             ),
         ),
         "realized_pnl": latest_portfolio.realized_pnl if latest_portfolio else None,
-        "unrealized_pnl": latest_portfolio.unrealized_pnl if latest_portfolio else None,
+        "unrealized_pnl": (
+            position_unrealized_pnl
+            if position_unrealized_pnl is not None
+            else latest_portfolio.unrealized_pnl if latest_portfolio else None
+        ),
         "total_return": None,
         "buying_power": latest_portfolio.buying_power if latest_portfolio else None,
         "stock_market_value": latest_portfolio.stock_market_value if latest_portfolio else None,
