@@ -1,5 +1,16 @@
 {# One row+detail renderer shared by both tables — a manual pin and an agent
    candidate are the same pipeline, so they display identically. #}
+{% macro candidate_colgroup() %}
+            <colgroup>
+              <col class="candidate-col-symbol">
+              <col class="candidate-col-outcome">
+              <col class="candidate-col-trade">
+              <col class="candidate-col-strategy">
+              <col class="candidate-col-confidence">
+              <col class="candidate-col-reason">
+            </colgroup>
+{% endmacro %}
+
 {% macro candidate_row(row) %}
               <tr class="sig-row" data-testid="candidate-group-{{ row.ticker }}">
                 <td class="sym"><span class="chev">▸</span> {{ row.ticker }}</td>
@@ -10,8 +21,8 @@
                 <td class="reason">{{ row.thesis or row.selection_reason or row.primary_reason or row.operator_summary or row.reason or row.selection_source or "—" }}</td>
               </tr>
               <tr class="sig-detail">
-                <td colspan="6">
-                  <div data-tabs>
+                <td colspan="6" class="candidate-detail-cell">
+                  <div class="candidate-detail-content" data-tabs>
                     <div class="tab-bar">
                       <button class="tab-btn active" data-tab="evidence">Evidence</button>
                       <button class="tab-btn" data-tab="risk">Risk</button>
@@ -93,7 +104,8 @@
         {% if agent_rows %}
         <p class="panel-sub">The agent's scored candidate universe (from the scan). Click one to expand its evidence, risk, news, and history.</p>
         <div class="scroll-rail">
-          <table class="dtable">
+          <table class="dtable candidate-stable-table">
+            {{ candidate_colgroup() }}
             <thead><tr><th>Symbol</th><th>Outcome</th><th>Trade Identity</th><th>Strategy</th><th>Confidence</th><th>Primary Reason</th></tr></thead>
             <tbody>
               {% for row in agent_rows %}{{ candidate_row(row) }}{% endfor %}
@@ -130,7 +142,8 @@
         </form>
         {% if manual_rows %}
         <div class="scroll-panel">
-          <table class="dtable">
+          <table class="dtable candidate-stable-table">
+            {{ candidate_colgroup() }}
             <thead><tr><th>Symbol</th><th>Status</th><th>Trade Identity</th><th>Strategy</th><th>Confidence</th><th>Primary Reason</th></tr></thead>
             <tbody>
               {% for row in manual_rows %}{{ candidate_row(row) }}{% endfor %}

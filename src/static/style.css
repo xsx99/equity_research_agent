@@ -1262,6 +1262,37 @@ details > summary:hover { color: var(--text); }
 .dtable tfoot td { border-top: 1px solid var(--border-strong); border-bottom: none; font-weight: 600; color: var(--text); }
 .sleeve { display: inline-block; padding: .12rem .5rem; border-radius: var(--pill); font-size: var(--fs-2xs); font-family: var(--sans); font-weight: 600; background: var(--pos-soft); color: var(--pos); border: 1px solid rgba(61,220,132,.3); }
 
+/* Candidate tables use expanded detail rows; keep detail content from reshaping header columns. */
+.candidate-stable-table { table-layout: fixed; min-width: 1120px; }
+.candidate-col-symbol { width: 7%; }
+.candidate-col-outcome { width: 15%; }
+.candidate-col-trade { width: 15%; }
+.candidate-col-strategy { width: 25%; }
+.candidate-col-confidence { width: 8%; }
+.candidate-col-reason { width: 30%; }
+.candidate-stable-table th,
+.candidate-stable-table td { overflow: hidden; text-overflow: ellipsis; }
+.candidate-stable-table td.reason,
+.candidate-stable-table .candidate-detail-cell {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.candidate-detail-content,
+.candidate-detail-content .tab-panel,
+.candidate-detail-content .news-list,
+.candidate-detail-content .news-item {
+  min-width: 0;
+  max-width: 100%;
+}
+.candidate-detail-content .news-item h4,
+.candidate-detail-content .news-item p,
+.candidate-detail-content .detail-body,
+.candidate-detail-content .history-card-listing li,
+.candidate-detail-content .hl-text {
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
 /* Expandable rows (signals / candidates) */
 .sig-row { cursor: pointer; }
 .sig-row > td { vertical-align: top; }

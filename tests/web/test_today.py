@@ -1343,6 +1343,9 @@ class TestTodayDashboard:
         assert "theme-chip-list" in response.text
         assert "scroll-panel" in response.text
         assert "scroll-rail" in response.text
+        assert response.text.count('class="dtable candidate-stable-table"') == 2
+        assert response.text.count('class="candidate-col-symbol"') == 2
+        assert response.text.count('class="candidate-col-reason"') == 2
         assert 'data-testid="candidate-group-AAPL"' in response.text
         assert "trades-canvas" not in response.text
         assert "Signal Summary" not in response.text
