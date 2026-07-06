@@ -20,6 +20,7 @@ def _candidate(
     *,
     direction: str = "bullish",
     strategy_id: str = "relative_strength_rotation_v1",
+    missing_required_signals: list[str] | None = None,
 ) -> CandidateScoreRecord:
     now = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
     return CandidateScoreRecord(
@@ -35,7 +36,7 @@ def _candidate(
         action="enter_long" if direction == "bullish" else "enter_short",
         typical_horizon="2w-3m",
         core_signal_evidence={},
-        missing_required_signals=[],
+        missing_required_signals=missing_required_signals or [],
         unsupported_missing_signal_families=[],
         invalidators=[],
         risk_tags=["relative_strength"],
@@ -87,9 +88,14 @@ def _request(
     direct_company_negative_evidence: bool = False,
     bearish_signal_sources: tuple[str, ...] = (),
     signal_freshness: dict[str, str] | None = None,
+    missing_required_signals: list[str] | None = None,
 ) -> TradeRiskRequest:
     return TradeRiskRequest(
-        candidate=_candidate(direction=direction, strategy_id=strategy_id),
+        candidate=_candidate(
+            direction=direction,
+            strategy_id=strategy_id,
+            missing_required_signals=missing_required_signals,
+        ),
         classification=_classification(trade_identity=trade_identity, strategy_id=strategy_id),
         instrument_type="stock",
         target_weight=0.08,
@@ -274,6 +280,30 @@ def test_risk_manager_allows_tactical_trade_when_only_insider_source_is_missing(
     assert decision.status == "approved"
 
 
+def test_risk_manager_allows_relative_strength_when_optional_source_families_are_missing():
+    portfolio = _portfolio()
+    config = RiskConfigResolver().resolve(
+        risk_appetite=RiskAppetiteProfile.BALANCED,
+        portfolio_context=portfolio,
+        macro_risk_budget_multiplier=1.0,
+    )
+    request = _request(
+        strategy_id="relative_strength_rotation_v1",
+        signal_freshness={
+            "technical": "fresh",
+            "fundamental": "missing",
+            "events_news": "missing",
+            "insider": "missing",
+            "social_macro": "missing",
+        },
+    )
+    sizing = PositionSizer().size_position(request, portfolio, config)
+
+    decision = RiskManager().evaluate(request, sizing, portfolio, config)
+
+    assert decision.status == "approved"
+
+
 def test_risk_manager_still_rejects_insider_strategy_when_insider_source_is_missing():
     portfolio = _portfolio()
     config = RiskConfigResolver().resolve(
@@ -288,6 +318,100 @@ def test_risk_manager_still_rejects_insider_strategy_when_insider_source_is_miss
             "fundamental": "fresh",
             "events_news": "fresh",
             "insider": "missing",
+        },
+    )
+    sizing = PositionSizer().size_position(request, portfolio, config)
+
+    decision = RiskManager().evaluate(request, sizing, portfolio, config)
+
+    assert decision.status == "rejected"
+    assert decision.reason_code == "missing_or_stale_signals"
+
+
+def test_risk_manager_rejects_when_core_technical_source_is_missing():
+    portfolio = _portfolio()
+    config = RiskConfigResolver().resolve(
+        risk_appetite=RiskAppetiteProfile.BALANCED,
+        portfolio_context=portfolio,
+        macro_risk_budget_multiplier=1.0,
+    )
+    request = _request(
+        strategy_id="relative_strength_rotation_v1",
+        signal_freshness={
+            "technical": "missing",
+            "fundamental": "fresh",
+            "events_news": "fresh",
+        },
+    )
+    sizing = PositionSizer().size_position(request, portfolio, config)
+
+    decision = RiskManager().evaluate(request, sizing, portfolio, config)
+
+    assert decision.status == "rejected"
+    assert decision.reason_code == "missing_or_stale_signals"
+
+
+def test_risk_manager_rejects_catalyst_strategy_when_events_news_source_is_missing():
+    portfolio = _portfolio()
+    config = RiskConfigResolver().resolve(
+        risk_appetite=RiskAppetiteProfile.BALANCED,
+        portfolio_context=portfolio,
+        macro_risk_budget_multiplier=1.0,
+    )
+    request = _request(
+        strategy_id="strong_theme_catalyst_continuation_v1",
+        signal_freshness={
+            "technical": "fresh",
+            "fundamental": "fresh",
+            "events_news": "missing",
+            "social_macro": "missing",
+        },
+    )
+    sizing = PositionSizer().size_position(request, portfolio, config)
+
+    decision = RiskManager().evaluate(request, sizing, portfolio, config)
+
+    assert decision.status == "rejected"
+    assert decision.reason_code == "missing_or_stale_signals"
+
+
+def test_risk_manager_rejects_valuation_strategy_when_fundamental_source_is_missing():
+    portfolio = _portfolio()
+    config = RiskConfigResolver().resolve(
+        risk_appetite=RiskAppetiteProfile.BALANCED,
+        portfolio_context=portfolio,
+        macro_risk_budget_multiplier=1.0,
+    )
+    request = _request(
+        strategy_id="valuation_repair_quality_software_v1",
+        signal_freshness={
+            "technical": "fresh",
+            "fundamental": "missing",
+            "events_news": "missing",
+            "social_macro": "missing",
+        },
+    )
+    sizing = PositionSizer().size_position(request, portfolio, config)
+
+    decision = RiskManager().evaluate(request, sizing, portfolio, config)
+
+    assert decision.status == "rejected"
+    assert decision.reason_code == "missing_or_stale_signals"
+
+
+def test_risk_manager_rejects_candidate_with_missing_required_signals():
+    portfolio = _portfolio()
+    config = RiskConfigResolver().resolve(
+        risk_appetite=RiskAppetiteProfile.BALANCED,
+        portfolio_context=portfolio,
+        macro_risk_budget_multiplier=1.0,
+    )
+    request = _request(
+        missing_required_signals=["technical.relative_volume"],
+        signal_freshness={
+            "technical": "fresh",
+            "fundamental": "fresh",
+            "events_news": "fresh",
         },
     )
     sizing = PositionSizer().size_position(request, portfolio, config)

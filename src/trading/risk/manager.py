@@ -17,6 +17,20 @@ from src.trading.risk.lookahead import HedgeActionRecord, PortfolioRiskIntentRec
 
 _BLOCKING_SIGNAL_STATUSES = frozenset({"missing", "stale", "failed"})
 _INSIDER_REQUIRED_STRATEGIES = frozenset({"insider_accumulation_momentum_v1"})
+_EVENTS_NEWS_REQUIRED_STRATEGIES = frozenset(
+    {
+        "catalyst_breakout_v1",
+        "strong_theme_catalyst_continuation_v1",
+        "strong_theme_no_clear_near_term_entry_v1",
+        "earnings_drift_v1",
+    }
+)
+_FUNDAMENTAL_REQUIRED_STRATEGIES = frozenset(
+    {
+        "valuation_repair_quality_software_v1",
+        "core_accumulation_on_pullback_v1",
+    }
+)
 
 
 class RiskManager:
@@ -475,15 +489,31 @@ def _is_macro_only_bearish(request: TradeRiskRequest) -> bool:
 
 
 def _has_missing_or_stale_signals(request: TradeRiskRequest) -> bool:
+    if request.candidate.missing_required_signals:
+        return True
+    if request.candidate.unsupported_missing_signal_families:
+        return True
+
     for signal_family, status in request.signal_freshness.items():
         if status not in _BLOCKING_SIGNAL_STATUSES:
             continue
-        if (
-            signal_family == "insider"
-            and request.candidate.strategy_id not in _INSIDER_REQUIRED_STRATEGIES
-        ):
-            continue
-        return True
+        if _is_blocking_signal_family(request, signal_family):
+            return True
+    return False
+
+
+def _is_blocking_signal_family(request: TradeRiskRequest, signal_family: str) -> bool:
+    strategy_id = request.candidate.strategy_id
+    if signal_family == "technical":
+        return request.instrument_type in {"stock", "option"}
+    if signal_family == "option_chain":
+        return request.instrument_type == "option"
+    if signal_family == "insider":
+        return strategy_id in _INSIDER_REQUIRED_STRATEGIES
+    if signal_family == "events_news":
+        return strategy_id in _EVENTS_NEWS_REQUIRED_STRATEGIES
+    if signal_family == "fundamental":
+        return strategy_id in _FUNDAMENTAL_REQUIRED_STRATEGIES
     return False
 
 
