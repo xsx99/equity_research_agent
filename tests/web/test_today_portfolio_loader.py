@@ -37,7 +37,7 @@ def test_load_positions_exposes_enriched_stock_position_fields():
         trade_identity="tactical_stock_trade",
         strategy_id="relative_strength_rotation_v1",
         quantity=10,
-        avg_cost=100,
+        average_cost=100,
         market_price=125,
         market_value=1250,
         unrealized_pnl=250,

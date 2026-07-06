@@ -64,17 +64,19 @@ def _load_positions(session: Any, *, as_of: datetime | None = None) -> tuple[dic
         .all()
     )
     reference_time = as_of or datetime.now(timezone.utc)
-    return tuple(
-        {
+    positions = []
+    for row in rows:
+        avg_cost = getattr(row, "average_cost", getattr(row, "avg_cost", None))
+        positions.append({
             "ticker": row.ticker,
             "trade_identity": row.trade_identity,
             "trade_identity_label": trade_identity_label(row.trade_identity),
             "strategy_id": row.strategy_id,
             "strategy_label": strategy_label(row.strategy_id),
             "quantity": row.quantity,
-            "avg_cost": getattr(row, "avg_cost", None),
-            "entry_price": getattr(row, "avg_cost", None),
-            "avg_fill_price": getattr(row, "avg_cost", None),
+            "avg_cost": avg_cost,
+            "entry_price": avg_cost,
+            "avg_fill_price": avg_cost,
             "filled_qty": row.quantity,
             "current_price": getattr(row, "market_price", None),
             "held_days": _held_days(getattr(row, "opened_at", None), reference_time),
@@ -83,12 +85,11 @@ def _load_positions(session: Any, *, as_of: datetime | None = None) -> tuple[dic
             "unrealized_pnl": getattr(row, "unrealized_pnl", None),
             "total_pnl_pct": _total_pnl_pct(
                 unrealized_pnl=getattr(row, "unrealized_pnl", None),
-                avg_cost=getattr(row, "avg_cost", None),
+                avg_cost=avg_cost,
                 quantity=row.quantity,
             ),
-        }
-        for row in rows
-    )
+        })
+    return tuple(positions)
 
 
 def _held_days(opened_at: Any, as_of: datetime) -> int | None:
