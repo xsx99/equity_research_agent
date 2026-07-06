@@ -112,6 +112,98 @@ def test_openrouter_chat_completion_posts_to_configured_base_url(monkeypatch):
     ]
 
 
+def test_openrouter_chat_completion_prefers_generation_total_cost(monkeypatch):
+    from src.agents.llm_models import run_openrouter_chat_completion
+
+    requests = []
+
+    class FakeResponse:
+        def __init__(self, payload):
+            self._payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self._payload
+
+    class FakeClient:
+        def __init__(self, *, timeout):
+            self.timeout = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def post(self, url, *, headers, json):
+            requests.append({"method": "POST", "url": url, "headers": headers, "json": json})
+            return FakeResponse(
+                {
+                    "id": "gen-abc123",
+                    "model": "moonshotai/kimi-k2.6-20260420",
+                    "choices": [{"message": {"content": '{"ok": true}'}}],
+                    "usage": {
+                        "prompt_tokens": 11,
+                        "completion_tokens": 7,
+                        "total_tokens": 18,
+                        "cost": 0.0002,
+                    },
+                }
+            )
+
+        def get(self, url, *, headers, params):
+            requests.append({"method": "GET", "url": url, "headers": headers, "params": params})
+            return FakeResponse(
+                {
+                    "data": {
+                        "model": "moonshotai/kimi-k2.6-20260420",
+                        "tokens_prompt": 13,
+                        "tokens_completion": 9,
+                        "total_cost": 0.00042,
+                        "latency": 456,
+                    }
+                }
+            )
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "router-key")
+
+    result = run_openrouter_chat_completion(
+        "Return JSON",
+        "moonshotai/kimi-k2.6",
+        http_client_cls=FakeClient,
+        now_ms=lambda: 1000,
+        monotonic_ms=lambda: 1123,
+    )
+
+    assert result["usage"] == {
+        "provider": "openrouter",
+        "model": "moonshotai/kimi-k2.6-20260420",
+        "prompt_tokens": 13,
+        "completion_tokens": 9,
+        "total_tokens": 22,
+        "estimated_cost": 0.00042,
+        "latency_ms": 456,
+    }
+    assert requests[1] == {
+        "method": "GET",
+        "url": "https://openrouter.ai/api/v1/generation",
+        "headers": {"Authorization": "Bearer router-key"},
+        "params": {"id": "gen-abc123"},
+    }
+
+
+def test_estimate_llm_cost_uses_gemini_flash_lite_standard_text_pricing():
+    from src.agents.llm_models import estimate_llm_cost
+
+    assert estimate_llm_cost(
+        "gemini-2.5-flash-lite",
+        prompt_tokens=1_000_000,
+        completion_tokens=1_000_000,
+    ) == 0.5
+
+
 def test_build_phi_model_configures_gemini(monkeypatch):
     from src.agents.llm_models import build_phi_model
 

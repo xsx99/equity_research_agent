@@ -271,6 +271,46 @@ def test_default_trading_agent_runner_uses_phi_agent(monkeypatch):
     assert response == '{"decision":"no_trade"}'
 
 
+def test_default_trading_agent_runner_preserves_phi_metrics_for_gemini(monkeypatch):
+    class _FakeAgent:
+        def __init__(self, *, model, markdown):
+            assert model == "fake-model"
+            assert markdown is False
+
+        def run(self, prompt):
+            assert prompt == "trade prompt"
+            return SimpleNamespace(
+                content='{"decision":"no_trade"}',
+                metrics={
+                    "input_tokens": 1_000_000,
+                    "output_tokens": 1_000_000,
+                    "total_tokens": 2_000_000,
+                    "time": [1.234],
+                },
+            )
+
+    monkeypatch.setattr("src.agents.trading._build_phi_model", lambda model_name: "fake-model")
+    monkeypatch.setitem(sys.modules, "phi", ModuleType("phi"))
+    phi_agent_module = ModuleType("phi.agent")
+    phi_agent_module.Agent = _FakeAgent
+    monkeypatch.setitem(sys.modules, "phi.agent", phi_agent_module)
+
+    response = _default_agent_runner("trade prompt", "gemini-2.5-flash-lite")
+
+    assert response == {
+        "content": '{"decision":"no_trade"}',
+        "usage": {
+            "provider": "google",
+            "model": "gemini-2.5-flash-lite",
+            "prompt_tokens": 1_000_000,
+            "completion_tokens": 1_000_000,
+            "total_tokens": 2_000_000,
+            "estimated_cost": 0.5,
+            "latency_ms": 1234,
+        },
+    }
+
+
 def test_default_trading_agent_runner_uses_direct_openrouter_runner(monkeypatch):
     calls: list[tuple[str, str]] = []
 

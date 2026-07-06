@@ -11,6 +11,11 @@ from src.core import config as app_config
 
 OPENROUTER_MODEL_PREFIXES = ("moonshotai/",)
 
+_GEMINI_PRICING_PER_1M_TOKENS: dict[str, tuple[float, float]] = {
+    "gemini-2.5-flash-lite": (0.10, 0.40),
+    "gemini-2.5-flash-lite-preview-09-2025": (0.10, 0.40),
+}
+
 
 def should_use_gemini_backend(model_name: str) -> bool:
     return model_name.strip().lower().startswith("gemini")
@@ -54,6 +59,17 @@ def build_phi_model(
     raise RuntimeError(f"Unsupported default LLM model for Phi runner: {model_name}")
 
 
+def estimate_llm_cost(model_name: str, *, prompt_tokens: int, completion_tokens: int) -> float:
+    """Estimate provider cost from local per-token pricing when the API omits billing cost."""
+    normalized = model_name.strip().lower()
+    rates = _GEMINI_PRICING_PER_1M_TOKENS.get(normalized)
+    if rates is None:
+        return 0.0
+
+    input_rate, output_rate = rates
+    return (max(prompt_tokens, 0) * input_rate + max(completion_tokens, 0) * output_rate) / 1_000_000
+
+
 def run_openrouter_chat_completion(
     prompt: str,
     model_name: str,
@@ -68,6 +84,7 @@ def run_openrouter_chat_completion(
         raise RuntimeError("OpenRouter model support requires OPENROUTER_API_KEY.")
 
     start_ms = int(time.monotonic() * 1000) if now_ms is None else int(now_ms())
+    generation_metadata: dict[str, Any] | None = None
     with http_client_cls(timeout=120) as client:
         response = client.post(
             f"{app_config.OPENROUTER_BASE_URL.rstrip('/')}/chat/completions",
@@ -81,29 +98,125 @@ def run_openrouter_chat_completion(
                 "temperature": 0,
             },
         )
-    response.raise_for_status()
+        response.raise_for_status()
+        payload = response.json()
+        generation_metadata = _fetch_openrouter_generation_metadata(
+            client=client,
+            api_key=api_key,
+            generation_id=payload.get("id"),
+        )
     elapsed_ms = (
         int(time.monotonic() * 1000) - start_ms
         if monotonic_ms is None
         else int(monotonic_ms()) - start_ms
     )
 
-    payload = response.json()
     choices = payload.get("choices") or ()
     message = choices[0].get("message") if choices else {}
     content = (message or {}).get("content")
     if content is None:
         content = ""
     usage = payload.get("usage") or {}
+    normalized_usage = _normalize_openrouter_usage(
+        model_name=model_name,
+        response_model=payload.get("model"),
+        chat_usage=usage,
+        generation_metadata=generation_metadata,
+        elapsed_ms=max(elapsed_ms, 0),
+    )
     return {
         "content": content,
-        "usage": {
-            "provider": "openrouter",
-            "model": str(payload.get("model") or model_name),
-            "prompt_tokens": int(usage.get("prompt_tokens") or 0),
-            "completion_tokens": int(usage.get("completion_tokens") or 0),
-            "total_tokens": int(usage.get("total_tokens") or 0),
-            "estimated_cost": float(usage.get("estimated_cost", usage.get("cost") or 0.0)),
-            "latency_ms": max(elapsed_ms, 0),
-        },
+        "usage": normalized_usage,
     }
+
+
+def _fetch_openrouter_generation_metadata(
+    *,
+    client: Any,
+    api_key: str,
+    generation_id: Any,
+) -> dict[str, Any] | None:
+    if not generation_id:
+        return None
+    try:
+        response = client.get(
+            f"{app_config.OPENROUTER_BASE_URL.rstrip('/')}/generation",
+            headers={"Authorization": f"Bearer {api_key}"},
+            params={"id": str(generation_id)},
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except Exception:
+        return None
+    data = payload.get("data") if isinstance(payload, dict) else None
+    return data if isinstance(data, dict) else None
+
+
+def _normalize_openrouter_usage(
+    *,
+    model_name: str,
+    response_model: Any,
+    chat_usage: dict[str, Any],
+    generation_metadata: dict[str, Any] | None,
+    elapsed_ms: int,
+) -> dict[str, Any]:
+    metadata = generation_metadata or {}
+    prompt_tokens = _int_or_none(metadata.get("tokens_prompt"))
+    if prompt_tokens is None:
+        prompt_tokens = _int_or_none(metadata.get("native_tokens_prompt"))
+    if prompt_tokens is None:
+        prompt_tokens = _int_or_none(chat_usage.get("prompt_tokens")) or 0
+
+    completion_tokens = _int_or_none(metadata.get("tokens_completion"))
+    if completion_tokens is None:
+        completion_tokens = _int_or_none(metadata.get("native_tokens_completion"))
+    if completion_tokens is None:
+        completion_tokens = _int_or_none(chat_usage.get("completion_tokens")) or 0
+
+    total_tokens = _int_or_none(metadata.get("total_tokens"))
+    if total_tokens is None and generation_metadata:
+        total_tokens = prompt_tokens + completion_tokens
+    if total_tokens is None:
+        total_tokens = _int_or_none(chat_usage.get("total_tokens"))
+    if total_tokens is None:
+        total_tokens = prompt_tokens + completion_tokens
+
+    estimated_cost = _float_or_none(metadata.get("total_cost"))
+    if estimated_cost is None:
+        estimated_cost = _float_or_none(metadata.get("usage"))
+    if estimated_cost is None:
+        estimated_cost = _float_or_none(chat_usage.get("estimated_cost"))
+    if estimated_cost is None:
+        estimated_cost = _float_or_none(chat_usage.get("cost")) or 0.0
+
+    latency_ms = _int_or_none(metadata.get("latency"))
+    if latency_ms is None:
+        latency_ms = elapsed_ms
+
+    return {
+        "provider": "openrouter",
+        "model": str(metadata.get("model") or response_model or model_name),
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": total_tokens,
+        "estimated_cost": estimated_cost,
+        "latency_ms": max(latency_ms, 0),
+    }
+
+
+def _int_or_none(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _float_or_none(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
