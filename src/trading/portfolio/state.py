@@ -284,13 +284,15 @@ def build_positions_from_broker(
         if not ticker:
             continue
         position_metadata = metadata.get(ticker, {})
+        quantity = abs(_to_float(payload.get("qty")) or 0.0)
+        market_value = abs(_to_float(payload.get("market_value")) or 0.0)
         positions.append(
             StockPosition(
                 ticker=ticker,
-                quantity=_to_float(payload.get("qty")) or 0.0,
+                quantity=quantity,
                 average_cost=_to_float(payload.get("avg_entry_price")) or 0.0,
                 market_price=_to_float(payload.get("current_price")) or 0.0,
-                market_value=_to_float(payload.get("market_value")) or 0.0,
+                market_value=market_value,
                 trade_identity=str(position_metadata.get("trade_identity", "tactical_stock_trade")),
                 strategy_id=_string_or_none(position_metadata.get("strategy_id")),
                 opened_at=as_of,
@@ -320,10 +322,11 @@ def build_option_positions_from_broker(
             continue
         position_metadata = metadata.get(contract_symbol, {})
         underlying_ticker = _underlying_ticker_from_option_symbol(contract_symbol) or contract_symbol
+        quantity = abs(int(round(_to_float(payload.get("qty")) or 0.0)))
         positions.append(
             OptionPosition(
                 ticker=str(position_metadata.get("ticker") or underlying_ticker),
-                quantity=int(round(_to_float(payload.get("qty")) or 0.0)),
+                quantity=quantity,
                 market_value=abs(_to_float(payload.get("market_value")) or 0.0),
                 trade_identity=str(position_metadata.get("trade_identity") or "tactical_option_trade"),
                 strategy_id=_string_or_none(position_metadata.get("strategy_id")),

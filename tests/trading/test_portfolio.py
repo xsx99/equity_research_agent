@@ -6,6 +6,7 @@ from src.trading.portfolio.state import (
     OptionPosition,
     PortfolioSnapshot,
     StockPosition,
+    build_option_positions_from_broker,
     build_portfolio_context,
     build_portfolio_snapshot_from_account,
     build_positions_from_broker,
@@ -111,6 +112,37 @@ def test_build_positions_from_broker_filters_option_contract_rows():
     )
 
     assert [position.ticker for position in positions] == ["AAPL"]
+
+
+def test_build_option_positions_from_broker_uses_absolute_quantity_for_short_contracts():
+    positions = build_option_positions_from_broker(
+        broker_positions=[
+            {
+                "symbol": "NVDA260717P00110000",
+                "qty": "-1",
+                "avg_entry_price": "0.02",
+                "current_price": "0.03",
+                "market_value": "-3",
+                "side": "short",
+                "asset_class": "us_option",
+            }
+        ],
+        as_of=datetime(2026, 7, 6, 18, 0, tzinfo=timezone.utc),
+        local_option_position_metadata={
+            "NVDA260717P00110000": {
+                "ticker": "NVDA",
+                "trade_identity": "tactical_option_trade",
+                "strategy_id": "defined_risk_income_v1",
+                "option_strategy_type": "put_credit_spread",
+            }
+        },
+    )
+
+    assert len(positions) == 1
+    assert positions[0].ticker == "NVDA"
+    assert positions[0].quantity == 1
+    assert positions[0].direction == "short"
+    assert positions[0].market_value == 3.0
 
 
 def test_build_portfolio_context_uses_broker_snapshot_and_positions():

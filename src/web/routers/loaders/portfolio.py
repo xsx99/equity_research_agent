@@ -86,6 +86,8 @@ def _load_positions(session: Any, *, as_of: datetime | None = None) -> tuple[dic
             "filled_qty": row.quantity,
             "current_price": getattr(row, "market_price", None),
             "held_days": _held_days(getattr(row, "opened_at", None), reference_time),
+            "opened_at": getattr(row, "opened_at", None),
+            "updated_at": getattr(row, "updated_at", None),
             "sleeve": trade_identity_label(row.trade_identity),
             "market_value": row.market_value,
             "unrealized_pnl": unrealized_pnl,

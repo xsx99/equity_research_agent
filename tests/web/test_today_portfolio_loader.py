@@ -60,6 +60,8 @@ def test_load_positions_exposes_enriched_stock_position_fields():
     assert position["total_pnl_pct"] == pytest.approx(0.25)
     assert position["sleeve"] == "Tactical Stock Trade"
     assert position["filled_qty"] == 10
+    assert position["opened_at"] == opened_at
+    assert position["updated_at"] == datetime(2026, 6, 15, 12, 0, tzinfo=timezone.utc)
 
 
 def test_load_positions_computes_unrealized_pnl_when_row_has_no_column():
