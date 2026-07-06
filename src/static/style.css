@@ -1303,6 +1303,9 @@ details > summary:hover { color: var(--text); }
 /* History Highlights — distilled per-ticker / per-candidate timeline */
 .history-hl { border: 1px solid var(--accent); border-radius: var(--radius-sm); background: linear-gradient(180deg, rgba(76,201,240,.05), var(--bg-elev-2)); padding: .9rem 1rem; }
 .history-hl h5 { font-size: var(--fs-2xs); letter-spacing: .07em; text-transform: uppercase; color: var(--accent); margin: 0 0 .7rem; display: flex; align-items: center; gap: .4rem; }
+.history-hl .history-table { margin: -.35rem 0; }
+.history-hl .history-table th:first-child, .history-hl .history-table td:first-child { padding-left: 0; }
+.history-hl .history-table th:last-child, .history-hl .history-table td:last-child { padding-right: 0; }
 .hl-line { display: grid; grid-template-columns: auto auto 1fr; gap: .7rem; align-items: baseline; padding: .45rem 0; border-bottom: 1px solid var(--border-faint); }
 .hl-line:last-child { border-bottom: none; }
 .hl-date { font-family: var(--mono); font-size: var(--fs-sm); color: var(--text-muted); white-space: nowrap; }

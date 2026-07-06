@@ -1513,6 +1513,9 @@ class TestTodayDashboard:
         assert response.status_code == 200
         assert "History Highlights" in response.text
         assert "history-hl" in response.text
+        assert '<div class="history-hl">' in response.text
+        assert '<table class="dtable history-table">' in response.text
+        assert '<table class="dtable history-table history-hl">' not in response.text
         assert "2026-06-18 16:42 UTC" in response.text
         # each historical decision shows the agent's per-snapshot reasoning + the change deltas
         assert "Catalyst quality faded" in response.text
@@ -3105,6 +3108,14 @@ def test_today_kpi_values_scale_to_fit_card_width():
     assert "container-type: inline-size" in stylesheet
     assert "@container (max-width: 230px)" in stylesheet
     assert "overflow-wrap: anywhere" in stylesheet
+
+
+def test_history_highlights_table_has_inset_container_spacing():
+    stylesheet = Path("src/static/style.css").read_text()
+
+    assert ".history-hl { border: 1px solid var(--accent);" in stylesheet
+    assert ".history-hl .history-table" in stylesheet
+    assert ".history-hl .history-table th:first-child" in stylesheet
 
 
 def test_build_attention_feed_merges_by_ticker():

@@ -239,29 +239,31 @@
               {% if detail.tabs is defined and detail.tabs.timeline %}
               <div class="tab-panel" data-panel="history" data-testid="history-highlights">
                 <div class="section-label">History Highlights</div>
-                <table class="dtable history-table history-hl">
-                  <thead><tr><th>Time</th><th>Phase</th><th>Decision</th><th>Strategy</th><th>Conf</th><th>Reasoning</th></tr></thead>
-                  <tbody>
-                    {% set history_items = detail.tabs.history_highlights if detail.tabs.history_highlights is defined else detail.tabs.timeline %}
-                    {% for item in history_items %}
-                    {% set hl_class = "entry" if item.change_type == "baseline" else ("risk" if item.change_type == "material_change" else "decision") %}
-                    {% set hl_tag = "Baseline" if item.change_type == "baseline" else ("Change" if item.change_type == "material_change" else "Latest") %}
-                    {% set td = item.trade_decision %}
-                    <tr>
-                      <td class="hl-date">{{ item.time_label or "—" }}</td>
-                      <td><span class="hl-tag {{ hl_class }}">{{ hl_tag }}</span></td>
-                      <td>{% if td and td.label %}<strong>{{ td.label }}</strong>{% else %}—{% endif %}</td>
-                      <td>{{ td.strategy_label if td and td.strategy_label and td.strategy_label != "—" else "—" }}</td>
-                      <td class="conv">{{ fmt_number(td.confidence) if td and td.confidence is not none else "—" }}</td>
-                      <td class="reason">
-                        {%- if td and td.summary and td.summary != "No material update" -%}{{ td.summary }}
-                        {%- elif item.signal_summary -%}{{ item.signal_summary | join(", ") }}{%- else -%}—{%- endif -%}
-                        {%- if item.change_summary %} <span class="detail-muted">({{ item.change_summary | join("; ") }})</span>{% endif -%}
-                      </td>
-                    </tr>
-                    {% endfor %}
-                  </tbody>
-                </table>
+                <div class="history-hl">
+                  <table class="dtable history-table">
+                    <thead><tr><th>Time</th><th>Phase</th><th>Decision</th><th>Strategy</th><th>Conf</th><th>Reasoning</th></tr></thead>
+                    <tbody>
+                      {% set history_items = detail.tabs.history_highlights if detail.tabs.history_highlights is defined else detail.tabs.timeline %}
+                      {% for item in history_items %}
+                      {% set hl_class = "entry" if item.change_type == "baseline" else ("risk" if item.change_type == "material_change" else "decision") %}
+                      {% set hl_tag = "Baseline" if item.change_type == "baseline" else ("Change" if item.change_type == "material_change" else "Latest") %}
+                      {% set td = item.trade_decision %}
+                      <tr>
+                        <td class="hl-date">{{ item.time_label or "—" }}</td>
+                        <td><span class="hl-tag {{ hl_class }}">{{ hl_tag }}</span></td>
+                        <td>{% if td and td.label %}<strong>{{ td.label }}</strong>{% else %}—{% endif %}</td>
+                        <td>{{ td.strategy_label if td and td.strategy_label and td.strategy_label != "—" else "—" }}</td>
+                        <td class="conv">{{ fmt_number(td.confidence) if td and td.confidence is not none else "—" }}</td>
+                        <td class="reason">
+                          {%- if td and td.summary and td.summary != "No material update" -%}{{ td.summary }}
+                          {%- elif item.signal_summary -%}{{ item.signal_summary | join(", ") }}{%- else -%}—{%- endif -%}
+                          {%- if item.change_summary %} <span class="detail-muted">({{ item.change_summary | join("; ") }})</span>{% endif -%}
+                        </td>
+                      </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </div>
               </div>
               {% endif %}
             </section>
