@@ -49,6 +49,8 @@ def build_today_candidates_view(
         (row.get("decision_time") for row in enriched_rows if row.get("decision_time")),
         default=None,
     )
+    agent_last_run_at = _latest_timestamp(agent_candidates, "decision_time")
+    manual_last_run_at = _latest_timestamp(manual_candidates, "decision_time", "last_evaluated_at")
     return {
         "summary": {
             "action_queue": action_queue,
@@ -59,6 +61,8 @@ def build_today_candidates_view(
         "agent_candidates": agent_candidates,
         "manual_candidates": manual_candidates,
         "last_run_at": last_run_at,
+        "agent_last_run_at": agent_last_run_at,
+        "manual_last_run_at": manual_last_run_at,
         "decision_readout": decision_readout,
         "rows": enriched_rows,
         "manual_requests": manual_requests,
@@ -68,6 +72,16 @@ def build_today_candidates_view(
         "peer_baskets": peer_baskets,
         "themes": themes,
     }
+
+
+def _latest_timestamp(rows: tuple[dict[str, Any], ...], *keys: str) -> Any | None:
+    values = [
+        row.get(key)
+        for row in rows
+        for key in keys
+        if row.get(key)
+    ]
+    return max(values, default=None)
 
 
 def _thesis_at(history: tuple[Any, ...], when: Any) -> str | None:

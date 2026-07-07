@@ -14,6 +14,12 @@ from src.web.presenters.today_copy import (
 from src.web.routers import today_loaders
 
 
+_CANDIDATE_LOOKBACK_LIMIT = 500
+_CANDIDATE_FALLBACK_LIMIT = 25
+_SCANNER_SELECTION_SOURCE = "scanner"
+_MANUAL_SELECTION_SOURCES = {"manual_request", "watchlist_pin"}
+
+
 def _attach_candidate_summary(candidates: dict[str, Any]) -> dict[str, Any]:
     decision_readout = tuple(candidates.get("decision_readout") or ())
     actionable = sum(1 for row in decision_readout if row.get("action_required"))
@@ -73,14 +79,53 @@ def _load_candidate_rows(session: Any) -> tuple[dict[str, Any], ...]:
     rows = (
         session.query(CandidateScore)
         .order_by(CandidateScore.decision_time.desc(), CandidateScore.candidate_score.desc())
-        .limit(25)
+        .limit(_CANDIDATE_LOOKBACK_LIMIT)
         .all()
     )
+    rows = _select_today_candidate_rows(rows)
     latest_decisions = _latest_trading_decisions_by_ticker(session, rows)
     return tuple(
         _candidate_row_payload(row, latest_decisions.get(str(row.ticker or "").strip().upper()))
         for row in rows
     )
+
+
+def _select_today_candidate_rows(rows: list[CandidateScore]) -> tuple[CandidateScore, ...]:
+    """Keep the latest scanner cohort even when a narrower manual-review run is newer."""
+    ordered_rows = tuple(rows)
+    scanner_key = _latest_candidate_run_key_for_sources(ordered_rows, {_SCANNER_SELECTION_SOURCE})
+    if scanner_key is None:
+        return ordered_rows[:_CANDIDATE_FALLBACK_LIMIT]
+
+    manual_key = _latest_candidate_run_key_for_sources(ordered_rows, _MANUAL_SELECTION_SOURCES)
+    selected: list[CandidateScore] = []
+    for row in ordered_rows:
+        row_key = _candidate_run_key(row)
+        selection_source = str(getattr(row, "selection_source", "") or "").strip()
+        if row_key == scanner_key:
+            selected.append(row)
+            continue
+        if manual_key is not None and row_key == manual_key and selection_source in _MANUAL_SELECTION_SOURCES:
+            selected.append(row)
+    return tuple(selected)
+
+
+def _latest_candidate_run_key_for_sources(rows: tuple[CandidateScore, ...], sources: set[str]) -> tuple[str, str] | None:
+    for row in rows:
+        selection_source = str(getattr(row, "selection_source", "") or "").strip()
+        if selection_source in sources:
+            return _candidate_run_key(row)
+    return None
+
+
+def _candidate_run_key(row: CandidateScore) -> tuple[str, str]:
+    strategy_run_id = getattr(row, "strategy_run_id", None)
+    if strategy_run_id:
+        return ("run", str(strategy_run_id))
+    decision_time = getattr(row, "decision_time", None)
+    if decision_time is not None:
+        return ("decision_time", str(decision_time))
+    return ("row", str(id(row)))
 
 
 def _candidate_row_payload(row: CandidateScore, latest_decision: Any | None) -> dict[str, Any]:

@@ -2322,6 +2322,61 @@ class TestTodayDashboard:
         assert rows[0]["current_outcome_label"] == "No clean entry, so no trade"
         assert "Actionable Trade" not in rows[0]["operator_summary"]
 
+    def test_load_candidate_rows_keeps_latest_scanner_run_when_manual_review_is_newer(self):
+        from src.web.routers.today import _load_candidate_rows
+
+        manual_time = datetime(2026, 7, 7, 12, 50, tzinfo=timezone.utc)
+        scanner_time = datetime(2026, 7, 7, 12, 45, tzinfo=timezone.utc)
+
+        def candidate(
+            *,
+            ticker: str,
+            run_id: str,
+            decision_time: datetime,
+            selection_source: str,
+            score: str = "0.35",
+        ) -> SimpleNamespace:
+            return SimpleNamespace(
+                ticker=ticker,
+                strategy_run_id=run_id,
+                selection_source=selection_source,
+                rejection_reason=None,
+                candidate_status="watch",
+                strategy_id="catalyst_breakout_v1",
+                trade_classifications=[],
+                watch_candidates=[],
+                decision_time=decision_time,
+                candidate_score=Decimal(score),
+            )
+
+        manual_rows = tuple(
+            candidate(
+                ticker="AAPL" if index % 2 == 0 else "NVDA",
+                run_id="manual-run",
+                decision_time=manual_time,
+                selection_source="manual_request",
+            )
+            for index in range(22)
+        )
+        scanner_rows = (
+            candidate(ticker="CRDO", run_id="scanner-run", decision_time=scanner_time, selection_source="scanner", score="0.98"),
+            candidate(ticker="CRDO", run_id="scanner-run", decision_time=scanner_time, selection_source="scanner", score="0.97"),
+            candidate(ticker="CRDO", run_id="scanner-run", decision_time=scanner_time, selection_source="scanner", score="0.96"),
+            candidate(ticker="MU", run_id="scanner-run", decision_time=scanner_time, selection_source="scanner"),
+            candidate(ticker="SNDK", run_id="scanner-run", decision_time=scanner_time, selection_source="scanner"),
+        )
+
+        session = MagicMock()
+        session.query.side_effect = [
+            _LimitedListQuery((*manual_rows, *scanner_rows)),
+            _ListQuery([]),
+        ]
+
+        rows = _load_candidate_rows(session)
+
+        tickers = {row["ticker"] for row in rows}
+        assert {"MU", "SNDK"}.issubset(tickers)
+
     def test_load_manual_requests_translates_operator_queue_copy(self):
         from src.web.routers.today import _load_manual_requests
         from src.trading.manual_review.sqlalchemy import ManualReviewAuditRow
@@ -2840,6 +2895,22 @@ class _ListQuery(_QueryStub):
 
     def all(self):
         return list(self._rows)
+
+
+class _LimitedListQuery(_ListQuery):
+    def __init__(self, rows):
+        super().__init__(rows)
+        self._limit = None
+
+    def limit(self, value):
+        self._limit = int(value)
+        return self
+
+    def all(self):
+        rows = super().all()
+        if self._limit is None:
+            return rows
+        return rows[: self._limit]
 
 
 def _query_stub_session() -> MagicMock:

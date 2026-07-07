@@ -93,12 +93,14 @@
     {% set decision_readout = candidates.decision_readout if candidates.decision_readout is defined else candidates.rows %}
     {% set agent_rows = candidates.agent_candidates if candidates.agent_candidates is defined else decision_readout %}
     {% set manual_rows = candidates.manual_candidates if candidates.manual_candidates is defined else manual_review_queue %}
+    {% set agent_last_run_at = candidates.agent_last_run_at if candidates.agent_last_run_at is defined else candidates.last_run_at %}
+    {% set manual_last_run_at = candidates.manual_last_run_at if candidates.manual_last_run_at is defined else candidates.last_run_at %}
 
     {# ===================== Block 1: Agent-Scored Candidates ===================== #}
     <div class="panel">
       <div class="panel-head">
         <h3>🔎 Agent-Scored Candidates</h3>
-        <span class="meta">{{ candidates.aggregate_summary.scored }} scored · {{ candidates.aggregate_summary.actionable }} actionable · {{ candidates.aggregate_summary.watch }} watch · {{ candidates.aggregate_summary.blocked }} blocked{% if candidates.last_run_at %} · Last run <time datetime="{{ candidates.last_run_at | iso_datetime }}" data-local-time-format="datetime">{{ candidates.last_run_at | local_time('datetime') }}</time>{% endif %}</span>
+        <span class="meta">{{ candidates.aggregate_summary.scored }} scored · {{ candidates.aggregate_summary.actionable }} actionable · {{ candidates.aggregate_summary.watch }} watch · {{ candidates.aggregate_summary.blocked }} blocked{% if agent_last_run_at %} · Last run <time datetime="{{ agent_last_run_at | iso_datetime }}" data-local-time-format="datetime">{{ agent_last_run_at | local_time('datetime') }}</time>{% endif %}</span>
       </div>
       <div class="panel-body">
         {% if agent_rows %}
@@ -127,7 +129,7 @@
     <div class="panel">
       <div class="panel-head">
         <h3>📌 Manual Watchlist</h3>
-        <span class="meta">{{ manual_rows | length }} pinned{% if candidates.last_run_at %} · Last run <time datetime="{{ candidates.last_run_at | iso_datetime }}" data-local-time-format="datetime">{{ candidates.last_run_at | local_time('datetime') }}</time>{% endif %}</span>
+        <span class="meta">{{ manual_rows | length }} pinned{% if manual_last_run_at %} · Last run <time datetime="{{ manual_last_run_at | iso_datetime }}" data-local-time-format="datetime">{{ manual_last_run_at | local_time('datetime') }}</time>{% endif %}</span>
       </div>
       <div class="panel-body">
         <p class="panel-sub">Tickers <strong>you</strong> pinned for the system to watch and review — same pipeline as the agent-scored candidates above, just selected by you. Pin another below.</p>

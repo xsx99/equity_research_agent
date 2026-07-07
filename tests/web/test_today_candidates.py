@@ -138,6 +138,63 @@ def test_build_today_candidates_view_separates_manual_review_queue_and_action_qu
     assert [row["ticker"] for row in payload["action_queue"]] == ["TSLA", "NVDA", "META"]
 
 
+def test_build_today_candidates_view_reports_agent_and_manual_run_times_separately():
+    payload = build_today_candidates_view(
+        rows=(
+            {
+                "ticker": "AAPL",
+                "decision_time": "2026-07-07T12:50:00Z",
+                "selection_source": "manual_request",
+                "current_outcome_label": "Still on watch",
+                "operator_summary": "Manual review follow-up.",
+                "trade_identity_label": "Watch Only",
+                "strategy_label": "Catalyst watch",
+                "strategy_match": "manual_watch_v1",
+                "candidate_score": 0.35,
+                "detail_internal_ids": {"selection_source": "manual_request"},
+            },
+            {
+                "ticker": "MU",
+                "decision_time": "2026-07-07T12:45:00Z",
+                "selection_source": "scanner",
+                "current_outcome_label": "Direct Negative Catalyst",
+                "operator_summary": "Scanner candidate.",
+                "trade_identity_label": "",
+                "strategy_label": "Catalyst Breakout V1",
+                "strategy_match": "catalyst_breakout_v1",
+                "candidate_score": 0.35,
+                "detail_internal_ids": {"selection_source": "scanner"},
+            },
+        ),
+        manual_requests=(
+            {
+                "manual_ticker_request_id": "request-aapl",
+                "ticker": "AAPL",
+                "reason": "manual follow-up",
+                "mode_label": "Review Only",
+                "status_label": "Pinned",
+                "operator_summary": "Review Only because manual follow-up.",
+                "last_evaluated_label": None,
+                "linked_detail_url": None,
+                "decision_state_label": "Pending evaluation",
+                "execution_state_label": "Unlinked",
+                "latest_block_reason": None,
+                "dismiss_form_action": "/today/manual-requests/request-aapl/dismiss",
+                "degraded_linkage_copy": None,
+            },
+        ),
+        themes=(),
+        active_universe_filter=None,
+        portfolio_intents=(),
+        relationships=(),
+        peer_baskets=(),
+    )
+
+    assert payload["last_run_at"] == "2026-07-07T12:50:00Z"
+    assert payload["agent_last_run_at"] == "2026-07-07T12:45:00Z"
+    assert payload["manual_last_run_at"] == "2026-07-07T12:50:00Z"
+
+
 def test_build_today_candidates_view_filters_smoke_rows_and_uses_plain_linkage_copy():
     payload = build_today_candidates_view(
         rows=(
