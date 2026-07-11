@@ -294,112 +294,51 @@ def load_today_dashboard(
     latest_portfolio = session.query(PortfolioSnapshot).order_by(PortfolioSnapshot.snapshot_time.desc()).first()
     latest_risk = session.query(PortfolioRiskSnapshot).order_by(PortfolioRiskSnapshot.decision_time.desc()).first()
     latest_reflection = session.query(DailyReflection).order_by(DailyReflection.trade_date.desc()).first()
-    active_universe_filter = (
-        session.query(UniverseFilterConfig)
-        .filter(UniverseFilterConfig.is_active == True)
-        .order_by(UniverseFilterConfig.version.desc(), UniverseFilterConfig.created_at.desc())
-        .first()
-    )
-
-    trade_rows = _load_trade_rows(session)
-    positions = _load_positions(session)
-    option_positions = _load_option_positions(session)
-    closed_positions = _load_recent_closed_positions(session)
-    positions_by_ticker = _group_latest_by_ticker(positions)
-    option_positions_by_ticker = _group_latest_by_ticker(option_positions)
-    closed_positions_by_ticker = _group_latest_by_ticker(closed_positions)
-    risk_by_ticker = _load_risk_by_ticker(session)
-    signal_history_by_ticker = _load_signal_history_by_ticker(session)
-    news_by_ticker = _load_news_by_ticker(session)
-    fundamentals_by_ticker = _load_fundamentals_by_ticker(session)
-    candidate_rows = _load_candidate_rows(session)
-    manual_requests = _load_manual_requests(session)
-    trade_rows = _filter_trade_rows_for_display(trade_rows, manual_requests)
-    candidate_surface_rows, trade_surface_candidate_rows = _split_candidate_rows_by_display_owner(
-        candidate_rows,
-        manual_requests=manual_requests,
-        trade_rows=trade_rows,
-        traded_tickers=set(positions_by_ticker) | set(option_positions_by_ticker),
-    )
-    trade_workspace_rows = _trade_workspace_rows(
-        trade_rows,
-        trade_surface_candidate_rows,
-    )
-    trade_workspace_rows = _ensure_trade_rows_include_ticker(
-        session,
-        trade_workspace_rows,
-        selected_ticker,
-    )
-    portfolio_intents = _load_portfolio_intents(session)
-    relationships = _load_relationships(session)
-    peer_baskets = _load_peer_baskets(session)
-    themes = _load_themes(session)
-    ticker_workspace = build_ticker_workspace(
-        trade_rows=trade_workspace_rows,
-        selected_ticker=selected_ticker,
-        positions_by_ticker=positions_by_ticker,
-        option_positions_by_ticker=option_positions_by_ticker,
-        closed_positions_by_ticker=closed_positions_by_ticker,
-        risk_by_ticker=risk_by_ticker,
-        signal_history_by_ticker=signal_history_by_ticker,
-        news_by_ticker=news_by_ticker,
-        fundamentals_by_ticker=fundamentals_by_ticker,
-    )
-    trade_workspace_rows = _ensure_trade_rows_include_ticker(
-        session,
-        trade_workspace_rows,
-        ticker_workspace.get("selected_ticker"),
-    )
-    ticker_workspace = build_ticker_workspace(
-        trade_rows=trade_workspace_rows,
-        selected_ticker=ticker_workspace.get("selected_ticker"),
-        positions_by_ticker=positions_by_ticker,
-        option_positions_by_ticker=option_positions_by_ticker,
-        closed_positions_by_ticker=closed_positions_by_ticker,
-        risk_by_ticker=risk_by_ticker,
-        signal_history_by_ticker=signal_history_by_ticker,
-        news_by_ticker=news_by_ticker,
-        fundamentals_by_ticker=fundamentals_by_ticker,
-    )
-
-    audit_detail = _load_trade_detail(session, decision_id) if decision_id else None
-    if audit_detail is None:
-        selected_decision_id = _latest_trade_decision_id_for_ticker(
-            trade_workspace_rows,
-            ticker_workspace.get("selected_ticker"),
-        )
-        if selected_decision_id:
-            audit_detail = _load_trade_detail(session, selected_decision_id)
-
-    merged_detail = _merge_audit_detail_into_workspace_detail(
-        ticker_workspace.get("detail"),
-        audit_detail,
-    )
-
-    normalized_detail_tab = _normalize_detail_tab(selected_detail_tab)
-    normalized_detail_item_index = _normalize_detail_item_index(
-        detail=merged_detail,
-        detail_tab=normalized_detail_tab,
-        detail_item_index=selected_detail_item_index,
-    )
-    ticker_workspace = {
-        **ticker_workspace,
-        "detail": merged_detail,
-        "audit_detail": audit_detail,
-        "selected_detail_tab": normalized_detail_tab,
-        "selected_detail_item_index": normalized_detail_item_index,
-        "selected_detail_item": _select_detail_item(
-            detail=merged_detail,
-            detail_tab=normalized_detail_tab,
-            detail_item_index=normalized_detail_item_index,
-        ),
-    }
     latest_macro_snapshot = _load_latest_macro_snapshot_for_today(
         session,
         latest_portfolio=latest_portfolio,
         latest_risk=latest_risk,
         latest_reflection=latest_reflection,
     )
+
+    needs_trade_workspace = selected_tab == "trades" or bool(decision_id) or bool(selected_ticker)
+    needs_candidates = selected_tab == "candidates"
+    needs_portfolio = selected_tab == "portfolio"
+    needs_risk_macro = selected_tab in {"overview", "portfolio", "risk-macro", "system"}
+    needs_overview = selected_tab in {"overview", "portfolio", "system"}
+    needs_positions = selected_tab in {"overview", "portfolio", "trades", "candidates"} or needs_trade_workspace
+    needs_closed_positions = selected_tab in {"overview", "portfolio", "trades"} or needs_trade_workspace
+    needs_candidate_split = needs_trade_workspace or needs_candidates
+
+    positions = _load_positions(session) if needs_positions else ()
+    option_positions = _load_option_positions(session) if needs_positions else ()
+    closed_positions = _load_recent_closed_positions(session) if needs_closed_positions else ()
+    positions_by_ticker = _group_latest_by_ticker(positions)
+    option_positions_by_ticker = _group_latest_by_ticker(option_positions)
+    closed_positions_by_ticker = _group_latest_by_ticker(closed_positions)
+
+    trade_rows: list[dict[str, Any]] = []
+    candidate_rows: tuple[dict[str, Any], ...] = ()
+    manual_requests: tuple[dict[str, Any], ...] = ()
+    candidate_surface_rows: tuple[dict[str, Any], ...] = ()
+    trade_surface_candidate_rows: tuple[dict[str, Any], ...] = ()
+    trade_workspace_rows: list[dict[str, Any]] = []
+    if needs_candidate_split:
+        trade_rows = _load_trade_rows(session)
+        candidate_rows = _load_candidate_rows(session)
+        manual_requests = _load_manual_requests(session)
+        trade_rows = _filter_trade_rows_for_display(trade_rows, manual_requests)
+        candidate_surface_rows, trade_surface_candidate_rows = _split_candidate_rows_by_display_owner(
+            candidate_rows,
+            manual_requests=manual_requests,
+            trade_rows=trade_rows,
+            traded_tickers=set(positions_by_ticker) | set(option_positions_by_ticker),
+        )
+        trade_workspace_rows = _trade_workspace_rows(
+            trade_rows,
+            trade_surface_candidate_rows,
+        )
+
     header = _build_header(
         latest_portfolio,
         latest_risk,
@@ -408,29 +347,126 @@ def load_today_dashboard(
         latest_macro_snapshot=latest_macro_snapshot,
         positions=positions,
     )
-    risk_macro = _load_today_risk_macro(
-        session,
-        latest_risk=latest_risk,
-        latest_macro_snapshot=latest_macro_snapshot,
+
+    risk_macro = (
+        _load_today_risk_macro(
+            session,
+            latest_risk=latest_risk,
+            latest_macro_snapshot=latest_macro_snapshot,
+        )
+        if needs_risk_macro
+        else {}
     )
-    latest_preopen_run = _load_latest_preopen_runtime_run_for_today(
-        session,
-        latest_portfolio=latest_portfolio,
-        latest_risk=latest_risk,
-        latest_reflection=latest_reflection,
+    latest_preopen_run = (
+        _load_latest_preopen_runtime_run_for_today(
+            session,
+            latest_portfolio=latest_portfolio,
+            latest_risk=latest_risk,
+            latest_reflection=latest_reflection,
+        )
+        if needs_overview
+        else None
     )
     job_timeline = _build_job_timeline(latest_reflection)
-    overview = build_today_overview(
-        header=header,
-        job_timeline=job_timeline,
-        risk_macro=risk_macro,
-        live_alerts=_load_live_alerts(session),
-        material_changes=_load_material_changes(session),
-        positions=positions,
-        option_positions=option_positions,
-        closed_positions=closed_positions,
-        latest_preopen_run=latest_preopen_run,
+    live_alerts = _load_live_alerts(session) if needs_overview else ()
+    material_changes = _load_material_changes(session) if needs_overview else ()
+    overview = (
+        build_today_overview(
+            header=header,
+            job_timeline=job_timeline,
+            risk_macro=risk_macro,
+            live_alerts=live_alerts,
+            material_changes=material_changes,
+            positions=positions,
+            option_positions=option_positions,
+            closed_positions=closed_positions,
+            latest_preopen_run=latest_preopen_run,
+        )
+        if needs_overview
+        else {}
     )
+
+    ticker_workspace: dict[str, Any] = {
+        "selected_ticker": None,
+        "selected_detail_tab": _normalize_detail_tab(selected_detail_tab),
+        "selected_detail_item_index": None,
+        "selected_detail_item": None,
+        "buckets": {},
+        "detail": None,
+        "audit_detail": None,
+    }
+    audit_detail: dict[str, Any] | None = None
+    if needs_trade_workspace:
+        risk_by_ticker = _load_risk_by_ticker(session)
+        signal_history_by_ticker = _load_signal_history_by_ticker(session)
+        news_by_ticker_for_workspace = _load_news_by_ticker(session)
+        fundamentals_by_ticker = _load_fundamentals_by_ticker(session)
+        trade_workspace_rows = _ensure_trade_rows_include_ticker(
+            session,
+            trade_workspace_rows,
+            selected_ticker,
+        )
+        ticker_workspace = build_ticker_workspace(
+            trade_rows=trade_workspace_rows,
+            selected_ticker=selected_ticker,
+            positions_by_ticker=positions_by_ticker,
+            option_positions_by_ticker=option_positions_by_ticker,
+            closed_positions_by_ticker=closed_positions_by_ticker,
+            risk_by_ticker=risk_by_ticker,
+            signal_history_by_ticker=signal_history_by_ticker,
+            news_by_ticker=news_by_ticker_for_workspace,
+            fundamentals_by_ticker=fundamentals_by_ticker,
+        )
+        trade_workspace_rows = _ensure_trade_rows_include_ticker(
+            session,
+            trade_workspace_rows,
+            ticker_workspace.get("selected_ticker"),
+        )
+        ticker_workspace = build_ticker_workspace(
+            trade_rows=trade_workspace_rows,
+            selected_ticker=ticker_workspace.get("selected_ticker"),
+            positions_by_ticker=positions_by_ticker,
+            option_positions_by_ticker=option_positions_by_ticker,
+            closed_positions_by_ticker=closed_positions_by_ticker,
+            risk_by_ticker=risk_by_ticker,
+            signal_history_by_ticker=signal_history_by_ticker,
+            news_by_ticker=news_by_ticker_for_workspace,
+            fundamentals_by_ticker=fundamentals_by_ticker,
+        )
+
+        audit_detail = _load_trade_detail(session, decision_id) if decision_id else None
+        if audit_detail is None:
+            selected_decision_id = _latest_trade_decision_id_for_ticker(
+                trade_workspace_rows,
+                ticker_workspace.get("selected_ticker"),
+            )
+            if selected_decision_id:
+                audit_detail = _load_trade_detail(session, selected_decision_id)
+
+        merged_detail = _merge_audit_detail_into_workspace_detail(
+            ticker_workspace.get("detail"),
+            audit_detail,
+        )
+
+        normalized_detail_tab = _normalize_detail_tab(selected_detail_tab)
+        normalized_detail_item_index = _normalize_detail_item_index(
+            detail=merged_detail,
+            detail_tab=normalized_detail_tab,
+            detail_item_index=selected_detail_item_index,
+        )
+        ticker_workspace = {
+            **ticker_workspace,
+            "detail": merged_detail,
+            "audit_detail": audit_detail,
+            "selected_detail_tab": normalized_detail_tab,
+            "selected_detail_item_index": normalized_detail_item_index,
+            "selected_detail_item": _select_detail_item(
+                detail=merged_detail,
+                detail_tab=normalized_detail_tab,
+                detail_item_index=normalized_detail_item_index,
+            ),
+        }
+
     # Map ticker -> [(decision_time, agent thesis)] (newest-first) from the trading
     # decisions so candidates can surface the LLM thesis instead of rule-based reasons.
     thesis_history_by_ticker: dict[str, list[tuple[Any, str]]] = {}
@@ -442,26 +478,56 @@ def load_today_dashboard(
         thesis_history_by_ticker.setdefault(ticker_symbol, []).append(
             (row.get("decision_time"), thesis_text)
         )
-    candidates = build_today_candidates_view(
-        rows=candidate_surface_rows,
-        manual_requests=manual_requests,
-        themes=themes,
-        active_universe_filter=_serialize_universe_filter(active_universe_filter),
-        portfolio_intents=portfolio_intents,
-        relationships=relationships,
-        peer_baskets=peer_baskets,
-        thesis_history_by_ticker=thesis_history_by_ticker,
-        news_by_ticker=news_by_ticker,
-    )
-    portfolio_history = _load_portfolio_history(session)
-    portfolio = _build_portfolio_view(
-        header=header,
-        positions=positions,
-        option_positions=option_positions,
-        hedge_overlays=_load_hedge_overlays(session),
-        overview=overview,
-        portfolio_history=portfolio_history,
-    )
+    if needs_candidates:
+        active_universe_filter = (
+            session.query(UniverseFilterConfig)
+            .filter(UniverseFilterConfig.is_active == True)
+            .order_by(UniverseFilterConfig.version.desc(), UniverseFilterConfig.created_at.desc())
+            .first()
+        )
+        portfolio_intents = _load_portfolio_intents(session)
+        relationships = _load_relationships(session)
+        peer_baskets = _load_peer_baskets(session)
+        themes = _load_themes(session)
+        candidates = build_today_candidates_view(
+            rows=candidate_surface_rows,
+            manual_requests=manual_requests,
+            themes=themes,
+            active_universe_filter=_serialize_universe_filter(active_universe_filter),
+            portfolio_intents=portfolio_intents,
+            relationships=relationships,
+            peer_baskets=peer_baskets,
+            thesis_history_by_ticker=thesis_history_by_ticker,
+            news_by_ticker=_load_news_by_ticker(session),
+        )
+        candidates = _attach_candidate_summary(candidates)
+    else:
+        candidates = _attach_candidate_summary(
+            build_today_candidates_view(
+                rows=(),
+                manual_requests=(),
+                themes=(),
+                active_universe_filter=None,
+                portfolio_intents=(),
+                relationships=(),
+                peer_baskets=(),
+                thesis_history_by_ticker={},
+                news_by_ticker={},
+            )
+        )
+
+    portfolio: dict[str, Any] = {}
+    strategy_perf: tuple[dict[str, Any], ...] = ()
+    if needs_portfolio:
+        portfolio_history = _load_portfolio_history(session)
+        portfolio = _build_portfolio_view(
+            header=header,
+            positions=positions,
+            option_positions=option_positions,
+            hedge_overlays=_load_hedge_overlays(session),
+            overview=overview,
+            portfolio_history=portfolio_history,
+        )
     # Surface the account-level total return on the header's Unrealized P&L card
     # (computed in the portfolio analytics from the equity history).
     if isinstance(header, dict) and header.get("total_return") is None:
@@ -471,32 +537,40 @@ def load_today_dashboard(
             header["total_return"] = _metrics.get("total_return")
     # Most / least effective strategy for the Portfolio analytics cards
     # (ranked by cumulative alpha = total_pnl in strategy performance).
-    strategy_perf = _load_strategy_performance(session)
+    if selected_tab in {"portfolio", "system"}:
+        strategy_perf = _load_strategy_performance(session)
     _ranked = [p for p in strategy_perf if p.get("total_pnl") is not None]
-    if isinstance(portfolio, dict):
+    if needs_portfolio and isinstance(portfolio, dict):
         portfolio["strategy_effectiveness"] = {
             "most": max(_ranked, key=lambda p: p["total_pnl"]) if _ranked else None,
             "least": min(_ranked, key=lambda p: p["total_pnl"]) if len(_ranked) > 1 else None,
         }
-    learning_strategies = build_today_learning_strategies(
-        reflection=_serialize_reflection(latest_reflection),
-        learning_factors=_load_learning_factors(session),
-        strategy_performance=strategy_perf,
-        strategy_proposals=_load_strategy_proposals(session),
-        strategy_definitions=_load_strategy_definitions(session),
-        strategy_evaluation_results=_load_strategy_evaluation_results(session),
+    learning_strategies = (
+        build_today_learning_strategies(
+            reflection=_serialize_reflection(latest_reflection),
+            learning_factors=_load_learning_factors(session),
+            strategy_performance=strategy_perf,
+            strategy_proposals=_load_strategy_proposals(session),
+            strategy_definitions=_load_strategy_definitions(session),
+            strategy_evaluation_results=_load_strategy_evaluation_results(session),
+        )
+        if selected_tab == "system"
+        else {}
     )
     ops_cost = {
-        "llm_usage": _load_llm_usage(session),
+        "llm_usage": _load_llm_usage(session) if selected_tab == "system" else (),
         "provider_usage": (),
     }
-    system = _build_system_view(
-        overview=overview,
-        learning_strategies=learning_strategies,
-        ops_cost=ops_cost,
-        risk_macro=risk_macro,
+    system = (
+        _build_system_view(
+            overview=overview,
+            learning_strategies=learning_strategies,
+            ops_cost=ops_cost,
+            risk_macro=risk_macro,
+        )
+        if selected_tab == "system"
+        else {}
     )
-    candidates = _attach_candidate_summary(candidates)
 
     return {
         "selected_tab": selected_tab,

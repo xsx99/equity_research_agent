@@ -5,7 +5,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from sqlalchemy.orm import Session as SQLAlchemySession
+from sqlalchemy.orm import Session as SQLAlchemySession, joinedload
 
 from src.db.models.trading import DailyReflection, LlmUsageEvent, PortfolioRiskSnapshot, PortfolioSnapshot, UniverseFilterConfig
 from src.web.presenters.today_copy import (
@@ -356,7 +356,13 @@ def _load_latest_preopen_runtime_run_for_today(
 
 
 def _load_llm_usage(session: Any) -> tuple[dict[str, Any], ...]:
-    rows = session.query(LlmUsageEvent).order_by(LlmUsageEvent.created_at.desc()).limit(25).all()
+    rows = (
+        session.query(LlmUsageEvent)
+        .options(joinedload(LlmUsageEvent.prompt_run))
+        .order_by(LlmUsageEvent.created_at.desc())
+        .limit(25)
+        .all()
+    )
     return tuple(
         {
             "pipeline_name": getattr(row.prompt_run, "pipeline_name", None),

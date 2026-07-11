@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from sqlalchemy.orm import selectinload
+
 from src.db.models.trading import CandidateScore, TradingDecision
 from src.web.presenters.today_copy import (
     candidate_result_label,
@@ -78,6 +80,10 @@ def _build_candidates_summary(
 def _load_candidate_rows(session: Any) -> tuple[dict[str, Any], ...]:
     rows = (
         session.query(CandidateScore)
+        .options(
+            selectinload(CandidateScore.trade_classifications),
+            selectinload(CandidateScore.watch_candidates),
+        )
         .order_by(CandidateScore.decision_time.desc(), CandidateScore.candidate_score.desc())
         .limit(_CANDIDATE_LOOKBACK_LIMIT)
         .all()

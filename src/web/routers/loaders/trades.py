@@ -4,6 +4,8 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
+from sqlalchemy.orm import joinedload
+
 from src.db.models.trading import CandidateOutcomeEvaluation, CandidateScore, PaperOptionOrder, PaperOrder, TradingDecision
 from src.web.presenters.signal_evidence import signal_groups
 from src.web.routers import today_loaders
@@ -13,17 +15,34 @@ def _load_trade_rows(session: Any) -> list[dict[str, Any]]:
     material_change_tickers = today_loaders._load_material_signal_change_tickers(session)
     rows = (
         session.query(TradingDecision)
+        .options(
+            joinedload(TradingDecision.risk_decision),
+            joinedload(TradingDecision.candidate_score),
+        )
         .order_by(TradingDecision.decision_time.desc())
         .limit(25)
         .all()
     )
-    return [_serialize_trade_row(session, row, material_change_tickers) for row in rows]
+    order_statuses = _load_order_statuses(
+        session,
+        [row.trading_decision_id for row in rows if getattr(row, "trading_decision_id", None)],
+    )
+    return [
+        _serialize_trade_row(
+            session,
+            row,
+            material_change_tickers,
+            order_status_by_decision_id=order_statuses,
+        )
+        for row in rows
+    ]
 
 
 def _serialize_trade_row(
     session: Any,
     row: TradingDecision,
     material_change_tickers: set[str],
+    order_status_by_decision_id: dict[str, str | None] | None = None,
 ) -> dict[str, Any]:
     metadata_json = dict(getattr(row, "metadata_json", {}) or {})
     key_drivers = list(getattr(row, "key_drivers_json", None) or metadata_json.get("key_drivers") or [])
@@ -49,7 +68,11 @@ def _serialize_trade_row(
         "exit_plan": metadata_json.get("exit_plan"),
         "confidence": row.confidence,
         "risk_status": row.risk_decision.status if row.risk_decision else None,
-        "order_status": _load_order_status(session, row.trading_decision_id),
+        "order_status": (
+            order_status_by_decision_id.get(str(row.trading_decision_id))
+            if order_status_by_decision_id is not None
+            else _load_order_status(session, row.trading_decision_id)
+        ),
         "material_signal_change": str(row.ticker).upper() in material_change_tickers,
         "thesis": getattr(row, "thesis", None),
         "key_drivers": key_drivers,
@@ -84,6 +107,40 @@ def _ensure_trade_rows_include_ticker(
         return trade_rows
 
     return [*trade_rows, _serialize_trade_row(session, latest_row, material_change_tickers)]
+
+
+def _load_order_statuses(session: Any, trading_decision_ids: list[uuid.UUID]) -> dict[str, str | None]:
+    if not trading_decision_ids:
+        return {}
+    statuses: dict[str, str | None] = {}
+    paper_orders = (
+        session.query(PaperOrder)
+        .filter(PaperOrder.trading_decision_id.in_(trading_decision_ids))
+        .all()
+    )
+    for row in paper_orders:
+        decision_id = getattr(row, "trading_decision_id", None)
+        if decision_id is None:
+            continue
+        statuses[str(decision_id)] = today_loaders._normalize_order_status(row.status)
+
+    missing_ids = [
+        decision_id
+        for decision_id in trading_decision_ids
+        if str(decision_id) not in statuses
+    ]
+    if missing_ids:
+        option_orders = (
+            session.query(PaperOptionOrder)
+            .filter(PaperOptionOrder.trading_decision_id.in_(missing_ids))
+            .all()
+        )
+        for row in option_orders:
+            decision_id = getattr(row, "trading_decision_id", None)
+            if decision_id is None:
+                continue
+            statuses[str(decision_id)] = today_loaders._normalize_order_status(row.status)
+    return statuses
 
 
 def _load_order_status(session: Any, trading_decision_id: uuid.UUID) -> str | None:

@@ -1889,15 +1889,72 @@ class TestTodayDashboard:
                 selected_ticker=None,
             )
 
-        candidate_tickers = {
-            row["ticker"] for row in build_candidates.call_args.kwargs["rows"]
-        }
         workspace_tickers = {
             row["ticker"] for row in build_workspace.call_args.kwargs["trade_rows"]
         }
 
-        assert candidate_tickers == {"REVIEW", "WATCH"}
         assert workspace_tickers == {"TRADE", "PAPER", "SCAN", "OPTION"}
+        assert "REVIEW" not in workspace_tickers
+        assert "OPTION" in workspace_tickers
+        build_candidates.assert_called_once_with(
+            rows=(),
+            manual_requests=(),
+            themes=(),
+            active_universe_filter=None,
+            portfolio_intents=(),
+            relationships=(),
+            peer_baskets=(),
+            thesis_history_by_ticker={},
+            news_by_ticker={},
+        )
+
+        with ExitStack() as stack:
+            stack.enter_context(patch("src.web.routers.today._load_trade_rows", return_value=trade_rows))
+            stack.enter_context(patch("src.web.routers.today._load_positions", return_value=()))
+            stack.enter_context(
+                patch(
+                    "src.web.routers.today._load_option_positions",
+                    return_value=(
+                        {
+                            "ticker": "OPTION",
+                            "option_strategy_type": "broker_option_position",
+                            "trade_identity": "tactical_option_trade",
+                            "updated_at": "2026-06-03T13:04:30Z",
+                        },
+                    ),
+                )
+            )
+            stack.enter_context(patch("src.web.routers.today._load_candidate_rows", return_value=candidate_rows))
+            stack.enter_context(patch("src.web.routers.today._load_manual_requests", return_value=manual_requests))
+            stack.enter_context(patch("src.web.routers.today._load_portfolio_intents", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_relationships", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_peer_baskets", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_themes", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_news_by_ticker", return_value={}))
+            build_candidates = stack.enter_context(
+                patch(
+                    "src.web.routers.today.build_today_candidates_view",
+                    return_value={
+                        "decision_readout": (),
+                        "action_queue": (),
+                        "manual_review_queue": (),
+                        "agent_candidates": (),
+                        "manual_candidates": (),
+                        "summary": {},
+                    },
+                )
+            )
+            load_today_dashboard(
+                session,
+                selected_tab="candidates",
+                decision_id=None,
+                selected_ticker=None,
+            )
+
+        candidate_tickers = {
+            row["ticker"] for row in build_candidates.call_args.kwargs["rows"]
+        }
+        assert candidate_tickers == {"REVIEW", "WATCH"}
 
     def test_load_today_dashboard_populates_trade_bucket_recency_labels(self):
         from src.web.routers.today import load_today_dashboard
@@ -2250,6 +2307,77 @@ class TestTodayDashboard:
             "lookahead_risk_source": "own_event",
             "applied_rules": (),
         }
+
+    def test_load_trade_rows_bulk_loads_order_statuses(self):
+        from src.db.models.trading import IntradaySignalSnapshot, PaperOptionOrder, PaperOrder, TradingDecision
+        from src.web.routers.today import _load_trade_rows
+
+        stock_decision_id = uuid.uuid4()
+        option_decision_id = uuid.uuid4()
+        stock_decision = SimpleNamespace(
+            trading_decision_id=stock_decision_id,
+            decision_time=datetime(2026, 6, 3, 14, 0, tzinfo=timezone.utc),
+            created_at=datetime(2026, 6, 3, 14, 0, tzinfo=timezone.utc),
+            ticker="AAPL",
+            decision="enter_long",
+            instrument_type="stock",
+            trade_identity="tactical_stock_trade",
+            strategy_id="breakout_v1",
+            expression_bucket_id="long_stock",
+            approved_weight=Decimal("0.03"),
+            target_weight=Decimal("0.04"),
+            time_horizon="swing",
+            max_loss_pct=Decimal("0.02"),
+            confidence=Decimal("0.72"),
+            risk_decision=SimpleNamespace(status="approved"),
+            candidate_score=None,
+            thesis="Breakout confirmed.",
+            metadata_json={},
+        )
+        option_decision = SimpleNamespace(
+            trading_decision_id=option_decision_id,
+            decision_time=datetime(2026, 6, 3, 14, 1, tzinfo=timezone.utc),
+            created_at=datetime(2026, 6, 3, 14, 1, tzinfo=timezone.utc),
+            ticker="NVDA",
+            decision="open_option_strategy",
+            instrument_type="option",
+            trade_identity="tactical_option_trade",
+            strategy_id="earnings_drift_v1",
+            expression_bucket_id="long_call",
+            approved_weight=Decimal("0.02"),
+            target_weight=Decimal("0.03"),
+            time_horizon="event",
+            max_loss_pct=Decimal("0.01"),
+            confidence=Decimal("0.68"),
+            risk_decision=SimpleNamespace(status="approved"),
+            candidate_score=None,
+            thesis="Event drift confirmed.",
+            metadata_json={},
+        )
+        session = MagicMock()
+        paper_order_calls = 0
+
+        def query_for(model):
+            nonlocal paper_order_calls
+            if model is IntradaySignalSnapshot:
+                return _ListQuery([])
+            if model is TradingDecision:
+                return _ListQuery([stock_decision, option_decision])
+            if model is PaperOrder:
+                paper_order_calls += 1
+                if paper_order_calls == 1:
+                    return _ListQuery([SimpleNamespace(trading_decision_id=stock_decision_id, status="filled")])
+                return _ListQuery([])
+            if model is PaperOptionOrder:
+                return _ListQuery([SimpleNamespace(trading_decision_id=option_decision_id, status="accepted")])
+            return _ListQuery([])
+
+        session.query.side_effect = query_for
+
+        rows = _load_trade_rows(session)
+
+        assert session.query.call_count == 4
+        assert [row["order_status"] for row in rows] == ["filled", "accepted"]
 
     def test_load_candidate_rows_translates_operator_facing_labels(self):
         from src.web.routers.today import _load_candidate_rows
@@ -2716,6 +2844,53 @@ class TestTodayDashboard:
         assert dashboard["header"]["macro_regime"] == "risk_off"
         assert dashboard["header"]["macro_regime_label"] == "Risk Off"
 
+    def test_load_today_dashboard_lazy_loads_only_selected_portfolio_tab(self):
+        from src.web.routers.today import load_today_dashboard
+
+        session = _query_stub_session()
+
+        with (
+            patch("src.web.routers.today._load_trade_rows", return_value=[]) as load_trade_rows,
+            patch("src.web.routers.today._load_positions", return_value=()),
+            patch("src.web.routers.today._load_recent_closed_positions", return_value=()),
+            patch("src.web.routers.today._load_option_positions", return_value=()),
+            patch("src.web.routers.today._load_portfolio_history", return_value=()),
+            patch("src.web.routers.today._load_hedge_overlays", return_value=()),
+            patch("src.web.routers.today._load_live_alerts", return_value=()),
+            patch("src.web.routers.today._load_material_changes", return_value=()),
+            patch("src.web.routers.today._load_today_risk_macro", return_value={}),
+            patch("src.web.routers.today._load_candidate_rows", return_value=()) as load_candidate_rows,
+            patch("src.web.routers.today._load_manual_requests", return_value=()) as load_manual_requests,
+            patch("src.web.routers.today._load_signal_history_by_ticker", return_value={}) as load_signal_history,
+            patch("src.web.routers.today._load_news_by_ticker", return_value={}) as load_news,
+            patch("src.web.routers.today._load_fundamentals_by_ticker", return_value={}) as load_fundamentals,
+            patch("src.web.routers.today._load_learning_factors", return_value=()) as load_learning_factors,
+            patch("src.web.routers.today._load_strategy_proposals", return_value=()) as load_strategy_proposals,
+            patch("src.web.routers.today._load_strategy_definitions", return_value=()) as load_strategy_definitions,
+            patch("src.web.routers.today._load_strategy_evaluation_results", return_value=()) as load_strategy_evaluations,
+            patch("src.web.routers.today._load_llm_usage", return_value=()) as load_llm_usage,
+        ):
+            dashboard = load_today_dashboard(
+                session,
+                selected_tab="portfolio",
+                decision_id=None,
+                selected_ticker=None,
+            )
+
+        assert dashboard["selected_tab"] == "portfolio"
+        assert "portfolio" in dashboard
+        load_trade_rows.assert_not_called()
+        load_candidate_rows.assert_not_called()
+        load_manual_requests.assert_not_called()
+        load_signal_history.assert_not_called()
+        load_news.assert_not_called()
+        load_fundamentals.assert_not_called()
+        load_learning_factors.assert_not_called()
+        load_strategy_proposals.assert_not_called()
+        load_strategy_definitions.assert_not_called()
+        load_strategy_evaluations.assert_not_called()
+        load_llm_usage.assert_not_called()
+
     def test_load_news_and_fundamentals_by_ticker_map_real_snapshot_and_event_rows(self):
         from src.web.routers.today import _load_fundamentals_by_ticker, _load_news_by_ticker
 
@@ -2898,6 +3073,9 @@ class _QueryStub:
         return self
 
     def limit(self, *_args, **_kwargs):
+        return self
+
+    def options(self, *_args, **_kwargs):
         return self
 
     def first(self):
