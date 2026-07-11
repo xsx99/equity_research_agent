@@ -306,6 +306,7 @@ def load_today_dashboard(
     option_positions = _load_option_positions(session)
     closed_positions = _load_recent_closed_positions(session)
     positions_by_ticker = _group_latest_by_ticker(positions)
+    option_positions_by_ticker = _group_latest_by_ticker(option_positions)
     closed_positions_by_ticker = _group_latest_by_ticker(closed_positions)
     risk_by_ticker = _load_risk_by_ticker(session)
     signal_history_by_ticker = _load_signal_history_by_ticker(session)
@@ -318,6 +319,7 @@ def load_today_dashboard(
         candidate_rows,
         manual_requests=manual_requests,
         trade_rows=trade_rows,
+        traded_tickers=set(positions_by_ticker) | set(option_positions_by_ticker),
     )
     trade_workspace_rows = _trade_workspace_rows(
         trade_rows,
@@ -336,6 +338,7 @@ def load_today_dashboard(
         trade_rows=trade_workspace_rows,
         selected_ticker=selected_ticker,
         positions_by_ticker=positions_by_ticker,
+        option_positions_by_ticker=option_positions_by_ticker,
         closed_positions_by_ticker=closed_positions_by_ticker,
         risk_by_ticker=risk_by_ticker,
         signal_history_by_ticker=signal_history_by_ticker,
@@ -351,6 +354,7 @@ def load_today_dashboard(
         trade_rows=trade_workspace_rows,
         selected_ticker=ticker_workspace.get("selected_ticker"),
         positions_by_ticker=positions_by_ticker,
+        option_positions_by_ticker=option_positions_by_ticker,
         closed_positions_by_ticker=closed_positions_by_ticker,
         risk_by_ticker=risk_by_ticker,
         signal_history_by_ticker=signal_history_by_ticker,
@@ -537,6 +541,7 @@ def _split_candidate_rows_by_display_owner(
     *,
     manual_requests: tuple[dict[str, Any], ...],
     trade_rows: list[dict[str, Any]],
+    traded_tickers: set[str] | None = None,
 ) -> tuple[tuple[dict[str, Any], ...], tuple[dict[str, Any], ...]]:
     manual_modes = _manual_request_modes_by_ticker(manual_requests)
     trade_tickers = {
@@ -544,6 +549,7 @@ def _split_candidate_rows_by_display_owner(
         for row in trade_rows
         if (ticker := _normalize_ticker_value(row.get("ticker")))
     }
+    trade_tickers.update(_normalize_ticker_value(ticker) for ticker in (traded_tickers or set()) if ticker)
     candidate_surface: list[dict[str, Any]] = []
     trade_surface: list[dict[str, Any]] = []
     for row in rows:

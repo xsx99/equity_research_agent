@@ -24,6 +24,7 @@ def build_ticker_workspace(
     trade_rows,
     selected_ticker,
     positions_by_ticker,
+    option_positions_by_ticker=None,
     closed_positions_by_ticker=None,
     risk_by_ticker,
     signal_history_by_ticker,
@@ -33,6 +34,9 @@ def build_ticker_workspace(
 ):
     reference_time = _normalize_datetime(as_of) or datetime.now(timezone.utc)
     normalized_positions = {_normalize_ticker(ticker): payload for ticker, payload in positions_by_ticker.items()}
+    normalized_option_positions = {
+        _normalize_ticker(ticker): payload for ticker, payload in (option_positions_by_ticker or {}).items()
+    }
     normalized_closed_positions = {
         _normalize_ticker(ticker): payload for ticker, payload in (closed_positions_by_ticker or {}).items()
     }
@@ -48,6 +52,7 @@ def build_ticker_workspace(
     ticker_items = _build_ticker_items(
         rows_by_ticker=rows_by_ticker,
         positions_by_ticker=normalized_positions,
+        option_positions_by_ticker=normalized_option_positions,
         closed_positions_by_ticker=normalized_closed_positions,
         risk_by_ticker=normalized_risk,
         signal_history_by_ticker=normalized_signal_history,
@@ -67,7 +72,7 @@ def build_ticker_workspace(
         if _is_action_now(item):
             item["primary_state"] = "action_now"
             buckets["action_now"].append(item)
-        elif ticker in normalized_positions:
+        elif ticker in normalized_positions or ticker in normalized_option_positions:
             # An open position always wins over a historical closed one for the
             # same ticker (e.g. a prior trade closed earlier, then re-entered).
             # Otherwise the position shows in the portfolio but vanishes from the
@@ -89,7 +94,7 @@ def build_ticker_workspace(
         item["card_detail"] = _card_detail(item)
         last_updated_at = _item_last_updated_at(
             item,
-            position=normalized_positions.get(ticker),
+            position=normalized_positions.get(ticker) or normalized_option_positions.get(ticker),
             closed_position=normalized_closed_positions.get(ticker),
             risk=normalized_risk.get(ticker),
             signal_history=normalized_signal_history.get(ticker),
@@ -127,6 +132,7 @@ def build_ticker_workspace(
             selected_ticker=normalized_selected_ticker,
             rows_by_ticker=rows_by_ticker,
             positions_by_ticker=normalized_positions,
+            option_positions_by_ticker=normalized_option_positions,
             closed_positions_by_ticker=normalized_closed_positions,
             risk_by_ticker=normalized_risk,
             signal_history_by_ticker=normalized_signal_history,
@@ -139,6 +145,7 @@ def _build_ticker_items(
     *,
     rows_by_ticker: dict[str, list[dict[str, Any]]],
     positions_by_ticker: dict[str | None, Any],
+    option_positions_by_ticker: dict[str | None, Any],
     closed_positions_by_ticker: dict[str | None, Any],
     risk_by_ticker: dict[str | None, Any],
     signal_history_by_ticker: dict[str | None, Any],
@@ -149,6 +156,7 @@ def _build_ticker_items(
     ticker_keys = list(rows_by_ticker.keys())
     for ticker_group in (
         positions_by_ticker,
+        option_positions_by_ticker,
         closed_positions_by_ticker,
     ):
         for ticker in ticker_group.keys():

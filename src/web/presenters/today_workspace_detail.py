@@ -62,6 +62,7 @@ def _build_detail(
     selected_ticker: str | None,
     rows_by_ticker: dict[str, list[dict[str, Any]]],
     positions_by_ticker: dict[str | None, Any],
+    option_positions_by_ticker: dict[str | None, Any],
     closed_positions_by_ticker: dict[str | None, Any],
     risk_by_ticker: dict[str | None, Any],
     signal_history_by_ticker: dict[str | None, Any],
@@ -78,7 +79,8 @@ def _build_detail(
     technical_charts = _build_technical_charts(signal_history.get("technical"))
     news_snippets = _build_snippets(news_by_ticker.get(selected_ticker))
     fundamental_snippets = _build_snippets(fundamentals_by_ticker.get(selected_ticker))
-    position = positions_by_ticker.get(selected_ticker) or {"summary": _EMPTY_MARKER}
+    option_positions_by_ticker = option_positions_by_ticker or {}
+    position = positions_by_ticker.get(selected_ticker) or option_positions_by_ticker.get(selected_ticker) or {"summary": _EMPTY_MARKER}
     closed_position = closed_positions_by_ticker.get(selected_ticker) or {}
     risk = risk_by_ticker.get(selected_ticker) or {}
     risk_history = _build_risk_history(risk.get("history"))

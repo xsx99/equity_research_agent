@@ -1797,10 +1797,19 @@ class TestTodayDashboard:
                 "candidate_score": 0.41,
                 "decision_time": "2026-06-03T13:03:00Z",
             },
+            {
+                "ticker": "OPTION",
+                "selection_source": "manual_request",
+                "result_status": "ordinary_watch",
+                "strategy_match": "option_monitor_v1",
+                "candidate_score": 0.35,
+                "decision_time": "2026-06-03T13:04:00Z",
+            },
         )
         manual_requests = (
             {"ticker": "REVIEW", "mode": "review_only"},
             {"ticker": "PAPER", "mode": "paper_trade_eligible"},
+            {"ticker": "OPTION", "mode": "paper_trade_eligible"},
         )
         trade_rows = [
             {
@@ -1827,7 +1836,19 @@ class TestTodayDashboard:
         with ExitStack() as stack:
             stack.enter_context(patch("src.web.routers.today._load_trade_rows", return_value=trade_rows))
             stack.enter_context(patch("src.web.routers.today._load_positions", return_value=()))
-            stack.enter_context(patch("src.web.routers.today._load_option_positions", return_value=()))
+            stack.enter_context(
+                patch(
+                    "src.web.routers.today._load_option_positions",
+                    return_value=(
+                        {
+                            "ticker": "OPTION",
+                            "option_strategy_type": "broker_option_position",
+                            "trade_identity": "tactical_option_trade",
+                            "updated_at": "2026-06-03T13:04:30Z",
+                        },
+                    ),
+                )
+            )
             stack.enter_context(patch("src.web.routers.today._load_hedge_overlays", return_value=()))
             stack.enter_context(patch("src.web.routers.today._load_live_alerts", return_value=()))
             stack.enter_context(patch("src.web.routers.today._load_material_changes", return_value=()))
@@ -1876,7 +1897,7 @@ class TestTodayDashboard:
         }
 
         assert candidate_tickers == {"REVIEW", "WATCH"}
-        assert workspace_tickers == {"TRADE", "PAPER", "SCAN"}
+        assert workspace_tickers == {"TRADE", "PAPER", "SCAN", "OPTION"}
 
     def test_load_today_dashboard_populates_trade_bucket_recency_labels(self):
         from src.web.routers.today import load_today_dashboard

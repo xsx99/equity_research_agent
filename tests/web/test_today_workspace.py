@@ -281,6 +281,32 @@ def test_build_ticker_workspace_includes_position_only_ticker():
     assert workspace["selected_ticker"] == "TSLA"
 
 
+def test_build_ticker_workspace_includes_option_position_only_ticker():
+    workspace = build_ticker_workspace(
+        trade_rows=[],
+        selected_ticker=None,
+        positions_by_ticker={},
+        option_positions_by_ticker={
+            "nvda": {
+                "status": "open",
+                "trade_identity": "tactical_option_trade",
+                "updated_at": "2026-07-10T19:00:00Z",
+            }
+        },
+        risk_by_ticker={},
+        signal_history_by_ticker={},
+        news_by_ticker={},
+        fundamentals_by_ticker={},
+        as_of=datetime(2026, 7, 10, 19, 5, tzinfo=timezone.utc),
+    )
+
+    assert [item["ticker"] for item in workspace["buckets"]["action_now"]] == []
+    assert [item["ticker"] for item in workspace["buckets"]["in_position"]] == ["NVDA"]
+    assert workspace["buckets"]["in_position"][0]["card_label"] == "Open Position"
+    assert workspace["buckets"]["in_position"][0]["recency_label"] == "5m ago"
+    assert workspace["selected_ticker"] == "NVDA"
+
+
 def test_build_ticker_workspace_does_not_seed_tickers_from_passive_context():
     workspace = build_ticker_workspace(
         trade_rows=[],
