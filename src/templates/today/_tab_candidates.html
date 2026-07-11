@@ -95,6 +95,66 @@
     {% set manual_rows = candidates.manual_candidates if candidates.manual_candidates is defined else manual_review_queue %}
     {% set agent_last_run_at = candidates.agent_last_run_at if candidates.agent_last_run_at is defined else candidates.last_run_at %}
     {% set manual_last_run_at = candidates.manual_last_run_at if candidates.manual_last_run_at is defined else candidates.last_run_at %}
+    {% set universe_filter = candidates.active_universe_filter if candidates.active_universe_filter is defined else none %}
+
+    <div class="panel">
+      <div class="panel-head">
+        <h3>Universe Filter</h3>
+        <span class="meta">{{ universe_filter.profile_name if universe_filter and universe_filter.profile_name is defined else "default" }}</span>
+      </div>
+      <div class="panel-body">
+        <p class="panel-sub">Scanner eligibility and manual ticker overrides for the next universe build.</p>
+        <form method="post" action="/today/universe-filter" class="universe-filter-form">
+          <label>
+            <span>Profile</span>
+            <input type="text" name="profile_name" value="{{ universe_filter.profile_name if universe_filter and universe_filter.profile_name is defined else 'default' }}">
+          </label>
+          <label>
+            <span>Min Price</span>
+            <input type="text" name="min_price" value="{{ universe_filter.min_price if universe_filter and universe_filter.min_price is not none else '0' }}">
+          </label>
+          <label>
+            <span>Min Avg $ Volume</span>
+            <input type="text" name="min_avg_dollar_volume" value="{{ universe_filter.min_avg_dollar_volume if universe_filter and universe_filter.min_avg_dollar_volume is not none else '0' }}">
+          </label>
+          <label>
+            <span>Included Sectors</span>
+            <input type="text" name="included_sectors" value="{{ (universe_filter.included_sectors or ()) | join(', ') if universe_filter else '' }}" placeholder="Technology, Healthcare">
+          </label>
+          <label>
+            <span>Excluded Sectors</span>
+            <input type="text" name="excluded_sectors" value="{{ (universe_filter.excluded_sectors or ()) | join(', ') if universe_filter else '' }}" placeholder="Utilities">
+          </label>
+          <label>
+            <span>Included Industries</span>
+            <input type="text" name="included_industries" value="{{ (universe_filter.included_industries or ()) | join(', ') if universe_filter else '' }}">
+          </label>
+          <label>
+            <span>Excluded Industries</span>
+            <input type="text" name="excluded_industries" value="{{ (universe_filter.excluded_industries or ()) | join(', ') if universe_filter else '' }}">
+          </label>
+          <label>
+            <span>Exchanges</span>
+            <input type="text" name="exchanges" value="{{ (universe_filter.exchanges or ()) | join(', ') if universe_filter else '' }}" placeholder="NASDAQ, NYSE">
+          </label>
+          <label>
+            <span>Asset Types</span>
+            <input type="text" name="asset_types" value="{{ (universe_filter.asset_types or ()) | join(', ') if universe_filter else '' }}" placeholder="us_equity">
+          </label>
+          <label>
+            <span>Manual Include</span>
+            <input type="text" name="manual_include" value="{{ (universe_filter.manual_include or ()) | join(', ') if universe_filter else '' }}" placeholder="AAPL, NVDA">
+          </label>
+          <label>
+            <span>Manual Exclude</span>
+            <input type="text" name="manual_exclude" value="{{ (universe_filter.manual_exclude or ()) | join(', ') if universe_filter else '' }}" placeholder="GME">
+          </label>
+          <div class="universe-filter-actions">
+            <button class="btn btn-primary" type="submit">Save Filter</button>
+          </div>
+        </form>
+      </div>
+    </div>
 
     {# ===================== Block 1: Agent-Scored Candidates ===================== #}
     <div class="panel">

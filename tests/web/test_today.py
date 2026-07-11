@@ -1383,6 +1383,19 @@ class TestTodayDashboard:
         assert "trades-canvas" not in response.text
         assert "Signal Summary" not in response.text
 
+    def test_candidates_tab_renders_universe_filter_editor(self, client):
+        payload = _dashboard_payload()
+        payload["selected_tab"] = "candidates"
+        with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
+            response = client.get("/today?tab=candidates")
+
+        assert response.status_code == 200
+        assert 'action="/today/universe-filter"' in response.text
+        assert 'name="excluded_sectors"' in response.text
+        assert 'value="Utilities"' in response.text
+        assert 'name="manual_exclude"' in response.text
+        assert 'value="GME"' in response.text
+
     def test_load_today_dashboard_prefers_selected_audit_detail_confidence_over_workspace_zero(self):
         from src.web.routers.today import load_today_dashboard
 
