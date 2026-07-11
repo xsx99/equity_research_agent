@@ -9,6 +9,7 @@ from src.trading.runtime.dispatch import get_job_phase_handler
 from src.trading.runtime.manual_review import (
     LiveManualReviewDependencies,
     LiveManualReviewRuntime,
+    build_live_manual_review_dependencies,
     run_live_manual_review_once,
 )
 from src.trading.runtime.support import build_execution_report
@@ -333,6 +334,40 @@ def test_run_live_manual_review_once_builds_default_dependencies_when_not_inject
 
     assert result["status"] == "passed"
     assert result["phase"] == "manual_review"
+
+
+def test_build_live_manual_review_dependencies_uses_scoped_universe_scan(monkeypatch):
+    class _FullScanPipeline:
+        def __init__(self) -> None:
+            self.scoped_calls = 0
+
+        def for_scoped_targets(self):
+            self.scoped_calls += 1
+            return "scoped-universe-scan"
+
+    full_scan_pipeline = _FullScanPipeline()
+    preopen_dependencies = SimpleNamespace(
+        universe_filter_loader="universe-filter-loader",
+        manual_request_loader="manual-request-loader",
+        universe_scan_pipeline=full_scan_pipeline,
+        signal_pipeline="signal-pipeline",
+        strategy_pipeline="strategy-pipeline",
+        portfolio_sync_workflow="portfolio-sync",
+        risk_workflow="risk-workflow",
+        trading_decision_pipeline="trading-decision",
+        paper_execution_workflow="paper-execution",
+        trading_repository="trading-repository",
+    )
+    monkeypatch.setattr(
+        "src.trading.phases.preopen.build_live_preopen_dependencies",
+        lambda _session: preopen_dependencies,
+    )
+
+    dependencies = build_live_manual_review_dependencies(session=object())
+
+    assert full_scan_pipeline.scoped_calls == 1
+    assert dependencies.universe_scan_pipeline == "scoped-universe-scan"
+    assert dependencies.signal_pipeline == "signal-pipeline"
 
 
 def test_runtime_dispatch_routes_manual_review_to_live_runtime():

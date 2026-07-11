@@ -7,6 +7,7 @@ from typing import Any, Protocol
 
 from src.core import config as app_config
 from src.research.repositories.research_repository import get_active_tickers
+from src.trading.data_sources.universe import UniverseAsset
 from src.trading.learning.apply import build_learning_adjustments
 from src.trading.risk.lookahead_risk import LookaheadRiskWorkflowHelper
 from src.trading.phases.preopen.risk import _LiveRiskWorkflow
@@ -172,7 +173,8 @@ def build_live_preopen_dependencies(session: Any | None = None) -> LivePreopenDe
         ),
         manual_request_loader=manual_request_service,
         universe_scan_pipeline=_ConfiguredLiveUniverseScanPipeline(
-            provider=LiveUniverseProvider(market_provider=market_provider)
+            provider=LiveUniverseProvider(market_provider=market_provider),
+            full_scan=True,
         ),
         signal_pipeline=SignalPipeline(
             source_repository=source_repository,
@@ -265,8 +267,12 @@ class _RepositoryUniverseFilterLoader:
 
 
 class _ConfiguredLiveUniverseScanPipeline:
-    def __init__(self, *, provider: Any) -> None:
+    def __init__(self, *, provider: Any, full_scan: bool = False) -> None:
         self.provider = provider
+        self.full_scan = full_scan
+
+    def for_scoped_targets(self) -> "_ConfiguredLiveUniverseScanPipeline":
+        return _ConfiguredLiveUniverseScanPipeline(provider=self.provider, full_scan=False)
 
     def run(self, *, config: object, decision_time: datetime, manual_requests: tuple[object, ...]) -> object:
         from src.trading.data_sources.universe import apply_universe_filters
@@ -281,6 +287,17 @@ class _ConfiguredLiveUniverseScanPipeline:
                 - {None}
             )
         )
+        if self.full_scan:
+            assets = list(self.provider.fetch_universe_assets())
+            if target_symbols and hasattr(self.provider, "fetch_assets_for_symbols"):
+                assets.extend(self.provider.fetch_assets_for_symbols(target_symbols))
+            assets.extend(_placeholder_assets_for_missing_symbols(assets, target_symbols))
+            result = apply_universe_filters(
+                assets,
+                config,
+                snapshot_time=decision_time,
+            )
+            return _force_include_target_symbols(result, target_symbols)
         if target_symbols and hasattr(self.provider, "fetch_assets_for_symbols"):
             return apply_universe_filters(
                 self.provider.fetch_assets_for_symbols(target_symbols),
@@ -292,3 +309,69 @@ class _ConfiguredLiveUniverseScanPipeline:
             config=config,
             now=lambda: decision_time,
         ).run()
+
+
+def _placeholder_assets_for_missing_symbols(
+    assets: list[UniverseAsset],
+    target_symbols: tuple[str, ...],
+) -> list[UniverseAsset]:
+    present = {asset.symbol for asset in assets}
+    return [
+        UniverseAsset(
+            symbol=symbol,
+            company_name=None,
+            asset_type="common_stock",
+            exchange=None,
+            sector=None,
+            industry=None,
+            price=None,
+            avg_dollar_volume=None,
+        )
+        for symbol in target_symbols
+        if symbol not in present
+    ]
+
+
+def _force_include_target_symbols(result: object, target_symbols: tuple[str, ...]) -> object:
+    if not target_symbols:
+        return replace(
+            result,
+            metadata={
+                **dict(getattr(result, "metadata", {}) or {}),
+                "full_scan": True,
+                "forced_include_symbols": (),
+                "forced_placeholder_symbols": (),
+            },
+        )
+    forced = set(target_symbols)
+    manual_exclude = set(getattr(getattr(result, "filter_config", None), "manual_exclude", ()) or ())
+    included_by_symbol = {
+        decision.symbol: decision
+        for decision in getattr(result, "included", ())
+    }
+    excluded: list[object] = []
+    forced_placeholders: list[str] = []
+    for decision in getattr(result, "excluded", ()):
+        if decision.symbol in forced and decision.symbol not in manual_exclude:
+            included_by_symbol[decision.symbol] = replace(
+                decision,
+                status="included",
+                exclusion_reason=None,
+            )
+            if decision.asset.price is None and decision.asset.avg_dollar_volume is None:
+                forced_placeholders.append(decision.symbol)
+            continue
+        excluded.append(decision)
+    return replace(
+        result,
+        included=tuple(sorted(included_by_symbol.values(), key=lambda item: item.symbol)),
+        excluded=tuple(sorted(excluded, key=lambda item: item.symbol)),
+        metadata={
+            **dict(getattr(result, "metadata", {}) or {}),
+            "full_scan": True,
+            "forced_include_symbols": tuple(
+                symbol for symbol in target_symbols if symbol in included_by_symbol
+            ),
+            "forced_placeholder_symbols": tuple(sorted(forced_placeholders)),
+        },
+    )

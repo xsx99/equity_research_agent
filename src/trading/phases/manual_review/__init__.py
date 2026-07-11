@@ -190,10 +190,13 @@ def build_live_manual_review_dependencies(session: Any | None = None) -> LiveMan
     if session is None:
         raise RuntimeError("db_session_required_for_live_manual_review_dependencies")
     preopen_dependencies = build_live_preopen_dependencies(session)
+    universe_scan_pipeline = preopen_dependencies.universe_scan_pipeline
+    if hasattr(universe_scan_pipeline, "for_scoped_targets"):
+        universe_scan_pipeline = universe_scan_pipeline.for_scoped_targets()
     return LiveManualReviewDependencies(
         universe_filter_loader=preopen_dependencies.universe_filter_loader,
         manual_request_loader=preopen_dependencies.manual_request_loader,
-        universe_scan_pipeline=preopen_dependencies.universe_scan_pipeline,
+        universe_scan_pipeline=universe_scan_pipeline,
         signal_pipeline=preopen_dependencies.signal_pipeline,
         strategy_pipeline=preopen_dependencies.strategy_pipeline,
         portfolio_sync_workflow=preopen_dependencies.portfolio_sync_workflow,

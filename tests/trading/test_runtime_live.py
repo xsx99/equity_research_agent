@@ -732,6 +732,72 @@ def test_configured_live_universe_scan_pipeline_prefers_targeted_symbols_for_man
     assert result.included_symbols == ("AAPL", "NVDA")
 
 
+def test_configured_live_universe_scan_pipeline_full_scan_forces_target_symbols_into_included():
+    calls: list[tuple[str, tuple[str, ...]]] = []
+
+    class _FullScanProvider:
+        def fetch_universe_assets(self):
+            calls.append(("full", ()))
+            return [
+                UniverseAsset(
+                    symbol="MSFT",
+                    company_name="Microsoft Corp.",
+                    asset_type="common_stock",
+                    exchange="NASDAQ",
+                    sector="Technology",
+                    industry="Software",
+                    price=330.0,
+                    avg_dollar_volume=150_000_000.0,
+                ),
+                UniverseAsset(
+                    symbol="LOWVOL",
+                    company_name="Low Volume Corp.",
+                    asset_type="common_stock",
+                    exchange="NASDAQ",
+                    sector="Technology",
+                    industry="Software",
+                    price=20.0,
+                    avg_dollar_volume=1_000_000.0,
+                ),
+            ]
+
+        def fetch_assets_for_symbols(self, symbols):
+            calls.append(("targeted", tuple(symbols)))
+            return [
+                UniverseAsset(
+                    symbol="AAPL",
+                    company_name="Apple Inc.",
+                    asset_type="common_stock",
+                    exchange="NASDAQ",
+                    sector="Technology",
+                    industry="Consumer Electronics",
+                    price=1.0,
+                    avg_dollar_volume=1_000.0,
+                ),
+            ]
+
+    decision_time = datetime(2026, 6, 3, 12, 45, tzinfo=timezone.utc)
+    pipeline = _ConfiguredLiveUniverseScanPipeline(provider=_FullScanProvider(), full_scan=True)
+
+    result = pipeline.run(
+        config=UniverseFilterConfig(
+            manual_include=("AAPL",),
+            manual_exclude=("LOWVOL",),
+            min_price=5.0,
+            min_avg_dollar_volume=25_000_000.0,
+        ),
+        decision_time=decision_time,
+        manual_requests=(SimpleNamespace(ticker="NVDA"),),
+    )
+
+    assert calls == [("full", ()), ("targeted", ("AAPL", "NVDA"))]
+    assert result.included_symbols == ("AAPL", "MSFT", "NVDA")
+    assert [decision.symbol for decision in result.excluded] == ["LOWVOL"]
+    assert result.metadata["full_scan"] is True
+    assert result.metadata["forced_include_symbols"] == ("AAPL", "NVDA")
+    assert result.metadata["forced_placeholder_symbols"] == ("NVDA",)
+
+
 def test_live_universe_provider_skips_symbols_that_fail_targeted_enrichment():
     class _MarketProvider:
         def fetch_daily_bars(self, ticker, lookback_days):
