@@ -1393,8 +1393,19 @@ class TestTodayDashboard:
         assert 'action="/today/universe-filter"' in response.text
         assert 'name="excluded_sectors"' in response.text
         assert 'value="Utilities"' in response.text
-        assert 'name="manual_exclude"' in response.text
-        assert 'value="GME"' in response.text
+        assert 'type="number" name="min_price"' in response.text
+        assert 'type="number" name="min_avg_dollar_volume"' in response.text
+        assert 'name="manual_include"' not in response.text
+        assert "Manual Include" not in response.text
+        assert 'name="manual_exclude"' not in response.text
+        assert "Manual Exclude" not in response.text
+        assert 'name="exchanges"' not in response.text
+        assert 'name="asset_types"' not in response.text
+        assert "Listing Rules" not in response.text
+        assert "Excluded Tickers" in response.text
+        assert 'action="/today/universe-filter/manual-excludes"' in response.text
+        assert 'action="/today/universe-filter/manual-excludes/GME/remove"' in response.text
+        assert ">GME</span>" in response.text
 
     def test_load_today_dashboard_prefers_selected_audit_detail_confidence_over_workspace_zero(self):
         from src.web.routers.today import load_today_dashboard
@@ -3062,10 +3073,6 @@ class TestTodayDashboardMutations:
                     "excluded_sectors": "Utilities",
                     "included_industries": "",
                     "excluded_industries": "",
-                    "exchanges": "NASDAQ,NYSE",
-                    "asset_types": "us_equity",
-                    "manual_include": "AAPL,NVDA",
-                    "manual_exclude": "GME",
                 },
                 follow_redirects=False,
             )
@@ -3073,6 +3080,97 @@ class TestTodayDashboardMutations:
         assert response.status_code == 303
         assert response.headers["location"] == "/today?tab=candidates"
         update_universe_filter.assert_called_once()
+        assert "manual_include" not in update_universe_filter.call_args.kwargs
+        assert "manual_exclude" not in update_universe_filter.call_args.kwargs
+        assert "exchanges" not in update_universe_filter.call_args.kwargs
+        assert "asset_types" not in update_universe_filter.call_args.kwargs
+
+    def test_update_universe_filter_validates_non_negative_numbers(self):
+        from src.web.routers.today import update_universe_filter
+
+        with pytest.raises(ValueError, match="Min price must be a non-negative number"):
+            update_universe_filter(
+                MagicMock(),
+                profile_name="default",
+                min_price="-1",
+                min_avg_dollar_volume="7500000",
+                included_sectors="",
+                excluded_sectors="",
+                included_industries="",
+                excluded_industries="",
+            )
+
+        with pytest.raises(ValueError, match="Minimum average dollar volume must be a non-negative number"):
+            update_universe_filter(
+                MagicMock(),
+                profile_name="default",
+                min_price="10",
+                min_avg_dollar_volume="not-a-number",
+                included_sectors="",
+                excluded_sectors="",
+                included_industries="",
+                excluded_industries="",
+            )
+
+    def test_update_universe_filter_clears_listing_rules_and_preserves_manual_excludes(self):
+        from src.web.routers.today import update_universe_filter
+
+        existing = SimpleNamespace(
+            version=2,
+            is_active=True,
+            manual_exclude_json=["GME"],
+        )
+        session = MagicMock()
+        session.query.return_value.filter.return_value.all.return_value = [existing]
+
+        update_universe_filter(
+            session,
+            profile_name="default",
+            min_price="10",
+            min_avg_dollar_volume="7500000",
+            included_sectors="Technology",
+            excluded_sectors="Utilities",
+            included_industries="",
+            excluded_industries="",
+        )
+
+        added = session.add.call_args.args[0]
+        assert existing.is_active is False
+        assert added.version == 3
+        assert added.exchanges_json == []
+        assert added.asset_types_json == []
+        assert added.manual_exclude_json == ["GME"]
+
+    def test_add_manual_exclude_redirects_back_to_candidates(self, client):
+        with patch("src.web.routers.today.add_universe_filter_manual_exclude") as add_manual_exclude:
+            response = client.post(
+                "/today/universe-filter/manual-excludes",
+                data={"ticker": "gme"},
+                follow_redirects=False,
+            )
+
+        assert response.status_code == 303
+        assert response.headers["location"] == "/today?tab=candidates"
+        add_manual_exclude.assert_called_once()
+        assert add_manual_exclude.call_args.kwargs["ticker"] == "gme"
+
+    def test_remove_manual_exclude_redirects_back_to_candidates(self, client):
+        with patch("src.web.routers.today.remove_universe_filter_manual_exclude") as remove_manual_exclude:
+            response = client.post(
+                "/today/universe-filter/manual-excludes/GME/remove",
+                follow_redirects=False,
+            )
+
+        assert response.status_code == 303
+        assert response.headers["location"] == "/today?tab=candidates"
+        remove_manual_exclude.assert_called_once()
+        assert remove_manual_exclude.call_args.kwargs["ticker"] == "GME"
+
+    def test_add_universe_filter_manual_exclude_validates_ticker(self):
+        from src.web.routers.today import add_universe_filter_manual_exclude
+
+        with pytest.raises(ValueError, match="Manual exclude must contain ticker symbols"):
+            add_universe_filter_manual_exclude(MagicMock(), ticker="BAD SYMBOL")
 
 
 class _QueryStub:

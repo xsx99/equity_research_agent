@@ -1,6 +1,7 @@
 """Today trading workstation routes."""
 from __future__ import annotations
 
+import re
 import sys
 import uuid
 from datetime import datetime, timezone
@@ -255,10 +256,6 @@ def today_update_universe_filter(
     excluded_sectors: str = Form(""),
     included_industries: str = Form(""),
     excluded_industries: str = Form(""),
-    exchanges: str = Form(""),
-    asset_types: str = Form(""),
-    manual_include: str = Form(""),
-    manual_exclude: str = Form(""),
 ):
     try:
         with get_session() as session:
@@ -271,13 +268,29 @@ def today_update_universe_filter(
                 excluded_sectors=excluded_sectors,
                 included_industries=included_industries,
                 excluded_industries=excluded_industries,
-                exchanges=exchanges,
-                asset_types=asset_types,
-                manual_include=manual_include,
-                manual_exclude=manual_exclude,
             )
     except Exception as exc:
         flash(request, f"Error updating universe filter: {exc}", "error")
+    return RedirectResponse("/today?tab=candidates", status_code=303)
+
+
+@router.post("/today/universe-filter/manual-excludes")
+def today_add_universe_filter_manual_exclude(request: Request, ticker: str = Form(...)):
+    try:
+        with get_session() as session:
+            add_universe_filter_manual_exclude(session, ticker=ticker)
+    except Exception as exc:
+        flash(request, f"Error adding excluded ticker: {exc}", "error")
+    return RedirectResponse("/today?tab=candidates", status_code=303)
+
+
+@router.post("/today/universe-filter/manual-excludes/{ticker}/remove")
+def today_remove_universe_filter_manual_exclude(ticker: str, request: Request):
+    try:
+        with get_session() as session:
+            remove_universe_filter_manual_exclude(session, ticker=ticker)
+    except Exception as exc:
+        flash(request, f"Error removing excluded ticker: {exc}", "error")
     return RedirectResponse("/today?tab=candidates", status_code=303)
 
 
@@ -716,8 +729,42 @@ def dismiss_manual_request(session: Any, request_id: str) -> None:
     service.dismiss(str(request_id))
 
 
+_TICKER_PATTERN = re.compile(r"^[A-Z0-9][A-Z0-9.-]{0,14}$")
+
+
+def _to_non_negative_decimal(raw_value: str, label: str) -> Decimal:
+    try:
+        value = Decimal(str(raw_value or "").strip())
+    except (InvalidOperation, ValueError) as exc:
+        raise ValueError(f"{label} must be a non-negative number.") from exc
+    if not value.is_finite() or value < 0:
+        raise ValueError(f"{label} must be a non-negative number.")
+    return value
+
+
+def _split_ticker_csv(raw_value: str, label: str) -> list[str]:
+    tickers = _split_csv(raw_value or "", uppercase=True)
+    invalid = [ticker for ticker in tickers if not _TICKER_PATTERN.fullmatch(ticker)]
+    if invalid:
+        raise ValueError(f"{label} must contain ticker symbols separated by commas.")
+    return tickers
+
+
+def _manual_excludes_from_rows(rows: list[Any]) -> list[str]:
+    values: list[str] = []
+    for row in rows:
+        for ticker in getattr(row, "manual_exclude_json", None) or []:
+            values.extend(_split_ticker_csv(str(ticker), "Manual exclude"))
+    return list(dict.fromkeys(values))
+
+
 def update_universe_filter(session: Any, **raw_form: str) -> uuid.UUID:
     profile_name = raw_form["profile_name"].strip() or "default"
+    min_price = _to_non_negative_decimal(raw_form["min_price"], "Min price")
+    min_avg_dollar_volume = _to_non_negative_decimal(
+        raw_form["min_avg_dollar_volume"],
+        "Minimum average dollar volume",
+    )
     active_rows = (
         session.query(UniverseFilterConfig)
         .filter(
@@ -726,6 +773,7 @@ def update_universe_filter(session: Any, **raw_form: str) -> uuid.UUID:
         )
         .all()
     )
+    manual_exclude = _manual_excludes_from_rows(active_rows)
     next_version = max((row.version for row in active_rows), default=0) + 1
     for row in active_rows:
         row.is_active = False
@@ -733,16 +781,82 @@ def update_universe_filter(session: Any, **raw_form: str) -> uuid.UUID:
         profile_name=profile_name,
         version=next_version,
         is_active=True,
-        min_price=_to_decimal(raw_form["min_price"]),
-        min_avg_dollar_volume=_to_decimal(raw_form["min_avg_dollar_volume"]),
+        min_price=min_price,
+        min_avg_dollar_volume=min_avg_dollar_volume,
         included_sectors_json=_split_csv(raw_form["included_sectors"]),
         excluded_sectors_json=_split_csv(raw_form["excluded_sectors"]),
         included_industries_json=_split_csv(raw_form["included_industries"]),
         excluded_industries_json=_split_csv(raw_form["excluded_industries"]),
-        exchanges_json=_split_csv(raw_form["exchanges"]),
-        asset_types_json=_split_csv(raw_form["asset_types"]),
-        manual_include_json=_split_csv(raw_form["manual_include"], uppercase=True),
-        manual_exclude_json=_split_csv(raw_form["manual_exclude"], uppercase=True),
+        exchanges_json=[],
+        asset_types_json=[],
+        manual_include_json=[],
+        manual_exclude_json=manual_exclude,
+    )
+    session.add(config)
+    session.flush()
+    return config.universe_filter_config_id
+
+
+def add_universe_filter_manual_exclude(session: Any, *, ticker: str) -> uuid.UUID:
+    tickers = _split_ticker_csv(ticker, "Manual exclude")
+    if not tickers:
+        raise ValueError("Manual exclude must contain ticker symbols separated by commas.")
+    return _update_universe_filter_manual_excludes(session, add=tickers)
+
+
+def remove_universe_filter_manual_exclude(session: Any, *, ticker: str) -> uuid.UUID:
+    tickers = _split_ticker_csv(ticker, "Manual exclude")
+    if not tickers:
+        raise ValueError("Manual exclude must contain ticker symbols separated by commas.")
+    return _update_universe_filter_manual_excludes(session, remove=set(tickers))
+
+
+def _update_universe_filter_manual_excludes(
+    session: Any,
+    *,
+    add: list[str] | None = None,
+    remove: set[str] | None = None,
+) -> uuid.UUID:
+    current = (
+        session.query(UniverseFilterConfig)
+        .filter(UniverseFilterConfig.is_active == True)
+        .order_by(UniverseFilterConfig.version.desc(), UniverseFilterConfig.created_at.desc())
+        .first()
+    )
+    profile_name = getattr(current, "profile_name", None) or "default"
+    active_rows = (
+        session.query(UniverseFilterConfig)
+        .filter(
+            UniverseFilterConfig.profile_name == profile_name,
+            UniverseFilterConfig.is_active == True,
+        )
+        .all()
+    )
+    manual_exclude = _manual_excludes_from_rows(active_rows)
+    for ticker in add or []:
+        if ticker not in manual_exclude:
+            manual_exclude.append(ticker)
+    if remove:
+        manual_exclude = [ticker for ticker in manual_exclude if ticker not in remove]
+
+    next_version = max((row.version for row in active_rows), default=0) + 1
+    for row in active_rows:
+        row.is_active = False
+
+    config = UniverseFilterConfig(
+        profile_name=profile_name,
+        version=next_version,
+        is_active=True,
+        min_price=getattr(current, "min_price", None) or Decimal("0"),
+        min_avg_dollar_volume=getattr(current, "min_avg_dollar_volume", None) or Decimal("0"),
+        included_sectors_json=list(getattr(current, "included_sectors_json", None) or []),
+        excluded_sectors_json=list(getattr(current, "excluded_sectors_json", None) or []),
+        included_industries_json=list(getattr(current, "included_industries_json", None) or []),
+        excluded_industries_json=list(getattr(current, "excluded_industries_json", None) or []),
+        exchanges_json=[],
+        asset_types_json=[],
+        manual_include_json=[],
+        manual_exclude_json=manual_exclude,
     )
     session.add(config)
     session.flush()
