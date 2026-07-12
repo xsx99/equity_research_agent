@@ -6,6 +6,7 @@ import sys
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
+from types import SimpleNamespace
 from typing import Any
 
 from fastapi import APIRouter, Form, Request
@@ -252,9 +253,7 @@ def today_update_universe_filter(
     profile_name: str = Form(...),
     min_price: str = Form(...),
     min_avg_dollar_volume: str = Form(...),
-    included_sectors: str = Form(""),
     excluded_sectors: str = Form(""),
-    included_industries: str = Form(""),
     excluded_industries: str = Form(""),
 ):
     try:
@@ -264,9 +263,7 @@ def today_update_universe_filter(
                 profile_name=profile_name,
                 min_price=min_price,
                 min_avg_dollar_volume=min_avg_dollar_volume,
-                included_sectors=included_sectors,
                 excluded_sectors=excluded_sectors,
-                included_industries=included_industries,
                 excluded_industries=excluded_industries,
             )
     except Exception as exc:
@@ -719,6 +716,9 @@ def _normalize_ticker_value(value: Any) -> str:
 
 
 def create_manual_request(session: Any, *, ticker: str, reason: str, mode: str) -> uuid.UUID:
+    normalized_ticker = _normalize_ticker_value(ticker)
+    if normalized_ticker in _active_manual_exclude_tickers(session):
+        raise ValueError("Ticker is manually excluded; remove it from Excluded Tickers before pinning it.")
     service = SQLAlchemyManualTickerRequestService(session)
     request = service.create(ticker, reason, mode)
     return uuid.UUID(request.request_id)
@@ -758,6 +758,27 @@ def _manual_excludes_from_rows(rows: list[Any]) -> list[str]:
     return list(dict.fromkeys(values))
 
 
+def _active_manual_exclude_tickers(session: Any) -> set[str]:
+    current = (
+        session.query(UniverseFilterConfig)
+        .filter(UniverseFilterConfig.is_active == True)
+        .order_by(UniverseFilterConfig.version.desc(), UniverseFilterConfig.created_at.desc())
+        .first()
+    )
+    values = getattr(current, "manual_exclude_json", None) or []
+    return set(_manual_excludes_from_rows([SimpleNamespace(manual_exclude_json=values)]))
+
+
+def _active_manual_request_tickers(session: Any) -> set[str]:
+    service = SQLAlchemyManualTickerRequestService(session)
+    tickers: set[str] = set()
+    for request in service.load_active():
+        normalized_ticker = _normalize_ticker_value(getattr(request, "ticker", None))
+        if normalized_ticker:
+            tickers.add(normalized_ticker)
+    return tickers
+
+
 def update_universe_filter(session: Any, **raw_form: str) -> uuid.UUID:
     profile_name = raw_form["profile_name"].strip() or "default"
     min_price = _to_non_negative_decimal(raw_form["min_price"], "Min price")
@@ -783,9 +804,9 @@ def update_universe_filter(session: Any, **raw_form: str) -> uuid.UUID:
         is_active=True,
         min_price=min_price,
         min_avg_dollar_volume=min_avg_dollar_volume,
-        included_sectors_json=_split_csv(raw_form["included_sectors"]),
+        included_sectors_json=[],
         excluded_sectors_json=_split_csv(raw_form["excluded_sectors"]),
-        included_industries_json=_split_csv(raw_form["included_industries"]),
+        included_industries_json=[],
         excluded_industries_json=_split_csv(raw_form["excluded_industries"]),
         exchanges_json=[],
         asset_types_json=[],
@@ -801,6 +822,10 @@ def add_universe_filter_manual_exclude(session: Any, *, ticker: str) -> uuid.UUI
     tickers = _split_ticker_csv(ticker, "Manual exclude")
     if not tickers:
         raise ValueError("Manual exclude must contain ticker symbols separated by commas.")
+    pinned_tickers = _active_manual_request_tickers(session)
+    conflicts = [ticker for ticker in tickers if ticker in pinned_tickers]
+    if conflicts:
+        raise ValueError("Ticker is pinned on the manual watchlist; remove it before excluding it.")
     return _update_universe_filter_manual_excludes(session, add=tickers)
 
 
@@ -849,9 +874,9 @@ def _update_universe_filter_manual_excludes(
         is_active=True,
         min_price=getattr(current, "min_price", None) or Decimal("0"),
         min_avg_dollar_volume=getattr(current, "min_avg_dollar_volume", None) or Decimal("0"),
-        included_sectors_json=list(getattr(current, "included_sectors_json", None) or []),
+        included_sectors_json=[],
         excluded_sectors_json=list(getattr(current, "excluded_sectors_json", None) or []),
-        included_industries_json=list(getattr(current, "included_industries_json", None) or []),
+        included_industries_json=[],
         excluded_industries_json=list(getattr(current, "excluded_industries_json", None) or []),
         exchanges_json=[],
         asset_types_json=[],

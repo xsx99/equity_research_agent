@@ -300,6 +300,28 @@ td.mono { font-family: var(--mono); font-size: 12px; color: var(--text); }
   align-items: end;
   justify-content: flex-start;
 }
+.manual-control-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(260px, 0.8fr);
+  gap: 1rem;
+  align-items: start;
+}
+.manual-control-block {
+  display: grid;
+  gap: 0.85rem;
+  min-width: 0;
+}
+.manual-control-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.manual-control-heading h4 {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--fs-base);
+}
 .excluded-ticker-form { margin-bottom: 0.85rem; }
 .excluded-ticker-list {
   display: flex;
@@ -1470,6 +1492,7 @@ details > summary:hover { color: var(--text); }
 
 @media (max-width: 1000px) {
   .chart-grid, .cal-grid, .agent-grid, .attn-2col { grid-template-columns: 1fr; }
+  .manual-control-grid { grid-template-columns: 1fr; }
   .universe-filter-group,
   .universe-filter-group-profile,
   .universe-filter-actions { grid-column: span 6; }

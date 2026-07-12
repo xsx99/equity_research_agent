@@ -1391,8 +1391,12 @@ class TestTodayDashboard:
 
         assert response.status_code == 200
         assert 'action="/today/universe-filter"' in response.text
+        assert 'name="included_sectors"' not in response.text
+        assert "Included Sectors" not in response.text
         assert 'name="excluded_sectors"' in response.text
         assert 'value="Utilities"' in response.text
+        assert 'name="included_industries"' not in response.text
+        assert "Included Industries" not in response.text
         assert 'type="number" name="min_price"' in response.text
         assert 'type="number" name="min_avg_dollar_volume"' in response.text
         assert 'name="manual_include"' not in response.text
@@ -1402,10 +1406,13 @@ class TestTodayDashboard:
         assert 'name="exchanges"' not in response.text
         assert 'name="asset_types"' not in response.text
         assert "Listing Rules" not in response.text
+        assert "Manual Ticker Controls" in response.text
         assert "Excluded Tickers" in response.text
+        assert "Manual Watchlist" in response.text
         assert 'action="/today/universe-filter/manual-excludes"' in response.text
         assert 'action="/today/universe-filter/manual-excludes/GME/remove"' in response.text
         assert ">GME</span>" in response.text
+        assert response.text.count("<h3>Manual Ticker Controls</h3>") == 1
 
     def test_load_today_dashboard_prefers_selected_audit_detail_confidence_over_workspace_zero(self):
         from src.web.routers.today import load_today_dashboard
@@ -3069,9 +3076,7 @@ class TestTodayDashboardMutations:
                     "profile_name": "default",
                     "min_price": "15",
                     "min_avg_dollar_volume": "7500000",
-                    "included_sectors": "Technology,Healthcare",
                     "excluded_sectors": "Utilities",
-                    "included_industries": "",
                     "excluded_industries": "",
                 },
                 follow_redirects=False,
@@ -3094,9 +3099,7 @@ class TestTodayDashboardMutations:
                 profile_name="default",
                 min_price="-1",
                 min_avg_dollar_volume="7500000",
-                included_sectors="",
                 excluded_sectors="",
-                included_industries="",
                 excluded_industries="",
             )
 
@@ -3106,18 +3109,18 @@ class TestTodayDashboardMutations:
                 profile_name="default",
                 min_price="10",
                 min_avg_dollar_volume="not-a-number",
-                included_sectors="",
                 excluded_sectors="",
-                included_industries="",
                 excluded_industries="",
             )
 
-    def test_update_universe_filter_clears_listing_rules_and_preserves_manual_excludes(self):
+    def test_update_universe_filter_clears_include_and_listing_rules_and_preserves_manual_excludes(self):
         from src.web.routers.today import update_universe_filter
 
         existing = SimpleNamespace(
             version=2,
             is_active=True,
+            included_sectors_json=["Technology"],
+            included_industries_json=["Semiconductors"],
             manual_exclude_json=["GME"],
         )
         session = MagicMock()
@@ -3128,18 +3131,43 @@ class TestTodayDashboardMutations:
             profile_name="default",
             min_price="10",
             min_avg_dollar_volume="7500000",
-            included_sectors="Technology",
             excluded_sectors="Utilities",
-            included_industries="",
             excluded_industries="",
         )
 
         added = session.add.call_args.args[0]
         assert existing.is_active is False
         assert added.version == 3
+        assert added.included_sectors_json == []
+        assert added.included_industries_json == []
         assert added.exchanges_json == []
         assert added.asset_types_json == []
         assert added.manual_exclude_json == ["GME"]
+
+    def test_create_manual_request_rejects_ticker_already_excluded(self):
+        from src.web.routers.today import create_manual_request
+
+        current_filter = SimpleNamespace(manual_exclude_json=["TSLA"])
+        session = MagicMock()
+        session.query.return_value.filter.return_value.order_by.return_value.first.return_value = current_filter
+
+        with pytest.raises(ValueError, match="Ticker is manually excluded"):
+            create_manual_request(
+                session,
+                ticker="tsla",
+                reason="post-event review",
+                mode="review_only",
+            )
+
+    def test_add_manual_exclude_rejects_active_manual_request_ticker(self):
+        from src.web.routers.today import add_universe_filter_manual_exclude
+
+        service = MagicMock()
+        service.load_active.return_value = (SimpleNamespace(ticker="TSLA"),)
+
+        with patch("src.web.routers.today.SQLAlchemyManualTickerRequestService", return_value=service):
+            with pytest.raises(ValueError, match="Ticker is pinned on the manual watchlist"):
+                add_universe_filter_manual_exclude(MagicMock(), ticker="tsla")
 
     def test_add_manual_exclude_redirects_back_to_candidates(self, client):
         with patch("src.web.routers.today.add_universe_filter_manual_exclude") as add_manual_exclude:

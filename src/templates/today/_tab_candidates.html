@@ -103,7 +103,7 @@
         <span class="meta">{{ universe_filter.profile_name if universe_filter and universe_filter.profile_name is defined else "default" }}</span>
       </div>
       <div class="panel-body">
-        <p class="panel-sub">Scanner eligibility for the next universe build. Ticker-level includes and excludes are managed below.</p>
+        <p class="panel-sub">Scanner eligibility for the next universe build. Sectors and industries are included by default unless excluded below; ticker-level controls are managed separately.</p>
         <form method="post" action="/today/universe-filter" class="universe-filter-form">
           <fieldset class="universe-filter-group universe-filter-group-profile">
             <legend>Profile</legend>
@@ -126,30 +126,18 @@
             </div>
           </fieldset>
           <fieldset class="universe-filter-group">
-            <legend>Sector Scope</legend>
-            <div class="universe-filter-row">
-              <label>
-                <span>Included Sectors</span>
-                <input type="text" name="included_sectors" value="{{ (universe_filter.included_sectors or ()) | join(', ') if universe_filter else '' }}" placeholder="Technology, Healthcare">
-              </label>
-              <label>
-                <span>Excluded Sectors</span>
-                <input type="text" name="excluded_sectors" value="{{ (universe_filter.excluded_sectors or ()) | join(', ') if universe_filter else '' }}" placeholder="Utilities">
-              </label>
-            </div>
+            <legend>Sector Exclusions</legend>
+            <label>
+              <span>Excluded Sectors</span>
+              <input type="text" name="excluded_sectors" value="{{ (universe_filter.excluded_sectors or ()) | join(', ') if universe_filter else '' }}" placeholder="Utilities">
+            </label>
           </fieldset>
           <fieldset class="universe-filter-group">
-            <legend>Industry Scope</legend>
-            <div class="universe-filter-row">
-              <label>
-                <span>Included Industries</span>
-                <input type="text" name="included_industries" value="{{ (universe_filter.included_industries or ()) | join(', ') if universe_filter else '' }}" placeholder="Semiconductors">
-              </label>
-              <label>
-                <span>Excluded Industries</span>
-                <input type="text" name="excluded_industries" value="{{ (universe_filter.excluded_industries or ()) | join(', ') if universe_filter else '' }}" placeholder="Banks">
-              </label>
-            </div>
+            <legend>Industry Exclusions</legend>
+            <label>
+              <span>Excluded Industries</span>
+              <input type="text" name="excluded_industries" value="{{ (universe_filter.excluded_industries or ()) | join(', ') if universe_filter else '' }}" placeholder="Banks">
+            </label>
           </fieldset>
           <div class="universe-filter-actions universe-filter-group">
             <button class="btn btn-primary" type="submit">Save Filter</button>
@@ -160,27 +148,61 @@
 
     <div class="panel">
       <div class="panel-head">
-        <h3>Excluded Tickers</h3>
-        <span class="meta">{{ (universe_filter.manual_exclude or ()) | length if universe_filter else 0 }} excluded</span>
+        <h3>Manual Ticker Controls</h3>
+        <span class="meta">{{ manual_rows | length }} pinned · {{ (universe_filter.manual_exclude or ()) | length if universe_filter else 0 }} excluded{% if manual_last_run_at %} · Last run <time datetime="{{ manual_last_run_at | iso_datetime }}" data-local-time-format="datetime">{{ manual_last_run_at | local_time('datetime') }}</time>{% endif %}</span>
       </div>
       <div class="panel-body">
-        <p class="panel-sub">Ticker-level hard exclusions from the next universe build.</p>
-        <form method="post" action="/today/universe-filter/manual-excludes" class="form-row excluded-ticker-form">
-          <input type="text" name="ticker" placeholder="Ticker" pattern="[A-Za-z0-9.\-]+" title="Ticker symbol only" required>
-          <button class="btn btn-primary" type="submit">Exclude Ticker</button>
-        </form>
-        {% if universe_filter and universe_filter.manual_exclude %}
-        <div class="excluded-ticker-list">
-          {% for ticker in universe_filter.manual_exclude %}
-          <form method="post" action="/today/universe-filter/manual-excludes/{{ ticker }}/remove" class="excluded-ticker-chip">
-            <span>{{ ticker }}</span>
-            <button class="btn btn-sm" type="submit">Remove</button>
-          </form>
-          {% endfor %}
+        <p class="panel-sub">Pinned tickers are forced into the review pipeline; excluded tickers are blocked from the next universe build. The same ticker cannot be both pinned and excluded.</p>
+        <div class="manual-control-grid">
+          <section class="manual-control-block">
+            <div class="manual-control-heading">
+              <h4>Manual Watchlist</h4>
+              <span class="meta">{{ manual_rows | length }} pinned</span>
+            </div>
+            <form method="post" action="/today/manual-requests" class="form-row">
+              <input type="text" name="ticker" placeholder="Ticker" pattern="[A-Za-z0-9.\-]+" title="Ticker symbol only" required>
+              <input type="text" name="reason" placeholder="Reason" required>
+              <select name="mode">
+                <option value="review_only">Review Only</option>
+                <option value="paper_trade_eligible">Paper Trade Eligible</option>
+              </select>
+              <button class="btn btn-primary" type="submit">Pin to Watchlist</button>
+            </form>
+            {% if manual_rows %}
+            <div class="scroll-panel">
+              <table class="dtable candidate-stable-table">
+                {{ candidate_colgroup() }}
+                <thead><tr><th>Symbol</th><th>Status</th><th>Trade Identity</th><th>Strategy</th><th>Confidence</th><th>Primary Reason</th></tr></thead>
+                <tbody>
+                  {% for row in manual_rows %}{{ candidate_row(row) }}{% endfor %}
+                </tbody>
+              </table>
+            </div>
+            {% else %}<p class="detail-muted quiet-empty">No tickers on your manual watchlist.</p>{% endif %}
+          </section>
+          <section class="manual-control-block">
+            <div class="manual-control-heading">
+              <h4>Excluded Tickers</h4>
+              <span class="meta">{{ (universe_filter.manual_exclude or ()) | length if universe_filter else 0 }} excluded</span>
+            </div>
+            <form method="post" action="/today/universe-filter/manual-excludes" class="form-row excluded-ticker-form">
+              <input type="text" name="ticker" placeholder="Ticker" pattern="[A-Za-z0-9.\-]+" title="Ticker symbol only" required>
+              <button class="btn btn-primary" type="submit">Exclude Ticker</button>
+            </form>
+            {% if universe_filter and universe_filter.manual_exclude %}
+            <div class="excluded-ticker-list">
+              {% for ticker in universe_filter.manual_exclude %}
+              <form method="post" action="/today/universe-filter/manual-excludes/{{ ticker }}/remove" class="excluded-ticker-chip">
+                <span>{{ ticker }}</span>
+                <button class="btn btn-sm" type="submit">Remove</button>
+              </form>
+              {% endfor %}
+            </div>
+            {% else %}
+            <p class="detail-muted quiet-empty">No tickers are manually excluded.</p>
+            {% endif %}
+          </section>
         </div>
-        {% else %}
-        <p class="detail-muted quiet-empty">No tickers are manually excluded.</p>
-        {% endif %}
       </div>
     </div>
 
@@ -210,36 +232,5 @@
           {% for row in candidates.themes %}<span class="theme-chip">{{ row.display_name }}</span>{% endfor %}
         </div>
         {% else %}<p class="detail-muted quiet-empty">No themes tracked.</p>{% endif %}
-      </div>
-    </div>
-
-    {# ===================== Block 2: Manual Watchlist ===================== #}
-    <div class="panel">
-      <div class="panel-head">
-        <h3>📌 Manual Watchlist</h3>
-        <span class="meta">{{ manual_rows | length }} pinned{% if manual_last_run_at %} · Last run <time datetime="{{ manual_last_run_at | iso_datetime }}" data-local-time-format="datetime">{{ manual_last_run_at | local_time('datetime') }}</time>{% endif %}</span>
-      </div>
-      <div class="panel-body">
-        <p class="panel-sub">Tickers <strong>you</strong> pinned for the system to watch and review — same pipeline as the agent-scored candidates above, just selected by you. Pin another below.</p>
-        <form method="post" action="/today/manual-requests" class="form-row">
-          <input type="text" name="ticker" placeholder="Ticker">
-          <input type="text" name="reason" placeholder="Reason">
-          <select name="mode">
-            <option value="review_only">Review Only</option>
-            <option value="paper_trade_eligible">Paper Trade Eligible</option>
-          </select>
-          <button class="btn btn-primary" type="submit">Pin to Watchlist</button>
-        </form>
-        {% if manual_rows %}
-        <div class="scroll-panel">
-          <table class="dtable candidate-stable-table">
-            {{ candidate_colgroup() }}
-            <thead><tr><th>Symbol</th><th>Status</th><th>Trade Identity</th><th>Strategy</th><th>Confidence</th><th>Primary Reason</th></tr></thead>
-            <tbody>
-              {% for row in manual_rows %}{{ candidate_row(row) }}{% endfor %}
-            </tbody>
-          </table>
-        </div>
-        {% else %}<p class="detail-muted quiet-empty">No tickers on your manual watchlist.</p>{% endif %}
       </div>
     </div>
