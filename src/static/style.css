@@ -248,68 +248,63 @@ td.mono { font-family: var(--mono); font-size: 12px; color: var(--text); }
 
 /* ------------------------------------------------------------- Forms */
 .form-row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 1rem; }
-.universe-filter-form {
+.universe-filter-control-grid {
   display: grid;
-  grid-template-columns: repeat(12, minmax(0, 1fr));
-  gap: 0.85rem;
-  align-items: stretch;
-}
-.universe-filter-group {
-  grid-column: span 4;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 0.75rem;
-  min-width: 0;
-  background: rgba(12, 17, 26, 0.32);
-}
-.universe-filter-group-profile,
-.universe-filter-actions {
-  grid-column: span 2;
-}
-.universe-filter-group legend {
-  color: var(--text-dim);
-  font-size: var(--fs-xs);
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  padding: 0 0.25rem;
-  text-transform: uppercase;
-}
-.universe-filter-row {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.55fr) minmax(0, 1fr) minmax(0, 1fr);
   gap: 0.65rem;
+  align-items: end;
 }
-.universe-filter-form label {
+.control-field {
   display: grid;
-  gap: 0.3rem;
+  gap: 0.38rem;
   min-width: 0;
 }
-.universe-filter-form label span {
+.control-field-liquidity {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+.control-field label {
+  display: grid;
+  gap: 0.38rem;
+  min-width: 0;
+}
+.control-field span,
+.control-field label span {
   color: var(--text-muted);
   font-size: var(--fs-xs);
   font-weight: 600;
   letter-spacing: 0.05em;
   text-transform: uppercase;
 }
-.universe-filter-form input[type="text"],
-.universe-filter-form input[type="number"] {
+.universe-filter-control-grid input[type="text"],
+.universe-filter-control-grid input[type="number"] {
   width: 100%;
 }
-.universe-filter-actions {
+.control-save {
+  grid-column: 1 / -1;
   display: flex;
-  align-items: end;
+  align-items: flex-end;
   justify-content: flex-start;
+  margin-top: 0.1rem;
+}
+.control-save .btn {
+  min-height: 38px;
+  white-space: nowrap;
 }
 .manual-control-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.6fr) minmax(260px, 0.8fr);
-  gap: 1rem;
+  grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.9fr);
+  gap: 0.85rem;
   align-items: start;
 }
-.manual-control-block {
+.manual-control-subpanel {
   display: grid;
-  gap: 0.85rem;
+  gap: 0.7rem;
   min-width: 0;
+  padding: 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: rgba(12, 17, 26, 0.26);
 }
 .manual-control-heading {
   display: flex;
@@ -322,7 +317,34 @@ td.mono { font-family: var(--mono); font-size: 12px; color: var(--text); }
   color: var(--text);
   font-size: var(--fs-base);
 }
-.excluded-ticker-form { margin-bottom: 0.85rem; }
+.manual-control-count {
+  flex: none;
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  font-family: var(--mono);
+}
+.manual-control-form {
+  margin-bottom: 0;
+}
+.manual-control-form input[type="text"] {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+.manual-control-form select {
+  flex: 0 1 170px;
+  min-width: 140px;
+}
+.manual-control-form .btn {
+  flex: 0 0 auto;
+}
+.manual-control-empty {
+  margin: 0;
+  padding: 0.72rem 0.8rem;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  background: rgba(5, 10, 17, 0.22);
+}
+.excluded-ticker-form { margin-bottom: 0; }
 .excluded-ticker-list {
   display: flex;
   flex-wrap: wrap;
@@ -1493,16 +1515,16 @@ details > summary:hover { color: var(--text); }
 @media (max-width: 1000px) {
   .chart-grid, .cal-grid, .agent-grid, .attn-2col { grid-template-columns: 1fr; }
   .manual-control-grid { grid-template-columns: 1fr; }
-  .universe-filter-group,
-  .universe-filter-group-profile,
-  .universe-filter-actions { grid-column: span 6; }
+  .universe-filter-control-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .control-save { justify-content: flex-start; }
 }
 
 @media (max-width: 700px) {
-  .universe-filter-group,
-  .universe-filter-group-profile,
-  .universe-filter-actions { grid-column: 1 / -1; }
-  .universe-filter-row { grid-template-columns: 1fr; }
+  .universe-filter-control-grid,
+  .control-field-liquidity { grid-template-columns: 1fr; }
+  .manual-control-form > input[type="text"],
+  .manual-control-form > select,
+  .manual-control-form > button { width: 100%; }
 }
 
 /* =====================================================================

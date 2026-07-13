@@ -1399,6 +1399,8 @@ class TestTodayDashboard:
         assert "Included Industries" not in response.text
         assert 'type="number" name="min_price"' in response.text
         assert 'type="number" name="min_avg_dollar_volume"' in response.text
+        assert 'class="universe-filter-control-grid"' in response.text
+        assert "<fieldset" not in response.text
         assert 'name="manual_include"' not in response.text
         assert "Manual Include" not in response.text
         assert 'name="manual_exclude"' not in response.text
@@ -1409,6 +1411,8 @@ class TestTodayDashboard:
         assert "Manual Ticker Controls" in response.text
         assert "Excluded Tickers" in response.text
         assert "Manual Watchlist" in response.text
+        assert response.text.count('class="manual-control-subpanel"') == 2
+        assert response.text.count('class="manual-control-count"') >= 2
         assert 'action="/today/universe-filter/manual-excludes"' in response.text
         assert 'action="/today/universe-filter/manual-excludes/GME/remove"' in response.text
         assert ">GME</span>" in response.text

@@ -104,42 +104,30 @@
       </div>
       <div class="panel-body">
         <p class="panel-sub">Scanner eligibility for the next universe build. Sectors and industries are included by default unless excluded below; ticker-level controls are managed separately.</p>
-        <form method="post" action="/today/universe-filter" class="universe-filter-form">
-          <fieldset class="universe-filter-group universe-filter-group-profile">
-            <legend>Profile</legend>
+        <form method="post" action="/today/universe-filter" class="universe-filter-control-grid">
+          <label class="control-field control-field-profile">
+            <span>Profile</span>
+            <input type="text" name="profile_name" value="{{ universe_filter.profile_name if universe_filter and universe_filter.profile_name is defined else 'default' }}" maxlength="64" required>
+          </label>
+          <div class="control-field control-field-liquidity">
             <label>
-              <span>Profile</span>
-              <input type="text" name="profile_name" value="{{ universe_filter.profile_name if universe_filter and universe_filter.profile_name is defined else 'default' }}" maxlength="64" required>
+              <span>Min Price</span>
+              <input type="number" name="min_price" value="{{ universe_filter.min_price if universe_filter and universe_filter.min_price is not none else '0' }}" min="0" step="0.01" inputmode="decimal" required>
             </label>
-          </fieldset>
-          <fieldset class="universe-filter-group">
-            <legend>Liquidity</legend>
-            <div class="universe-filter-row">
-              <label>
-                <span>Min Price</span>
-                <input type="number" name="min_price" value="{{ universe_filter.min_price if universe_filter and universe_filter.min_price is not none else '0' }}" min="0" step="0.01" inputmode="decimal" required>
-              </label>
-              <label>
-                <span>Min Avg $ Volume</span>
-                <input type="number" name="min_avg_dollar_volume" value="{{ universe_filter.min_avg_dollar_volume if universe_filter and universe_filter.min_avg_dollar_volume is not none else '0' }}" min="0" step="1" inputmode="numeric" required>
-              </label>
-            </div>
-          </fieldset>
-          <fieldset class="universe-filter-group">
-            <legend>Sector Exclusions</legend>
             <label>
-              <span>Excluded Sectors</span>
-              <input type="text" name="excluded_sectors" value="{{ (universe_filter.excluded_sectors or ()) | join(', ') if universe_filter else '' }}" placeholder="Utilities">
+              <span>Min Avg $ Volume</span>
+              <input type="number" name="min_avg_dollar_volume" value="{{ universe_filter.min_avg_dollar_volume if universe_filter and universe_filter.min_avg_dollar_volume is not none else '0' }}" min="0" step="1" inputmode="numeric" required>
             </label>
-          </fieldset>
-          <fieldset class="universe-filter-group">
-            <legend>Industry Exclusions</legend>
-            <label>
-              <span>Excluded Industries</span>
-              <input type="text" name="excluded_industries" value="{{ (universe_filter.excluded_industries or ()) | join(', ') if universe_filter else '' }}" placeholder="Banks">
-            </label>
-          </fieldset>
-          <div class="universe-filter-actions universe-filter-group">
+          </div>
+          <label class="control-field">
+            <span>Excluded Sectors</span>
+            <input type="text" name="excluded_sectors" value="{{ (universe_filter.excluded_sectors or ()) | join(', ') if universe_filter else '' }}" placeholder="Utilities">
+          </label>
+          <label class="control-field">
+            <span>Excluded Industries</span>
+            <input type="text" name="excluded_industries" value="{{ (universe_filter.excluded_industries or ()) | join(', ') if universe_filter else '' }}" placeholder="Banks">
+          </label>
+          <div class="control-save">
             <button class="btn btn-primary" type="submit">Save Filter</button>
           </div>
         </form>
@@ -154,12 +142,12 @@
       <div class="panel-body">
         <p class="panel-sub">Pinned tickers are forced into the review pipeline; excluded tickers are blocked from the next universe build. The same ticker cannot be both pinned and excluded.</p>
         <div class="manual-control-grid">
-          <section class="manual-control-block">
+          <section class="manual-control-subpanel">
             <div class="manual-control-heading">
               <h4>Manual Watchlist</h4>
-              <span class="meta">{{ manual_rows | length }} pinned</span>
+              <span class="manual-control-count">{{ manual_rows | length }} pinned</span>
             </div>
-            <form method="post" action="/today/manual-requests" class="form-row">
+            <form method="post" action="/today/manual-requests" class="form-row manual-control-form">
               <input type="text" name="ticker" placeholder="Ticker" pattern="[A-Za-z0-9.\-]+" title="Ticker symbol only" required>
               <input type="text" name="reason" placeholder="Reason" required>
               <select name="mode">
@@ -178,14 +166,14 @@
                 </tbody>
               </table>
             </div>
-            {% else %}<p class="detail-muted quiet-empty">No tickers on your manual watchlist.</p>{% endif %}
+            {% else %}<p class="detail-muted quiet-empty manual-control-empty">No tickers on your manual watchlist.</p>{% endif %}
           </section>
-          <section class="manual-control-block">
+          <section class="manual-control-subpanel">
             <div class="manual-control-heading">
               <h4>Excluded Tickers</h4>
-              <span class="meta">{{ (universe_filter.manual_exclude or ()) | length if universe_filter else 0 }} excluded</span>
+              <span class="manual-control-count">{{ (universe_filter.manual_exclude or ()) | length if universe_filter else 0 }} excluded</span>
             </div>
-            <form method="post" action="/today/universe-filter/manual-excludes" class="form-row excluded-ticker-form">
+            <form method="post" action="/today/universe-filter/manual-excludes" class="form-row manual-control-form excluded-ticker-form">
               <input type="text" name="ticker" placeholder="Ticker" pattern="[A-Za-z0-9.\-]+" title="Ticker symbol only" required>
               <button class="btn btn-primary" type="submit">Exclude Ticker</button>
             </form>
@@ -199,7 +187,7 @@
               {% endfor %}
             </div>
             {% else %}
-            <p class="detail-muted quiet-empty">No tickers are manually excluded.</p>
+            <p class="detail-muted quiet-empty manual-control-empty">No tickers are manually excluded.</p>
             {% endif %}
           </section>
         </div>
