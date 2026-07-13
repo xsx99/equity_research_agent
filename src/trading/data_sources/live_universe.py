@@ -9,15 +9,16 @@ from src.trading.data_sources.universe import UniverseAsset, UniverseProvider, l
 class LiveUniverseProvider:
     """Adapt market-provider universe payloads into normalized universe assets."""
 
-    def __init__(self, *, market_provider: Any) -> None:
+    def __init__(self, *, market_provider: Any, daily_bar_lookback_days: int = 20) -> None:
         self.market_provider = market_provider
+        self.daily_bar_lookback_days = daily_bar_lookback_days
 
     def fetch_universe_assets(self) -> list[UniverseAsset]:
         rows = self.market_provider.fetch_universe_assets()
         assets = [_coerce_universe_asset(row) for row in rows]
         normalized = [asset for asset in assets if asset is not None]
         if normalized:
-            return normalized
+            return self._enrich_assets_with_batched_daily_bars(normalized)
         return load_universe_assets_from_env(
             default_price=100.0,
             default_avg_dollar_volume=50_000_000.0,
@@ -67,6 +68,28 @@ class LiveUniverseProvider:
             avg_dollar_volume=avg_dollar_volume,
         )
 
+    def _enrich_assets_with_batched_daily_bars(
+        self,
+        assets: list[UniverseAsset],
+    ) -> list[UniverseAsset]:
+        batch_loader = getattr(self.market_provider, "fetch_daily_bars_for_symbols", None)
+        if batch_loader is None:
+            return assets
+        symbols = tuple(asset.symbol for asset in assets if asset.price is None or asset.avg_dollar_volume is None)
+        if not symbols:
+            return assets
+        try:
+            bars_by_symbol = batch_loader(symbols, lookback_days=self.daily_bar_lookback_days)
+        except Exception:
+            return assets
+        if not isinstance(bars_by_symbol, dict):
+            return assets
+        enriched: list[UniverseAsset] = []
+        for asset in assets:
+            bars = bars_by_symbol.get(asset.symbol)
+            enriched.append(_enrich_asset_from_bars(asset, bars if isinstance(bars, list) else []))
+        return enriched
+
 
 def _coerce_universe_asset(row: Any) -> UniverseAsset | None:
     if isinstance(row, UniverseAsset):
@@ -92,4 +115,35 @@ def _coerce_universe_asset(row: Any) -> UniverseAsset | None:
             if isinstance(row.get("avg_dollar_volume"), (int, float))
             else None
         ),
+    )
+
+
+def _enrich_asset_from_bars(asset: UniverseAsset, bars: list[Any]) -> UniverseAsset:
+    normalized_bars = [bar for bar in bars if isinstance(bar, dict)]
+    if not normalized_bars:
+        return asset
+    last_bar = normalized_bars[-1]
+    close = last_bar.get("close")
+    if not isinstance(close, (int, float)):
+        return asset
+    dollar_volumes = [
+        float(bar["close"]) * float(bar["volume"])
+        for bar in normalized_bars
+        if isinstance(bar.get("close"), (int, float))
+        and isinstance(bar.get("volume"), (int, float))
+    ]
+    avg_dollar_volume = (
+        sum(dollar_volumes) / len(dollar_volumes)
+        if dollar_volumes
+        else asset.avg_dollar_volume
+    )
+    return UniverseAsset(
+        symbol=asset.symbol,
+        company_name=asset.company_name,
+        asset_type=asset.asset_type,
+        exchange=asset.exchange,
+        sector=asset.sector,
+        industry=asset.industry,
+        price=float(close),
+        avg_dollar_volume=avg_dollar_volume,
     )

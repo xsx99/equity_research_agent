@@ -155,9 +155,13 @@ def _exclusion_reason(asset: UniverseAsset, config: UniverseFilterConfig) -> str
         return "manual_exclude"
     if config.asset_types and asset.asset_type not in config.asset_types:
         return "not_common_stock" if "common_stock" in config.asset_types else "asset_type_excluded"
-    if asset.price is None or asset.price < config.min_price:
+    if asset.price is None:
+        return "missing_price"
+    if asset.price < config.min_price:
         return "below_min_price"
-    if asset.avg_dollar_volume is None or asset.avg_dollar_volume < config.min_avg_dollar_volume:
+    if asset.avg_dollar_volume is None:
+        return "missing_avg_dollar_volume"
+    if asset.avg_dollar_volume < config.min_avg_dollar_volume:
         return "below_min_dollar_volume"
     if config.exchanges and (asset.exchange or "").strip().upper() not in config.exchanges:
         return "exchange_excluded"

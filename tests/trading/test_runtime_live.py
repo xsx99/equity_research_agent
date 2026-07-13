@@ -825,6 +825,53 @@ def test_live_universe_provider_skips_symbols_that_fail_targeted_enrichment():
     assert [asset.symbol for asset in assets] == ["AAPL"]
 
 
+def test_live_universe_provider_enriches_full_universe_from_batched_daily_bars():
+    class _MarketProvider:
+        def __init__(self) -> None:
+            self.batch_calls: list[tuple[tuple[str, ...], int]] = []
+
+        def fetch_universe_assets(self):
+            return [
+                {
+                    "symbol": "TSM",
+                    "company_name": "Taiwan Semiconductor Manufacturing Company Ltd.",
+                    "asset_type": "common_stock",
+                    "exchange": "NYSE",
+                    "price": None,
+                    "avg_dollar_volume": None,
+                },
+                {
+                    "symbol": "MISSING",
+                    "company_name": "Missing Bars Corp.",
+                    "asset_type": "common_stock",
+                    "exchange": "NASDAQ",
+                    "price": None,
+                    "avg_dollar_volume": None,
+                },
+            ]
+
+        def fetch_daily_bars_for_symbols(self, symbols, lookback_days):
+            self.batch_calls.append((tuple(symbols), lookback_days))
+            return {
+                "TSM": [
+                    {"date": "2026-07-10", "close": 230.0, "volume": 2_000_000},
+                    {"date": "2026-07-11", "close": 240.0, "volume": 3_000_000},
+                ],
+            }
+
+    market_provider = _MarketProvider()
+    provider = LiveUniverseProvider(market_provider=market_provider)
+
+    assets = provider.fetch_universe_assets()
+
+    by_symbol = {asset.symbol: asset for asset in assets}
+    assert market_provider.batch_calls == [(("TSM", "MISSING"), 20)]
+    assert by_symbol["TSM"].price == 240.0
+    assert by_symbol["TSM"].avg_dollar_volume == 590_000_000.0
+    assert by_symbol["MISSING"].price is None
+    assert by_symbol["MISSING"].avg_dollar_volume is None
+
+
 def test_bootstrap_seed_strategy_definitions_populates_empty_repository_once():
     class _Repository:
         def __init__(self) -> None:

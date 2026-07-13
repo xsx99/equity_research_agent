@@ -41,6 +41,31 @@ def test_universe_filters_common_stock_liquidity_and_manual_exclude():
     }
 
 
+def test_universe_filters_distinguish_missing_price_from_low_price():
+    config = UniverseFilterConfig(
+        min_price=5.0,
+        min_avg_dollar_volume=25_000_000,
+    )
+    assets = [
+        UniverseAsset("TSM", "Taiwan Semiconductor", "common_stock", "NYSE", None, None, None, None),
+        UniverseAsset("PENNY", "Penny", "common_stock", "NYSE", None, None, 2.0, 80_000_000),
+        UniverseAsset("THIN", "Thin", "common_stock", "NYSE", None, None, 40.0, None),
+    ]
+
+    result = apply_universe_filters(
+        assets,
+        config,
+        snapshot_time=datetime(2026, 7, 13, 12, 45, tzinfo=timezone.utc),
+    )
+
+    exclusions = {symbol.symbol: symbol.exclusion_reason for symbol in result.excluded}
+    assert exclusions == {
+        "TSM": "missing_price",
+        "PENNY": "below_min_price",
+        "THIN": "missing_avg_dollar_volume",
+    }
+
+
 def test_universe_filter_env_fallback_uses_configured_symbols(monkeypatch):
     monkeypatch.setenv("TRADING_UNIVERSE_SYMBOLS", " aapl, msft ,,nvda ")
 

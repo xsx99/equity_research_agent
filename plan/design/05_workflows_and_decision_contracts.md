@@ -34,7 +34,7 @@ Default filter dimensions:
 - exchange and asset-type eligibility, with common stock as the default asset type
 - optional manual include/exclude ticker overrides
 
-`UniverseProvider` should persist both included and excluded symbols with explicit exclusion reasons such as `below_min_price`, `below_min_dollar_volume`, `sector_excluded`, `not_common_stock`, or `manual_exclude`. Manual ticker requests can force evaluation outside scanner selection, but they still cannot bypass data availability, liquidity/tradability, or risk checks unless a future explicit override mode is designed.
+`UniverseProvider` should persist both included and excluded symbols with explicit exclusion reasons such as `missing_price`, `below_min_price`, `missing_avg_dollar_volume`, `below_min_dollar_volume`, `sector_excluded`, `not_common_stock`, or `manual_exclude`. Manual ticker requests can force evaluation outside scanner selection, but they still cannot bypass data availability, liquidity/tradability, or risk checks unless a future explicit override mode is designed.
 
 Morning workflow semantics:
 

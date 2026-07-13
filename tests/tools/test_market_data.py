@@ -157,6 +157,35 @@ def test_fetch_daily_bars_parses_open_close_and_bar_date():
     ]
 
 
+def test_fetch_daily_bars_for_symbols_batches_multi_symbol_requests():
+    client = _CapturingClient(
+        {
+            "bars": {
+                "AAPL": [{"t": "2026-03-24T04:00:00Z", "c": 201.25, "v": 1_000_000}],
+                "MSFT": [{"t": "2026-03-24T04:00:00Z", "c": 420.0, "v": 2_000_000}],
+                "TSM": [{"t": "2026-03-24T04:00:00Z", "c": 240.0, "v": 3_000_000}],
+            }
+        }
+    )
+    provider = AlpacaMarketDataProvider(
+        api_key="test-key",
+        secret_key="test-secret",
+        client=client,
+    )
+
+    bars = provider.fetch_daily_bars_for_symbols(
+        ["aapl", "msft", "tsm"],
+        lookback_days=5,
+        batch_size=2,
+    )
+
+    assert sorted(bars) == ["AAPL", "MSFT", "TSM"]
+    assert bars["TSM"][0]["close"] == 240.0
+    assert bars["TSM"][0]["volume"] == 3_000_000
+    assert [call["params"]["symbols"] for call in client.calls] == ["AAPL,MSFT", "TSM"]
+    assert [call["params"]["limit"] for call in client.calls] == [10, 5]
+
+
 def test_fetch_option_chain_requests_alpaca_chain_endpoint_and_normalizes_contracts():
     client = _CapturingClient(
         {

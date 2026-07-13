@@ -111,6 +111,47 @@ class AlpacaMarketDataProvider:
             raise ValueError(f"no_close_prices_for_{symbol}")
         return daily_bars
 
+    def fetch_daily_bars_for_symbols(
+        self,
+        symbols: tuple[str, ...] | list[str],
+        lookback_days: int,
+        *,
+        batch_size: int = 200,
+    ) -> dict[str, list[DailyBar]]:
+        normalized_symbols = tuple(
+            dict.fromkeys(symbol.upper().strip() for symbol in symbols if symbol.strip())
+        )
+        if not normalized_symbols:
+            return {}
+        end = datetime.now(timezone.utc).replace(microsecond=0)
+        start = end - timedelta(days=max(lookback_days * 3, 10))
+        bars_by_symbol: dict[str, list[DailyBar]] = {}
+        for chunk in _chunks(normalized_symbols, max(batch_size, 1)):
+            response = self._client.get(
+                f"{self.data_base_url}/v2/stocks/bars",
+                params={
+                    "symbols": ",".join(chunk),
+                    "timeframe": "1Day",
+                    "start": start.isoformat(),
+                    "end": end.isoformat(),
+                    "limit": max(lookback_days * len(chunk), 2),
+                    "sort": "desc",
+                    "adjustment": "split",
+                    "feed": "iex",
+                },
+                headers=self._auth_headers(),
+            )
+            response.raise_for_status()
+            payload = response.json()
+            bars_payload = payload.get("bars", {}) if isinstance(payload, dict) else {}
+            if not isinstance(bars_payload, dict):
+                continue
+            for symbol in chunk:
+                daily_bars = _normalize_daily_bars(bars_payload.get(symbol, []))
+                if daily_bars:
+                    bars_by_symbol[symbol] = daily_bars[-lookback_days:]
+        return bars_by_symbol
+
     def fetch_daily_closes(self, ticker: str, lookback_days: int) -> list[float]:
         return [bar["close"] for bar in self.fetch_daily_bars(ticker, lookback_days)]
 
@@ -559,6 +600,34 @@ def _average_scores(values: tuple[Optional[float], ...]) -> Optional[float]:
     if not present:
         return None
     return sum(present) / len(present)
+
+
+def _chunks(values: tuple[str, ...], size: int) -> list[tuple[str, ...]]:
+    return [values[index : index + size] for index in range(0, len(values), size)]
+
+
+def _normalize_daily_bars(raw_bars: Any) -> list[DailyBar]:
+    if not isinstance(raw_bars, list):
+        return []
+    daily_bars: list[DailyBar] = []
+    for item in sorted(raw_bars, key=lambda bar: str(bar.get("t", "")) if isinstance(bar, dict) else ""):
+        if not isinstance(item, dict):
+            continue
+        close_raw = item.get("c")
+        bar_date = _parse_bar_date(item.get("t"))
+        if close_raw is None or bar_date is None:
+            continue
+        daily_bars.append(
+            {
+                "date": bar_date,
+                "open": float(item["o"]) if item.get("o") is not None else None,
+                "high": float(item["h"]) if item.get("h") is not None else None,
+                "low": float(item["l"]) if item.get("l") is not None else None,
+                "close": float(close_raw),
+                "volume": _to_int_or_none(item.get("v")),
+            }
+        )
+    return daily_bars
 
 
 def _valuation_percentile(*, pe_ratio: Optional[float], ps_ratio: Optional[float]) -> Optional[float]:

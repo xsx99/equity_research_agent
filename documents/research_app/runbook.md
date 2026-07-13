@@ -180,6 +180,15 @@ source ~/.venv/bin/activate
 python scripts/run_trading_signal_family_smoke.py --ticker NVDA --fixture --json
 ```
 
+Low-volume live universe batch enrichment smoke:
+
+```bash
+source ~/.venv/bin/activate
+python scripts/run_trading_universe_batch_enrichment_smoke.py --tickers TSM --json
+```
+
+This verifies the Alpaca multi-symbol daily-bars path used by live preopen universe enrichment without scanning the full universe. Keep `--tickers` small to preserve provider rate limit budget.
+
 This fixture-backed smoke seeds one ticker with deterministic `technical`, `fundamental`, `events_news`, `insider`, and `social_macro` rows, builds the resulting preopen snapshot, and prints the top candidate evidence for `insider_accumulation_momentum_v1`.
 
 Live social-macro persistence-only smoke:
