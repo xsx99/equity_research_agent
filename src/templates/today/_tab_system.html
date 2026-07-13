@@ -113,29 +113,31 @@
             <span class="surface-block-count">{{ system.learning_strategies.strategy_proposals | length }}</span>
           </div>
           {% if system.learning_strategies.strategy_proposals %}
-          <div class="strategy-proposal-list">
-            {% for row in system.learning_strategies.strategy_proposals %}
-            <article class="strategy-proposal-card">
-              <div class="strategy-proposal-head">
-                <div>
-                  <strong>{{ row.display_name or row.proposed_strategy_id }}</strong>
-                  <span class="detail-muted">{{ row.proposed_strategy_id }}</span>
+          <div class="strategy-proposal-scroll">
+            <div class="strategy-proposal-list">
+              {% for row in system.learning_strategies.strategy_proposals %}
+              <article class="strategy-proposal-card">
+                <div class="strategy-proposal-head">
+                  <div>
+                    <strong>{{ row.display_name or row.proposed_strategy_id }}</strong>
+                    <span class="detail-muted">{{ row.proposed_strategy_id }}</span>
+                  </div>
+                  <span class="tag">{{ row.proposal_status_label or row.proposal_status }}{% if row.proposal_count is defined and row.proposal_count > 1 %} · ×{{ row.proposal_count }}{% endif %}</span>
                 </div>
-                <span class="tag">{{ row.proposal_status_label or row.proposal_status }}{% if row.proposal_count is defined and row.proposal_count > 1 %} · ×{{ row.proposal_count }}{% endif %}</span>
-              </div>
-              {% if row.core_thesis %}<p>{{ row.core_thesis }}</p>{% endif %}
-              {% if row.evidence_summary %}<p class="detail-muted">{{ row.evidence_summary }}</p>{% endif %}
-              <div class="proposal-chip-grid">
-                {% if row.proposed_lifecycle_status_label %}<span class="tag">{{ row.proposed_lifecycle_status_label }}</span>{% endif %}
-                {% for signal in row.required_signals or () %}<span class="tag blue">Required: {{ signal }}</span>{% endfor %}
-                {% for signal in row.optional_signals or () %}<span class="tag">Optional: {{ signal }}</span>{% endfor %}
-                {% for tag in row.risk_tags or () %}<span class="tag amber">{{ tag }}</span>{% endfor %}
-                {% for invalidator in row.invalidators or () %}<span class="tag red">Invalidator: {{ invalidator }}</span>{% endfor %}
-                {% if row.duplicate_of_strategy_id %}<span class="tag amber">Duplicate of {{ row.duplicate_of_strategy_id }}</span>{% endif %}
-                {% if row.rejection_reason %}<span class="tag red">{{ row.rejection_reason }}</span>{% endif %}
-              </div>
-            </article>
-            {% endfor %}
+                {% if row.core_thesis %}<p>{{ row.core_thesis }}</p>{% endif %}
+                {% if row.evidence_summary %}<p class="detail-muted">{{ row.evidence_summary }}</p>{% endif %}
+                <div class="proposal-chip-grid">
+                  {% if row.proposed_lifecycle_status_label %}<span class="tag">{{ row.proposed_lifecycle_status_label }}</span>{% endif %}
+                  {% for signal in row.required_signals or () %}<span class="tag blue">Required: {{ signal }}</span>{% endfor %}
+                  {% for signal in row.optional_signals or () %}<span class="tag">Optional: {{ signal }}</span>{% endfor %}
+                  {% for tag in row.risk_tags or () %}<span class="tag amber">{{ tag }}</span>{% endfor %}
+                  {% for invalidator in row.invalidators or () %}<span class="tag red">Invalidator: {{ invalidator }}</span>{% endfor %}
+                  {% if row.duplicate_of_strategy_id %}<span class="tag amber">Duplicate of {{ row.duplicate_of_strategy_id }}</span>{% endif %}
+                  {% if row.rejection_reason %}<span class="tag red">{{ row.rejection_reason }}</span>{% endif %}
+                </div>
+              </article>
+              {% endfor %}
+            </div>
           </div>
           {% else %}<p class="detail-muted quiet-empty">No strategy proposals.</p>{% endif %}
         </div>

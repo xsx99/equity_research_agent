@@ -1522,6 +1522,8 @@ class TestTodayDashboard:
         assert "Usage Ledger" in response.text
         assert "Provider Usage" in response.text
         assert "Bullish catalyst continuation respected" in response.text
+        assert "strategy-proposal-scroll" in response.text
+        assert "strategy-proposal-list" in response.text
         assert "Strategy Performance" in response.text
         assert "$4,200" in response.text
         assert "1 active strategy tracked today." in response.text
@@ -3480,6 +3482,7 @@ def test_load_strategy_proposals_exposes_user_readable_llm_output():
     from src.web.routers.today import _load_strategy_proposals
 
     row = SimpleNamespace(
+        trade_date=date(2026, 7, 10),
         proposed_strategy_id="post_gap_vwap_reclaim_v1",
         display_name="Post-gap VWAP reclaim",
         proposal_status="accepted",
@@ -3496,11 +3499,13 @@ def test_load_strategy_proposals_exposes_user_readable_llm_output():
         },
     )
     session = MagicMock()
-    session.query.return_value.order_by.return_value.limit.return_value.all.return_value = [row]
+    session.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [row]
 
     proposals = _load_strategy_proposals(session)
 
+    assert session.query.return_value.filter.called
     assert proposals[0]["display_name"] == "Post-gap VWAP reclaim"
+    assert proposals[0]["trade_date"] == date(2026, 7, 10)
     assert proposals[0]["core_thesis"] == "Wait for a failed gap-down to reclaim VWAP before entering."
     assert proposals[0]["required_signals"] == ("opening_gap_pct", "vwap_reclaim")
     assert proposals[0]["optional_signals"] == ("news_sentiment",)
@@ -3508,6 +3513,12 @@ def test_load_strategy_proposals_exposes_user_readable_llm_output():
     assert proposals[0]["invalidators"] == ("Fails to hold VWAP",)
     assert proposals[0]["evidence_summary"] == "Repeated reclaim setups outperformed after early gap failures."
     assert proposals[0]["proposed_lifecycle_status_label"] == "Shadow"
+
+
+def test_strategy_proposal_recent_cutoff_uses_ten_calendar_days():
+    from src.web.routers.loaders.universe_learning import _strategy_proposal_recent_cutoff
+
+    assert _strategy_proposal_recent_cutoff(today=date(2026, 7, 13)) == date(2026, 7, 4)
 
 
 def test_load_strategy_performance_computes_win_rate_percentage():

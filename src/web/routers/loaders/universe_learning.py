@@ -1,6 +1,7 @@
 """Universe and learning loader helpers for the today router."""
 from __future__ import annotations
 
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -16,6 +17,13 @@ from src.db.models.trading import (
     TickerRelationship,
 )
 from src.web.presenters.today_copy import generic_status_label, scope_label
+
+_STRATEGY_PROPOSAL_LOOKBACK_DAYS = 10
+
+
+def _strategy_proposal_recent_cutoff(*, today: date | None = None) -> date:
+    anchor = today or date.today()
+    return anchor - timedelta(days=_STRATEGY_PROPOSAL_LOOKBACK_DAYS - 1)
 
 
 def _load_relationships(session: Any) -> tuple[dict[str, Any], ...]:
@@ -109,7 +117,13 @@ def _load_strategy_performance(session: Any) -> tuple[dict[str, Any], ...]:
 
 
 def _load_strategy_proposals(session: Any) -> tuple[dict[str, Any], ...]:
-    rows = session.query(StrategyProposal).order_by(StrategyProposal.created_at.desc()).limit(20).all()
+    rows = (
+        session.query(StrategyProposal)
+        .filter(StrategyProposal.trade_date >= _strategy_proposal_recent_cutoff())
+        .order_by(StrategyProposal.trade_date.desc(), StrategyProposal.created_at.desc())
+        .limit(100)
+        .all()
+    )
     return tuple(
         _serialize_strategy_proposal(row)
         for row in rows
@@ -119,6 +133,7 @@ def _load_strategy_proposals(session: Any) -> tuple[dict[str, Any], ...]:
 def _serialize_strategy_proposal(row: StrategyProposal) -> dict[str, Any]:
     proposal_json = row.proposal_json or {}
     return {
+        "trade_date": row.trade_date,
         "proposed_strategy_id": row.proposed_strategy_id,
         "display_name": row.display_name,
         "proposal_status": row.proposal_status,
