@@ -164,6 +164,40 @@ def test_build_ticker_workspace_keeps_closed_ticker_visible_in_closed_today_buck
     assert workspace["selected_ticker"] == "AAPL"
 
 
+def test_build_ticker_workspace_does_not_keep_closed_reduce_partial_fill_in_action_now():
+    workspace = build_ticker_workspace(
+        trade_rows=[
+            {
+                "ticker": "CRDO",
+                "decision": "reduce",
+                "risk_status": "approved",
+                "order_status": "partial_fill",
+                "material_signal_change": True,
+                "confidence": 0.6,
+                "created_at": datetime(2026, 7, 7, 17, 0, tzinfo=timezone.utc),
+            },
+        ],
+        selected_ticker=None,
+        positions_by_ticker={},
+        closed_positions_by_ticker={
+            "CRDO": {
+                "ticker": "CRDO",
+                "status": "closed",
+                "closed_at": datetime(2026, 7, 7, 17, 0, tzinfo=timezone.utc),
+            }
+        },
+        risk_by_ticker={},
+        signal_history_by_ticker={},
+        news_by_ticker={},
+        fundamentals_by_ticker={},
+    )
+
+    assert [item["ticker"] for item in workspace["buckets"]["action_now"]] == []
+    assert [item["ticker"] for item in workspace["buckets"]["closed_today"]] == ["CRDO"]
+    assert workspace["buckets"]["closed_today"][0]["attention_flags"] == ["material_change"]
+    assert workspace["selected_ticker"] == "CRDO"
+
+
 def test_build_ticker_workspace_prefers_open_position_over_closed_today_when_ticker_is_in_both():
     workspace = build_ticker_workspace(
         trade_rows=[

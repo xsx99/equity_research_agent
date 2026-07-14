@@ -18,6 +18,7 @@ from src.web.presenters.today_workspace_timeline import _latest_row
 
 _ACTIONABLE_DECISIONS = {"enter_long", "enter_short", "trim", "exit"}
 _ACTIONABLE_ORDER_STATUSES = {"pending", "accepted", "partial_fill"}
+_CLOSE_POSITION_DECISIONS = {"reduce", "exit"}
 
 def build_ticker_workspace(
     *,
@@ -69,17 +70,27 @@ def build_ticker_workspace(
 
     for item in ticker_items:
         ticker = item["ticker"]
-        if _is_action_now(item):
+        has_open_position = ticker in normalized_positions or ticker in normalized_option_positions
+        has_closed_position = ticker in normalized_closed_positions
+        stale_closed_order_action = _is_stale_closed_order_action(
+            item,
+            has_open_position=has_open_position,
+            has_closed_position=has_closed_position,
+        )
+        if stale_closed_order_action:
+            item["primary_state"] = "closed"
+            buckets["closed_today"].append(item)
+        elif _is_action_now(item):
             item["primary_state"] = "action_now"
             buckets["action_now"].append(item)
-        elif ticker in normalized_positions or ticker in normalized_option_positions:
+        elif has_open_position:
             # An open position always wins over a historical closed one for the
             # same ticker (e.g. a prior trade closed earlier, then re-entered).
             # Otherwise the position shows in the portfolio but vanishes from the
             # Open Positions bucket here.
             item["primary_state"] = "open_position"
             buckets["open_positions"].append(item)
-        elif ticker in normalized_closed_positions:
+        elif has_closed_position:
             item["primary_state"] = "closed"
             buckets["closed_today"].append(item)
         elif _is_reviewing(item):
@@ -88,7 +99,10 @@ def build_ticker_workspace(
         else:
             item["primary_state"] = "watch"
             buckets["watch"].append(item)
-        item["attention_flags"] = _attention_flags(item)
+        item["attention_flags"] = _attention_flags(
+            item,
+            suppress_pending_execution=stale_closed_order_action,
+        )
         item["latest_decision"] = _humanize_label(item.get("decision"))
         item["card_label"] = _card_label(item)
         item["card_detail"] = _card_detail(item)
@@ -217,6 +231,19 @@ def _is_action_now(row: dict[str, Any]) -> bool:
 
     return False
 
+def _is_stale_closed_order_action(
+    row: dict[str, Any],
+    *,
+    has_open_position: bool,
+    has_closed_position: bool,
+) -> bool:
+    if has_open_position or not has_closed_position:
+        return False
+
+    decision = str(row.get("decision") or "").strip().lower()
+    order_status = str(row.get("order_status") or "").strip().lower()
+    return decision in _CLOSE_POSITION_DECISIONS and order_status in _ACTIONABLE_ORDER_STATUSES
+
 def _item_priority(row: dict[str, Any]) -> tuple[int, int, int, int]:
     order_status = str(row.get("order_status") or "").strip().lower()
     decision = str(row.get("decision") or "").strip().lower()
@@ -254,13 +281,13 @@ def _is_reviewing(row: dict[str, Any]) -> bool:
 
     return False
 
-def _attention_flags(row: dict[str, Any]) -> list[str]:
+def _attention_flags(row: dict[str, Any], *, suppress_pending_execution: bool = False) -> list[str]:
     flags: list[str] = []
     if bool(row.get("material_signal_change")):
         flags.append("material_change")
 
     order_status = str(row.get("order_status") or "").strip().lower()
-    if order_status in _ACTIONABLE_ORDER_STATUSES:
+    if not suppress_pending_execution and order_status in _ACTIONABLE_ORDER_STATUSES:
         flags.append("pending_execution")
 
     risk_status = str(row.get("risk_status") or "").strip().lower()
