@@ -52,6 +52,7 @@ class BrokerPortfolioSyncWorkflow:
             position.ticker: {
                 "strategy_id": position.strategy_id,
                 "trade_identity": position.trade_identity,
+                "opened_at": position.opened_at,
             }
             for position in self.repository.load_paper_positions()
         }

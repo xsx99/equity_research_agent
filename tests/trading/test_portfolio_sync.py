@@ -73,7 +73,8 @@ class _BrokerWithOptionStub:
 
 
 def test_broker_portfolio_sync_workflow_persists_broker_state_and_builds_portfolio_context():
-    now = datetime(2026, 6, 2, 16, 31, tzinfo=timezone.utc)
+    opened_at = datetime(2026, 6, 2, 16, 31, tzinfo=timezone.utc)
+    synced_at = datetime(2026, 6, 3, 16, 31, tzinfo=timezone.utc)
     repository = InMemoryTradingRepository()
     repository.save_paper_position(
         StockPosition(
@@ -84,8 +85,8 @@ def test_broker_portfolio_sync_workflow_persists_broker_state_and_builds_portfol
             market_value=2.2715,
             trade_identity="tactical_stock_trade",
             strategy_id="relative_strength_rotation_v1",
-            opened_at=now,
-            updated_at=now,
+            opened_at=opened_at,
+            updated_at=opened_at,
             direction="long",
         )
     )
@@ -94,14 +95,17 @@ def test_broker_portfolio_sync_workflow_persists_broker_state_and_builds_portfol
         broker=_BrokerStub(),
     )
 
-    result = workflow.run(as_of=now, approved_core_tickers=("MSFT",))
+    result = workflow.run(as_of=synced_at, approved_core_tickers=("MSFT",))
 
     assert result.snapshot.margin_requirement_source == "broker_reported"
     assert result.positions[0].ticker == "AAPL"
     assert result.positions[0].trade_identity == "tactical_stock_trade"
+    assert result.positions[0].opened_at == opened_at
+    assert result.positions[0].updated_at == synced_at
     assert result.portfolio_context.buying_power == 1999995.46
     assert result.portfolio_context.margin_model_profile == "alpaca_paper_account"
     assert repository.paper_positions[0].strategy_id == "relative_strength_rotation_v1"
+    assert repository.paper_positions[0].opened_at == opened_at
     assert repository.portfolio_snapshots[-1].account_equity == 1000000.12
 
 

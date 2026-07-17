@@ -1137,6 +1137,14 @@ class TestTodayDashboard:
     def test_portfolio_tab_renders_summary_first_structure(self, client):
         payload = _dashboard_payload()
         payload["selected_tab"] = "portfolio"
+        payload["portfolio"]["positions"] = (
+            {
+                **payload["portfolio"]["positions"][0],
+                "avg_cost": Decimal("182.01"),
+                "opened_at": datetime(2026, 6, 5, 14, 32, tzinfo=timezone.utc),
+            },
+            payload["portfolio"]["positions"][1],
+        )
         with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
             response = client.get("/today?tab=portfolio")
 
@@ -1153,6 +1161,11 @@ class TestTodayDashboard:
         assert "2 positions" in response.text
         assert "$3,696.00 market value" in response.text
         assert "$300" in response.text
+        assert "Avg Buy" in response.text
+        assert "Bought" in response.text
+        assert "$182.01" in response.text
+        assert "2026-06-05" in response.text
+        assert "Earnings Drift V1" in response.text
         assert "1 strategies" in response.text
         assert "$840.75" in response.text
         assert "max loss $420.00" in response.text

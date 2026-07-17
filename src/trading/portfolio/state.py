@@ -295,7 +295,7 @@ def build_positions_from_broker(
                 market_value=market_value,
                 trade_identity=str(position_metadata.get("trade_identity", "tactical_stock_trade")),
                 strategy_id=_string_or_none(position_metadata.get("strategy_id")),
-                opened_at=as_of,
+                opened_at=position_metadata.get("opened_at") or as_of,
                 updated_at=as_of,
                 direction=str(payload.get("side", "long")).lower() or "long",
             )

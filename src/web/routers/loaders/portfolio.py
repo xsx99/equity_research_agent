@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from src.db.models.trading import PaperOptionPosition, PaperPosition, PortfolioIntent, PortfolioSnapshot, RiskHedgeDecision
+from src.db.models.trading import PaperOptionPosition, PaperOrder, PaperPosition, PortfolioIntent, PortfolioSnapshot, RiskHedgeDecision
 from src.web.presenters.today_copy import generic_status_label, intent_type_label, option_strategy_type_label, strategy_label, trade_identity_label
 from src.web.presenters.today_portfolio_analytics import build_portfolio_analytics
 from src.web.routers import today_loaders
@@ -64,6 +64,7 @@ def _load_positions(session: Any, *, as_of: datetime | None = None) -> tuple[dic
         .all()
     )
     reference_time = as_of or datetime.now(timezone.utc)
+    strategy_fallbacks = _load_position_strategy_fallbacks(session, tickers=tuple(row.ticker for row in rows))
     positions = []
     for row in rows:
         avg_cost = getattr(row, "average_cost", getattr(row, "avg_cost", None))
@@ -73,12 +74,13 @@ def _load_positions(session: Any, *, as_of: datetime | None = None) -> tuple[dic
             avg_cost=avg_cost,
             quantity=getattr(row, "quantity", None),
         )
+        strategy_id = getattr(row, "strategy_id", None) or strategy_fallbacks.get(str(row.ticker).upper())
         positions.append({
             "ticker": row.ticker,
             "trade_identity": row.trade_identity,
             "trade_identity_label": trade_identity_label(row.trade_identity),
-            "strategy_id": row.strategy_id,
-            "strategy_label": strategy_label(row.strategy_id),
+            "strategy_id": strategy_id,
+            "strategy_label": strategy_label(strategy_id),
             "quantity": row.quantity,
             "avg_cost": avg_cost,
             "entry_price": avg_cost,
@@ -98,6 +100,37 @@ def _load_positions(session: Any, *, as_of: datetime | None = None) -> tuple[dic
             ),
         })
     return tuple(positions)
+
+
+def _load_position_strategy_fallbacks(session: Any, *, tickers: tuple[str, ...]) -> dict[str, str]:
+    normalized_tickers = tuple(sorted({str(ticker).upper() for ticker in tickers if ticker}))
+    if not normalized_tickers:
+        return {}
+    rows = (
+        session.query(PaperOrder)
+        .filter(PaperOrder.ticker.in_(normalized_tickers))
+        .filter(PaperOrder.action.in_(("enter_long", "enter_short")))
+        .order_by(PaperOrder.created_at.desc())
+        .all()
+    )
+    usable_rows = sorted(
+        (
+            row
+            for row in rows
+            if str(getattr(row, "ticker", "")).upper() in normalized_tickers
+            and getattr(row, "strategy_id", None)
+            and getattr(row, "action", None) in {"enter_long", "enter_short"}
+            and str(getattr(row, "status", "")).lower() not in {"canceled", "cancelled", "expired", "rejected"}
+        ),
+        key=lambda row: getattr(row, "created_at", None) or datetime.min.replace(tzinfo=timezone.utc),
+        reverse=True,
+    )
+    fallbacks: dict[str, str] = {}
+    for row in usable_rows:
+        ticker = str(row.ticker).upper()
+        if ticker not in fallbacks:
+            fallbacks[ticker] = row.strategy_id
+    return fallbacks
 
 
 def _held_days(opened_at: Any, as_of: datetime) -> int | None:
