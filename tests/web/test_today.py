@@ -3491,6 +3491,94 @@ def test_build_system_view_aggregates_llm_usage_by_day_and_month():
     )
 
 
+def test_build_system_view_uses_precomputed_llm_usage_aggregates_when_recent_events_are_truncated():
+    from datetime import datetime, timezone
+
+    from src.web.routers.today import _build_system_view
+
+    recent_intraday_events = tuple(
+        {
+            "created_at": datetime(2026, 7, 17, 15, 0, tzinfo=timezone.utc),
+            "pipeline_name": "intraday_rebalance",
+            "provider": "google",
+            "model": "gemini-2.5-flash-lite",
+            "estimated_cost": Decimal("0"),
+            "total_tokens": 0,
+            "latency_ms": 0,
+            "status": "succeeded",
+        }
+        for _ in range(25)
+    )
+    precomputed_daily = (
+        {
+            "period_label": "2026-07-17",
+            "pipeline_name": "intraday_rebalance",
+            "provider": "google",
+            "model": "gemini-2.5-flash-lite",
+            "event_count": 25,
+            "total_tokens": 0,
+            "estimated_cost": Decimal("0"),
+            "avg_latency_ms": 0,
+            "status_label": "Succeeded",
+        },
+        {
+            "period_label": "2026-07-16",
+            "pipeline_name": "reflection",
+            "provider": "openrouter",
+            "model": "moonshotai/kimi-k2.6",
+            "event_count": 1,
+            "total_tokens": 516012,
+            "estimated_cost": Decimal("0.49"),
+            "avg_latency_ms": 1200,
+            "status_label": "Succeeded",
+        },
+        {
+            "period_label": "2026-07-16",
+            "pipeline_name": "strategy_evolution",
+            "provider": "openrouter",
+            "model": "moonshotai/kimi-k2.6",
+            "event_count": 1,
+            "total_tokens": 256544,
+            "estimated_cost": Decimal("0.32"),
+            "avg_latency_ms": 1300,
+            "status_label": "Succeeded",
+        },
+    )
+
+    system = _build_system_view(
+        overview={"command_center": {"system_issues": ()}},
+        learning_strategies={},
+        ops_cost={
+            "llm_usage": recent_intraday_events,
+            "llm_usage_daily": precomputed_daily,
+            "llm_usage_monthly": (
+                {
+                    **precomputed_daily[0],
+                    "period_label": "2026-07",
+                },
+                {
+                    **precomputed_daily[1],
+                    "period_label": "2026-07",
+                },
+                {
+                    **precomputed_daily[2],
+                    "period_label": "2026-07",
+                },
+            ),
+            "provider_usage": (),
+        },
+        risk_macro={"events": (), "exposures": ()},
+    )
+
+    assert system["llm_usage_summary"]["count"] == 27
+    assert system["llm_usage_summary"]["estimated_cost"] == Decimal("0.81")
+    assert tuple(row["pipeline_name"] for row in system["llm_usage_daily"]) == (
+        "intraday_rebalance",
+        "reflection",
+        "strategy_evolution",
+    )
+
+
 def test_load_strategy_proposals_exposes_user_readable_llm_output():
     from src.web.routers.today import _load_strategy_proposals
 

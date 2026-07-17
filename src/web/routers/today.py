@@ -90,6 +90,7 @@ from src.web.routers.today_loaders import (
     _load_hedge_overlays,
     _load_latest_macro_snapshot_for_today,
     _load_latest_preopen_runtime_run_for_today,
+    _load_llm_usage_aggregates,
     _load_learning_factors,
     _load_live_alerts,
     _load_llm_usage,
@@ -567,8 +568,11 @@ def load_today_dashboard(
         if selected_tab == "system"
         else {}
     )
+    llm_usage_aggregates = _load_llm_usage_aggregates(session) if selected_tab == "system" else {"daily": (), "monthly": ()}
     ops_cost = {
         "llm_usage": _load_llm_usage(session) if selected_tab == "system" else (),
+        "llm_usage_daily": llm_usage_aggregates["daily"],
+        "llm_usage_monthly": llm_usage_aggregates["monthly"],
         "provider_usage": (),
     }
     system = (

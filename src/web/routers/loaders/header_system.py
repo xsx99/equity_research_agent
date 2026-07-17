@@ -5,9 +5,17 @@ from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session as SQLAlchemySession, joinedload
 
-from src.db.models.trading import DailyReflection, LlmUsageEvent, PortfolioRiskSnapshot, PortfolioSnapshot, UniverseFilterConfig
+from src.db.models.trading import (
+    DailyReflection,
+    LlmPromptRun,
+    LlmUsageEvent,
+    PortfolioRiskSnapshot,
+    PortfolioSnapshot,
+    UniverseFilterConfig,
+)
 from src.web.presenters.today_copy import (
     generic_status_label,
     live_status_label,
@@ -119,8 +127,11 @@ def _build_system_view(
 ) -> dict[str, Any]:
     exposures = tuple(risk_macro.get("exposures") or ())
     llm_usage = tuple(ops_cost.get("llm_usage") or ())
+    llm_daily = tuple(ops_cost.get("llm_usage_daily") or _aggregate_llm_usage(llm_usage, period="day"))
+    llm_monthly = tuple(ops_cost.get("llm_usage_monthly") or _aggregate_llm_usage(llm_usage, period="month"))
     provider_usage = tuple(ops_cost.get("provider_usage") or ())
     events = tuple(risk_macro.get("events") or ())
+    summary_rows = llm_daily or llm_monthly
     return {
         "system_issues": tuple(overview.get("command_center", {}).get("system_issues") or ()),
         "learning_strategies": learning_strategies,
@@ -134,15 +145,23 @@ def _build_system_view(
             "count": len(events),
         },
         "llm_usage_summary": {
-            "count": len(llm_usage),
-            "estimated_cost": today_loaders._safe_sum(llm_usage, "estimated_cost"),
+            "count": _sum_event_count(summary_rows) if summary_rows else len(llm_usage),
+            "estimated_cost": _sum_estimated_cost(summary_rows) if summary_rows else today_loaders._safe_sum(llm_usage, "estimated_cost"),
         },
-        "llm_usage_daily": _aggregate_llm_usage(llm_usage, period="day"),
-        "llm_usage_monthly": _aggregate_llm_usage(llm_usage, period="month"),
+        "llm_usage_daily": llm_daily,
+        "llm_usage_monthly": llm_monthly,
         "provider_usage_summary": {
             "count": len(provider_usage),
         },
     }
+
+
+def _sum_event_count(rows: tuple[dict[str, Any], ...]) -> int:
+    return sum(_int_or_zero(row.get("event_count")) for row in rows)
+
+
+def _sum_estimated_cost(rows: tuple[dict[str, Any], ...]) -> Decimal:
+    return sum((_decimal_or_zero(row.get("estimated_cost")) for row in rows), Decimal("0"))
 
 
 def _aggregate_llm_usage(
@@ -380,6 +399,64 @@ def _load_llm_usage(session: Any) -> tuple[dict[str, Any], ...]:
         }
         for row in rows
     )
+
+
+def _load_llm_usage_aggregates(session: Any) -> dict[str, tuple[dict[str, Any], ...]]:
+    if not isinstance(session, SQLAlchemySession):
+        return {"daily": (), "monthly": ()}
+    return {
+        "daily": _load_llm_usage_aggregate_rows(session, period="day"),
+        "monthly": _load_llm_usage_aggregate_rows(session, period="month"),
+    }
+
+
+def _load_llm_usage_aggregate_rows(
+    session: SQLAlchemySession,
+    *,
+    period: str,
+) -> tuple[dict[str, Any], ...]:
+    period_start = func.date_trunc(period, LlmUsageEvent.created_at).label("period_start")
+    latency_count = func.count(LlmUsageEvent.latency_ms).label("latency_count")
+    latency_total = func.coalesce(func.sum(LlmUsageEvent.latency_ms), 0).label("latency_total")
+    rows = (
+        session.query(
+            period_start,
+            LlmPromptRun.pipeline_name.label("pipeline_name"),
+            LlmUsageEvent.provider.label("provider"),
+            LlmUsageEvent.model.label("model"),
+            func.count(LlmUsageEvent.llm_usage_event_id).label("event_count"),
+            func.coalesce(func.sum(LlmUsageEvent.total_tokens), 0).label("total_tokens"),
+            func.coalesce(func.sum(LlmUsageEvent.estimated_cost), 0).label("estimated_cost"),
+            latency_total,
+            latency_count,
+            func.min(LlmUsageEvent.status).label("min_status"),
+            func.max(LlmUsageEvent.status).label("max_status"),
+        )
+        .join(LlmUsageEvent.prompt_run)
+        .group_by(period_start, LlmPromptRun.pipeline_name, LlmUsageEvent.provider, LlmUsageEvent.model)
+        .order_by(period_start.desc(), LlmPromptRun.pipeline_name, LlmUsageEvent.provider, LlmUsageEvent.model)
+        .all()
+    )
+    return tuple(_serialize_llm_usage_aggregate_row(row, period=period) for row in rows)
+
+
+def _serialize_llm_usage_aggregate_row(row: Any, *, period: str) -> dict[str, Any]:
+    latency_count = _int_or_zero(getattr(row, "latency_count", None))
+    latency_total = _int_or_zero(getattr(row, "latency_total", None))
+    min_status = getattr(row, "min_status", None)
+    max_status = getattr(row, "max_status", None)
+    status_label = generic_status_label(min_status) if min_status and min_status == max_status else "Mixed"
+    return {
+        "period_label": _usage_period_label(getattr(row, "period_start", None), period=period),
+        "pipeline_name": getattr(row, "pipeline_name", None) or "unknown",
+        "provider": getattr(row, "provider", None) or "unknown",
+        "model": getattr(row, "model", None) or "unknown",
+        "event_count": _int_or_zero(getattr(row, "event_count", None)),
+        "total_tokens": _int_or_zero(getattr(row, "total_tokens", None)),
+        "estimated_cost": _decimal_or_zero(getattr(row, "estimated_cost", None)),
+        "avg_latency_ms": round(latency_total / latency_count) if latency_count else None,
+        "status_label": status_label,
+    }
 
 
 def _serialize_universe_filter(config: UniverseFilterConfig | None) -> dict[str, Any] | None:
