@@ -1534,6 +1534,7 @@ class TestTodayDashboard:
         assert "LLM Spend" in response.text
         assert "Usage Ledger" in response.text
         assert "Provider Usage" in response.text
+        assert "Provider / Model" not in response.text
         assert "Bullish catalyst continuation respected" in response.text
         assert "strategy-proposal-scroll" in response.text
         assert "strategy-proposal-list" in response.text
@@ -3469,7 +3470,7 @@ def test_build_system_view_aggregates_llm_usage_by_day_and_month():
         {
             "period_label": "2026-07",
             "pipeline_name": "intraday_rebalance",
-            "provider": "gemini",
+            "provider": "all",
             "model": "gemini-2.5-flash-lite",
             "event_count": 2,
             "total_tokens": 300,
@@ -3480,7 +3481,7 @@ def test_build_system_view_aggregates_llm_usage_by_day_and_month():
         {
             "period_label": "2026-07",
             "pipeline_name": "reflection",
-            "provider": "gemini",
+            "provider": "all",
             "model": "gemini-2.5-pro",
             "event_count": 1,
             "total_tokens": 900,
@@ -3576,6 +3577,57 @@ def test_build_system_view_uses_precomputed_llm_usage_aggregates_when_recent_eve
         "intraday_rebalance",
         "reflection",
         "strategy_evolution",
+    )
+
+
+def test_build_system_view_aggregates_llm_usage_by_normalized_model_not_provider():
+    from datetime import datetime, timezone
+
+    from src.web.routers.today import _build_system_view
+
+    system = _build_system_view(
+        overview={"command_center": {"system_issues": ()}},
+        learning_strategies={},
+        ops_cost={
+            "llm_usage": (
+                {
+                    "created_at": datetime(2026, 7, 16, 21, 0, tzinfo=timezone.utc),
+                    "pipeline_name": "reflection",
+                    "provider": "openrouter",
+                    "model": "moonshotai/kimi-k2.6",
+                    "estimated_cost": Decimal("0.49"),
+                    "total_tokens": 516012,
+                    "latency_ms": 267851,
+                    "status": "succeeded",
+                },
+                {
+                    "created_at": datetime(2026, 7, 16, 22, 0, tzinfo=timezone.utc),
+                    "pipeline_name": "reflection",
+                    "provider": "unknown",
+                    "model": "moonshotai/kimi-k2.6-20260420",
+                    "estimated_cost": Decimal("0.41"),
+                    "total_tokens": 300275,
+                    "latency_ms": 252624,
+                    "status": "succeeded",
+                },
+            ),
+            "provider_usage": (),
+        },
+        risk_macro={"events": (), "exposures": ()},
+    )
+
+    assert system["llm_usage_daily"] == (
+        {
+            "period_label": "2026-07-16",
+            "pipeline_name": "reflection",
+            "provider": "all",
+            "model": "moonshotai/kimi-k2.6",
+            "event_count": 2,
+            "total_tokens": 816287,
+            "estimated_cost": Decimal("0.90"),
+            "avg_latency_ms": 260238,
+            "status_label": "Succeeded",
+        },
     )
 
 

@@ -179,8 +179,8 @@
         <div class="section-label">Daily</div>
         <div class="surface-table-wrap">
           <table class="compact-table">
-            <thead><tr><th>Day</th><th>Pipeline</th><th>Provider / Model</th><th>Events</th><th>Tokens</th><th>Avg Latency</th><th>Estimated Cost</th></tr></thead>
-            <tbody>{% for row in llm_daily %}<tr><td>{{ row.period_label }}</td><td>{{ row.pipeline_name }}</td><td>{{ row.provider }} · {{ row.model }}</td><td>{{ row.event_count }}</td><td>{{ fmt_number(row.total_tokens, 0) }}</td><td>{% if row.avg_latency_ms is not none %}{{ fmt_number(row.avg_latency_ms, 0) }} ms{% else %}—{% endif %}</td><td>{{ fmt_currency(row.estimated_cost) }}</td></tr>{% endfor %}</tbody>
+            <thead><tr><th>Day</th><th>Pipeline</th><th>Model</th><th>Events</th><th>Tokens</th><th>Avg Latency</th><th>Estimated Cost</th></tr></thead>
+            <tbody>{% for row in llm_daily %}<tr><td>{{ row.period_label }}</td><td>{{ row.pipeline_name }}</td><td>{{ row.model }}</td><td>{{ row.event_count }}</td><td>{{ fmt_number(row.total_tokens, 0) }}</td><td>{% if row.avg_latency_ms is not none %}{{ fmt_number(row.avg_latency_ms, 0) }} ms{% else %}—{% endif %}</td><td>{{ fmt_currency(row.estimated_cost) }}</td></tr>{% endfor %}</tbody>
           </table>
         </div>
         {% endif %}
@@ -188,8 +188,8 @@
         <div class="section-label">Monthly</div>
         <div class="surface-table-wrap">
           <table class="compact-table">
-            <thead><tr><th>Month</th><th>Pipeline</th><th>Provider / Model</th><th>Events</th><th>Tokens</th><th>Avg Latency</th><th>Estimated Cost</th></tr></thead>
-            <tbody>{% for row in llm_monthly %}<tr><td>{{ row.period_label }}</td><td>{{ row.pipeline_name }}</td><td>{{ row.provider }} · {{ row.model }}</td><td>{{ row.event_count }}</td><td>{{ fmt_number(row.total_tokens, 0) }}</td><td>{% if row.avg_latency_ms is not none %}{{ fmt_number(row.avg_latency_ms, 0) }} ms{% else %}—{% endif %}</td><td>{{ fmt_currency(row.estimated_cost) }}</td></tr>{% endfor %}</tbody>
+            <thead><tr><th>Month</th><th>Pipeline</th><th>Model</th><th>Events</th><th>Tokens</th><th>Avg Latency</th><th>Estimated Cost</th></tr></thead>
+            <tbody>{% for row in llm_monthly %}<tr><td>{{ row.period_label }}</td><td>{{ row.pipeline_name }}</td><td>{{ row.model }}</td><td>{{ row.event_count }}</td><td>{{ fmt_number(row.total_tokens, 0) }}</td><td>{% if row.avg_latency_ms is not none %}{{ fmt_number(row.avg_latency_ms, 0) }} ms{% else %}—{% endif %}</td><td>{{ fmt_currency(row.estimated_cost) }}</td></tr>{% endfor %}</tbody>
           </table>
         </div>
         {% endif %}

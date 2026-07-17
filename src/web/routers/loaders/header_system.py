@@ -1,6 +1,7 @@
 """Header and system loader helpers for the today router."""
 from __future__ import annotations
 
+import re
 from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -127,8 +128,12 @@ def _build_system_view(
 ) -> dict[str, Any]:
     exposures = tuple(risk_macro.get("exposures") or ())
     llm_usage = tuple(ops_cost.get("llm_usage") or ())
-    llm_daily = tuple(ops_cost.get("llm_usage_daily") or _aggregate_llm_usage(llm_usage, period="day"))
-    llm_monthly = tuple(ops_cost.get("llm_usage_monthly") or _aggregate_llm_usage(llm_usage, period="month"))
+    llm_daily = _coalesce_llm_usage_aggregates(
+        tuple(ops_cost.get("llm_usage_daily") or _aggregate_llm_usage(llm_usage, period="day"))
+    )
+    llm_monthly = _coalesce_llm_usage_aggregates(
+        tuple(ops_cost.get("llm_usage_monthly") or _aggregate_llm_usage(llm_usage, period="month"))
+    )
     provider_usage = tuple(ops_cost.get("provider_usage") or ())
     events = tuple(risk_macro.get("events") or ())
     summary_rows = llm_daily or llm_monthly
@@ -169,22 +174,21 @@ def _aggregate_llm_usage(
     *,
     period: str,
 ) -> tuple[dict[str, Any], ...]:
-    grouped: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+    grouped: dict[tuple[str, str, str], dict[str, Any]] = {}
     for row in rows:
         period_label = _usage_period_label(row.get("created_at"), period=period)
         key = (
             period_label,
             str(row.get("pipeline_name") or "unknown"),
-            str(row.get("provider") or "unknown"),
-            str(row.get("model") or "unknown"),
+            _normalize_llm_model_name(row.get("model")),
         )
         bucket = grouped.setdefault(
             key,
             {
                 "period_label": period_label,
                 "pipeline_name": key[1],
-                "provider": key[2],
-                "model": key[3],
+                "provider": "all",
+                "model": key[2],
                 "event_count": 0,
                 "total_tokens": 0,
                 "estimated_cost": Decimal("0"),
@@ -217,11 +221,69 @@ def _aggregate_llm_usage(
         aggregates,
         key=lambda row: (
             str(row["pipeline_name"]),
-            str(row["provider"]),
             str(row["model"]),
         ),
     )
     return tuple(sorted(pipeline_sorted, key=lambda row: str(row["period_label"]), reverse=True))
+
+
+def _coalesce_llm_usage_aggregates(rows: tuple[dict[str, Any], ...]) -> tuple[dict[str, Any], ...]:
+    grouped: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for row in rows:
+        key = (
+            str(row.get("period_label") or "unknown"),
+            str(row.get("pipeline_name") or "unknown"),
+            _normalize_llm_model_name(row.get("model")),
+        )
+        bucket = grouped.setdefault(
+            key,
+            {
+                "period_label": key[0],
+                "pipeline_name": key[1],
+                "provider": "all",
+                "model": key[2],
+                "event_count": 0,
+                "total_tokens": 0,
+                "estimated_cost": Decimal("0"),
+                "_latency_total": 0,
+                "_latency_count": 0,
+                "_statuses": set(),
+            },
+        )
+        event_count = _int_or_zero(row.get("event_count"))
+        bucket["event_count"] += event_count
+        bucket["total_tokens"] += _int_or_zero(row.get("total_tokens"))
+        bucket["estimated_cost"] += _decimal_or_zero(row.get("estimated_cost"))
+        avg_latency = _int_or_none(row.get("avg_latency_ms"))
+        if avg_latency is not None and event_count > 0:
+            bucket["_latency_total"] += avg_latency * event_count
+            bucket["_latency_count"] += event_count
+        status = str(row.get("status_label") or "").strip()
+        if status:
+            bucket["_statuses"].add(status)
+
+    aggregates = []
+    for bucket in grouped.values():
+        latency_count = bucket.pop("_latency_count")
+        latency_total = bucket.pop("_latency_total")
+        statuses = bucket.pop("_statuses")
+        bucket["avg_latency_ms"] = round(latency_total / latency_count) if latency_count else None
+        bucket["status_label"] = next(iter(statuses)) if len(statuses) == 1 else "Mixed" if statuses else "Unknown"
+        aggregates.append(bucket)
+
+    pipeline_sorted = sorted(
+        aggregates,
+        key=lambda row: (
+            str(row["pipeline_name"]),
+            str(row["model"]),
+        ),
+    )
+    return tuple(sorted(pipeline_sorted, key=lambda row: str(row["period_label"]), reverse=True))
+
+
+def _normalize_llm_model_name(value: Any) -> str:
+    model = str(value or "unknown").strip() or "unknown"
+    return re.sub(r"-\d{8}$", "", model)
 
 
 def _usage_period_label(value: Any, *, period: str) -> str:
@@ -416,14 +478,18 @@ def _load_llm_usage_aggregate_rows(
     period: str,
 ) -> tuple[dict[str, Any], ...]:
     period_start = func.date_trunc(period, LlmUsageEvent.created_at).label("period_start")
+    normalized_model = func.regexp_replace(
+        func.coalesce(LlmUsageEvent.model, "unknown"),
+        r"-[0-9]{8}$",
+        "",
+    ).label("model")
     latency_count = func.count(LlmUsageEvent.latency_ms).label("latency_count")
     latency_total = func.coalesce(func.sum(LlmUsageEvent.latency_ms), 0).label("latency_total")
     rows = (
         session.query(
             period_start,
             LlmPromptRun.pipeline_name.label("pipeline_name"),
-            LlmUsageEvent.provider.label("provider"),
-            LlmUsageEvent.model.label("model"),
+            normalized_model,
             func.count(LlmUsageEvent.llm_usage_event_id).label("event_count"),
             func.coalesce(func.sum(LlmUsageEvent.total_tokens), 0).label("total_tokens"),
             func.coalesce(func.sum(LlmUsageEvent.estimated_cost), 0).label("estimated_cost"),
@@ -433,8 +499,8 @@ def _load_llm_usage_aggregate_rows(
             func.max(LlmUsageEvent.status).label("max_status"),
         )
         .join(LlmUsageEvent.prompt_run)
-        .group_by(period_start, LlmPromptRun.pipeline_name, LlmUsageEvent.provider, LlmUsageEvent.model)
-        .order_by(period_start.desc(), LlmPromptRun.pipeline_name, LlmUsageEvent.provider, LlmUsageEvent.model)
+        .group_by(period_start, LlmPromptRun.pipeline_name, normalized_model)
+        .order_by(period_start.desc(), LlmPromptRun.pipeline_name, normalized_model)
         .all()
     )
     return tuple(_serialize_llm_usage_aggregate_row(row, period=period) for row in rows)
@@ -449,8 +515,8 @@ def _serialize_llm_usage_aggregate_row(row: Any, *, period: str) -> dict[str, An
     return {
         "period_label": _usage_period_label(getattr(row, "period_start", None), period=period),
         "pipeline_name": getattr(row, "pipeline_name", None) or "unknown",
-        "provider": getattr(row, "provider", None) or "unknown",
-        "model": getattr(row, "model", None) or "unknown",
+        "provider": "all",
+        "model": _normalize_llm_model_name(getattr(row, "model", None)),
         "event_count": _int_or_zero(getattr(row, "event_count", None)),
         "total_tokens": _int_or_zero(getattr(row, "total_tokens", None)),
         "estimated_cost": _decimal_or_zero(getattr(row, "estimated_cost", None)),
