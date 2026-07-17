@@ -211,6 +211,16 @@ class LiveIntradayRefreshRuntime:
             )
             for snapshot in snapshots
         )
+        skipped_rebalance_requests = tuple(
+            (request, reason)
+            for request in rebalance_requests
+            if (reason := _rebalance_request_skip_reason(request)) is not None
+        )
+        actionable_rebalance_requests = tuple(
+            request
+            for request in rebalance_requests
+            if _rebalance_request_skip_reason(request) is None
+        )
         portfolio_context = getattr(portfolio_result, "portfolio_context", portfolio_result)
         portfolio_risk_intent = None
         if self.dependencies.lookahead_helper is not None:
@@ -226,7 +236,7 @@ class LiveIntradayRefreshRuntime:
             )
             portfolio_risk_intent = _build_intraday_intent_with_optional_context(
                 self.dependencies.lookahead_helper,
-                rebalance_requests=rebalance_requests,
+                rebalance_requests=actionable_rebalance_requests,
                 portfolio_context=risk_portfolio_context,
                 config=config,
                 decision_time=decision_time,
@@ -235,7 +245,7 @@ class LiveIntradayRefreshRuntime:
                 event_assessments=event_assessments,
             )
         rebalance_result = self.dependencies.rebalance_pipeline.run(
-            rebalance_requests=rebalance_requests,
+            rebalance_requests=actionable_rebalance_requests,
             portfolio_context=portfolio_context,
             risk_appetite="balanced",
             portfolio_risk_intent=portfolio_risk_intent,
@@ -257,6 +267,11 @@ class LiveIntradayRefreshRuntime:
                 "ticker_count": len(tickers),
                 "intraday_signal_snapshot_count": len(snapshots),
                 "news_alert_count": len(alerts),
+                "intraday_rebalance_request_skip_count": len(skipped_rebalance_requests),
+                "intraday_rebalance_request_skip_reasons": _skip_reason_counts(skipped_rebalance_requests),
+                "intraday_rebalance_skipped_tickers": [
+                    request.ticker for request, _reason in skipped_rebalance_requests
+                ],
                 "intraday_rebalance_decision_count": len(tuple(getattr(rebalance_result, "decisions", ()))),
             },
             execution=execution,
@@ -321,6 +336,19 @@ def _intraday_instrument_type(
     if trade_identity in {"tactical_option_trade", "risk_hedge_overlay"}:
         return "option"
     return instrument_type
+
+
+def _rebalance_request_skip_reason(request: object) -> str | None:
+    if float(getattr(request, "current_price", 0.0) or 0.0) <= 0.0:
+        return "missing_current_price"
+    return None
+
+
+def _skip_reason_counts(skipped_requests: tuple[tuple[object, str], ...]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for _request, reason in skipped_requests:
+        counts[reason] = counts.get(reason, 0) + 1
+    return counts
 
 
 def _portfolio_context_with_positions(

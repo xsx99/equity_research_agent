@@ -46,7 +46,7 @@ class _BaselineLoader:
         self.baselines = baselines
 
     def load_for_tickers(self, *, tickers: tuple[str, ...], decision_time: datetime) -> dict[str, SignalSnapshotResult]:
-        assert tickers == ("AAPL", "MSFT")
+        assert set(tickers) <= set(self.baselines)
         assert decision_time.tzinfo is not None
         self.recorder.record("load_baselines")
         return dict(self.baselines)
@@ -60,7 +60,7 @@ class _PreviousSnapshotLoader:
     def load_for_tickers(
         self, *, tickers: tuple[str, ...], decision_time: datetime
     ) -> dict[str, IntradaySignalSnapshotRecord]:
-        assert tickers == ("AAPL", "MSFT")
+        assert set(self.previous) <= set(tickers)
         assert decision_time.tzinfo is not None
         self.recorder.record("load_previous_intraday")
         return dict(self.previous)
@@ -72,7 +72,7 @@ class _RequestContextLoader:
         self.contexts = contexts
 
     def load_for_tickers(self, *, tickers: tuple[str, ...], decision_time: datetime) -> dict[str, object]:
-        assert tickers == ("AAPL", "MSFT")
+        assert set(tickers) <= set(self.contexts)
         assert decision_time.tzinfo is not None
         self.recorder.record("load_request_context")
         return dict(self.contexts)
@@ -577,6 +577,95 @@ def test_live_intraday_refresh_runtime_runs_live_intraday_chain_in_dry_run_mode(
     assert trading_repository.saved_snapshots[0].refreshed_signals_json["social_macro"]["policy_headwind_flag"] is True
     assert trading_repository.saved_snapshots[0].carried_forward_signals_json["insider"]["purchase_count_30d"] == 2
     assert trading_repository.saved_snapshots[0].source_freshness_json["insider"] == "carried_forward_from_baseline"
+
+
+def test_live_intraday_refresh_runtime_skips_rebalance_request_when_current_price_missing():
+    runtime, _recorder, rebalance_pipeline, trading_repository, _refresh_service = _build_runtime()
+    runtime.dependencies = LiveIntradayRefreshDependencies(
+        **{
+            **runtime.dependencies.__dict__,
+            "scope_loader": _ScopeLoader(_recorder, ("AAPL", "HWM")),
+            "baseline_loader": _BaselineLoader(
+                _recorder,
+                {
+                    "AAPL": _baseline_snapshot(ticker="AAPL"),
+                    "HWM": SignalSnapshotResult(
+                        **{
+                            **_baseline_snapshot(ticker="HWM").__dict__,
+                            "signal_json": {
+                                "technical": {},
+                                "fundamental": {},
+                                "insider": {},
+                                "social_macro": {},
+                            },
+                            "source_freshness_json": {
+                                "technical": "missing",
+                                "fundamental": "missing",
+                                "insider": "missing",
+                                "social_macro": "missing",
+                            },
+                        }
+                    ),
+                },
+            ),
+            "previous_snapshot_loader": _PreviousSnapshotLoader(_recorder, {}),
+            "request_context_loader": _RequestContextLoader(
+                _recorder,
+                {
+                    "AAPL": SimpleNamespace(
+                        selection_source="risk_manager",
+                        strategy_id="relative_strength_rotation_v1",
+                        strategy_version="v1",
+                        expression_bucket_id="long_stock",
+                        expression_bucket_version="v1",
+                        trade_identity="tactical_stock_trade",
+                        instrument_type="stock",
+                        candidate_score=0.82,
+                        target_weight=0.05,
+                        allow_open_new=False,
+                    ),
+                    "HWM": SimpleNamespace(
+                        selection_source="scanner",
+                        strategy_id="earnings_reaction_v1",
+                        strategy_version="v1",
+                        expression_bucket_id="long_stock",
+                        expression_bucket_version="v1",
+                        trade_identity="tactical_stock_trade",
+                        instrument_type="stock",
+                        candidate_score=0.4,
+                        target_weight=0.0,
+                        allow_open_new=False,
+                    ),
+                },
+            ),
+            "source_repository": _IntradaySourceRepository(
+                _recorder,
+                {
+                    ("AAPL", "technical"): (
+                        _source_record(ticker="AAPL", family="technical", payload={"bars": [{"close": 104.0}]}),
+                    ),
+                    ("AAPL", "events_news"): (),
+                    ("AAPL", "social_macro"): (),
+                    ("AAPL", "insider"): (),
+                    ("HWM", "technical"): (),
+                    ("HWM", "events_news"): (),
+                    ("HWM", "social_macro"): (),
+                    ("HWM", "insider"): (),
+                },
+            ),
+            "news_alert_service": SimpleNamespace(build_alerts=lambda **kwargs: ()),
+        }
+    )
+
+    result = runtime.run()
+
+    assert [snapshot.ticker for snapshot in trading_repository.saved_snapshots] == ["AAPL", "HWM"]
+    assert [request.ticker for request in rebalance_pipeline.last_requests] == ["AAPL"]
+    assert result["summary"]["intraday_rebalance_request_skip_count"] == 1
+    assert result["summary"]["intraday_rebalance_request_skip_reasons"] == {
+        "missing_current_price": 1,
+    }
+    assert result["summary"]["intraday_rebalance_skipped_tickers"] == ["HWM"]
 
 
 def test_live_intraday_refresh_runtime_requires_paper_execution_when_option_execution_enabled():
