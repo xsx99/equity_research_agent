@@ -96,6 +96,9 @@ class _FakeQuery:
             raise AssertionError("expected at most one row")
         return self._rows[0]
 
+    def order_by(self, *criteria: Any) -> "_FakeQuery":
+        return self
+
 
 class _FakeSession:
     def __init__(self) -> None:
@@ -948,6 +951,65 @@ def test_sqlalchemy_repository_closes_missing_positions_on_replace():
     repository.replace_paper_positions(())
 
     assert repository.load_paper_positions() == ()
+
+
+def test_sqlalchemy_repository_loads_refreshable_stock_orders_and_detects_order_execution():
+    now = datetime(2026, 6, 2, 16, 31, tzinfo=timezone.utc)
+    session = _FakeSession()
+    repository = SqlAlchemyTradingRepository(session)
+    refreshable_order = PaperOrderRecord(
+        paper_order_id="11111111-1111-4111-8111-111111111111",
+        broker_order_id="broker-order-1",
+        client_order_id="2026-06-02:AAPL:relative_strength_rotation_v1:enter_long",
+        trading_decision_id="22222222-2222-4222-8222-222222222222",
+        risk_decision_id="33333333-3333-4333-8333-333333333333",
+        ticker="AAPL",
+        strategy_id="relative_strength_rotation_v1",
+        action="enter_long",
+        trade_date=now.date(),
+        quantity=0.01,
+        limit_price=None,
+        status="accepted",
+        rejection_reason=None,
+        created_at=now,
+    )
+    filled_order = PaperOrderRecord(
+        paper_order_id="44444444-4444-4444-8444-444444444444",
+        broker_order_id="broker-order-2",
+        client_order_id="2026-06-02:MSFT:relative_strength_rotation_v1:enter_long",
+        trading_decision_id="55555555-5555-4555-8555-555555555555",
+        risk_decision_id="66666666-6666-4666-8666-666666666666",
+        ticker="MSFT",
+        strategy_id="relative_strength_rotation_v1",
+        action="enter_long",
+        trade_date=now.date(),
+        quantity=0.02,
+        limit_price=300.0,
+        status="filled",
+        rejection_reason=None,
+        created_at=now,
+    )
+    repository.save_paper_order(refreshable_order)
+    repository.save_paper_order(filled_order)
+    repository.save_paper_execution(
+        PaperExecutionRecord(
+            paper_execution_id="77777777-7777-4777-8777-777777777777",
+            paper_order_id=refreshable_order.paper_order_id,
+            broker_order_id="broker-order-1",
+            ticker="AAPL",
+            quantity=0.01,
+            fill_price=227.15,
+            trade_date=now.date(),
+            executed_at=now,
+            net_cash_effect=-2.2715,
+        )
+    )
+
+    refreshable = repository.load_refreshable_paper_orders()
+
+    assert [order.ticker for order in refreshable] == ["AAPL"]
+    assert repository.has_paper_execution_for_order_id(refreshable_order.paper_order_id) is True
+    assert repository.has_paper_execution_for_order_id(filled_order.paper_order_id) is False
 
 
 def test_sqlalchemy_repository_persists_pr7_option_artifacts():

@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from src.trading.brokers.paper_option import PaperOptionPosition
+from src.trading.brokers.paper_stock import PaperOrderRecord, PaperStockBroker
 from src.trading.portfolio.state import StockPosition
 from src.trading.repositories.in_memory import InMemoryTradingRepository
 from src.trading.workflows.portfolio_sync import BrokerPortfolioSyncWorkflow
@@ -72,6 +73,63 @@ class _BrokerWithOptionStub:
         ]
 
 
+class _LateFilledOrderClient:
+    def get(self, url: str, *, params: dict[str, Any] | None = None, headers: dict[str, str]):
+        if url.endswith("/v2/orders:by_client_order_id"):
+            return _ResponseStub(
+                {
+                    "id": "broker-order-1",
+                    "client_order_id": (params or {})["client_order_id"],
+                    "symbol": "AAPL",
+                    "qty": "0.01",
+                    "filled_qty": "0.01",
+                    "filled_avg_price": "227.15",
+                    "side": "buy",
+                    "status": "filled",
+                    "submitted_at": "2026-06-02T16:31:00+00:00",
+                    "filled_at": "2026-06-02T16:32:00+00:00",
+                }
+            )
+        if url.endswith("/v2/account"):
+            return _ResponseStub(
+                {
+                    "cash": "999997.73",
+                    "equity": "1000000.12",
+                    "portfolio_value": "1000000.12",
+                    "buying_power": "1999995.46",
+                    "long_market_value": "2.27",
+                    "initial_margin": "1.14",
+                    "maintenance_margin": "0.68",
+                    "last_equity": "1000000.00",
+                }
+            )
+        if url.endswith("/v2/positions"):
+            return _ResponseStub(
+                [
+                    {
+                        "symbol": "AAPL",
+                        "qty": "0.01",
+                        "avg_entry_price": "227.15",
+                        "current_price": "227.27",
+                        "market_value": "2.27",
+                        "side": "long",
+                    }
+                ]
+            )
+        raise AssertionError(f"unexpected_get:{url}")
+
+
+class _ResponseStub:
+    def __init__(self, payload: Any) -> None:
+        self._payload = payload
+
+    def raise_for_status(self) -> None:
+        return None
+
+    def json(self) -> Any:
+        return self._payload
+
+
 def test_broker_portfolio_sync_workflow_persists_broker_state_and_builds_portfolio_context():
     opened_at = datetime(2026, 6, 2, 16, 31, tzinfo=timezone.utc)
     synced_at = datetime(2026, 6, 3, 16, 31, tzinfo=timezone.utc)
@@ -107,6 +165,41 @@ def test_broker_portfolio_sync_workflow_persists_broker_state_and_builds_portfol
     assert repository.paper_positions[0].strategy_id == "relative_strength_rotation_v1"
     assert repository.paper_positions[0].opened_at == opened_at
     assert repository.portfolio_snapshots[-1].account_equity == 1000000.12
+
+
+def test_broker_portfolio_sync_workflow_reconciles_late_filled_stock_orders():
+    submitted_at = datetime(2026, 6, 2, 16, 31, tzinfo=timezone.utc)
+    synced_at = datetime(2026, 6, 2, 16, 33, tzinfo=timezone.utc)
+    repository = InMemoryTradingRepository()
+    repository.save_paper_order(
+        PaperOrderRecord(
+            paper_order_id="paper-order-1",
+            broker_order_id="broker-order-1",
+            client_order_id="2026-06-02:AAPL:relative_strength_rotation_v1:enter_long",
+            trading_decision_id="11111111-1111-4111-8111-111111111111",
+            risk_decision_id="22222222-2222-4222-8222-222222222222",
+            ticker="AAPL",
+            strategy_id="relative_strength_rotation_v1",
+            action="enter_long",
+            trade_date=submitted_at.date(),
+            quantity=0.01,
+            limit_price=None,
+            status="accepted",
+            rejection_reason=None,
+            created_at=submitted_at,
+        )
+    )
+    workflow = BrokerPortfolioSyncWorkflow(
+        repository=repository,
+        broker=PaperStockBroker(api_key="key", secret_key="secret", client=_LateFilledOrderClient()),
+    )
+
+    workflow.run(as_of=synced_at)
+
+    assert repository.paper_orders[0].status == "filled"
+    assert len(repository.paper_executions) == 1
+    assert repository.paper_executions[0].paper_order_id == "paper-order-1"
+    assert repository.paper_positions[0].strategy_id == "relative_strength_rotation_v1"
 
 
 def test_broker_portfolio_sync_workflow_uses_broker_option_positions_without_local_overlay():

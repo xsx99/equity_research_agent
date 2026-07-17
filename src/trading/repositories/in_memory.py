@@ -421,6 +421,17 @@ class InMemoryTradingRepository:
     def has_paper_execution(self, paper_execution_id: str) -> bool:
         return any(item.paper_execution_id == paper_execution_id for item in self.paper_executions)
 
+    def has_paper_execution_for_order_id(self, paper_order_id: str) -> bool:
+        return any(item.paper_order_id == paper_order_id for item in self.paper_executions)
+
+    def load_refreshable_paper_orders(self) -> tuple[PaperOrderRecord, ...]:
+        terminal_statuses = {"filled", "canceled", "cancelled", "expired", "rejected"}
+        return tuple(
+            order
+            for order in self.paper_orders
+            if str(order.status).lower() not in terminal_statuses
+        )
+
     def save_execution_attempt(self, attempt: ExecutionAttemptRecord) -> None:
         self.execution_attempts = [
             item

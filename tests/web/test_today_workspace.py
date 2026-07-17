@@ -34,6 +34,7 @@ def test_build_ticker_workspace_groups_attention_buckets():
         signal_history_by_ticker={},
         news_by_ticker={},
         fundamentals_by_ticker={},
+        as_of=datetime(2026, 6, 5, 21, 0, tzinfo=timezone.utc),
     )
 
     assert [item["ticker"] for item in workspace["buckets"]["action_now"]] == ["NVDA"]
@@ -83,6 +84,7 @@ def test_build_ticker_workspace_builds_trade_plan_without_duplicate_edge_alias()
         signal_history_by_ticker={},
         news_by_ticker={},
         fundamentals_by_ticker={},
+        as_of=datetime(2026, 7, 7, 18, 0, tzinfo=timezone.utc),
     )
 
     detail = workspace["detail"]
@@ -158,6 +160,7 @@ def test_build_ticker_workspace_keeps_closed_ticker_visible_in_closed_today_buck
         signal_history_by_ticker={},
         news_by_ticker={},
         fundamentals_by_ticker={},
+        as_of=datetime(2026, 6, 5, 21, 0, tzinfo=timezone.utc),
     )
 
     assert [item["ticker"] for item in workspace["buckets"]["closed_today"]] == ["NVDA"]
@@ -190,12 +193,45 @@ def test_build_ticker_workspace_does_not_keep_closed_reduce_partial_fill_in_acti
         signal_history_by_ticker={},
         news_by_ticker={},
         fundamentals_by_ticker={},
+        as_of=datetime(2026, 7, 7, 18, 0, tzinfo=timezone.utc),
     )
 
     assert [item["ticker"] for item in workspace["buckets"]["action_now"]] == []
     assert [item["ticker"] for item in workspace["buckets"]["closed_today"]] == ["CRDO"]
     assert workspace["buckets"]["closed_today"][0]["attention_flags"] == ["material_change"]
     assert workspace["selected_ticker"] == "CRDO"
+
+
+def test_build_ticker_workspace_does_not_put_historical_closed_position_in_closed_today():
+    workspace = build_ticker_workspace(
+        trade_rows=[
+            {
+                "ticker": "CRDO",
+                "decision": "trade_candidate",
+                "selected_strategy_id": "gap_and_go_v1",
+                "confidence": 0.2,
+                "material_signal_change": True,
+                "created_at": datetime(2026, 7, 17, 12, 45, tzinfo=timezone.utc),
+            },
+        ],
+        selected_ticker=None,
+        positions_by_ticker={},
+        closed_positions_by_ticker={
+            "CRDO": {
+                "ticker": "CRDO",
+                "status": "closed",
+                "closed_at": datetime(2026, 7, 7, 17, 0, tzinfo=timezone.utc),
+            }
+        },
+        risk_by_ticker={},
+        signal_history_by_ticker={},
+        news_by_ticker={},
+        fundamentals_by_ticker={},
+        as_of=datetime(2026, 7, 17, 16, 0, tzinfo=timezone.utc),
+    )
+
+    assert [item["ticker"] for item in workspace["buckets"]["closed_today"]] == []
+    assert [item["ticker"] for item in workspace["buckets"]["reviewing"]] == ["CRDO"]
 
 
 def test_build_ticker_workspace_prefers_open_position_over_closed_today_when_ticker_is_in_both():
@@ -214,6 +250,7 @@ def test_build_ticker_workspace_prefers_open_position_over_closed_today_when_tic
         signal_history_by_ticker={},
         news_by_ticker={},
         fundamentals_by_ticker={},
+        as_of=datetime(2026, 6, 5, 21, 0, tzinfo=timezone.utc),
     )
 
     assert [item["ticker"] for item in workspace["buckets"]["open_positions"]] == ["NVDA"]

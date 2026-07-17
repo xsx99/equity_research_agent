@@ -72,15 +72,19 @@ def build_ticker_workspace(
         ticker = item["ticker"]
         has_open_position = ticker in normalized_positions or ticker in normalized_option_positions
         has_closed_position = ticker in normalized_closed_positions
+        has_closed_today = _is_closed_on_reference_date(
+            normalized_closed_positions.get(ticker),
+            reference_time=reference_time,
+        )
         stale_closed_order_action = _is_stale_closed_order_action(
             item,
             has_open_position=has_open_position,
             has_closed_position=has_closed_position,
         )
-        if stale_closed_order_action:
+        if stale_closed_order_action and has_closed_today:
             item["primary_state"] = "closed"
             buckets["closed_today"].append(item)
-        elif _is_action_now(item):
+        elif _is_action_now(item) and not stale_closed_order_action:
             item["primary_state"] = "action_now"
             buckets["action_now"].append(item)
         elif has_open_position:
@@ -90,7 +94,7 @@ def build_ticker_workspace(
             # Open Positions bucket here.
             item["primary_state"] = "open_position"
             buckets["open_positions"].append(item)
-        elif has_closed_position:
+        elif has_closed_today:
             item["primary_state"] = "closed"
             buckets["closed_today"].append(item)
         elif _is_reviewing(item):
@@ -243,6 +247,15 @@ def _is_stale_closed_order_action(
     decision = str(row.get("decision") or "").strip().lower()
     order_status = str(row.get("order_status") or "").strip().lower()
     return decision in _CLOSE_POSITION_DECISIONS and order_status in _ACTIONABLE_ORDER_STATUSES
+
+def _is_closed_on_reference_date(closed_position: Any, *, reference_time: datetime) -> bool:
+    if not isinstance(closed_position, dict):
+        return False
+    closed_at = _normalize_datetime(closed_position.get("closed_at"))
+    if closed_at is None:
+        return False
+    reference = _normalize_datetime(reference_time) or reference_time
+    return closed_at.date() == reference.date()
 
 def _item_priority(row: dict[str, Any]) -> tuple[int, int, int, int]:
     order_status = str(row.get("order_status") or "").strip().lower()

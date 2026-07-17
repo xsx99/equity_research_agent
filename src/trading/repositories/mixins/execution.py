@@ -75,6 +75,37 @@ class ExecutionRepositoryMixin:
         return self.session.query(PaperExecution).filter_by(
             paper_execution_id=_to_uuid(paper_execution_id)
         ).one_or_none() is not None
+    def has_paper_execution_for_order_id(self, paper_order_id: str) -> bool:
+        return self.session.query(PaperExecution).filter_by(
+            paper_order_id=_to_uuid(paper_order_id)
+        ).one_or_none() is not None
+    def load_refreshable_paper_orders(self) -> tuple[PaperOrderRecord, ...]:
+        terminal_statuses = {"filled", "canceled", "cancelled", "expired", "rejected"}
+        rows = (
+            self.session.query(PaperOrder)
+            .filter(PaperOrder.status.notin_(terminal_statuses))
+            .order_by(PaperOrder.created_at.asc())
+            .all()
+        )
+        return tuple(
+            PaperOrderRecord(
+                paper_order_id=str(row.paper_order_id),
+                broker_order_id=row.broker_order_id,
+                client_order_id=row.client_order_id,
+                trading_decision_id=str(row.trading_decision_id) if row.trading_decision_id else "",
+                risk_decision_id=str(row.risk_decision_id) if row.risk_decision_id else "",
+                ticker=row.ticker,
+                strategy_id=row.strategy_id,
+                action=row.action,
+                trade_date=row.trade_date,
+                quantity=float(row.quantity),
+                limit_price=float(row.order_price) if row.order_price is not None else None,
+                status=row.status,
+                rejection_reason=row.rejection_reason,
+                created_at=row.created_at,
+            )
+            for row in rows
+        )
     def load_paper_positions(self) -> tuple[StockPosition, ...]:
         rows = self.session.query(PaperPosition).filter_by(status="open").all()
         positions = [

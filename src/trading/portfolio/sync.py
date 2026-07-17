@@ -46,6 +46,10 @@ class BrokerPortfolioSyncWorkflow:
         extra_position_metadata: dict[str, dict[str, Any]] | None = None,
         persist: bool = True,
     ) -> BrokerPortfolioSyncResult:
+        late_fill_metadata = _reconcile_late_stock_order_fills(
+            repository=self.repository,
+            broker=self.broker,
+        )
         account_payload = self.broker.sync_account()
         broker_positions = self.broker.sync_positions()
         local_position_metadata = {
@@ -56,6 +60,7 @@ class BrokerPortfolioSyncWorkflow:
             }
             for position in self.repository.load_paper_positions()
         }
+        local_position_metadata.update(late_fill_metadata)
         for ticker, metadata in (extra_position_metadata or {}).items():
             local_position_metadata[ticker.upper()] = dict(metadata)
         local_option_positions = tuple(getattr(self.repository, "load_paper_option_positions", lambda: ())())
@@ -99,6 +104,34 @@ class BrokerPortfolioSyncWorkflow:
                 approved_core_tickers=approved_core_tickers,
             ),
         )
+
+
+def _reconcile_late_stock_order_fills(*, repository: Any, broker: Any) -> dict[str, dict[str, Any]]:
+    load_orders = getattr(repository, "load_refreshable_paper_orders", None)
+    refresh_order = getattr(broker, "refresh_order", None)
+    find_execution = getattr(broker, "find_execution_by_order_id", None)
+    if not callable(load_orders) or not callable(refresh_order) or not callable(find_execution):
+        return {}
+
+    save_order = getattr(repository, "save_paper_order")
+    save_execution = getattr(repository, "save_paper_execution")
+    has_execution_for_order = getattr(repository, "has_paper_execution_for_order_id", None)
+    metadata_by_ticker: dict[str, dict[str, Any]] = {}
+    for order in load_orders():
+        refreshed_order = refresh_order(order)
+        save_order(refreshed_order)
+        execution = find_execution(refreshed_order.paper_order_id)
+        if execution is None:
+            continue
+        if callable(has_execution_for_order) and has_execution_for_order(refreshed_order.paper_order_id):
+            continue
+        save_execution(execution)
+        metadata_by_ticker[refreshed_order.ticker.upper()] = {
+            "strategy_id": refreshed_order.strategy_id,
+            "trade_identity": "tactical_stock_trade",
+            "opened_at": execution.executed_at,
+        }
+    return metadata_by_ticker
 
 
 def _local_option_position_metadata(local_option_positions: tuple[Any, ...]) -> dict[str, dict[str, Any]]:
