@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import and_, or_
 
+from src.core import config as app_config
 from src.db.models.trading import (
     CandidateOutcomeEvaluation,
     CandidateScore,
@@ -47,6 +48,10 @@ from src.trading.repositories._base_payloads import (
     _trading_decision_payload,
 )
 from src.trading.repositories._base_records import _learning_factor_record
+from src.trading.trade_day import local_day_bounds_utc
+
+
+LONG_HORIZON_LOOKBACK_DAYS = 60
 
 
 class ReflectionRepositoryMixin:
@@ -75,6 +80,11 @@ class ReflectionRepositoryMixin:
         window: tuple[datetime, datetime],
     ) -> dict[str, object]:
         start_utc, end_utc = window
+        lookback_start_utc, _ = local_day_bounds_utc(
+            trade_date - timedelta(days=LONG_HORIZON_LOOKBACK_DAYS),
+            app_config.SCHEDULER_TIMEZONE,
+        )
+        prior_reflection_start = trade_date - timedelta(days=LONG_HORIZON_LOOKBACK_DAYS)
         portfolio_rows = (
             self.session.query(PortfolioSnapshotModel)
             .filter(
@@ -211,6 +221,32 @@ class ReflectionRepositoryMixin:
                 )
                 .all()
             ),
+            "historical_outcome_context": tuple(
+                _candidate_outcome_payload(row)
+                for row in sorted(
+                    self.session.query(CandidateOutcomeEvaluation)
+                    .filter(
+                        CandidateOutcomeEvaluation.decision_time >= lookback_start_utc,
+                        CandidateOutcomeEvaluation.decision_time < start_utc,
+                    )
+                    .all(),
+                    key=lambda item: item.decision_time,
+                    reverse=True,
+                )
+            ),
+            "prior_reflection_context": tuple(
+                _prior_reflection_context_payload(row)
+                for row in sorted(
+                    self.session.query(DailyReflection)
+                    .filter(
+                        DailyReflection.trade_date >= prior_reflection_start,
+                        DailyReflection.trade_date < trade_date,
+                    )
+                    .all(),
+                    key=lambda item: item.trade_date,
+                    reverse=True,
+                )
+            ),
             "benchmark_peer_returns": {},
             "paper_option_decisions": tuple(
                 _paper_option_decision_payload(row)
@@ -248,6 +284,7 @@ class ReflectionRepositoryMixin:
                 else ()
             ),
         }
+
     def save_daily_reflection(self, reflection: Any) -> None:
         reflection_id = _to_uuid(reflection.daily_reflection_id)
         row = self.session.query(DailyReflection).filter_by(
@@ -300,3 +337,15 @@ class ReflectionRepositoryMixin:
         row.evidence_json = list(learning_factor.evidence)
         row.metadata_json = dict(learning_factor.metadata_json)
         self.session.flush()
+
+
+def _prior_reflection_context_payload(row: Any) -> dict[str, Any]:
+    reflection_json = dict(row.reflection_json or {})
+    return {
+        "daily_reflection_id": str(row.daily_reflection_id),
+        "trade_date": row.trade_date.isoformat(),
+        "status": row.status,
+        "what_worked": list(reflection_json.get("what_worked") or ()),
+        "what_failed": list(reflection_json.get("what_failed") or ()),
+        "strategy_proposal_hints": list(row.strategy_proposal_hints_json or ()),
+    }

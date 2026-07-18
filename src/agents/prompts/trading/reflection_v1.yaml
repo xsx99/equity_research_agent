@@ -10,6 +10,10 @@ template: |
 
   Requirements:
   - Evaluate portfolio outcomes, accepted and rejected trades, watch items, intraday alerts, risk actions, and replay outcome rows.
+  - Label every important evidence point as one of `single_day_noise`, `interim_horizon_mark`, `final_horizon_evidence`, or `repeated_pattern`.
+  - Do not infer a durable strategy edge from one trade date. `what_worked`, `what_failed`, `learning_factors`, and `strategy_proposal_hints` must make clear when evidence is only single-day noise.
+  - Treat interim horizon rows as useful monitoring marks, not final proof. Only final horizon evidence across repeated dates can support durable behavior.
+  - Compare candidate returns against benchmark, peer basket, and sector/theme context where present; call out when apparent alpha may only be a sector or theme tailwind.
   - Analyze bullish catalyst trades separately from bearish or risk-off calls.
   - Evaluate confidence calibration, factor concentration, candidate misses, manual ticker requests, and whether catalyst_watch would have been more appropriate than ordinary watch.
   - Emit learning factors conservatively. Risk-tightening ideas may use activation_policy `auto_risk_tightening` only when they reduce exposure, add confirmation, block stale data, lower confidence, or tighten exits.

@@ -141,6 +141,8 @@ class ReflectionInput(BaseModel):
     risk_factor_exposures: list[dict[str, Any]] = Field(default_factory=list)
     portfolio_snapshots: list[dict[str, Any]] = Field(default_factory=list)
     candidate_outcome_evaluations: list[dict[str, Any]] = Field(default_factory=list)
+    historical_outcome_context: list[dict[str, Any]] = Field(default_factory=list)
+    prior_reflection_context: list[dict[str, Any]] = Field(default_factory=list)
     benchmark_peer_returns: dict[str, Any] = Field(default_factory=dict)
     paper_option_decisions: list[dict[str, Any]] = Field(default_factory=list)
     paper_option_positions: list[dict[str, Any]] = Field(default_factory=list)

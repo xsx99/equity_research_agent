@@ -114,6 +114,14 @@ The reflection output is structured:
 
 Reflection may also emit `strategy_proposal_hints`: partial observations that are not yet complete strategy definitions. `StrategyEvolutionPipeline` owns converting those hints into concrete strategy proposals so reflection stays focused on evidence and attribution.
 
+### Horizon-Aware Strategy Evolution Evidence
+
+Reflection receives both same-day outcome rows and bounded prior context: prior candidate outcome evaluations plus prior daily reflection summaries over the configured lookback. Same-day rows remain useful for operator review, but durable claims must distinguish `single_day_noise`, `interim_horizon_mark`, `final_horizon_evidence`, and repeated patterns. Interim outcome rows can monitor open horizons; they do not prove an edge.
+
+Strategy evolution consumes a trailing evidence window rather than only the current reflection day. LLM proposals must cite concrete `supporting_outcome_ids`, but those citations are advisory input to deterministic Python gates. A proposal is accepted only when cited final outcome rows meet the minimum evidence policy: enough final rows, distinct trade dates, distinct tickers, positive win rate, and positive mean alpha. Missing ids, interim-only evidence, or same-day-only support are persisted as `insufficient_evidence_rejected` with `metadata_json.evidence_gate` explaining the failed gate.
+
+Lifecycle promotion reuses the same multi-day evidence policy for `shadow -> experimental` and `experimental -> active`, with the stricter active-promotion mean-alpha threshold preserved. New strategy definitions still start at `candidate` or `shadow`; the LLM never creates active or experimental strategies directly.
+
 The next trading run adapts only to learning factors that are active under the lifecycle policy below. Adaptation means:
 
 - candidate scores can be adjusted only by active, validated strategy-scoped learning factors
@@ -141,4 +149,3 @@ Initial policy:
 - Any learning factor that increases score, expands eligibility, increases position size, weakens hard safety rails, broadens universe rules, or increases strategy/risk budget must go through shadow/test evidence and explicit promotion.
 - If reflection suggests a looser risk rule, broader universe rule, larger strategy budget, or new alpha pattern, the change should become a strategy/config proposal rather than an automatically active learning factor.
 - Every trading decision stores which learning factors were injected so impact can be evaluated later.
-

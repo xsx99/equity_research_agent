@@ -202,3 +202,67 @@ def test_reflection_pipeline_passes_option_and_hedge_payloads_to_agent(tmp_path)
     assert captured["option_risk_snapshots"] == [{"ticker": "NVDA", "risk_status": "rejected"}]
     assert captured["risk_hedge_overlays"] == [{"ticker": "QQQ", "action": "open_hedge"}]
     assert captured["hedge_effectiveness"] == {"overlay_count": 1, "protected_notional": 12000.0}
+
+
+def test_reflection_pipeline_passes_long_horizon_context_to_agent(tmp_path):
+    repository = InMemoryTradingRepository()
+    registry = _write_prompt(tmp_path)
+    pipeline = ReflectionPipeline(
+        repository=repository,
+        prompt_registry=registry,
+        model_name="gpt-5",
+        agent_runner=lambda prompt, model_name: {"content": "unused"},
+    )
+    captured: dict[str, object] = {}
+
+    def _run(payload, context):
+        captured.update(payload)
+        return SimpleNamespace(
+            success=True,
+            output_data={
+                "trade_date": "2026-06-02",
+                "portfolio_summary": {},
+                "what_worked": [],
+                "what_failed": [],
+                "attribution": [],
+                "learning_factors": [],
+                "strategy_proposal_hints": [],
+                "schema_version": "v1",
+                "generated_at": "2026-06-02T22:00:00+00:00",
+            },
+            metadata={
+                "prompt_template": object(),
+                "prompt_run": PromptRunRecord(
+                    pipeline_name="reflection",
+                    rendered_prompt_hash="hash",
+                    rendered_prompt_redacted="prompt",
+                    input_context_json={},
+                    raw_output_text="{}",
+                    parsed_output_json={},
+                    parse_status="succeeded",
+                    validation_errors_json=[],
+                    fallback_action=None,
+                    error_message=None,
+                ),
+                "usage_events": [],
+            },
+        )
+
+    pipeline.agent = SimpleNamespace(run=_run)
+    request = _request()
+    request = ReflectionPipelineRequest(
+        **{
+            **request.__dict__,
+            "historical_outcome_context": (
+                {"ticker": "AAPL", "strategy_id": "gap_reclaim_v1", "evaluation_status": "final", "alpha": 0.03},
+            ),
+            "prior_reflection_context": (
+                {"trade_date": "2026-05-31", "what_failed": ["single-day chase"]},
+            ),
+        }
+    )
+
+    pipeline.run(request=request)
+
+    assert captured["historical_outcome_context"][0]["ticker"] == "AAPL"
+    assert captured["prior_reflection_context"][0]["trade_date"] == "2026-05-31"

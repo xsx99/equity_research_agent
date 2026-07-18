@@ -114,7 +114,12 @@ def test_new_status_enums_expose_choices():
         "suppressed",
         "retired",
     )
-    assert StrategyProposalStatus.choices() == ("accepted", "duplicate_rejected", "proposal_failed")
+    assert StrategyProposalStatus.choices() == (
+        "accepted",
+        "duplicate_rejected",
+        "proposal_failed",
+        "insufficient_evidence_rejected",
+    )
     assert StrategyEvaluationStatus.choices() == ("observed", "promoted", "rejected", "retired")
     assert PortfolioIntentLifecycleStatus.choices() == ("active", "paused", "retired")
     assert PortfolioIntentType.choices() == (
@@ -364,6 +369,22 @@ def test_strategy_evolution_models_can_be_instantiated():
     assert proposal.daily_reflection is not None
     assert evaluation.strategy_definition is definition
     assert evaluation.strategy_proposal is proposal
+
+    insufficient_proposal = StrategyProposal(
+        trade_date=date(2026, 6, 2),
+        proposal_status="insufficient_evidence_rejected",
+        proposed_strategy_id="thin_gap_reclaim_v1",
+        display_name="Thin Gap Reclaim",
+        proposed_lifecycle_status=None,
+        duplicate_of_strategy_id=None,
+        rejection_reason="insufficient_final_outcomes",
+        source="reflection_learning",
+        evidence_summary="Only two final outcomes were cited.",
+        proposal_json={},
+        metadata_json={"evidence_gate": {"final_outcome_count": 2}},
+    )
+
+    assert insufficient_proposal.proposal_status == "insufficient_evidence_rejected"
 
 
 def test_pr_8_models_can_be_instantiated():
@@ -1391,6 +1412,16 @@ def test_trading_migration_contains_strategy_proposal_reflection_link():
     assert '"strategy_proposals"' in text
     assert '"daily_reflection_id"' in text
     assert '"daily_reflections"' in text
+
+
+def test_trading_migration_contains_insufficient_evidence_strategy_proposal_status():
+    migration_path = Path("alembic/versions/031_strategy_proposal_insufficient_evidence_status.py")
+    text = migration_path.read_text(encoding="utf-8")
+
+    assert 'down_revision: Union[str, None] = "030"' in text
+    assert '"ck_strategy_proposals_status"' in text
+    assert '"strategy_proposals"' in text
+    assert "insufficient_evidence_rejected" in text
 
 
 def test_dead_persistence_cleanup_scope_keeps_replay_and_removes_half_wired_models():

@@ -9,6 +9,10 @@ from typing import Any, Iterable
 
 from src.agents.strategy_evolution import StrategyEvolutionAgent
 from src.agents.trading import PromptRunRecord, UsageEventRecord
+from src.trading.phases.strategy_evolution.evidence import (
+    EvidenceGatePolicy,
+    evaluate_proposal_evidence,
+)
 from src.trading.phases.reflection.pipeline import DailyReflectionRecord, LearningFactorRecord
 from src.trading.strategies.policy import experimental_strategy_weight_cap
 from src.trading.phases.replay.outcomes import CandidateOutcomeEvaluationRecord
@@ -177,6 +181,35 @@ class StrategyEvolutionPipeline:
             )
 
         for proposal_json in result.output_data.get("proposals", []):
+            gate = evaluate_proposal_evidence(
+                supporting_outcome_ids=proposal_json.get("supporting_outcome_ids", ()),
+                outcomes=request.candidate_outcome_evaluations,
+            )
+            if not gate.passed:
+                proposal = StrategyProposalRecord(
+                    strategy_proposal_id=str(uuid.uuid4()),
+                    trade_date=request.trade_date,
+                    prompt_template=prompt_template,
+                    prompt_run=prompt_run,
+                    usage_events=list(usage_events),
+                    source_daily_reflection_id=_resolve_proposal_reflection_id(
+                        proposal_json,
+                        request.daily_reflections,
+                    ),
+                    proposal_status="insufficient_evidence_rejected",
+                    proposed_strategy_id=str(proposal_json["proposed_strategy_id"]),
+                    display_name=str(proposal_json["display_name"]),
+                    proposed_lifecycle_status=None,
+                    duplicate_of_strategy_id=None,
+                    rejection_reason=gate.reason_code,
+                    evidence_summary=str(proposal_json["evidence_summary"]),
+                    proposal_json=dict(proposal_json),
+                    metadata_json={"evidence_gate": dict(gate.metrics_json)},
+                )
+                self.repository.save_strategy_proposal(proposal)
+                proposals.append(proposal)
+                continue
+
             duplicate = find_duplicate_strategy(
                 proposal=proposal_json,
                 existing_definitions=existing_definitions,
@@ -197,7 +230,7 @@ class StrategyEvolutionPipeline:
                     rejection_reason="duplicate_strategy",
                     evidence_summary=str(proposal_json["evidence_summary"]),
                     proposal_json=dict(proposal_json),
-                    metadata_json={},
+                    metadata_json={"evidence_gate": dict(gate.metrics_json)},
                 )
                 self.repository.save_strategy_proposal(proposal)
                 proposals.append(proposal)
@@ -270,7 +303,10 @@ class StrategyEvolutionPipeline:
                 rejection_reason=None,
                 evidence_summary=str(proposal_json["evidence_summary"]),
                 proposal_json=dict(proposal_json),
-                metadata_json={"strategy_definition_id": final_definition.strategy_definition_id},
+                metadata_json={
+                    "strategy_definition_id": final_definition.strategy_definition_id,
+                    "evidence_gate": dict(gate.metrics_json),
+                },
             )
             self.repository.save_strategy_proposal(proposal)
             proposals.append(proposal)
@@ -334,11 +370,16 @@ def maybe_promote_strategy_from_outcomes(
     if definition.lifecycle_status not in {"shadow", "experimental"}:
         return None
     relevant = [row for row in outcomes if row.strategy_id == definition.strategy_id and row.evaluation_status == "final"]
-    if len(relevant) < 3:
+    gate = evaluate_proposal_evidence(
+        supporting_outcome_ids=(row.candidate_outcome_evaluation_id for row in relevant),
+        outcomes=relevant,
+        policy=EvidenceGatePolicy(),
+    )
+    if not gate.passed:
         return None
-    mean_alpha = sum(float(row.alpha or 0.0) for row in relevant) / len(relevant)
-    win_rate = sum(1 for row in relevant if float(row.alpha or 0.0) > 0) / len(relevant)
-    if definition.lifecycle_status == "shadow" and mean_alpha > 0 and win_rate >= 0.6:
+    mean_alpha = float(gate.metrics_json.get("mean_alpha") or 0.0)
+    win_rate = float(gate.metrics_json.get("win_rate") or 0.0)
+    if definition.lifecycle_status == "shadow":
         return StrategyEvaluationResultRecord(
             strategy_evaluation_result_id=str(uuid.uuid4()),
             strategy_id=definition.strategy_id,
@@ -350,10 +391,10 @@ def maybe_promote_strategy_from_outcomes(
             new_lifecycle_status="experimental",
             reason_code="positive_shadow_evidence",
             evidence_summary="Repeated positive shadow evidence met the promotion gate.",
-            metrics_json={"sample_size": len(relevant), "mean_alpha": mean_alpha, "win_rate": win_rate},
+            metrics_json={**dict(gate.metrics_json), "sample_size": len(relevant), "mean_alpha": mean_alpha, "win_rate": win_rate},
             created_at=decision_time,
         )
-    if definition.lifecycle_status == "experimental" and mean_alpha > 0.01 and win_rate >= 0.6:
+    if definition.lifecycle_status == "experimental" and mean_alpha > 0.01:
         return StrategyEvaluationResultRecord(
             strategy_evaluation_result_id=str(uuid.uuid4()),
             strategy_id=definition.strategy_id,
@@ -365,7 +406,7 @@ def maybe_promote_strategy_from_outcomes(
             new_lifecycle_status="active",
             reason_code="positive_experimental_evidence",
             evidence_summary="Experimental paper-trade evidence met the active promotion gate.",
-            metrics_json={"sample_size": len(relevant), "mean_alpha": mean_alpha, "win_rate": win_rate},
+            metrics_json={**dict(gate.metrics_json), "sample_size": len(relevant), "mean_alpha": mean_alpha, "win_rate": win_rate},
             created_at=decision_time,
         )
     return None
@@ -385,8 +426,11 @@ def _learning_factor_payload(factor: LearningFactorRecord) -> dict[str, Any]:
 
 def _outcome_payload(row: CandidateOutcomeEvaluationRecord) -> dict[str, Any]:
     return {
+        "candidate_outcome_evaluation_id": row.candidate_outcome_evaluation_id,
         "strategy_id": row.strategy_id,
         "ticker": row.ticker,
+        "decision_time": row.decision_time.isoformat(),
+        "evaluation_status": row.evaluation_status,
         "alpha": row.alpha,
         "candidate_return": row.candidate_return,
         "regime": row.regime,

@@ -132,6 +132,7 @@ def _load_strategy_proposals(session: Any) -> tuple[dict[str, Any], ...]:
 
 def _serialize_strategy_proposal(row: StrategyProposal) -> dict[str, Any]:
     proposal_json = row.proposal_json or {}
+    metadata_json = row.metadata_json or {}
     return {
         "trade_date": row.trade_date,
         "proposed_strategy_id": row.proposed_strategy_id,
@@ -150,6 +151,7 @@ def _serialize_strategy_proposal(row: StrategyProposal) -> dict[str, Any]:
         "macro_blocked_regimes": tuple(proposal_json.get("macro_blocked_regimes") or ()),
         "invalidators": tuple(proposal_json.get("invalidators") or ()),
         "evidence_summary": row.evidence_summary,
+        "evidence_gate": dict(metadata_json.get("evidence_gate") or {}),
     }
 
 

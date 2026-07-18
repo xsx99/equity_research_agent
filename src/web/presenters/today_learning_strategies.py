@@ -140,8 +140,9 @@ def _proposal_status_rank(row: dict[str, Any]) -> tuple[int, str]:
         "accepted": 0,
         "promoted": 1,
         "duplicate_rejected": 2,
-        "rejected": 3,
-        "proposal_failed": 4,
+        "insufficient_evidence_rejected": 3,
+        "rejected": 4,
+        "proposal_failed": 5,
     }
     return (priority.get(status, 99), str(row.get("proposed_strategy_id") or ""))
 
