@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from decimal import Decimal
 
-from src.web.presenters.today_learning_strategies import build_today_learning_strategies
+from src.web.presenters.today_learning_strategies import build_today_learning_strategies, _proposal_status_rank
 
 
 def test_build_today_learning_strategies_exposes_funnel_and_weight_inputs():
@@ -172,6 +172,10 @@ def test_build_today_learning_strategies_dedupes_strategy_proposals_and_learning
     assert payload["strategy_proposals"][0]["proposal_count"] == 2
     assert len(payload["learning_factors"]) == 1
     assert payload["learning_factors"][0]["occurrence_count"] == 2
+
+
+def test_build_today_learning_strategies_ranks_insufficient_evidence_with_rejections():
+    assert _proposal_status_rank({"proposal_status": "insufficient_evidence_rejected"})[0] < 99
 
 
 def test_build_today_learning_strategies_normalizes_reflection_points_for_display():
