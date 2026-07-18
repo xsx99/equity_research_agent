@@ -14,6 +14,7 @@ from src.db.models.trading import (
     CandidateScore,
     CalendarEvent,
     DailyReflection,
+    EventNewsItem,
     IntradayRebalanceDecision,
     LearningFactor,
     LlmPromptRun,
@@ -37,6 +38,7 @@ from src.db.models.trading import (
     RiskDecision,
     RiskHedgeDecision,
     RiskFactorExposure,
+    SocialMacroItem,
     TradingRuntimeRun,
     TradingDecision,
     UniverseFilterConfig,
@@ -841,6 +843,155 @@ def test_sqlalchemy_repository_filters_event_risk_assessments_by_decision_availa
     assert [item.portfolio_event_risk_assessment_id for item in loaded] == [
         str(uuid.uuid5(uuid.NAMESPACE_URL, "assessment-1"))
     ]
+
+
+def test_sqlalchemy_repository_loads_decision_visible_news_in_risk_macro_context():
+    session = _FakeSession()
+    repository = SqlAlchemyTradingRepository(session)
+    earlier = datetime(2026, 6, 16, 12, 0, tzinfo=timezone.utc)
+    decision_time = datetime(2026, 6, 16, 13, 0, tzinfo=timezone.utc)
+    later = datetime(2026, 6, 16, 14, 0, tzinfo=timezone.utc)
+    visible_macro_id = uuid.uuid4()
+    future_macro_id = uuid.uuid4()
+    visible_event_id = uuid.uuid4()
+    other_event_id = uuid.uuid4()
+    future_event_id = uuid.uuid4()
+
+    session.add(
+        SocialMacroItem(
+            social_macro_item_id=visible_macro_id,
+            ticker="NVDA",
+            category="geopolitical_news",
+            source_type="news",
+            source_key="geopolitical_news",
+            provider="global_context",
+            title="Export-control update hits semis",
+            summary="Policy risk is fresh for chip names.",
+            direction="negative",
+            sentiment_direction="negative",
+            importance_score=0.8,
+            importance_label="high",
+            policy_headwind_flag=True,
+            policy_tailwind_flag=False,
+            explicit_ticker_mention_flag=True,
+            explicit_theme_mention_flag=True,
+            theme_tags_json=["semiconductors"],
+            company_name_mentions_json=["NVIDIA"],
+            source_refs_json=[],
+            dedupe_key="macro-visible",
+            event_time=earlier,
+            published_at=earlier,
+            ingested_at=earlier,
+            available_for_decision_at=earlier,
+            raw_payload_ref=None,
+            metadata_json={},
+        )
+    )
+    session.add(
+        SocialMacroItem(
+            social_macro_item_id=future_macro_id,
+            ticker="NVDA",
+            category="geopolitical_news",
+            source_type="news",
+            source_key="geopolitical_news",
+            provider="global_context",
+            title="Future policy headline",
+            summary="Not available to the decision yet.",
+            direction="negative",
+            sentiment_direction="negative",
+            importance_score=0.9,
+            importance_label="high",
+            policy_headwind_flag=True,
+            policy_tailwind_flag=False,
+            explicit_ticker_mention_flag=True,
+            explicit_theme_mention_flag=True,
+            theme_tags_json=["semiconductors"],
+            company_name_mentions_json=["NVIDIA"],
+            source_refs_json=[],
+            dedupe_key="macro-future",
+            event_time=later,
+            published_at=later,
+            ingested_at=later,
+            available_for_decision_at=later,
+            raw_payload_ref=None,
+            metadata_json={},
+        )
+    )
+    session.add(
+        EventNewsItem(
+            event_news_item_id=visible_event_id,
+            ticker="NVDA",
+            source_ticker=None,
+            event_type="company_specific",
+            direction="negative",
+            sentiment="negative",
+            importance="high",
+            headline="NVIDIA export restriction update",
+            summary="Fresh headline raises event risk.",
+            provider="alpaca",
+            source_refs_json=[],
+            dedupe_key="event-visible",
+            event_time=earlier,
+            published_at=earlier,
+            ingested_at=earlier,
+            available_for_decision_at=earlier,
+            raw_payload_ref=None,
+            metadata_json={},
+        )
+    )
+    session.add(
+        EventNewsItem(
+            event_news_item_id=other_event_id,
+            ticker="AMD",
+            source_ticker=None,
+            event_type="company_specific",
+            direction="negative",
+            sentiment="negative",
+            importance="high",
+            headline="AMD-only headline",
+            summary="Different ticker should stay out of NVDA context.",
+            provider="alpaca",
+            source_refs_json=[],
+            dedupe_key="event-other",
+            event_time=earlier,
+            published_at=earlier,
+            ingested_at=earlier,
+            available_for_decision_at=earlier,
+            raw_payload_ref=None,
+            metadata_json={},
+        )
+    )
+    session.add(
+        EventNewsItem(
+            event_news_item_id=future_event_id,
+            ticker="NVDA",
+            source_ticker=None,
+            event_type="company_specific",
+            direction="negative",
+            sentiment="negative",
+            importance="high",
+            headline="Future NVIDIA headline",
+            summary="Not available to the decision yet.",
+            provider="alpaca",
+            source_refs_json=[],
+            dedupe_key="event-future",
+            event_time=later,
+            published_at=later,
+            ingested_at=later,
+            available_for_decision_at=later,
+            raw_payload_ref=None,
+            metadata_json={},
+        )
+    )
+
+    context = repository.load_decision_available_risk_macro_context(
+        trade_date=decision_time.date(),
+        decision_time=decision_time,
+        ticker="NVDA",
+    )
+
+    assert [item.social_macro_item_id for item in context["macro_news"]] == [str(visible_macro_id)]
+    assert [item.event_news_item_id for item in context["event_news"]] == [str(visible_event_id)]
 
 
 def test_sqlalchemy_repository_persists_pr6_order_execution_snapshot_and_positions():

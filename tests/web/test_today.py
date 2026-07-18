@@ -1080,6 +1080,62 @@ class TestTodayDashboard:
         assert "No upcoming US macro events are loaded for this decision window." in response.text
         assert "No economic calendar rows are currently visible." not in response.text
 
+    def test_risk_macro_tab_renders_decision_visible_news(self, client):
+        payload = _dashboard_payload()
+        payload["selected_tab"] = "risk-macro"
+        payload["risk_macro"] = {
+            **payload["risk_macro"],
+            "macro_news": (
+                {
+                    "title": "Export-control update hits semis",
+                    "headline": "Export-control update hits semis",
+                    "summary": "Policy risk is fresh for chip names.",
+                    "source": "global_context",
+                    "sentiment": "negative",
+                    "importance": "high",
+                    "time": datetime(2026, 6, 3, 12, 30, tzinfo=timezone.utc),
+                },
+            ),
+            "event_news": (
+                {
+                    "ticker": "NVDA",
+                    "title": "NVIDIA export restriction update",
+                    "headline": "NVIDIA export restriction update",
+                    "summary": "Fresh headline raises event risk.",
+                    "source": "alpaca",
+                    "sentiment": "negative",
+                    "importance": "high",
+                    "time": datetime(2026, 6, 3, 12, 45, tzinfo=timezone.utc),
+                },
+            ),
+        }
+        with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
+            response = client.get("/today?tab=risk-macro")
+
+        assert response.status_code == 200
+        assert 'data-testid="macro-news"' in response.text
+        assert 'data-testid="event-news"' in response.text
+        assert "decision-news-list" in response.text
+        assert "Export-control update hits semis" in response.text
+        assert "NVIDIA export restriction update" in response.text
+        assert 'data-local-time-format="datetime"' in response.text
+        assert ">2026-06-03T12:30:00" not in response.text
+
+    def test_risk_macro_tab_explains_missing_decision_visible_news(self, client):
+        payload = _dashboard_payload()
+        payload["selected_tab"] = "risk-macro"
+        payload["risk_macro"] = {
+            **payload["risk_macro"],
+            "macro_news": (),
+            "event_news": (),
+        }
+        with patch("src.web.routers.today.load_today_dashboard", return_value=payload):
+            response = client.get("/today?tab=risk-macro")
+
+        assert response.status_code == 200
+        assert "No macro news was decision-visible for this risk window." in response.text
+        assert "No event news was decision-visible for this risk window." in response.text
+
     def test_portfolio_tab_omits_attention_modules(self, client):
         # Attention (review / alerts / material changes) now lives on the
         # Overview tab; Portfolio focuses on positions, exposure, and P&L.

@@ -61,27 +61,61 @@
         </div>
       </section>
 
-      {# Macro News — needs a macro-level news feed (backend); renders only when present. #}
-      {% if risk_macro.macro_news %}
+      {% set macro_news = risk_macro.macro_news or () %}
+      {% set event_news = risk_macro.event_news or () %}
+
+      {# Decision-visible news from the same risk/macro backend context. #}
       <section class="surface-block" data-testid="macro-news">
         <div class="surface-block-head">
           <div class="section-label">Macro News</div>
-          <span class="surface-block-count">{{ risk_macro.macro_news | length }}</span>
+          <span class="surface-block-count">{{ macro_news | length }}</span>
         </div>
-        <div class="news-list">
-          {% for item in risk_macro.macro_news %}
+        {% if macro_news %}
+        <div class="news-list decision-news-list">
+          {% for item in macro_news %}
           <article class="news-item">
             <h4>{{ item.title or item.headline or 'Untitled macro item' }}</h4>
             {% set meta = [] %}
+            {% if item.ticker %}{% set meta = meta + [item.ticker] %}{% endif %}
+            {% if item.category %}{% set meta = meta + [item.category] %}{% endif %}
             {% if item.source %}{% set meta = meta + [item.source] %}{% endif %}
+            {% if item.importance %}{% set meta = meta + [item.importance ~ " importance"] %}{% endif %}
             {% if item.sentiment %}{% set meta = meta + ["sentiment " ~ item.sentiment] %}{% endif %}
             {% if meta or item.time %}<p class="detail-muted">{{ meta | join(" · ") }}{% if item.time %}{% if meta %} · {% endif %}<time datetime="{{ item.time | iso_datetime }}" data-local-time-format="datetime">{{ item.time | local_time('datetime') }}</time>{% endif %}</p>{% endif %}
             <p>{{ item.summary or 'No summary captured.' }}</p>
           </article>
           {% endfor %}
         </div>
+        {% else %}
+        <p class="detail-muted quiet-empty surface-empty-copy">No macro news was decision-visible for this risk window.</p>
+        {% endif %}
       </section>
-      {% endif %}
+
+      <section class="surface-block" data-testid="event-news">
+        <div class="surface-block-head">
+          <div class="section-label">Event News</div>
+          <span class="surface-block-count">{{ event_news | length }}</span>
+        </div>
+        {% if event_news %}
+        <div class="news-list decision-news-list">
+          {% for item in event_news %}
+          <article class="news-item">
+            <h4>{{ item.title or item.headline or 'Untitled event item' }}</h4>
+            {% set meta = [] %}
+            {% if item.ticker %}{% set meta = meta + [item.ticker] %}{% endif %}
+            {% if item.category %}{% set meta = meta + [item.category] %}{% endif %}
+            {% if item.source %}{% set meta = meta + [item.source] %}{% endif %}
+            {% if item.importance %}{% set meta = meta + [item.importance ~ " importance"] %}{% endif %}
+            {% if item.sentiment %}{% set meta = meta + ["sentiment " ~ item.sentiment] %}{% endif %}
+            {% if meta or item.time %}<p class="detail-muted">{{ meta | join(" · ") }}{% if item.time %}{% if meta %} · {% endif %}<time datetime="{{ item.time | iso_datetime }}" data-local-time-format="datetime">{{ item.time | local_time('datetime') }}</time>{% endif %}</p>{% endif %}
+            <p>{{ item.summary or 'No summary captured.' }}</p>
+          </article>
+          {% endfor %}
+        </div>
+        {% else %}
+        <p class="detail-muted quiet-empty surface-empty-copy">No event news was decision-visible for this risk window.</p>
+        {% endif %}
+      </section>
 
       <section class="surface-block">
         <div class="surface-block-head">

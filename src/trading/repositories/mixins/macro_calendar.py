@@ -3,7 +3,13 @@ from __future__ import annotations
 from datetime import date, datetime
 from decimal import Decimal
 
-from src.db.models.trading import CalendarEvent, MacroSnapshot, PortfolioEventRiskAssessment
+from src.db.models.trading import (
+    CalendarEvent,
+    EventNewsItem,
+    MacroSnapshot,
+    PortfolioEventRiskAssessment,
+    SocialMacroItem,
+)
 from src.trading.events import CalendarEventRecord, PortfolioEventRiskAssessmentRecord
 from src.trading.macro import MacroSnapshotRecord
 from src.trading.repositories._base_common import _to_uuid, _to_uuid_or_none
@@ -164,6 +170,50 @@ class MacroCalendarRepositoryMixin:
             )
         )
         return tuple(_portfolio_event_risk_assessment_record(row) for row in rows)
+    def load_decision_visible_macro_news(
+        self,
+        *,
+        decision_time: datetime,
+        ticker: str | None = None,
+    ) -> tuple[object, ...]:
+        symbol = ticker.strip().upper() if isinstance(ticker, str) else None
+        rows = [
+            row
+            for row in self.session.query(SocialMacroItem).all()
+            if row.available_for_decision_at <= decision_time
+            and (symbol is None or row.ticker == symbol)
+        ]
+        rows.sort(
+            key=lambda row: (
+                row.available_for_decision_at,
+                str(row.social_macro_item_id),
+            )
+        )
+        return tuple(self._to_social_macro_item_record(row) for row in rows)
+    def load_decision_visible_event_news(
+        self,
+        *,
+        decision_time: datetime,
+        ticker: str | None = None,
+    ) -> tuple[object, ...]:
+        symbol = ticker.strip().upper() if isinstance(ticker, str) else None
+        rows = [
+            row
+            for row in self.session.query(EventNewsItem).all()
+            if row.available_for_decision_at <= decision_time
+            and (
+                symbol is None
+                or row.ticker == symbol
+                or row.source_ticker == symbol
+            )
+        ]
+        rows.sort(
+            key=lambda row: (
+                row.available_for_decision_at,
+                str(row.event_news_item_id),
+            )
+        )
+        return tuple(self._to_event_news_item_record(row) for row in rows)
     def load_decision_available_risk_macro_context(
         self,
         *,
@@ -181,6 +231,14 @@ class MacroCalendarRepositoryMixin:
                 ticker=ticker,
             ),
             "portfolio_event_risk_assessments": self.load_portfolio_event_risk_assessments(
+                decision_time=decision_time,
+                ticker=ticker,
+            ),
+            "macro_news": self.load_decision_visible_macro_news(
+                decision_time=decision_time,
+                ticker=ticker,
+            ),
+            "event_news": self.load_decision_visible_event_news(
                 decision_time=decision_time,
                 ticker=ticker,
             ),

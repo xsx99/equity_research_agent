@@ -254,6 +254,52 @@ class InMemoryTradingRepository:
         )
         return tuple(assessments)
 
+    def load_decision_visible_macro_news(
+        self,
+        *,
+        decision_time: datetime,
+        ticker: str | None = None,
+    ) -> tuple[SocialMacroItemRecord, ...]:
+        symbol = ticker.strip().upper() if isinstance(ticker, str) else None
+        rows = [
+            item
+            for item in self.social_macro_items
+            if item.available_for_decision_at <= decision_time
+            and (symbol is None or item.ticker == symbol)
+        ]
+        rows.sort(
+            key=lambda item: (
+                item.available_for_decision_at,
+                item.social_macro_item_id,
+            )
+        )
+        return tuple(rows)
+
+    def load_decision_visible_event_news(
+        self,
+        *,
+        decision_time: datetime,
+        ticker: str | None = None,
+    ) -> tuple[EventNewsItemRecord, ...]:
+        symbol = ticker.strip().upper() if isinstance(ticker, str) else None
+        rows = [
+            item
+            for item in self.event_news_items
+            if item.available_for_decision_at <= decision_time
+            and (
+                symbol is None
+                or item.ticker == symbol
+                or item.source_ticker == symbol
+            )
+        ]
+        rows.sort(
+            key=lambda item: (
+                item.available_for_decision_at,
+                item.event_news_item_id,
+            )
+        )
+        return tuple(rows)
+
     def load_decision_available_risk_macro_context(
         self,
         *,
@@ -271,6 +317,14 @@ class InMemoryTradingRepository:
                 ticker=ticker,
             ),
             "portfolio_event_risk_assessments": self.load_portfolio_event_risk_assessments(
+                decision_time=decision_time,
+                ticker=ticker,
+            ),
+            "macro_news": self.load_decision_visible_macro_news(
+                decision_time=decision_time,
+                ticker=ticker,
+            ),
+            "event_news": self.load_decision_visible_event_news(
                 decision_time=decision_time,
                 ticker=ticker,
             ),

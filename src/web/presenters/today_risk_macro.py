@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
-from typing import Any
+from typing import Any, Callable
 
 from src.web.presenters.today_copy import (
     event_type_label,
@@ -26,6 +26,8 @@ def build_today_risk_macro_payload(
     macro_snapshot = context.get("macro_snapshot")
     calendar_events = _dedupe_calendar_events(tuple(context.get("calendar_events") or ()), as_of=as_of)
     event_assessments = _dedupe_risk_assessments(tuple(context.get("portfolio_event_risk_assessments") or ()))
+    macro_news = _display_news_rows(tuple(context.get("macro_news") or ()), row_builder=_macro_news_row, limit=6)
+    event_news = _display_news_rows(tuple(context.get("event_news") or ()), row_builder=_event_news_row, limit=8)
 
     binding_constraints = tuple(
         getattr(latest_intent, "binding_constraints", None)
@@ -87,6 +89,8 @@ def build_today_risk_macro_payload(
             if _default_visible_event(event) and _is_upcoming_event(event, as_of)
         ),
         "risk_sources": tuple(_risk_source_row(assessment) for assessment in event_assessments if _default_visible_assessment(assessment)),
+        "macro_news": macro_news,
+        "event_news": event_news,
         "exposures": exposures,
         "binding_constraints": binding_constraints,
         "availability": availability,
@@ -289,6 +293,80 @@ def _risk_source_row(assessment: object) -> dict[str, Any]:
         "updated_at": getattr(assessment, "available_for_decision_at", None),
         "basis_note": metadata_json.get("why_visible") or metadata_json.get("summary_bucket"),
     }
+
+
+def _display_news_rows(
+    items: tuple[object, ...],
+    *,
+    row_builder: Callable[[object], dict[str, Any]],
+    limit: int,
+) -> tuple[dict[str, Any], ...]:
+    deduped: dict[str, object] = {}
+    for item in items:
+        key = _news_dedupe_key(item)
+        current = deduped.get(key)
+        if current is None or _sort_timestamp(getattr(item, "available_for_decision_at", None)) >= _sort_timestamp(
+            getattr(current, "available_for_decision_at", None)
+        ):
+            deduped[key] = item
+    rows = sorted(deduped.values(), key=_news_sort_key, reverse=True)
+    return tuple(row_builder(item) for item in rows[:limit])
+
+
+def _news_dedupe_key(item: object) -> str:
+    return str(
+        getattr(item, "dedupe_key", None)
+        or getattr(item, "social_macro_item_id", None)
+        or getattr(item, "event_news_item_id", None)
+        or id(item)
+    )
+
+
+def _news_sort_key(item: object) -> tuple[tuple[int, str], str]:
+    return (
+        _sort_timestamp(getattr(item, "available_for_decision_at", None)),
+        _news_dedupe_key(item),
+    )
+
+
+def _macro_news_row(item: object) -> dict[str, Any]:
+    title = _first_text(getattr(item, "title", None), getattr(item, "summary", None))
+    return {
+        "news_id": getattr(item, "social_macro_item_id", None),
+        "ticker": getattr(item, "ticker", None),
+        "category": _humanize_identifier(getattr(item, "category", None)),
+        "title": title,
+        "headline": title,
+        "summary": getattr(item, "summary", None),
+        "source": getattr(item, "provider", None),
+        "sentiment": getattr(item, "sentiment_direction", None) or getattr(item, "direction", None),
+        "importance": getattr(item, "importance_label", None),
+        "time": getattr(item, "available_for_decision_at", None),
+    }
+
+
+def _event_news_row(item: object) -> dict[str, Any]:
+    headline = _first_text(getattr(item, "headline", None), getattr(item, "summary", None))
+    return {
+        "news_id": getattr(item, "event_news_item_id", None),
+        "ticker": getattr(item, "ticker", None),
+        "category": event_type_label(getattr(item, "event_type", None)),
+        "title": headline,
+        "headline": headline,
+        "summary": getattr(item, "summary", None),
+        "source": getattr(item, "provider", None),
+        "sentiment": getattr(item, "sentiment", None) or getattr(item, "direction", None),
+        "importance": getattr(item, "importance", None),
+        "time": getattr(item, "available_for_decision_at", None),
+    }
+
+
+def _first_text(*values: object) -> str | None:
+    for value in values:
+        text = str(value or "").strip()
+        if text:
+            return text
+    return None
 
 
 def _default_visible_event(event: object) -> bool:

@@ -70,7 +70,7 @@ from src.trading.portfolio.state import PortfolioSnapshot, StockPosition
 from src.trading.post_close.reflection import DailyReflectionRecord, LearningFactorRecord
 from src.trading.replay.outcomes import CandidateOutcomeEvaluationRecord
 from src.trading.signals import SignalSnapshotResult
-from src.trading.signals.sources import EventNewsItemRecord
+from src.trading.signals.sources import EventNewsItemRecord, SocialMacroItemRecord
 from src.trading.strategies.classifier import TradeClassificationRecord
 from src.trading.strategies.matching import CandidateScoreRecord, StrategyRunRecord
 from src.trading.strategies.matching import StrategyDefinitionRecord
@@ -157,6 +157,36 @@ class _RepositoryBase:
             headline=row.headline,
             summary=row.summary,
             provider=row.provider,
+            source_refs_json=list(row.source_refs_json or []),
+            dedupe_key=row.dedupe_key,
+            event_time=row.event_time,
+            published_at=row.published_at,
+            ingested_at=row.ingested_at,
+            available_for_decision_at=row.available_for_decision_at,
+            raw_payload_ref=row.raw_payload_ref,
+            metadata_json=dict(row.metadata_json or {}),
+        )
+
+    def _to_social_macro_item_record(self, row: Any) -> SocialMacroItemRecord:
+        return SocialMacroItemRecord(
+            social_macro_item_id=str(row.social_macro_item_id),
+            ticker=row.ticker,
+            category=row.category,
+            source_type=row.source_type,
+            source_key=row.source_key,
+            provider=row.provider,
+            title=row.title,
+            summary=row.summary,
+            direction=row.direction,
+            sentiment_direction=row.sentiment_direction,
+            importance_score=float(row.importance_score) if row.importance_score is not None else None,
+            importance_label=row.importance_label,
+            policy_headwind_flag=bool(row.policy_headwind_flag),
+            policy_tailwind_flag=bool(row.policy_tailwind_flag),
+            explicit_ticker_mention_flag=bool(row.explicit_ticker_mention_flag),
+            explicit_theme_mention_flag=bool(row.explicit_theme_mention_flag),
+            theme_tags_json=list(row.theme_tags_json or []),
+            company_name_mentions_json=list(row.company_name_mentions_json or []),
             source_refs_json=list(row.source_refs_json or []),
             dedupe_key=row.dedupe_key,
             event_time=row.event_time,

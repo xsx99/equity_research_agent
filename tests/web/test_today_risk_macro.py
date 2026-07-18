@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from src.trading.events.calendar import CalendarEventRecord
 from src.trading.events.risk import PortfolioEventRiskAssessmentRecord
 from src.trading.macro.context import MacroSnapshotRecord
+from src.trading.signals.sources import EventNewsItemRecord, SocialMacroItemRecord
 from src.web.presenters.today_risk_macro import build_today_risk_macro_payload
 
 
@@ -134,6 +135,83 @@ def test_today_risk_macro_presenter_formats_event_dates_without_raw_timestamps()
 
     assert payload["events"][0]["scheduled_at"] == datetime(2026, 7, 31, 20, 0, 12, 123456, tzinfo=timezone.utc)
     assert payload["events"][0]["scheduled_at_label"] == "Jul 31, 2026"
+
+
+def test_today_risk_macro_presenter_formats_decision_visible_news_rows():
+    decision_time = datetime(2026, 6, 16, 13, 0, tzinfo=timezone.utc)
+    macro_news = SocialMacroItemRecord(
+        social_macro_item_id="macro-news-1",
+        ticker="NVDA",
+        category="geopolitical_news",
+        source_type="news",
+        source_key="geopolitical_news",
+        provider="global_context",
+        title="Export-control update hits semis",
+        summary="Policy risk is fresh for chip names.",
+        direction="negative",
+        sentiment_direction="negative",
+        importance_score=0.8,
+        importance_label="high",
+        policy_headwind_flag=True,
+        policy_tailwind_flag=False,
+        explicit_ticker_mention_flag=True,
+        explicit_theme_mention_flag=True,
+        theme_tags_json=["semiconductors"],
+        company_name_mentions_json=["NVIDIA"],
+        source_refs_json=[],
+        dedupe_key="macro-visible",
+        event_time=decision_time,
+        published_at=decision_time,
+        ingested_at=decision_time,
+        available_for_decision_at=decision_time,
+        raw_payload_ref=None,
+        metadata_json={},
+    )
+    event_news = EventNewsItemRecord(
+        event_news_item_id="event-news-1",
+        ticker="NVDA",
+        source_ticker=None,
+        event_type="company_specific",
+        direction="negative",
+        sentiment="negative",
+        importance="high",
+        headline="NVIDIA export restriction update",
+        summary="Fresh headline raises event risk.",
+        provider="alpaca",
+        source_refs_json=[],
+        dedupe_key="event-visible",
+        event_time=decision_time,
+        published_at=decision_time,
+        ingested_at=decision_time,
+        available_for_decision_at=decision_time,
+        raw_payload_ref=None,
+        metadata_json={},
+    )
+
+    payload = build_today_risk_macro_payload(
+        latest_risk=None,
+        latest_intent=None,
+        risk_macro_context={"macro_news": (macro_news,), "event_news": (event_news,)},
+        exposures=(),
+    )
+
+    assert payload["macro_news"] == (
+        {
+            "news_id": "macro-news-1",
+            "ticker": "NVDA",
+            "category": "Geopolitical News",
+            "title": "Export-control update hits semis",
+            "headline": "Export-control update hits semis",
+            "summary": "Policy risk is fresh for chip names.",
+            "source": "global_context",
+            "sentiment": "negative",
+            "importance": "high",
+            "time": decision_time,
+        },
+    )
+    assert payload["event_news"][0]["news_id"] == "event-news-1"
+    assert payload["event_news"][0]["headline"] == "NVIDIA export restriction update"
+    assert payload["event_news"][0]["category"] == "Company Specific"
 
 
 def test_today_risk_macro_presenter_keeps_latest_refreshed_earnings_per_ticker():

@@ -1166,6 +1166,7 @@ pre {
 .risk-context-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 0.6rem 1.6rem; margin-top: 0.9rem; }
 .risk-context-col .section-label { margin-top: 0; margin-bottom: 0.4rem; }
 .risk-context-col .summary-points li { font-size: var(--fs-sm); }
+.decision-news-list { max-height: 28rem; overflow-y: auto; padding-right: 0.25rem; }
 /* Compact event-calendar rows (reference style: dot · time · name · impact) */
 .cal-event-list { display: flex; flex-direction: column; gap: 0.15rem; }
 .cal-event-row { display: flex; align-items: center; gap: 0.6rem; padding: 0.4rem 0.5rem; border-radius: var(--radius-sm); }
