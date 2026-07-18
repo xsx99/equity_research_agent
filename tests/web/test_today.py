@@ -3741,6 +3741,7 @@ def test_load_strategy_proposals_exposes_user_readable_llm_output():
         duplicate_of_strategy_id=None,
         rejection_reason=None,
         evidence_summary="Repeated reclaim setups outperformed after early gap failures.",
+        metadata_json={"evidence_gate": {"final_outcome_count": 2}},
         proposal_json={
             "core_thesis": "Wait for a failed gap-down to reclaim VWAP before entering.",
             "required_signals": ["opening_gap_pct", "vwap_reclaim"],
@@ -3764,6 +3765,31 @@ def test_load_strategy_proposals_exposes_user_readable_llm_output():
     assert proposals[0]["invalidators"] == ("Fails to hold VWAP",)
     assert proposals[0]["evidence_summary"] == "Repeated reclaim setups outperformed after early gap failures."
     assert proposals[0]["proposed_lifecycle_status_label"] == "Shadow"
+    assert proposals[0]["evidence_gate"]["final_outcome_count"] == 2
+
+
+def test_load_strategy_proposals_labels_insufficient_evidence_status():
+    from src.web.routers.today import _load_strategy_proposals
+
+    row = SimpleNamespace(
+        trade_date=date(2026, 7, 10),
+        proposed_strategy_id="thin_gap_reclaim_v1",
+        display_name="Thin gap reclaim",
+        proposal_status="insufficient_evidence_rejected",
+        proposed_lifecycle_status=None,
+        duplicate_of_strategy_id=None,
+        rejection_reason="insufficient_final_outcomes",
+        evidence_summary="Only two final rows were cited.",
+        metadata_json={"evidence_gate": {"final_outcome_count": 2}},
+        proposal_json={},
+    )
+    session = MagicMock()
+    session.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [row]
+
+    proposals = _load_strategy_proposals(session)
+
+    assert proposals[0]["proposal_status_label"] == "Insufficient Evidence Rejected"
+    assert proposals[0]["evidence_gate"]["final_outcome_count"] == 2
 
 
 def test_strategy_proposal_recent_cutoff_uses_ten_calendar_days():

@@ -8,7 +8,11 @@ from src.trading.replay.outcomes import CandidateOutcomeEvaluationRecord
 from src.trading.risk import PortfolioContext, PositionSizer, RiskConfigResolver, RiskDecisionRecord, TradeRiskRequest
 from src.trading.strategies.classifier import TradeClassificationRecord
 from src.trading.strategies.matching import CandidateScoreRecord, StrategyDefinitionRecord
-from src.trading.post_close.strategy_evolution import StrategyEvolutionPipeline, StrategyEvolutionRequest
+from src.trading.post_close.strategy_evolution import (
+    StrategyEvolutionPipeline,
+    StrategyEvolutionRequest,
+    maybe_promote_strategy_from_outcomes,
+)
 from src.trading.workflows.trading_decision import TradingDecisionPipeline
 
 
@@ -121,7 +125,73 @@ def _risk(candidate: CandidateScoreRecord) -> RiskDecisionRecord:
     )
 
 
-def _lifecycle_request() -> StrategyEvolutionRequest:
+def _strategy_definition(*, lifecycle_status: str = "shadow") -> StrategyDefinitionRecord:
+    return StrategyDefinitionRecord(
+        strategy_definition_id="definition-1",
+        strategy_id="post_gap_vwap_reclaim_v1",
+        version="v1",
+        display_name="Post-Gap VWAP Reclaim",
+        strategy_layer="tactical_pattern",
+        typical_horizon="intraday-3d",
+        config_json={
+            "required_signals": ["opening_gap_pct", "vwap_reclaim", "relative_volume"],
+            "risk_tags": ["gap_risk", "intraday_momentum"],
+            "core_thesis": "Gap reclaim continuation.",
+        },
+        lifecycle_status=lifecycle_status,
+        is_active=True,
+        source="reflection_learning",
+    )
+
+
+def _outcome(
+    outcome_id: str,
+    *,
+    ticker: str,
+    decision_time: datetime,
+    alpha: float,
+) -> CandidateOutcomeEvaluationRecord:
+    return CandidateOutcomeEvaluationRecord(
+        candidate_outcome_evaluation_id=outcome_id,
+        historical_replay_run_id=None,
+        candidate_score_id=f"candidate-{outcome_id}",
+        trade_classification_id=None,
+        ticker=ticker,
+        strategy_id="post_gap_vwap_reclaim_v1",
+        strategy_version="v1",
+        expression_bucket_id="long_stock",
+        trade_identity="watch_only",
+        direction="bullish",
+        catalyst_type="earnings",
+        confidence_bucket="bucket",
+        decision_time=decision_time,
+        horizon_start_at=decision_time,
+        horizon_end_at=decision_time,
+        evaluation_status="final",
+        candidate_return=0.04,
+        benchmark_returns={"QQQ": 0.01},
+        peer_basket_id=None,
+        peer_basket_return=None,
+        alpha=alpha,
+        max_favorable_excursion=0.05,
+        max_adverse_excursion=-0.01,
+        regime="neutral",
+        sector_theme="software",
+        metadata_json={},
+    )
+
+
+def _positive_outcomes() -> tuple[CandidateOutcomeEvaluationRecord, ...]:
+    return (
+        _outcome("outcome-1", ticker="AAPL", decision_time=datetime(2026, 5, 29, 22, 0, tzinfo=timezone.utc), alpha=0.03),
+        _outcome("outcome-2", ticker="MSFT", decision_time=datetime(2026, 6, 1, 22, 0, tzinfo=timezone.utc), alpha=0.03),
+        _outcome("outcome-3", ticker="NVDA", decision_time=datetime(2026, 6, 2, 22, 0, tzinfo=timezone.utc), alpha=-0.01),
+    )
+
+
+def _lifecycle_request(
+    outcomes: tuple[CandidateOutcomeEvaluationRecord, ...] | None = None,
+) -> StrategyEvolutionRequest:
     now = datetime(2026, 6, 2, 22, 0, tzinfo=timezone.utc)
     return StrategyEvolutionRequest(
         trade_date=date(2026, 6, 2),
@@ -130,115 +200,13 @@ def _lifecycle_request() -> StrategyEvolutionRequest:
         daily_reflections=(),
         learning_factors=(),
         rejected_candidates=(),
-        candidate_outcome_evaluations=(
-            CandidateOutcomeEvaluationRecord(
-                candidate_outcome_evaluation_id="outcome-1",
-                historical_replay_run_id=None,
-                candidate_score_id="candidate-1",
-                trade_classification_id=None,
-                ticker="AAPL",
-                strategy_id="post_gap_vwap_reclaim_v1",
-                strategy_version="v1",
-                expression_bucket_id="long_stock",
-                trade_identity="watch_only",
-                direction="bullish",
-                catalyst_type="earnings",
-                confidence_bucket="bucket",
-                decision_time=now,
-                horizon_start_at=now,
-                horizon_end_at=now,
-                evaluation_status="final",
-                candidate_return=0.04,
-                benchmark_returns={"QQQ": 0.01},
-                peer_basket_id=None,
-                peer_basket_return=None,
-                alpha=0.03,
-                max_favorable_excursion=0.05,
-                max_adverse_excursion=-0.01,
-                regime="neutral",
-                sector_theme="software",
-                metadata_json={},
-            ),
-            CandidateOutcomeEvaluationRecord(
-                candidate_outcome_evaluation_id="outcome-2",
-                historical_replay_run_id=None,
-                candidate_score_id="candidate-2",
-                trade_classification_id=None,
-                ticker="MSFT",
-                strategy_id="post_gap_vwap_reclaim_v1",
-                strategy_version="v1",
-                expression_bucket_id="long_stock",
-                trade_identity="watch_only",
-                direction="bullish",
-                catalyst_type="earnings",
-                confidence_bucket="bucket",
-                decision_time=now,
-                horizon_start_at=now,
-                horizon_end_at=now,
-                evaluation_status="final",
-                candidate_return=0.03,
-                benchmark_returns={"QQQ": 0.0},
-                peer_basket_id=None,
-                peer_basket_return=None,
-                alpha=0.03,
-                max_favorable_excursion=0.05,
-                max_adverse_excursion=-0.01,
-                regime="neutral",
-                sector_theme="software",
-                metadata_json={},
-            ),
-            CandidateOutcomeEvaluationRecord(
-                candidate_outcome_evaluation_id="outcome-3",
-                historical_replay_run_id=None,
-                candidate_score_id="candidate-3",
-                trade_classification_id=None,
-                ticker="NVDA",
-                strategy_id="post_gap_vwap_reclaim_v1",
-                strategy_version="v1",
-                expression_bucket_id="long_stock",
-                trade_identity="watch_only",
-                direction="bullish",
-                catalyst_type="earnings",
-                confidence_bucket="bucket",
-                decision_time=now,
-                horizon_start_at=now,
-                horizon_end_at=now,
-                evaluation_status="final",
-                candidate_return=0.02,
-                benchmark_returns={"QQQ": -0.01},
-                peer_basket_id=None,
-                peer_basket_return=None,
-                alpha=0.03,
-                max_favorable_excursion=0.04,
-                max_adverse_excursion=-0.01,
-                regime="neutral",
-                sector_theme="software",
-                metadata_json={},
-            ),
-        ),
+        candidate_outcome_evaluations=outcomes or _positive_outcomes(),
     )
 
 
 def test_shadow_strategy_promotes_to_experimental_after_positive_evidence(tmp_path):
     repository = InMemoryTradingRepository()
-    repository.save_strategy_definition(
-        StrategyDefinitionRecord(
-            strategy_definition_id="definition-1",
-            strategy_id="post_gap_vwap_reclaim_v1",
-            version="v1",
-            display_name="Post-Gap VWAP Reclaim",
-            strategy_layer="tactical_pattern",
-            typical_horizon="intraday-3d",
-            config_json={
-                "required_signals": ["opening_gap_pct", "vwap_reclaim", "relative_volume"],
-                "risk_tags": ["gap_risk", "intraday_momentum"],
-                "core_thesis": "Gap reclaim continuation.",
-            },
-            lifecycle_status="shadow",
-            is_active=True,
-            source="reflection_learning",
-        )
-    )
+    repository.save_strategy_definition(_strategy_definition(lifecycle_status="shadow"))
     pipeline = StrategyEvolutionPipeline(
         repository=repository,
         prompt_registry=_strategy_prompt(tmp_path),
@@ -256,6 +224,70 @@ def test_shadow_strategy_promotes_to_experimental_after_positive_evidence(tmp_pa
 
     assert result.lifecycle_updates[0].new_lifecycle_status == "experimental"
     assert result.strategy_definitions[0].lifecycle_status == "experimental"
+
+
+def test_lifecycle_promotion_requires_distinct_trade_dates():
+    same_day = datetime(2026, 6, 2, 22, 0, tzinfo=timezone.utc)
+
+    transition = maybe_promote_strategy_from_outcomes(
+        definition=_strategy_definition(lifecycle_status="shadow"),
+        outcomes=(
+            _outcome("outcome-1", ticker="AAPL", decision_time=same_day, alpha=0.03),
+            _outcome("outcome-2", ticker="MSFT", decision_time=same_day, alpha=0.03),
+            _outcome("outcome-3", ticker="NVDA", decision_time=same_day, alpha=0.02),
+        ),
+        decision_time=same_day,
+    )
+
+    assert transition is None
+
+
+def test_lifecycle_promotion_requires_distinct_tickers():
+    decision_time = datetime(2026, 6, 2, 22, 0, tzinfo=timezone.utc)
+
+    transition = maybe_promote_strategy_from_outcomes(
+        definition=_strategy_definition(lifecycle_status="shadow"),
+        outcomes=(
+            _outcome("outcome-1", ticker="AAPL", decision_time=datetime(2026, 5, 29, 22, 0, tzinfo=timezone.utc), alpha=0.03),
+            _outcome("outcome-2", ticker="AAPL", decision_time=datetime(2026, 6, 1, 22, 0, tzinfo=timezone.utc), alpha=0.03),
+            _outcome("outcome-3", ticker="AAPL", decision_time=decision_time, alpha=0.02),
+        ),
+        decision_time=decision_time,
+    )
+
+    assert transition is None
+
+
+def test_lifecycle_promotion_requires_win_rate_threshold():
+    decision_time = datetime(2026, 6, 2, 22, 0, tzinfo=timezone.utc)
+
+    transition = maybe_promote_strategy_from_outcomes(
+        definition=_strategy_definition(lifecycle_status="shadow"),
+        outcomes=(
+            _outcome("outcome-1", ticker="AAPL", decision_time=datetime(2026, 5, 29, 22, 0, tzinfo=timezone.utc), alpha=0.03),
+            _outcome("outcome-2", ticker="MSFT", decision_time=datetime(2026, 6, 1, 22, 0, tzinfo=timezone.utc), alpha=-0.02),
+            _outcome("outcome-3", ticker="NVDA", decision_time=decision_time, alpha=-0.01),
+        ),
+        decision_time=decision_time,
+    )
+
+    assert transition is None
+
+
+def test_lifecycle_promotion_requires_positive_mean_alpha():
+    decision_time = datetime(2026, 6, 2, 22, 0, tzinfo=timezone.utc)
+
+    transition = maybe_promote_strategy_from_outcomes(
+        definition=_strategy_definition(lifecycle_status="shadow"),
+        outcomes=(
+            _outcome("outcome-1", ticker="AAPL", decision_time=datetime(2026, 5, 29, 22, 0, tzinfo=timezone.utc), alpha=0.001),
+            _outcome("outcome-2", ticker="MSFT", decision_time=datetime(2026, 6, 1, 22, 0, tzinfo=timezone.utc), alpha=0.001),
+            _outcome("outcome-3", ticker="NVDA", decision_time=decision_time, alpha=-0.01),
+        ),
+        decision_time=decision_time,
+    )
+
+    assert transition is None
 
 
 def test_shadow_strategies_are_not_paper_trade_authorized_and_experimental_are_capped(tmp_path):

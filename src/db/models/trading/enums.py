@@ -122,6 +122,7 @@ class StrategyProposalStatus(ChoiceEnum):
     ACCEPTED = "accepted"
     DUPLICATE_REJECTED = "duplicate_rejected"
     PROPOSAL_FAILED = "proposal_failed"
+    INSUFFICIENT_EVIDENCE_REJECTED = "insufficient_evidence_rejected"
 
 class StrategyEvaluationStatus(ChoiceEnum):
     OBSERVED = "observed"

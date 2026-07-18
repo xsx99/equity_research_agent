@@ -28,7 +28,48 @@ def _write_prompt(tmp_path) -> PromptRegistry:
     return PromptRegistry(root=tmp_path / "prompts")
 
 
-def _request() -> StrategyEvolutionRequest:
+def _outcome(
+    outcome_id: str,
+    *,
+    ticker: str,
+    decision_time: datetime,
+    alpha: float,
+    strategy_id: str = "gap_and_go_v1",
+) -> CandidateOutcomeEvaluationRecord:
+    return CandidateOutcomeEvaluationRecord(
+        candidate_outcome_evaluation_id=outcome_id,
+        historical_replay_run_id=None,
+        candidate_score_id=f"candidate-{outcome_id}",
+        trade_classification_id=None,
+        ticker=ticker,
+        strategy_id=strategy_id,
+        strategy_version="v1",
+        expression_bucket_id="long_stock",
+        trade_identity="watch_only",
+        direction="bullish",
+        catalyst_type="earnings",
+        confidence_bucket="gap_reclaim",
+        decision_time=decision_time,
+        horizon_start_at=decision_time,
+        horizon_end_at=decision_time,
+        evaluation_status="final",
+        candidate_return=0.05,
+        benchmark_returns={"QQQ": 0.01},
+        peer_basket_id=None,
+        peer_basket_return=None,
+        alpha=alpha,
+        max_favorable_excursion=0.06,
+        max_adverse_excursion=-0.01,
+        regime="neutral",
+        sector_theme="software",
+        metadata_json={"would_have_worked": True},
+    )
+
+
+def _request(
+    *,
+    outcomes: tuple[CandidateOutcomeEvaluationRecord, ...] | None = None,
+) -> StrategyEvolutionRequest:
     now = datetime(2026, 6, 2, 22, 0, tzinfo=timezone.utc)
     return StrategyEvolutionRequest(
         trade_date=date(2026, 6, 2),
@@ -95,35 +136,11 @@ def _request() -> StrategyEvolutionRequest:
                 "core_signal_evidence": {"technical.vwap_reclaim": True},
             },
         ),
-        candidate_outcome_evaluations=(
-            CandidateOutcomeEvaluationRecord(
-                candidate_outcome_evaluation_id="outcome-1",
-                historical_replay_run_id=None,
-                candidate_score_id="candidate-1",
-                trade_classification_id=None,
-                ticker="PLTR",
-                strategy_id="gap_and_go_v1",
-                strategy_version="v1",
-                expression_bucket_id="long_stock",
-                trade_identity="watch_only",
-                direction="bullish",
-                catalyst_type="earnings",
-                confidence_bucket="gap_reclaim",
-                decision_time=now,
-                horizon_start_at=now,
-                horizon_end_at=now,
-                evaluation_status="final",
-                candidate_return=0.05,
-                benchmark_returns={"QQQ": 0.01},
-                peer_basket_id=None,
-                peer_basket_return=None,
-                alpha=0.04,
-                max_favorable_excursion=0.06,
-                max_adverse_excursion=-0.01,
-                regime="neutral",
-                sector_theme="software",
-                metadata_json={"would_have_worked": True},
-            ),
+        candidate_outcome_evaluations=outcomes
+        or (
+            _outcome("outcome-1", ticker="PLTR", decision_time=datetime(2026, 5, 29, 22, 0, tzinfo=timezone.utc), alpha=0.04),
+            _outcome("outcome-2", ticker="AAPL", decision_time=datetime(2026, 6, 1, 22, 0, tzinfo=timezone.utc), alpha=0.03),
+            _outcome("outcome-3", ticker="MSFT", decision_time=now, alpha=-0.01),
         ),
     )
 
@@ -160,6 +177,7 @@ def test_strategy_evolution_pipeline_creates_shadow_strategy_from_unique_proposa
                         "proposed_strategy_id": "post_gap_vwap_reclaim_v1",
                         "display_name": "Post-Gap VWAP Reclaim",
                         "source_reflection_ids": ["reflection-1"],
+                        "supporting_outcome_ids": ["outcome-1", "outcome-2", "outcome-3"],
                         "core_thesis": "Stocks that fade an opening gap and reclaim VWAP with renewed volume often continue.",
                         "typical_horizon": "intraday-3d",
                         "required_signals": [
@@ -186,6 +204,7 @@ def test_strategy_evolution_pipeline_creates_shadow_strategy_from_unique_proposa
 
     assert len(result.strategy_proposals) == 1
     assert result.strategy_proposals[0].proposal_status == "accepted"
+    assert result.strategy_proposals[0].metadata_json["evidence_gate"]["passed"] is True
     assert result.strategy_proposals[0].proposed_lifecycle_status == "shadow"
     assert result.strategy_proposals[0].source_daily_reflection_id == "reflection-1"
     assert len(result.strategy_definitions) == 1
@@ -193,6 +212,56 @@ def test_strategy_evolution_pipeline_creates_shadow_strategy_from_unique_proposa
     assert result.strategy_definitions[0].lifecycle_status == "shadow"
     assert result.strategy_evaluation_results[-1].new_lifecycle_status == "shadow"
     assert len(repository.llm_prompt_runs) == 1
+
+
+def test_strategy_evolution_pipeline_rejects_proposal_with_only_same_day_evidence(tmp_path):
+    same_day = datetime(2026, 6, 2, 22, 0, tzinfo=timezone.utc)
+    request = _request(
+        outcomes=(
+            _outcome("outcome-1", ticker="PLTR", decision_time=same_day, alpha=0.04),
+            _outcome("outcome-2", ticker="AAPL", decision_time=same_day, alpha=0.03),
+            _outcome("outcome-3", ticker="MSFT", decision_time=same_day, alpha=-0.01),
+        )
+    )
+    pipeline = StrategyEvolutionPipeline(
+        repository=InMemoryTradingRepository(),
+        prompt_registry=_write_prompt(tmp_path),
+        model_name="gpt-5",
+        agent_runner=lambda prompt, model_name: {
+            "content": {
+                "proposals": [
+                    {
+                        "proposed_strategy_id": "post_gap_vwap_reclaim_v1",
+                        "display_name": "Post-Gap VWAP Reclaim",
+                        "source_reflection_ids": ["reflection-1"],
+                        "supporting_outcome_ids": ["outcome-1", "outcome-2", "outcome-3"],
+                        "core_thesis": "Stocks that fade an opening gap and reclaim VWAP with renewed volume often continue.",
+                        "typical_horizon": "intraday-3d",
+                        "required_signals": [
+                            "opening_gap_pct",
+                            "vwap_reclaim",
+                            "relative_volume",
+                        ],
+                        "optional_signals": [],
+                        "scoring_rules": {},
+                        "risk_tags": ["gap_risk"],
+                        "macro_blocked_regimes": [],
+                        "invalidators": ["re-loses VWAP"],
+                        "evidence_summary": "Only same-day rows look good.",
+                    }
+                ],
+                "schema_version": "v1",
+                "generated_at": "2026-06-02T22:00:00+00:00",
+            }
+        },
+    )
+
+    result = pipeline.run(request=request)
+
+    assert result.strategy_proposals[0].proposal_status == "insufficient_evidence_rejected"
+    assert result.strategy_proposals[0].rejection_reason == "insufficient_distinct_trade_dates"
+    assert result.strategy_definitions == ()
+    assert result.strategy_proposals[0].metadata_json["evidence_gate"]["passed"] is False
 
 
 def test_strategy_evolution_pipeline_rejects_duplicates_and_persists_failed_proposals(tmp_path):
@@ -227,6 +296,7 @@ def test_strategy_evolution_pipeline_rejects_duplicates_and_persists_failed_prop
                         "proposed_strategy_id": "another_gap_and_go_v1",
                         "display_name": "Another Gap-and-Go",
                         "source_reflection_ids": ["reflection-1"],
+                        "supporting_outcome_ids": ["outcome-1", "outcome-2", "outcome-3"],
                         "core_thesis": "Overnight information continues as momentum.",
                         "typical_horizon": "intraday-3d",
                         "required_signals": [

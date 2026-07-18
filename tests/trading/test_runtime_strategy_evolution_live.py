@@ -91,6 +91,33 @@ def test_live_strategy_evolution_request_loader_returns_skipped_when_reflection_
     assert result.reasons == ("daily_reflection_missing",)
 
 
+def test_live_strategy_evolution_loader_requires_current_day_reflection():
+    decision_time = datetime(2026, 6, 4, 22, 30, tzinfo=timezone.utc)
+    loader = LiveStrategyEvolutionRequestLoader(
+        repository=_Repository(
+            {
+                "daily_reflections": (
+                    SimpleNamespace(
+                        daily_reflection_id="reflection-old",
+                        trade_date=date(2026, 6, 3),
+                        status="succeeded",
+                        strategy_proposal_hints=(),
+                        metadata_json={},
+                    ),
+                ),
+                "learning_factors": (),
+                "rejected_candidates": (),
+                "candidate_outcome_evaluations": (),
+            }
+        )
+    )
+
+    result = loader.load(trade_date=date(2026, 6, 4), decision_time=decision_time)
+
+    assert result.status == "skipped"
+    assert result.reasons == ("daily_reflection_missing",)
+
+
 @dataclass(frozen=True)
 class _RequestLoader:
     result: StrategyEvolutionLoadResult

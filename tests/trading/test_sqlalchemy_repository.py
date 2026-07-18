@@ -2249,3 +2249,269 @@ def test_sqlalchemy_repository_load_reflection_inputs_includes_late_local_day_ro
     assert payload["portfolio_outcome"] is not None
     assert [row["ticker"] for row in payload["trading_decisions"]] == ["AAPL"]
     assert payload["portfolio_snapshots"][0]["snapshot_time"] == late_row_time.isoformat()
+
+
+def test_sqlalchemy_repository_load_reflection_inputs_adds_long_horizon_context():
+    session = _FakeSession()
+    repository = SqlAlchemyTradingRepository(session)
+    trade_date = date(2026, 6, 30)
+    window = (
+        datetime(2026, 6, 30, 0, 0, tzinfo=timezone.utc),
+        datetime(2026, 7, 1, 0, 0, tzinfo=timezone.utc),
+    )
+    current_reflection_id = uuid.uuid4()
+    prior_reflection_id = uuid.uuid4()
+    old_reflection_id = uuid.uuid4()
+    session.rows_by_type[CandidateOutcomeEvaluation] = [
+        SimpleNamespace(
+            ticker="TODAY",
+            strategy_id="gap_reclaim_v1",
+            trade_identity="tactical_stock_trade",
+            evaluation_status="final",
+            candidate_return=Decimal("0.03"),
+            alpha=Decimal("0.02"),
+            benchmark_returns_json={"QQQ": 0.01},
+            decision_time=datetime(2026, 6, 30, 15, 30, tzinfo=timezone.utc),
+        ),
+        SimpleNamespace(
+            ticker="PRIOR_IN_WINDOW",
+            strategy_id="gap_reclaim_v1",
+            trade_identity="tactical_stock_trade",
+            evaluation_status="final",
+            candidate_return=Decimal("0.04"),
+            alpha=Decimal("0.03"),
+            benchmark_returns_json={"QQQ": 0.01},
+            decision_time=datetime(2026, 6, 20, 15, 30, tzinfo=timezone.utc),
+        ),
+        SimpleNamespace(
+            ticker="OLDER_THAN_LOOKBACK",
+            strategy_id="gap_reclaim_v1",
+            trade_identity="tactical_stock_trade",
+            evaluation_status="final",
+            candidate_return=Decimal("0.05"),
+            alpha=Decimal("0.04"),
+            benchmark_returns_json={"QQQ": 0.01},
+            decision_time=datetime(2026, 4, 15, 15, 30, tzinfo=timezone.utc),
+        ),
+    ]
+    session.rows_by_type[DailyReflection] = [
+        SimpleNamespace(
+            daily_reflection_id=current_reflection_id,
+            trade_date=trade_date,
+            status="succeeded",
+            reflection_json={"what_worked": ["today"]},
+            strategy_proposal_hints_json=[],
+            metadata_json={"learning_factors_used": []},
+            created_at=datetime(2026, 6, 30, 22, 0, tzinfo=timezone.utc),
+        ),
+        SimpleNamespace(
+            daily_reflection_id=prior_reflection_id,
+            trade_date=date(2026, 6, 20),
+            status="succeeded",
+            reflection_json={"what_failed": ["single-day chase"]},
+            strategy_proposal_hints_json=[{"title": "gap context"}],
+            metadata_json={},
+            created_at=datetime(2026, 6, 20, 22, 0, tzinfo=timezone.utc),
+        ),
+        SimpleNamespace(
+            daily_reflection_id=old_reflection_id,
+            trade_date=date(2026, 4, 15),
+            status="succeeded",
+            reflection_json={"what_failed": ["old"]},
+            strategy_proposal_hints_json=[],
+            metadata_json={},
+            created_at=datetime(2026, 4, 15, 22, 0, tzinfo=timezone.utc),
+        ),
+    ]
+
+    payload = repository.load_reflection_inputs(trade_date=trade_date, window=window)
+
+    assert [row["ticker"] for row in payload["candidate_outcome_evaluations"]] == ["TODAY"]
+    assert [row["ticker"] for row in payload["historical_outcome_context"]] == ["PRIOR_IN_WINDOW"]
+    assert payload["prior_reflection_context"][0]["daily_reflection_id"] == str(prior_reflection_id)
+    assert payload["prior_reflection_context"][0]["trade_date"] == "2026-06-20"
+    assert payload["prior_reflection_context"][0]["what_failed"] == ["single-day chase"]
+
+
+def test_sqlalchemy_repository_load_strategy_evolution_inputs_uses_trailing_window():
+    session = _FakeSession()
+    repository = SqlAlchemyTradingRepository(session)
+    trade_date = date(2026, 6, 30)
+    current_reflection_id = uuid.uuid4()
+    prior_reflection_id = uuid.uuid4()
+    old_reflection_id = uuid.uuid4()
+    current_factor_id = uuid.uuid4()
+    prior_factor_id = uuid.uuid4()
+    old_factor_id = uuid.uuid4()
+    session.rows_by_type[DailyReflection] = [
+        SimpleNamespace(
+            daily_reflection_id=prior_reflection_id,
+            trade_date=date(2026, 6, 20),
+            prompt_run_id=None,
+            status="succeeded",
+            reflection_json={"what_worked": ["prior"]},
+            strategy_proposal_hints_json=[{"title": "prior hint"}],
+            metadata_json={},
+            created_at=datetime(2026, 6, 20, 22, 0, tzinfo=timezone.utc),
+        ),
+        SimpleNamespace(
+            daily_reflection_id=current_reflection_id,
+            trade_date=trade_date,
+            prompt_run_id=None,
+            status="succeeded",
+            reflection_json={"what_worked": ["current"]},
+            strategy_proposal_hints_json=[{"title": "current hint"}],
+            metadata_json={},
+            created_at=datetime(2026, 6, 30, 22, 0, tzinfo=timezone.utc),
+        ),
+        SimpleNamespace(
+            daily_reflection_id=old_reflection_id,
+            trade_date=date(2026, 4, 15),
+            prompt_run_id=None,
+            status="succeeded",
+            reflection_json={"what_worked": ["old"]},
+            strategy_proposal_hints_json=[{"title": "old hint"}],
+            metadata_json={},
+            created_at=datetime(2026, 4, 15, 22, 0, tzinfo=timezone.utc),
+        ),
+    ]
+    session.rows_by_type[LearningFactor] = [
+        SimpleNamespace(
+            learning_factor_id=current_factor_id,
+            factor_key="lf-current",
+            daily_reflection_id=current_reflection_id,
+            trade_date=trade_date,
+            title="Current factor",
+            factor_type="candidate_filter",
+            scope="strategy",
+            status="candidate",
+            strategy_id="gap_reclaim_v1",
+            condition="current",
+            recommendation="observe",
+            confidence=Decimal("0.65"),
+            activation_policy="candidate",
+            effect_tags_json=[],
+            evidence_json=[],
+            metadata_json={},
+            created_at=datetime(2026, 6, 30, 22, 0, tzinfo=timezone.utc),
+        ),
+        SimpleNamespace(
+            learning_factor_id=prior_factor_id,
+            factor_key="lf-prior",
+            daily_reflection_id=prior_reflection_id,
+            trade_date=date(2026, 6, 20),
+            title="Prior factor",
+            factor_type="candidate_filter",
+            scope="strategy",
+            status="observation",
+            strategy_id="gap_reclaim_v1",
+            condition="prior",
+            recommendation="observe",
+            confidence=Decimal("0.62"),
+            activation_policy="observation",
+            effect_tags_json=[],
+            evidence_json=[],
+            metadata_json={},
+            created_at=datetime(2026, 6, 20, 22, 0, tzinfo=timezone.utc),
+        ),
+        SimpleNamespace(
+            learning_factor_id=old_factor_id,
+            factor_key="lf-old",
+            daily_reflection_id=old_reflection_id,
+            trade_date=date(2026, 4, 15),
+            title="Old factor",
+            factor_type="candidate_filter",
+            scope="strategy",
+            status="candidate",
+            strategy_id="gap_reclaim_v1",
+            condition="old",
+            recommendation="observe",
+            confidence=Decimal("0.61"),
+            activation_policy="candidate",
+            effect_tags_json=[],
+            evidence_json=[],
+            metadata_json={},
+            created_at=datetime(2026, 4, 15, 22, 0, tzinfo=timezone.utc),
+        ),
+    ]
+    session.rows_by_type[CandidateScore] = [
+        SimpleNamespace(
+            ticker="TODAY_REJECT",
+            strategy_id="gap_reclaim_v1",
+            strategy_version="v1",
+            rejection_reason="risk_limit",
+            selection_source="scanner",
+            selection_reason="current reject",
+            core_signal_evidence_json={},
+            risk_tags_json=[],
+            decision_time=datetime(2026, 6, 30, 15, 30, tzinfo=timezone.utc),
+        ),
+        SimpleNamespace(
+            ticker="PRIOR_REJECT",
+            strategy_id="gap_reclaim_v1",
+            strategy_version="v1",
+            rejection_reason="late_confirmation",
+            selection_source="scanner",
+            selection_reason="prior reject",
+            core_signal_evidence_json={},
+            risk_tags_json=[],
+            decision_time=datetime(2026, 6, 20, 15, 30, tzinfo=timezone.utc),
+        ),
+        SimpleNamespace(
+            ticker="OLD_REJECT",
+            strategy_id="gap_reclaim_v1",
+            strategy_version="v1",
+            rejection_reason="old",
+            selection_source="scanner",
+            selection_reason="old reject",
+            core_signal_evidence_json={},
+            risk_tags_json=[],
+            decision_time=datetime(2026, 4, 15, 15, 30, tzinfo=timezone.utc),
+        ),
+    ]
+    session.rows_by_type[CandidateOutcomeEvaluation] = [
+        _candidate_outcome_row("TODAY", "outcome-current", datetime(2026, 6, 30, 15, 30, tzinfo=timezone.utc)),
+        _candidate_outcome_row("PRIOR_IN_WINDOW", "outcome-prior", datetime(2026, 6, 20, 15, 30, tzinfo=timezone.utc)),
+        _candidate_outcome_row("OLDER_THAN_LOOKBACK", "outcome-old", datetime(2026, 4, 15, 15, 30, tzinfo=timezone.utc)),
+    ]
+
+    payload = repository.load_strategy_evolution_inputs(trade_date=trade_date)
+
+    assert [row.daily_reflection_id for row in payload["daily_reflections"]] == [
+        str(current_reflection_id),
+        str(prior_reflection_id),
+    ]
+    assert {row.factor_key for row in payload["learning_factors"]} == {"lf-current", "lf-prior"}
+    assert {row.ticker for row in payload["candidate_outcome_evaluations"]} == {"TODAY", "PRIOR_IN_WINDOW"}
+    assert {row["ticker"] for row in payload["rejected_candidates"]} == {"TODAY_REJECT", "PRIOR_REJECT"}
+
+
+def _candidate_outcome_row(ticker: str, outcome_id: str, decision_time: datetime) -> SimpleNamespace:
+    return SimpleNamespace(
+        candidate_outcome_evaluation_id=uuid.uuid5(uuid.NAMESPACE_DNS, outcome_id),
+        historical_replay_run_id=None,
+        candidate_score_id=None,
+        trade_classification_id=None,
+        ticker=ticker,
+        strategy_id="gap_reclaim_v1",
+        strategy_version="v1",
+        expression_bucket_id="stock",
+        trade_identity="tactical_stock_trade",
+        direction="long",
+        catalyst_type="earnings",
+        confidence_bucket="gap_reclaim_v1|stock|tactical_stock_trade|long|earnings",
+        decision_time=decision_time,
+        horizon_start_at=decision_time,
+        horizon_end_at=decision_time,
+        evaluation_status="final",
+        candidate_return=Decimal("0.03"),
+        benchmark_returns_json={"QQQ": 0.01},
+        peer_basket_id=None,
+        peer_basket_return=None,
+        alpha=Decimal("0.02"),
+        max_favorable_excursion=Decimal("0.04"),
+        max_adverse_excursion=Decimal("-0.01"),
+        regime="neutral",
+        sector_theme="semis",
+        metadata_json={},
+    )

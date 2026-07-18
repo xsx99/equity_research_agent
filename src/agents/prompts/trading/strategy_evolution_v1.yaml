@@ -17,6 +17,7 @@ template: |
         "proposed_strategy_id": "post_gap_vwap_reclaim_v1",
         "display_name": "Post-Gap VWAP Reclaim",
         "source_reflection_ids": ["reflection-id"],
+        "supporting_outcome_ids": ["candidate-outcome-id-1"],
         "core_thesis": "Why this pattern is distinct.",
         "typical_horizon": "intraday-3d",
         "required_signals": ["signal_a", "signal_b"],
@@ -36,4 +37,7 @@ template: |
   - Propose only distinct tactical_pattern strategies.
   - Prefer new strategies only when existing strategies do not already capture the same thesis.
   - Use only signals present in the input evidence.
+  - A proposal must cite `supporting_outcome_ids` from at least 3 final outcome rows across at least 3 distinct trade dates and at least 2 tickers.
+  - Interim rows may be discussed as monitoring context, but they are not proof for a proposal.
+  - Return an empty proposals array when evidence is only same-day, interim, missing outcome ids, or otherwise below the multi-day threshold.
   - Do not suggest active or experimental lifecycle states. The Python pipeline decides lifecycle transitions.
