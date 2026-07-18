@@ -15,6 +15,8 @@ class StrategyProposalOutputItem(BaseModel):
     proposed_strategy_id: str
     display_name: str
     source_reflection_ids: list[str] = Field(default_factory=list)
+    supporting_outcome_ids: list[str] = Field(default_factory=list)
+    supporting_learning_factor_keys: list[str] = Field(default_factory=list)
     core_thesis: str
     typical_horizon: str
     required_signals: list[str] = Field(default_factory=list)
