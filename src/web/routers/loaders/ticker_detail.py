@@ -7,15 +7,25 @@ from src.db.models.trading import EventNewsItem, IntradaySignalSnapshot, NewsAle
 from src.web.routers import today_loaders
 
 
-def _load_signal_history_by_ticker(session: Any) -> dict[str, dict[str, Any]]:
+def _load_signal_history_by_ticker(
+    session: Any,
+    *,
+    tickers: tuple[str, ...] | None = None,
+) -> dict[str, dict[str, Any]]:
+    ticker_scope = _normalize_ticker_scope(tickers)
+    signal_query = session.query(SignalSnapshot)
+    intraday_query = session.query(IntradaySignalSnapshot)
+    if ticker_scope is not None:
+        signal_query = signal_query.filter(SignalSnapshot.ticker.in_(ticker_scope))
+        intraday_query = intraday_query.filter(IntradaySignalSnapshot.ticker.in_(ticker_scope))
     signal_rows = (
-        session.query(SignalSnapshot)
+        signal_query
         .order_by(SignalSnapshot.decision_time.desc(), SignalSnapshot.created_at.desc())
         .limit(100)
         .all()
     )
     intraday_rows = (
-        session.query(IntradaySignalSnapshot)
+        intraday_query
         .order_by(IntradaySignalSnapshot.decision_time.desc(), IntradaySignalSnapshot.created_at.desc())
         .limit(100)
         .all()
@@ -72,15 +82,25 @@ def _load_signal_history_by_ticker(session: Any) -> dict[str, dict[str, Any]]:
     return grouped
 
 
-def _load_news_by_ticker(session: Any) -> dict[str, list[dict[str, Any]]]:
+def _load_news_by_ticker(
+    session: Any,
+    *,
+    tickers: tuple[str, ...] | None = None,
+) -> dict[str, list[dict[str, Any]]]:
+    ticker_scope = _normalize_ticker_scope(tickers)
+    alert_query = session.query(NewsAlert)
+    event_query = session.query(EventNewsItem)
+    if ticker_scope is not None:
+        alert_query = alert_query.filter(NewsAlert.ticker.in_(ticker_scope))
+        event_query = event_query.filter(EventNewsItem.ticker.in_(ticker_scope))
     alert_rows = (
-        session.query(NewsAlert)
+        alert_query
         .order_by(NewsAlert.published_at.desc(), NewsAlert.created_at.desc())
         .limit(100)
         .all()
     )
     event_rows = (
-        session.query(EventNewsItem)
+        event_query
         .order_by(EventNewsItem.published_at.desc(), EventNewsItem.available_for_decision_at.desc())
         .limit(100)
         .all()
@@ -124,9 +144,17 @@ def _load_news_by_ticker(session: Any) -> dict[str, list[dict[str, Any]]]:
     return grouped
 
 
-def _load_fundamentals_by_ticker(session: Any) -> dict[str, list[dict[str, Any]]]:
+def _load_fundamentals_by_ticker(
+    session: Any,
+    *,
+    tickers: tuple[str, ...] | None = None,
+) -> dict[str, list[dict[str, Any]]]:
+    ticker_scope = _normalize_ticker_scope(tickers)
+    query = session.query(SignalSnapshot)
+    if ticker_scope is not None:
+        query = query.filter(SignalSnapshot.ticker.in_(ticker_scope))
     rows = (
-        session.query(SignalSnapshot)
+        query
         .order_by(SignalSnapshot.decision_time.desc(), SignalSnapshot.created_at.desc())
         .limit(100)
         .all()
@@ -156,6 +184,19 @@ def _load_fundamentals_by_ticker(session: Any) -> dict[str, list[dict[str, Any]]
         if isinstance(fundamental_metrics, dict):
             items.extend(_fundamental_snippets_from_metrics(fundamental_metrics, row.decision_time))
     return grouped
+
+
+def _normalize_ticker_scope(tickers: tuple[str, ...] | None) -> tuple[str, ...] | None:
+    if tickers is None:
+        return None
+    normalized = tuple(
+        dict.fromkeys(
+            ticker
+            for raw_ticker in tickers
+            if (ticker := str(raw_ticker or "").strip().upper())
+        )
+    )
+    return normalized or None
 
 
 def _timeline_summary_from_signal(signal_json: dict[str, Any]) -> str:

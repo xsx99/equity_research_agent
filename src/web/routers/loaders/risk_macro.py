@@ -115,9 +115,17 @@ def _load_material_signal_change_tickers(session: Any) -> set[str]:
     return tickers
 
 
-def _load_risk_by_ticker(session: Any) -> dict[str, dict[str, Any]]:
+def _load_risk_by_ticker(
+    session: Any,
+    *,
+    tickers: tuple[str, ...] | None = None,
+) -> dict[str, dict[str, Any]]:
+    ticker_scope = _normalize_ticker_scope(tickers)
+    query = session.query(RiskDecision)
+    if ticker_scope is not None:
+        query = query.filter(RiskDecision.ticker.in_(ticker_scope))
     rows = (
-        session.query(RiskDecision)
+        query
         .order_by(RiskDecision.decision_time.desc(), RiskDecision.created_at.desc())
         .limit(100)
         .all()
@@ -146,6 +154,19 @@ def _load_risk_by_ticker(session: Any) -> dict[str, dict[str, Any]]:
             ],
         }
     return grouped
+
+
+def _normalize_ticker_scope(tickers: tuple[str, ...] | None) -> tuple[str, ...] | None:
+    if tickers is None:
+        return None
+    normalized = tuple(
+        dict.fromkeys(
+            ticker
+            for raw_ticker in tickers
+            if (ticker := str(raw_ticker or "").strip().upper())
+        )
+    )
+    return normalized or None
 
 
 def _risk_decision_lookahead_source(row: Any) -> str | None:

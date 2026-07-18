@@ -408,10 +408,6 @@ def load_today_dashboard(
     }
     audit_detail: dict[str, Any] | None = None
     if needs_trade_workspace:
-        risk_by_ticker = _load_risk_by_ticker(session)
-        signal_history_by_ticker = _load_signal_history_by_ticker(session)
-        news_by_ticker_for_workspace = _load_news_by_ticker(session)
-        fundamentals_by_ticker = _load_fundamentals_by_ticker(session)
         trade_workspace_rows = _ensure_trade_rows_include_ticker(
             session,
             trade_workspace_rows,
@@ -423,19 +419,41 @@ def load_today_dashboard(
             positions_by_ticker=positions_by_ticker,
             option_positions_by_ticker=option_positions_by_ticker,
             closed_positions_by_ticker=closed_positions_by_ticker,
-            risk_by_ticker=risk_by_ticker,
-            signal_history_by_ticker=signal_history_by_ticker,
-            news_by_ticker=news_by_ticker_for_workspace,
-            fundamentals_by_ticker=fundamentals_by_ticker,
+            risk_by_ticker={},
+            signal_history_by_ticker={},
+            news_by_ticker={},
+            fundamentals_by_ticker={},
         )
         trade_workspace_rows = _ensure_trade_rows_include_ticker(
             session,
             trade_workspace_rows,
             ticker_workspace.get("selected_ticker"),
         )
+        selected_workspace_ticker = ticker_workspace.get("selected_ticker")
+        detail_ticker_scope = (selected_workspace_ticker,) if selected_workspace_ticker else ()
+        risk_by_ticker = (
+            _load_risk_by_ticker(session, tickers=detail_ticker_scope)
+            if detail_ticker_scope
+            else {}
+        )
+        signal_history_by_ticker = (
+            _load_signal_history_by_ticker(session, tickers=detail_ticker_scope)
+            if detail_ticker_scope
+            else {}
+        )
+        news_by_ticker_for_workspace = (
+            _load_news_by_ticker(session, tickers=detail_ticker_scope)
+            if detail_ticker_scope
+            else {}
+        )
+        fundamentals_by_ticker = (
+            _load_fundamentals_by_ticker(session, tickers=detail_ticker_scope)
+            if detail_ticker_scope
+            else {}
+        )
         ticker_workspace = build_ticker_workspace(
             trade_rows=trade_workspace_rows,
-            selected_ticker=ticker_workspace.get("selected_ticker"),
+            selected_ticker=selected_workspace_ticker,
             positions_by_ticker=positions_by_ticker,
             option_positions_by_ticker=option_positions_by_ticker,
             closed_positions_by_ticker=closed_positions_by_ticker,

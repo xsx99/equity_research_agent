@@ -2191,6 +2191,48 @@ class TestTodayDashboard:
         assert dashboard["ticker_workspace"]["audit_detail"] == selected_nvda_detail
         assert dashboard["trades"]["selected_detail"] == selected_nvda_detail
 
+    def test_load_today_dashboard_scopes_trade_workspace_detail_loaders_to_selected_ticker(self):
+        from src.web.routers.today import load_today_dashboard
+
+        session = _query_stub_session()
+        trade_rows = _ticker_selection_trade_rows()
+        selected_nvda_detail = _selected_trade_detail("NVDA")
+
+        with ExitStack() as stack:
+            stack.enter_context(patch("src.web.routers.today._load_trade_rows", return_value=trade_rows))
+            stack.enter_context(patch("src.web.routers.today._load_trade_detail", return_value=selected_nvda_detail))
+            stack.enter_context(patch("src.web.routers.today._load_positions", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_option_positions", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_recent_closed_positions", return_value=()))
+            load_risk = stack.enter_context(
+                patch("src.web.routers.today._load_risk_by_ticker", return_value={"NVDA": {"status": "approved"}})
+            )
+            load_signal_history = stack.enter_context(
+                patch(
+                    "src.web.routers.today._load_signal_history_by_ticker",
+                    return_value={"NVDA": {"technical": [], "summary": [], "timeline": []}},
+                )
+            )
+            load_news = stack.enter_context(patch("src.web.routers.today._load_news_by_ticker", return_value={}))
+            load_fundamentals = stack.enter_context(
+                patch("src.web.routers.today._load_fundamentals_by_ticker", return_value={})
+            )
+            stack.enter_context(patch("src.web.routers.today._load_candidate_rows", return_value=()))
+            stack.enter_context(patch("src.web.routers.today._load_manual_requests", return_value=()))
+
+            dashboard = load_today_dashboard(
+                session,
+                selected_tab="trades",
+                decision_id=None,
+                selected_ticker="NVDA",
+            )
+
+        assert dashboard["ticker_workspace"]["selected_ticker"] == "NVDA"
+        load_risk.assert_called_once_with(session, tickers=("NVDA",))
+        load_signal_history.assert_called_once_with(session, tickers=("NVDA",))
+        load_news.assert_called_once_with(session, tickers=("NVDA",))
+        load_fundamentals.assert_called_once_with(session, tickers=("NVDA",))
+
     def test_load_today_dashboard_backfills_selected_ticker_trade_row_outside_recent_trade_rows(self):
         from src.db.models.trading import TradingDecision
         from src.web.routers.today import load_today_dashboard
