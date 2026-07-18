@@ -27,7 +27,12 @@ class LiveStrategyEvolutionRequestLoader:
     def load(self, *, trade_date: date, decision_time: datetime) -> StrategyEvolutionLoadResult:
         payload = self.repository.load_strategy_evolution_inputs(trade_date=trade_date)
         daily_reflections = tuple(payload.get("daily_reflections") or ())
-        if not daily_reflections:
+        current_reflections = tuple(
+            reflection
+            for reflection in daily_reflections
+            if getattr(reflection, "trade_date", None) == trade_date
+        )
+        if not current_reflections:
             return StrategyEvolutionLoadResult(
                 status="skipped",
                 request=None,

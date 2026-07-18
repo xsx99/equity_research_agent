@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -36,6 +36,9 @@ from src.trading.trade_day import local_day_bounds_utc
 
 def _trade_day_window(trade_date: date) -> tuple[object, object]:
     return local_day_bounds_utc(trade_date, app_config.SCHEDULER_TIMEZONE)
+
+
+LONG_HORIZON_LOOKBACK_DAYS = 60
 
 
 class StrategyRepositoryMixin:
@@ -129,43 +132,60 @@ class StrategyRepositoryMixin:
         self.session.add(row)
         self.session.flush()
     def load_strategy_evolution_inputs(self, *, trade_date: date) -> dict[str, object]:
-        start_utc, end_utc = _trade_day_window(trade_date)
-        latest_reflection = max(
-            self.session.query(DailyReflection).filter(DailyReflection.trade_date == trade_date).all(),
-            key=lambda row: row.created_at,
-            default=None,
-        )
-        daily_reflections = (
-            (_daily_reflection_record(latest_reflection),)
-            if latest_reflection is not None
-            else ()
+        start_date = trade_date - timedelta(days=LONG_HORIZON_LOOKBACK_DAYS)
+        start_utc, _ = _trade_day_window(start_date)
+        _, end_utc = _trade_day_window(trade_date)
+        daily_reflection_rows = sorted(
+            self.session.query(DailyReflection)
+            .filter(
+                DailyReflection.trade_date >= start_date,
+                DailyReflection.trade_date <= trade_date,
+            )
+            .all(),
+            key=lambda row: (row.trade_date, row.created_at),
+            reverse=True,
         )
         return {
-            "daily_reflections": daily_reflections,
+            "daily_reflections": tuple(_daily_reflection_record(row) for row in daily_reflection_rows),
             "learning_factors": tuple(
                 _learning_factor_record(row)
-                for row in self.session.query(LearningFactor)
-                .filter(LearningFactor.trade_date == trade_date)
-                .all()
+                for row in sorted(
+                    self.session.query(LearningFactor)
+                    .filter(
+                        LearningFactor.trade_date >= start_date,
+                        LearningFactor.trade_date <= trade_date,
+                    )
+                    .all(),
+                    key=lambda item: item.trade_date,
+                    reverse=True,
+                )
             ),
             "rejected_candidates": tuple(
                 _rejected_candidate_payload(row)
-                for row in self.session.query(CandidateScore)
-                .filter(
-                    CandidateScore.decision_time >= start_utc,
-                    CandidateScore.decision_time < end_utc,
+                for row in sorted(
+                    self.session.query(CandidateScore)
+                    .filter(
+                        CandidateScore.decision_time >= start_utc,
+                        CandidateScore.decision_time < end_utc,
+                    )
+                    .all(),
+                    key=lambda item: item.decision_time,
+                    reverse=True,
                 )
-                .all()
                 if row.rejection_reason
             ),
             "candidate_outcome_evaluations": tuple(
                 _candidate_outcome_record(row)
-                for row in self.session.query(CandidateOutcomeEvaluation)
-                .filter(
-                    CandidateOutcomeEvaluation.decision_time >= start_utc,
-                    CandidateOutcomeEvaluation.decision_time < end_utc,
+                for row in sorted(
+                    self.session.query(CandidateOutcomeEvaluation)
+                    .filter(
+                        CandidateOutcomeEvaluation.decision_time >= start_utc,
+                        CandidateOutcomeEvaluation.decision_time < end_utc,
+                    )
+                    .all(),
+                    key=lambda item: item.decision_time,
+                    reverse=True,
                 )
-                .all()
             ),
         }
     def save_candidate_scores(self, candidates: list[CandidateScoreRecord] | tuple[CandidateScoreRecord, ...]) -> None:
