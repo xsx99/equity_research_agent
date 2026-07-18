@@ -62,6 +62,8 @@ class ReflectionPipelineRequest:
     risk_factor_exposures: tuple[dict[str, Any], ...] = ()
     portfolio_snapshots: tuple[dict[str, Any], ...] = ()
     candidate_outcome_evaluations: tuple[dict[str, Any], ...] = ()
+    historical_outcome_context: tuple[dict[str, Any], ...] = ()
+    prior_reflection_context: tuple[dict[str, Any], ...] = ()
     benchmark_peer_returns: dict[str, Any] = field(default_factory=dict)
     paper_option_decisions: tuple[dict[str, Any], ...] = ()
     paper_option_positions: tuple[dict[str, Any], ...] = ()
@@ -155,6 +157,8 @@ class ReflectionPipeline:
             "risk_factor_exposures": list(request.risk_factor_exposures),
             "portfolio_snapshots": list(request.portfolio_snapshots),
             "candidate_outcome_evaluations": list(request.candidate_outcome_evaluations),
+            "historical_outcome_context": list(request.historical_outcome_context),
+            "prior_reflection_context": list(request.prior_reflection_context),
             "benchmark_peer_returns": dict(request.benchmark_peer_returns),
             "paper_option_decisions": list(request.paper_option_decisions),
             "paper_option_positions": list(request.paper_option_positions),

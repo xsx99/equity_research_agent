@@ -2098,3 +2098,85 @@ def test_sqlalchemy_repository_load_reflection_inputs_includes_late_local_day_ro
     assert payload["portfolio_outcome"] is not None
     assert [row["ticker"] for row in payload["trading_decisions"]] == ["AAPL"]
     assert payload["portfolio_snapshots"][0]["snapshot_time"] == late_row_time.isoformat()
+
+
+def test_sqlalchemy_repository_load_reflection_inputs_adds_long_horizon_context():
+    session = _FakeSession()
+    repository = SqlAlchemyTradingRepository(session)
+    trade_date = date(2026, 6, 30)
+    window = (
+        datetime(2026, 6, 30, 0, 0, tzinfo=timezone.utc),
+        datetime(2026, 7, 1, 0, 0, tzinfo=timezone.utc),
+    )
+    current_reflection_id = uuid.uuid4()
+    prior_reflection_id = uuid.uuid4()
+    old_reflection_id = uuid.uuid4()
+    session.rows_by_type[CandidateOutcomeEvaluation] = [
+        SimpleNamespace(
+            ticker="TODAY",
+            strategy_id="gap_reclaim_v1",
+            trade_identity="tactical_stock_trade",
+            evaluation_status="final",
+            candidate_return=Decimal("0.03"),
+            alpha=Decimal("0.02"),
+            benchmark_returns_json={"QQQ": 0.01},
+            decision_time=datetime(2026, 6, 30, 15, 30, tzinfo=timezone.utc),
+        ),
+        SimpleNamespace(
+            ticker="PRIOR_IN_WINDOW",
+            strategy_id="gap_reclaim_v1",
+            trade_identity="tactical_stock_trade",
+            evaluation_status="final",
+            candidate_return=Decimal("0.04"),
+            alpha=Decimal("0.03"),
+            benchmark_returns_json={"QQQ": 0.01},
+            decision_time=datetime(2026, 6, 20, 15, 30, tzinfo=timezone.utc),
+        ),
+        SimpleNamespace(
+            ticker="OLDER_THAN_LOOKBACK",
+            strategy_id="gap_reclaim_v1",
+            trade_identity="tactical_stock_trade",
+            evaluation_status="final",
+            candidate_return=Decimal("0.05"),
+            alpha=Decimal("0.04"),
+            benchmark_returns_json={"QQQ": 0.01},
+            decision_time=datetime(2026, 4, 15, 15, 30, tzinfo=timezone.utc),
+        ),
+    ]
+    session.rows_by_type[DailyReflection] = [
+        SimpleNamespace(
+            daily_reflection_id=current_reflection_id,
+            trade_date=trade_date,
+            status="succeeded",
+            reflection_json={"what_worked": ["today"]},
+            strategy_proposal_hints_json=[],
+            metadata_json={"learning_factors_used": []},
+            created_at=datetime(2026, 6, 30, 22, 0, tzinfo=timezone.utc),
+        ),
+        SimpleNamespace(
+            daily_reflection_id=prior_reflection_id,
+            trade_date=date(2026, 6, 20),
+            status="succeeded",
+            reflection_json={"what_failed": ["single-day chase"]},
+            strategy_proposal_hints_json=[{"title": "gap context"}],
+            metadata_json={},
+            created_at=datetime(2026, 6, 20, 22, 0, tzinfo=timezone.utc),
+        ),
+        SimpleNamespace(
+            daily_reflection_id=old_reflection_id,
+            trade_date=date(2026, 4, 15),
+            status="succeeded",
+            reflection_json={"what_failed": ["old"]},
+            strategy_proposal_hints_json=[],
+            metadata_json={},
+            created_at=datetime(2026, 4, 15, 22, 0, tzinfo=timezone.utc),
+        ),
+    ]
+
+    payload = repository.load_reflection_inputs(trade_date=trade_date, window=window)
+
+    assert [row["ticker"] for row in payload["candidate_outcome_evaluations"]] == ["TODAY"]
+    assert [row["ticker"] for row in payload["historical_outcome_context"]] == ["PRIOR_IN_WINDOW"]
+    assert payload["prior_reflection_context"][0]["daily_reflection_id"] == str(prior_reflection_id)
+    assert payload["prior_reflection_context"][0]["trade_date"] == "2026-06-20"
+    assert payload["prior_reflection_context"][0]["what_failed"] == ["single-day chase"]
