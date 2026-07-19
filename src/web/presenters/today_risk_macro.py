@@ -1,7 +1,7 @@
 """Backend risk/macro presenter for the today workstation."""
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable
 
 from src.web.presenters.today_copy import (
@@ -26,8 +26,18 @@ def build_today_risk_macro_payload(
     macro_snapshot = context.get("macro_snapshot")
     calendar_events = _dedupe_calendar_events(tuple(context.get("calendar_events") or ()), as_of=as_of)
     event_assessments = _dedupe_risk_assessments(tuple(context.get("portfolio_event_risk_assessments") or ()))
-    macro_news = _display_news_rows(tuple(context.get("macro_news") or ()), row_builder=_macro_news_row, limit=6)
-    event_news = _display_news_rows(tuple(context.get("event_news") or ()), row_builder=_event_news_row, limit=8)
+    macro_news = _display_news_rows(
+        tuple(context.get("macro_news") or ()),
+        row_builder=_macro_news_row,
+        limit=6,
+        as_of=as_of,
+    )
+    event_news = _display_news_rows(
+        tuple(context.get("event_news") or ()),
+        row_builder=_event_news_row,
+        limit=8,
+        as_of=as_of,
+    )
 
     binding_constraints = tuple(
         getattr(latest_intent, "binding_constraints", None)
@@ -86,7 +96,9 @@ def build_today_risk_macro_payload(
         "events": tuple(
             _event_row(event)
             for event in sorted(calendar_events, key=_event_sort_key)
-            if _default_visible_event(event) and _is_upcoming_event(event, as_of)
+            if _default_visible_event(event)
+            and _is_upcoming_event(event, as_of)
+            and _is_in_visible_event_window(event, as_of)
         ),
         "risk_sources": tuple(_risk_source_row(assessment) for assessment in event_assessments if _default_visible_assessment(assessment)),
         "macro_news": macro_news,
@@ -300,9 +312,12 @@ def _display_news_rows(
     *,
     row_builder: Callable[[object], dict[str, Any]],
     limit: int,
+    as_of: datetime | None,
 ) -> tuple[dict[str, Any], ...]:
     deduped: dict[str, object] = {}
     for item in items:
+        if not _is_recent_news(item, as_of):
+            continue
         key = _news_dedupe_key(item)
         current = deduped.get(key)
         if current is None or _sort_timestamp(getattr(item, "available_for_decision_at", None)) >= _sort_timestamp(
@@ -314,6 +329,14 @@ def _display_news_rows(
 
 
 def _news_dedupe_key(item: object) -> str:
+    headline = _normalized_story_text(
+        _first_text(getattr(item, "title", None), getattr(item, "headline", None), getattr(item, "summary", None))
+    )
+    summary = _normalized_story_text(getattr(item, "summary", None))
+    provider = _normalized_story_text(getattr(item, "provider", None))
+    display_date = _display_date(getattr(item, "available_for_decision_at", None))
+    if headline or summary:
+        return f"story:{display_date or 'unknown'}:{provider}:{headline}:{summary}"
     return str(
         getattr(item, "dedupe_key", None)
         or getattr(item, "social_macro_item_id", None)
@@ -369,6 +392,10 @@ def _first_text(*values: object) -> str | None:
     return None
 
 
+def _normalized_story_text(value: object) -> str:
+    return " ".join(str(value or "").strip().lower().split())
+
+
 def _default_visible_event(event: object) -> bool:
     metadata_json = dict(getattr(event, "metadata_json", {}) or {})
     return metadata_json.get("default_visibility", "show") != "hide"
@@ -398,6 +425,43 @@ def _is_upcoming_event(event: object, as_of: datetime | None) -> bool:
     if isinstance(cutoff, datetime):
         cutoff = cutoff.date()
     return event_time >= cutoff
+
+
+def _is_in_visible_event_window(event: object, as_of: datetime | None) -> bool:
+    if as_of is None:
+        return True
+    event_type = str(getattr(event, "event_type", "") or "").strip().lower()
+    if "earn" not in event_type:
+        return True
+    event_date = _display_date(getattr(event, "event_time", None))
+    reference_date = _display_date(as_of)
+    if event_date is None or reference_date is None:
+        return True
+    return event_date <= reference_date + timedelta(days=7)
+
+
+def _is_recent_news(item: object, as_of: datetime | None) -> bool:
+    if as_of is None:
+        return True
+    news_date = _display_date(
+        getattr(item, "available_for_decision_at", None)
+        or getattr(item, "published_at", None)
+        or getattr(item, "event_time", None)
+    )
+    reference_date = _display_date(as_of)
+    if news_date is None or reference_date is None:
+        return False
+    return reference_date - timedelta(days=3) <= news_date <= reference_date
+
+
+def _display_date(value: object) -> date | None:
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.date()
+        return value.astimezone().date()
+    if isinstance(value, date):
+        return value
+    return None
 
 
 def _default_visible_assessment(assessment: object) -> bool:

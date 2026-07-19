@@ -10,6 +10,102 @@ from src.trading.signals.sources import EventNewsItemRecord, SocialMacroItemReco
 from src.web.presenters.today_risk_macro import build_today_risk_macro_payload
 
 
+def _calendar_event(
+    *,
+    event_id: str,
+    event_type: str,
+    ticker: str | None,
+    event_time: datetime,
+    as_of: datetime,
+    title: str,
+    severity: str = "high",
+) -> CalendarEventRecord:
+    event_key_ticker = ticker or "macro"
+    return CalendarEventRecord(
+        calendar_event_id=event_id,
+        event_key=f"{event_type}:{event_key_ticker}:{event_time.date().isoformat()}:{event_id}",
+        event_type=event_type,
+        ticker=ticker,
+        event_time=event_time,
+        published_at=as_of,
+        available_for_decision_at=as_of,
+        title=title,
+        severity_hint=severity,
+        source="fixture",
+        metadata_json={},
+    )
+
+
+def _macro_news_item(
+    *,
+    item_id: str,
+    ticker: str,
+    title: str,
+    summary: str,
+    available_at: datetime,
+    provider: str = "alpaca_live",
+) -> SocialMacroItemRecord:
+    return SocialMacroItemRecord(
+        social_macro_item_id=item_id,
+        ticker=ticker,
+        category="geopolitical_news",
+        source_type="news",
+        source_key="geopolitical_news",
+        provider=provider,
+        title=title,
+        summary=summary,
+        direction=None,
+        sentiment_direction=None,
+        importance_score=0.5,
+        importance_label="medium",
+        policy_headwind_flag=False,
+        policy_tailwind_flag=False,
+        explicit_ticker_mention_flag=True,
+        explicit_theme_mention_flag=False,
+        theme_tags_json=[],
+        company_name_mentions_json=[],
+        source_refs_json=[],
+        dedupe_key=f"{item_id}:{ticker}",
+        event_time=available_at,
+        published_at=available_at,
+        ingested_at=available_at,
+        available_for_decision_at=available_at,
+        raw_payload_ref=None,
+        metadata_json={},
+    )
+
+
+def _event_news_item(
+    *,
+    item_id: str,
+    ticker: str,
+    headline: str,
+    summary: str,
+    available_at: datetime,
+    provider: str = "alpaca_live",
+) -> EventNewsItemRecord:
+    return EventNewsItemRecord(
+        event_news_item_id=item_id,
+        ticker=ticker,
+        source_ticker=None,
+        event_type="company_specific",
+        direction=None,
+        sentiment=None,
+        importance="high",
+        headline=headline,
+        summary=summary,
+        provider=provider,
+        source_refs_json=[],
+        dedupe_key=f"{item_id}:{ticker}",
+        event_time=available_at,
+        published_at=available_at,
+        ingested_at=available_at,
+        available_for_decision_at=available_at,
+        raw_payload_ref=None,
+        metadata_json={},
+    )
+
+
 def test_today_risk_macro_presenter_builds_command_center_from_canonical_rows():
     decision_time = datetime(2026, 6, 16, 13, 0, tzinfo=timezone.utc)
     macro_snapshot = MacroSnapshotRecord(
@@ -214,8 +310,104 @@ def test_today_risk_macro_presenter_formats_decision_visible_news_rows():
     assert payload["event_news"][0]["category"] == "Company Specific"
 
 
+def test_today_risk_macro_presenter_filters_dedupes_and_sorts_recent_news_by_as_of_date():
+    as_of = datetime(2026, 7, 18, 17, 0, tzinfo=timezone.utc)
+    repeated_title = "Russian strikes kill 4 in Ukraine as Zelenskyy's defense shake-up sparks anger"
+    repeated_summary = "Russian attacks overnight on Ukraine killed at least four civilians and wounded 20."
+
+    payload = build_today_risk_macro_payload(
+        latest_risk=None,
+        latest_intent=None,
+        risk_macro_context={
+            "macro_news": (
+                _macro_news_item(
+                    item_id="old-macro",
+                    ticker="XOM",
+                    title="Four-day-old macro item",
+                    summary="Outside the requested display window.",
+                    available_at=datetime(2026, 7, 14, 23, 0, tzinfo=timezone.utc),
+                ),
+                _macro_news_item(
+                    item_id="duplicate-older",
+                    ticker="XOM",
+                    title=repeated_title,
+                    summary=repeated_summary,
+                    available_at=datetime(2026, 7, 17, 12, 0, tzinfo=timezone.utc),
+                ),
+                _macro_news_item(
+                    item_id="today",
+                    ticker="SPY",
+                    title="Fed official flags patient policy path",
+                    summary="Today macro headline should lead the list.",
+                    available_at=datetime(2026, 7, 18, 9, 0, tzinfo=timezone.utc),
+                ),
+                _macro_news_item(
+                    item_id="duplicate-newer",
+                    ticker="XLY",
+                    title=repeated_title,
+                    summary=repeated_summary,
+                    available_at=datetime(2026, 7, 17, 13, 0, tzinfo=timezone.utc),
+                ),
+                _macro_news_item(
+                    item_id="boundary",
+                    ticker="QQQ",
+                    title="Three-day boundary macro item",
+                    summary="This row is still in the requested window.",
+                    available_at=datetime(2026, 7, 15, 8, 0, tzinfo=timezone.utc),
+                ),
+            ),
+            "event_news": (
+                _event_news_item(
+                    item_id="old-event",
+                    ticker="IBM",
+                    headline="Outdated event headline",
+                    summary="Outside the requested display window.",
+                    available_at=datetime(2026, 7, 14, 20, 0, tzinfo=timezone.utc),
+                ),
+                _event_news_item(
+                    item_id="event-duplicate-older",
+                    ticker="IBM",
+                    headline="Dividend story repeats across tickers",
+                    summary="The same event story should collapse across symbols.",
+                    available_at=datetime(2026, 7, 17, 10, 0, tzinfo=timezone.utc),
+                ),
+                _event_news_item(
+                    item_id="event-today",
+                    ticker="AAPL",
+                    headline="Today company headline",
+                    summary="Fresh event headline should lead the event list.",
+                    available_at=datetime(2026, 7, 18, 8, 0, tzinfo=timezone.utc),
+                ),
+                _event_news_item(
+                    item_id="event-duplicate-newer",
+                    ticker="D",
+                    headline="Dividend story repeats across tickers",
+                    summary="The same event story should collapse across symbols.",
+                    available_at=datetime(2026, 7, 17, 11, 0, tzinfo=timezone.utc),
+                ),
+            ),
+        },
+        exposures=(),
+        as_of=as_of,
+    )
+
+    assert [row["title"] for row in payload["macro_news"]] == [
+        "Fed official flags patient policy path",
+        repeated_title,
+        "Three-day boundary macro item",
+    ]
+    assert payload["macro_news"][1]["ticker"] == "XLY"
+    assert "Four-day-old macro item" not in {row["title"] for row in payload["macro_news"]}
+    assert [row["headline"] for row in payload["event_news"]] == [
+        "Today company headline",
+        "Dividend story repeats across tickers",
+    ]
+    assert payload["event_news"][1]["ticker"] == "D"
+    assert "Outdated event headline" not in {row["headline"] for row in payload["event_news"]}
+
+
 def test_today_risk_macro_presenter_keeps_latest_refreshed_earnings_per_ticker():
-    as_of = datetime(2026, 7, 4, 20, 0, tzinfo=timezone.utc)
+    as_of = datetime(2026, 7, 24, 20, 0, tzinfo=timezone.utc)
     stale_near_event = CalendarEventRecord(
         calendar_event_id="event-stale-near",
         event_key="earnings:AAPL:2026-07-29",
@@ -258,10 +450,10 @@ def test_today_risk_macro_presenter_sorts_visible_events_by_date():
     as_of = datetime(2026, 7, 4, 20, 0, tzinfo=timezone.utc)
     later_event = CalendarEventRecord(
         calendar_event_id="event-later",
-        event_key="earnings:AMD:2026-08-03",
+        event_key="earnings:AMD:2026-07-10",
         event_type="earnings",
         ticker="AMD",
-        event_time=datetime(2026, 8, 3, 20, 0, tzinfo=timezone.utc),
+        event_time=datetime(2026, 7, 10, 20, 0, tzinfo=timezone.utc),
         published_at=as_of,
         available_for_decision_at=as_of,
         title="AMD earnings",
@@ -271,10 +463,10 @@ def test_today_risk_macro_presenter_sorts_visible_events_by_date():
     )
     earlier_event = CalendarEventRecord(
         calendar_event_id="event-earlier",
-        event_key="earnings:GOOGL:2026-07-22",
+        event_key="earnings:GOOGL:2026-07-06",
         event_type="earnings",
         ticker="GOOGL",
-        event_time=datetime(2026, 7, 22, 20, 0, tzinfo=timezone.utc),
+        event_time=datetime(2026, 7, 6, 20, 0, tzinfo=timezone.utc),
         published_at=as_of,
         available_for_decision_at=as_of,
         title="GOOGL earnings",
@@ -292,6 +484,58 @@ def test_today_risk_macro_presenter_sorts_visible_events_by_date():
     )
 
     assert [event["affected_ticker"] for event in payload["events"]] == ["GOOGL", "AMD"]
+
+
+def test_today_risk_macro_presenter_limits_earnings_to_one_week_from_as_of():
+    as_of = datetime(2026, 7, 18, 20, 0, tzinfo=timezone.utc)
+    today_earnings = _calendar_event(
+        event_id="event-fitb",
+        event_type="earnings",
+        ticker="FITB",
+        event_time=datetime(2026, 7, 18, 20, 0, tzinfo=timezone.utc),
+        as_of=as_of,
+        title="FITB earnings",
+    )
+    one_week_earnings = _calendar_event(
+        event_id="event-cof",
+        event_type="earnings",
+        ticker="COF",
+        event_time=datetime(2026, 7, 25, 20, 0, tzinfo=timezone.utc),
+        as_of=as_of,
+        title="COF earnings",
+    )
+    later_earnings = _calendar_event(
+        event_id="event-bkr",
+        event_type="earnings",
+        ticker="BKR",
+        event_time=datetime(2026, 7, 26, 20, 0, tzinfo=timezone.utc),
+        as_of=as_of,
+        title="BKR earnings",
+    )
+    later_macro_event = _calendar_event(
+        event_id="event-cpi",
+        event_type="macro",
+        ticker=None,
+        event_time=datetime(2026, 8, 3, 13, 30, tzinfo=timezone.utc),
+        as_of=as_of,
+        title="US CPI",
+        severity="medium",
+    )
+
+    payload = build_today_risk_macro_payload(
+        latest_risk=None,
+        latest_intent=None,
+        risk_macro_context={"calendar_events": (later_earnings, later_macro_event, one_week_earnings, today_earnings)},
+        exposures=(),
+        as_of=as_of,
+    )
+
+    assert [event["affected_ticker"] for event in payload["events"] if event["event_type"] == "earnings"] == [
+        "FITB",
+        "COF",
+    ]
+    assert "BKR" not in {event["affected_ticker"] for event in payload["events"]}
+    assert [event["risk_mechanism"] for event in payload["events"] if event["event_type"] == "macro"] == ["US CPI"]
 
 
 def test_today_risk_macro_presenter_exposes_assessment_fields_needed_to_filter_earnings_actions():
@@ -503,26 +747,26 @@ def test_today_risk_macro_presenter_dedupes_accumulated_audit_rows():
     newer = datetime(2026, 6, 16, 14, 0, tzinfo=timezone.utc)
     stale_event = CalendarEventRecord(
         calendar_event_id="event-stale",
-        event_key="earnings:GOOGL:2026-07-22",
+        event_key="earnings:GOOGL:2026-06-22",
         event_type="earnings",
         ticker="GOOGL",
-        event_time=datetime(2026, 7, 22, 20, 0, tzinfo=timezone.utc),
+        event_time=datetime(2026, 6, 22, 20, 0, tzinfo=timezone.utc),
         published_at=older,
         available_for_decision_at=older,
-        title="GOOGL earnings within 28 day(s)",
+        title="GOOGL earnings within 6 day(s)",
         severity_hint="high",
         source="fixture",
         metadata_json={},
     )
     latest_event = CalendarEventRecord(
         calendar_event_id="event-latest",
-        event_key="earnings:GOOGL:2026-07-16",
+        event_key="earnings:GOOGL:2026-06-21",
         event_type="earnings",
         ticker="GOOGL",
-        event_time=datetime(2026, 7, 16, 20, 0, tzinfo=timezone.utc),
+        event_time=datetime(2026, 6, 21, 20, 0, tzinfo=timezone.utc),
         published_at=newer,
         available_for_decision_at=newer,
-        title="GOOGL earnings within 22 day(s)",
+        title="GOOGL earnings within 5 day(s)",
         severity_hint="high",
         source="fixture",
         metadata_json={},
@@ -573,5 +817,5 @@ def test_today_risk_macro_presenter_dedupes_accumulated_audit_rows():
         as_of=older,
     )
 
-    assert [event["risk_mechanism"] for event in payload["events"]] == ["GOOGL earnings within 22 day(s)"]
+    assert [event["risk_mechanism"] for event in payload["events"]] == ["GOOGL earnings within 5 day(s)"]
     assert [row["rationale"] for row in payload["risk_sources"]] == ["NVDA monitor duplicate from latest run."]
