@@ -1960,7 +1960,9 @@ class TestTodayDashboard:
             stack.enter_context(patch("src.web.routers.today._load_live_alerts", return_value=()))
             stack.enter_context(patch("src.web.routers.today._load_material_changes", return_value=()))
             stack.enter_context(patch("src.web.routers.today._load_risk_exposures", return_value=()))
-            stack.enter_context(patch("src.web.routers.today._load_candidate_rows", return_value=candidate_rows))
+            load_candidate_rows = stack.enter_context(
+                patch("src.web.routers.today._load_candidate_rows", return_value=candidate_rows)
+            )
             stack.enter_context(patch("src.web.routers.today._load_manual_requests", return_value=manual_requests))
             stack.enter_context(patch("src.web.routers.today._load_portfolio_intents", return_value=()))
             stack.enter_context(patch("src.web.routers.today._load_relationships", return_value=()))
@@ -2003,6 +2005,7 @@ class TestTodayDashboard:
         assert workspace_tickers == {"TRADE", "PAPER", "SCAN", "OPTION"}
         assert "REVIEW" not in workspace_tickers
         assert "OPTION" in workspace_tickers
+        assert set(load_candidate_rows.call_args.kwargs["tickers"]) == {"OPTION", "TRADE"}
         build_candidates.assert_called_once_with(
             rows=(),
             manual_requests=(),
@@ -2531,25 +2534,21 @@ class TestTodayDashboard:
     def test_load_candidate_rows_translates_operator_facing_labels(self):
         from src.web.routers.today import _load_candidate_rows
 
-        session = MagicMock()
-        session.query.side_effect = [
-            _ListQuery(
-                [
-                    SimpleNamespace(
-                        ticker="UBER",
-                        selection_source="direct_negative_catalyst",
-                        rejection_reason="blocked_by_missing_data",
-                        candidate_status="blocked",
-                        strategy_id="valuation_repair_quality_software_v1",
-                        trade_classifications=[],
-                        watch_candidates=[SimpleNamespace(result_status="blocked_by_missing_data")],
-                        decision_time=datetime(2026, 6, 3, 23, 25, 34, tzinfo=timezone.utc),
-                        candidate_score=Decimal("0.32"),
-                    )
-                ]
-            ),
-            _ListQuery([]),
-        ]
+        session = _CandidateRunScopedSession(
+            (
+                SimpleNamespace(
+                    ticker="UBER",
+                    selection_source="direct_negative_catalyst",
+                    rejection_reason="blocked_by_missing_data",
+                    candidate_status="blocked",
+                    strategy_id="valuation_repair_quality_software_v1",
+                    trade_classifications=[],
+                    watch_candidates=[SimpleNamespace(result_status="blocked_by_missing_data")],
+                    decision_time=datetime(2026, 6, 3, 23, 25, 34, tzinfo=timezone.utc),
+                    candidate_score=Decimal("0.32"),
+                ),
+            )
+        )
 
         rows = _load_candidate_rows(session)
 
@@ -2585,34 +2584,30 @@ class TestTodayDashboard:
     def test_load_candidate_rows_prefers_latest_trading_decision_over_classifier_status(self):
         from src.web.routers.today import _load_candidate_rows
 
-        session = MagicMock()
-        session.query.side_effect = [
-            _ListQuery(
-                [
-                    SimpleNamespace(
-                        ticker="APP",
-                        selection_source="scanner",
-                        rejection_reason=None,
-                        candidate_status="selected",
-                        strategy_id="gap_continuation_v1",
-                        trade_classifications=[SimpleNamespace(result_status="actionable_trade", trade_identity="tactical_stock_trade")],
-                        watch_candidates=[],
-                        decision_time=datetime(2026, 6, 3, 13, 0, tzinfo=timezone.utc),
-                        candidate_score=Decimal("0.72"),
-                    )
-                ]
+        session = _CandidateRunScopedSession(
+            (
+                SimpleNamespace(
+                    ticker="APP",
+                    strategy_run_id=uuid.uuid4(),
+                    selection_source="scanner",
+                    rejection_reason=None,
+                    candidate_status="selected",
+                    strategy_id="gap_continuation_v1",
+                    trade_classifications=[SimpleNamespace(result_status="actionable_trade", trade_identity="tactical_stock_trade")],
+                    watch_candidates=[],
+                    decision_time=datetime(2026, 6, 3, 13, 0, tzinfo=timezone.utc),
+                    candidate_score=Decimal("0.72"),
+                ),
             ),
-            _ListQuery(
-                [
-                    SimpleNamespace(
-                        ticker="APP",
-                        decision="no_trade",
-                        paper_trade_authorized=False,
-                        decision_time=datetime(2026, 6, 3, 13, 5, tzinfo=timezone.utc),
-                    )
-                ]
+            trading_decisions=(
+                SimpleNamespace(
+                    ticker="APP",
+                    decision="no_trade",
+                    paper_trade_authorized=False,
+                    decision_time=datetime(2026, 6, 3, 13, 5, tzinfo=timezone.utc),
+                ),
             ),
-        ]
+        )
 
         rows = _load_candidate_rows(session)
 
@@ -2664,11 +2659,7 @@ class TestTodayDashboard:
             candidate(ticker="SNDK", run_id="scanner-run", decision_time=scanner_time, selection_source="scanner"),
         )
 
-        session = MagicMock()
-        session.query.side_effect = [
-            _LimitedListQuery((*manual_rows, *scanner_rows)),
-            _ListQuery([]),
-        ]
+        session = _CandidateRunScopedSession((*manual_rows, *scanner_rows))
 
         rows = _load_candidate_rows(session)
 
@@ -2846,7 +2837,7 @@ class TestTodayDashboard:
         ):
             dashboard = load_today_dashboard(
                 session,
-                selected_tab="portfolio",
+                selected_tab="overview",
                 decision_id=None,
                 selected_ticker="NVDA",
             )
@@ -3005,9 +2996,9 @@ class TestTodayDashboard:
             patch("src.web.routers.today._load_option_positions", return_value=()),
             patch("src.web.routers.today._load_portfolio_history", return_value=()),
             patch("src.web.routers.today._load_hedge_overlays", return_value=()),
-            patch("src.web.routers.today._load_live_alerts", return_value=()),
-            patch("src.web.routers.today._load_material_changes", return_value=()),
-            patch("src.web.routers.today._load_today_risk_macro", return_value={}),
+            patch("src.web.routers.today._load_live_alerts", return_value=()) as load_live_alerts,
+            patch("src.web.routers.today._load_material_changes", return_value=()) as load_material_changes,
+            patch("src.web.routers.today._load_today_risk_macro", return_value={}) as load_today_risk_macro,
             patch("src.web.routers.today._load_candidate_rows", return_value=()) as load_candidate_rows,
             patch("src.web.routers.today._load_manual_requests", return_value=()) as load_manual_requests,
             patch("src.web.routers.today._load_signal_history_by_ticker", return_value={}) as load_signal_history,
@@ -3029,6 +3020,9 @@ class TestTodayDashboard:
         assert dashboard["selected_tab"] == "portfolio"
         assert "portfolio" in dashboard
         load_trade_rows.assert_not_called()
+        load_today_risk_macro.assert_not_called()
+        load_live_alerts.assert_not_called()
+        load_material_changes.assert_not_called()
         load_candidate_rows.assert_not_called()
         load_manual_requests.assert_not_called()
         load_signal_history.assert_not_called()
@@ -3319,6 +3313,47 @@ class TestTodayDashboardMutations:
             add_universe_filter_manual_exclude(MagicMock(), ticker="BAD SYMBOL")
 
 
+def test_load_candidate_rows_does_not_materialize_large_lookback_before_selecting_current_runs():
+    from src.web.routers.loaders.candidates import _load_candidate_rows
+
+    scanner_run_id = uuid.uuid4()
+    scanner_time = datetime(2026, 6, 3, 13, 0, tzinfo=timezone.utc)
+    manual_time = datetime(2026, 6, 3, 13, 5, tzinfo=timezone.utc)
+
+    def candidate(*, ticker: str, run_id: uuid.UUID | None, decision_time: datetime, selection_source: str):
+        return SimpleNamespace(
+            candidate_score_id=uuid.uuid4(),
+            strategy_run_id=run_id,
+            signal_snapshot_id=None,
+            ticker=ticker,
+            strategy_id="scanner_strategy_v1",
+            candidate_score=Decimal("0.72"),
+            decision_time=decision_time,
+            selection_source=selection_source,
+            candidate_status="candidate",
+            rejection_reason=None,
+            core_signal_evidence_json={},
+            selection_reason=None,
+            risk_tags_json=[],
+            invalidators_json=[],
+            missing_required_signals_json=[],
+            trade_classifications=[],
+            watch_candidates=[],
+        )
+
+    current_rows = (
+        candidate(ticker="NVDA", run_id=scanner_run_id, decision_time=scanner_time, selection_source="scanner"),
+        candidate(ticker="MSFT", run_id=None, decision_time=manual_time, selection_source="manual_request"),
+    )
+    session = _CandidateRunScopedSession(current_rows)
+
+    rows = _load_candidate_rows(session)
+
+    assert {row["ticker"] for row in rows} == {"NVDA", "MSFT"}
+    assert session.large_unfiltered_candidate_lookback_attempts == 0
+    assert session.queried_run_keys >= 2
+
+
 class _QueryStub:
     def filter(self, *_args, **_kwargs):
         return self
@@ -3367,6 +3402,79 @@ class _LimitedListQuery(_ListQuery):
         if self._limit is None:
             return rows
         return rows[: self._limit]
+
+
+class _CandidateRunScopedSession:
+    def __init__(self, candidate_rows, *, trading_decisions=()):
+        self.candidate_rows = tuple(candidate_rows)
+        self.trading_decisions = tuple(trading_decisions)
+        self.large_unfiltered_candidate_lookback_attempts = 0
+        self.queried_run_keys = 0
+
+    def query(self, *entities):
+        from src.db.models.trading import CandidateScore, TradingDecision
+
+        first = entities[0] if entities else None
+        if first is CandidateScore:
+            return _CandidateNoLookbackQuery(self, self.candidate_rows)
+        if first is TradingDecision:
+            return _ListQuery(self.trading_decisions)
+        if getattr(first, "class_", None) is CandidateScore:
+            self.queried_run_keys += 1
+            return _CandidateRunKeyQuery(self)
+        return _QueryStub()
+
+
+class _CandidateRunKeyQuery(_QueryStub):
+    def __init__(self, session: _CandidateRunScopedSession):
+        self._session = session
+        self._source = None
+
+    def filter(self, *criteria, **_kwargs):
+        for criterion in criteria:
+            text = str(criterion)
+            if "manual_request" in text or "watchlist_pin" in text:
+                self._source = "manual_request"
+            elif "scanner" in text:
+                self._source = "scanner"
+        return self
+
+    def first(self):
+        rows = [
+            row
+            for row in self._session.candidate_rows
+            if self._source is None or row.selection_source == self._source
+        ]
+        rows.sort(key=lambda row: row.decision_time, reverse=True)
+        if not rows:
+            return None
+        row = rows[0]
+        return SimpleNamespace(strategy_run_id=getattr(row, "strategy_run_id", None), decision_time=row.decision_time)
+
+
+class _CandidateNoLookbackQuery(_ListQuery):
+    def __init__(self, session: _CandidateRunScopedSession, rows):
+        super().__init__(rows)
+        self._session = session
+        self._filtered = False
+        self._limit = None
+
+    def options(self, *_args, **_kwargs):
+        return self
+
+    def filter(self, *_args, **_kwargs):
+        self._filtered = True
+        return self
+
+    def limit(self, value):
+        self._limit = int(value)
+        return self
+
+    def all(self):
+        if self._limit == 500 and not self._filtered:
+            self._session.large_unfiltered_candidate_lookback_attempts += 1
+            raise AssertionError("candidate loader materialized the 500-row lookback before selecting run cohorts")
+        return super().all()
 
 
 def _query_stub_session() -> MagicMock:

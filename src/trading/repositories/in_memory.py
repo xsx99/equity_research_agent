@@ -209,6 +209,9 @@ class InMemoryTradingRepository:
         *,
         decision_time: datetime,
         ticker: str | None = None,
+        event_time_start: datetime | None = None,
+        event_time_end: datetime | None = None,
+        limit: int | None = None,
     ) -> tuple[CalendarEventRecord, ...]:
         symbol = ticker.strip().upper() if isinstance(ticker, str) else None
         events = [
@@ -216,9 +219,11 @@ class InMemoryTradingRepository:
             for item in self.calendar_events
             if item.available_for_decision_at <= decision_time
             and (symbol is None or item.ticker in {None, symbol})
+            and (event_time_start is None or item.event_time >= event_time_start)
+            and (event_time_end is None or item.event_time <= event_time_end)
         ]
         events.sort(key=lambda item: (item.event_time, item.event_key))
-        return tuple(events)
+        return tuple(events[:limit] if limit is not None else events)
 
     def save_portfolio_event_risk_assessments(
         self,
@@ -238,6 +243,8 @@ class InMemoryTradingRepository:
         *,
         decision_time: datetime,
         ticker: str | None = None,
+        available_since: datetime | None = None,
+        limit: int | None = None,
     ) -> tuple[PortfolioEventRiskAssessmentRecord, ...]:
         symbol = ticker.strip().upper() if isinstance(ticker, str) else None
         assessments = [
@@ -245,6 +252,11 @@ class InMemoryTradingRepository:
             for item in self.portfolio_event_risk_assessments
             if (item.available_for_decision_at is None or item.available_for_decision_at <= decision_time)
             and (symbol is None or item.ticker == symbol)
+            and (
+                available_since is None
+                or item.available_for_decision_at is None
+                or item.available_for_decision_at >= available_since
+            )
         ]
         assessments.sort(
             key=lambda item: (
@@ -252,13 +264,15 @@ class InMemoryTradingRepository:
                 item.portfolio_event_risk_assessment_id or "",
             )
         )
-        return tuple(assessments)
+        return tuple(assessments[:limit] if limit is not None else assessments)
 
     def load_decision_visible_macro_news(
         self,
         *,
         decision_time: datetime,
         ticker: str | None = None,
+        available_since: datetime | None = None,
+        limit: int | None = None,
     ) -> tuple[SocialMacroItemRecord, ...]:
         symbol = ticker.strip().upper() if isinstance(ticker, str) else None
         rows = [
@@ -266,6 +280,7 @@ class InMemoryTradingRepository:
             for item in self.social_macro_items
             if item.available_for_decision_at <= decision_time
             and (symbol is None or item.ticker == symbol)
+            and (available_since is None or item.available_for_decision_at >= available_since)
         ]
         rows.sort(
             key=lambda item: (
@@ -273,6 +288,8 @@ class InMemoryTradingRepository:
                 item.social_macro_item_id,
             )
         )
+        if limit is not None:
+            rows = rows[-limit:]
         return tuple(rows)
 
     def load_decision_visible_event_news(
@@ -280,6 +297,8 @@ class InMemoryTradingRepository:
         *,
         decision_time: datetime,
         ticker: str | None = None,
+        available_since: datetime | None = None,
+        limit: int | None = None,
     ) -> tuple[EventNewsItemRecord, ...]:
         symbol = ticker.strip().upper() if isinstance(ticker, str) else None
         rows = [
@@ -291,6 +310,7 @@ class InMemoryTradingRepository:
                 or item.ticker == symbol
                 or item.source_ticker == symbol
             )
+            and (available_since is None or item.available_for_decision_at >= available_since)
         ]
         rows.sort(
             key=lambda item: (
@@ -298,6 +318,8 @@ class InMemoryTradingRepository:
                 item.event_news_item_id,
             )
         )
+        if limit is not None:
+            rows = rows[-limit:]
         return tuple(rows)
 
     def load_decision_available_risk_macro_context(
@@ -306,6 +328,12 @@ class InMemoryTradingRepository:
         trade_date: date,
         decision_time: datetime,
         ticker: str | None = None,
+        event_time_start: datetime | None = None,
+        event_time_end: datetime | None = None,
+        news_available_since: datetime | None = None,
+        news_limit: int | None = None,
+        assessment_available_since: datetime | None = None,
+        assessment_limit: int | None = None,
     ) -> dict[str, object]:
         return {
             "macro_snapshot": self.load_latest_macro_snapshot(
@@ -315,18 +343,26 @@ class InMemoryTradingRepository:
             "calendar_events": self.load_calendar_events(
                 decision_time=decision_time,
                 ticker=ticker,
+                event_time_start=event_time_start,
+                event_time_end=event_time_end,
             ),
             "portfolio_event_risk_assessments": self.load_portfolio_event_risk_assessments(
                 decision_time=decision_time,
                 ticker=ticker,
+                available_since=assessment_available_since,
+                limit=assessment_limit,
             ),
             "macro_news": self.load_decision_visible_macro_news(
                 decision_time=decision_time,
                 ticker=ticker,
+                available_since=news_available_since,
+                limit=news_limit,
             ),
             "event_news": self.load_decision_visible_event_news(
                 decision_time=decision_time,
                 ticker=ticker,
+                available_since=news_available_since,
+                limit=news_limit,
             ),
         }
 

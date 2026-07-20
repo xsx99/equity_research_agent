@@ -315,8 +315,8 @@ def load_today_dashboard(
     needs_trade_workspace = selected_tab == "trades" or bool(decision_id) or bool(selected_ticker)
     needs_candidates = selected_tab == "candidates"
     needs_portfolio = selected_tab == "portfolio"
-    needs_risk_macro = selected_tab in {"overview", "portfolio", "risk-macro", "system"}
-    needs_overview = selected_tab in {"overview", "portfolio", "system"}
+    needs_risk_macro = selected_tab in {"overview", "risk-macro", "system"}
+    needs_overview = selected_tab in {"overview", "system"}
     needs_positions = selected_tab in {"overview", "portfolio", "trades", "candidates"} or needs_trade_workspace
     needs_closed_positions = selected_tab in {"overview", "portfolio", "trades"} or needs_trade_workspace
     needs_candidate_split = needs_trade_workspace or needs_candidates
@@ -336,7 +336,15 @@ def load_today_dashboard(
     trade_workspace_rows: list[dict[str, Any]] = []
     if needs_candidate_split:
         trade_rows = _load_trade_rows(session)
-        candidate_rows = _load_candidate_rows(session)
+        if needs_trade_workspace and not needs_candidates:
+            candidate_tickers = _trade_candidate_ticker_scope(
+                trade_rows=trade_rows,
+                positions_by_ticker=positions_by_ticker,
+                option_positions_by_ticker=option_positions_by_ticker,
+            )
+            candidate_rows = _load_candidate_rows(session, tickers=candidate_tickers) if candidate_tickers else ()
+        else:
+            candidate_rows = _load_candidate_rows(session)
         manual_requests = _load_manual_requests(session)
         trade_rows = _filter_trade_rows_for_display(trade_rows, manual_requests)
         candidate_surface_rows, trade_surface_candidate_rows = _split_candidate_rows_by_display_owner(
@@ -640,6 +648,22 @@ def _filter_trade_rows_for_display(
         for row in trade_rows
         if _normalize_ticker_value(row.get("ticker")) not in review_only_tickers
     ]
+
+
+def _trade_candidate_ticker_scope(
+    *,
+    trade_rows: list[dict[str, Any]],
+    positions_by_ticker: dict[str | None, Any],
+    option_positions_by_ticker: dict[str | None, Any],
+) -> tuple[str, ...]:
+    tickers = {
+        ticker
+        for row in trade_rows
+        if (ticker := _normalize_ticker_value(row.get("ticker")))
+    }
+    tickers.update(ticker for ticker in positions_by_ticker if ticker)
+    tickers.update(ticker for ticker in option_positions_by_ticker if ticker)
+    return tuple(sorted(tickers))
 
 
 def _split_candidate_rows_by_display_owner(

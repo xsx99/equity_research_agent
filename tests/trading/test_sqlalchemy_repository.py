@@ -91,6 +91,9 @@ class _FakeQuery:
     def all(self) -> list[object]:
         return list(self._rows)
 
+    def first(self) -> object | None:
+        return self._rows[0] if self._rows else None
+
     def one_or_none(self) -> object | None:
         if not self._rows:
             return None
@@ -199,6 +202,8 @@ def _matches_filter_criterion(row: object, criterion: Any) -> bool:
             return left == right
         if criterion.operator is operator.ne:
             return left != right
+        if getattr(criterion.operator, "__name__", "") == "is_":
+            return left is right
         if criterion.operator is operator.ge:
             return left is not None and right is not None and left >= right
         if criterion.operator is operator.gt:
@@ -218,9 +223,73 @@ def _matches_filter_criterion(row: object, criterion: Any) -> bool:
 def _resolve_filter_operand(row: object, operand: Any) -> Any:
     if hasattr(operand, "value"):
         return operand.value
+    if hasattr(operand, "element"):
+        return _resolve_filter_operand(row, operand.element)
+    if hasattr(operand, "clauses"):
+        return [_resolve_filter_operand(row, clause) for clause in operand.clauses]
+    if operand.__class__.__name__ == "Null":
+        return None
     if hasattr(operand, "key"):
         return getattr(row, operand.key)
     return operand
+
+
+class _FilterRequiredQuery(_FakeQuery):
+    def __init__(self, rows: list[object], model: type, filter_required_for: set[type], *, filtered: bool = False) -> None:
+        super().__init__(rows)
+        self._model = model
+        self._filter_required_for = filter_required_for
+        self._filtered = filtered
+
+    def filter(self, *criteria: Any) -> "_FilterRequiredQuery":
+        filtered = [
+            row
+            for row in self._rows
+            if all(_matches_filter_criterion(row, criterion) for criterion in criteria)
+        ]
+        return _FilterRequiredQuery(
+            filtered,
+            self._model,
+            self._filter_required_for,
+            filtered=True,
+        )
+
+    def filter_by(self, **kwargs: Any) -> "_FilterRequiredQuery":
+        filtered = [
+            row
+            for row in self._rows
+            if all(getattr(row, key) == value for key, value in kwargs.items())
+        ]
+        return _FilterRequiredQuery(
+            filtered,
+            self._model,
+            self._filter_required_for,
+            filtered=True,
+        )
+
+    def order_by(self, *criteria: Any) -> "_FilterRequiredQuery":
+        return self
+
+    def limit(self, *criteria: Any) -> "_FilterRequiredQuery":
+        return self
+
+    def all(self) -> list[object]:
+        if self._model in self._filter_required_for and not self._filtered:
+            raise AssertionError(f"{self._model.__name__} was materialized before SQL filtering")
+        return super().all()
+
+
+class _FilterRequiredSession(_FakeSession):
+    def __init__(self, *, filter_required_for: tuple[type, ...]) -> None:
+        super().__init__()
+        self._filter_required_for = set(filter_required_for)
+
+    def query(self, model: type) -> _FilterRequiredQuery:
+        return _FilterRequiredQuery(
+            self.rows_by_type.get(model, []),
+            model,
+            self._filter_required_for,
+        )
 
 
 def test_sqlalchemy_repository_persists_universe_snapshot_and_symbols():
@@ -505,6 +574,97 @@ def test_sqlalchemy_repository_loads_manual_review_audit_rows_with_explicit_link
     assert rows[1].manual_ticker_request_id == str(pending_request_id)
     assert rows[1].execution_path_state == "pending_evaluation"
     assert rows[1].linkage_state == "pending_evaluation"
+
+
+def test_sqlalchemy_repository_scopes_manual_review_audit_queries_to_active_requests():
+    now = datetime(2026, 6, 5, 15, 30, tzinfo=timezone.utc)
+    request_id = uuid.uuid4()
+    inactive_request_id = uuid.uuid4()
+    trading_decision_id = uuid.uuid4()
+    risk_decision_id = uuid.uuid4()
+    paper_order_id = uuid.uuid4()
+    session = _FilterRequiredSession(
+        filter_required_for=(
+            ManualTickerRequest,
+            TradingDecision,
+            RiskDecision,
+            PaperOrder,
+            PaperExecution,
+        )
+    )
+    repository = SqlAlchemyTradingRepository(session)
+    session.rows_by_type[ManualTickerRequest] = [
+        SimpleNamespace(
+            manual_ticker_request_id=request_id,
+            ticker="AAPL",
+            reason="breakout retest",
+            mode="paper_trade_eligible",
+            status="active",
+            created_at=now,
+            last_evaluated_at=now,
+            latest_result_status="actionable_trade",
+            latest_signal_snapshot_id=None,
+        ),
+        SimpleNamespace(
+            manual_ticker_request_id=inactive_request_id,
+            ticker="MSFT",
+            reason="old request",
+            mode="review_only",
+            status="dismissed",
+            created_at=now,
+            last_evaluated_at=None,
+            latest_result_status=None,
+            latest_signal_snapshot_id=None,
+        ),
+    ]
+    session.rows_by_type[TradingDecision] = [
+        SimpleNamespace(
+            trading_decision_id=trading_decision_id,
+            manual_request_id=request_id,
+            risk_decision_id=risk_decision_id,
+            ticker="AAPL",
+            decision="enter_long",
+            metadata_json={},
+            decision_time=now,
+            created_at=now,
+        ),
+        SimpleNamespace(
+            trading_decision_id=uuid.uuid4(),
+            manual_request_id=inactive_request_id,
+            risk_decision_id=uuid.uuid4(),
+            ticker="MSFT",
+            decision="hold",
+            metadata_json={},
+            decision_time=now,
+            created_at=now,
+        ),
+    ]
+    session.rows_by_type[RiskDecision] = [
+        SimpleNamespace(
+            risk_decision_id=risk_decision_id,
+            ticker="AAPL",
+            status="approved",
+            reason_code="within_limits",
+            decision_time=now,
+            created_at=now,
+        ),
+    ]
+    session.rows_by_type[PaperOrder] = [
+        SimpleNamespace(
+            paper_order_id=paper_order_id,
+            trading_decision_id=trading_decision_id,
+            ticker="AAPL",
+            status="accepted",
+            rejection_reason=None,
+            created_at=now,
+        ),
+    ]
+    session.rows_by_type[PaperExecution] = []
+
+    rows = repository.load_manual_review_audit_rows()
+
+    assert [row.ticker for row in rows] == ["AAPL"]
+    assert rows[0].latest_trading_decision_id == str(trading_decision_id)
 
 
 def test_sqlalchemy_repository_persists_pr4_risk_artifacts():
@@ -992,6 +1152,148 @@ def test_sqlalchemy_repository_loads_decision_visible_news_in_risk_macro_context
 
     assert [item.social_macro_item_id for item in context["macro_news"]] == [str(visible_macro_id)]
     assert [item.event_news_item_id for item in context["event_news"]] == [str(visible_event_id)]
+
+
+def test_sqlalchemy_repository_risk_macro_context_loaders_filter_in_sql_before_materializing_rows():
+    earlier = datetime(2026, 6, 16, 12, 0, tzinfo=timezone.utc)
+    decision_time = datetime(2026, 6, 16, 13, 0, tzinfo=timezone.utc)
+    later = datetime(2026, 6, 16, 14, 0, tzinfo=timezone.utc)
+    calendar_id = uuid.uuid4()
+    market_calendar_id = uuid.uuid4()
+    assessment_id = uuid.uuid4()
+    macro_id = uuid.uuid4()
+    event_id = uuid.uuid4()
+    session = _FilterRequiredSession(
+        filter_required_for=(
+            CalendarEvent,
+            PortfolioEventRiskAssessment,
+            SocialMacroItem,
+            EventNewsItem,
+        )
+    )
+    repository = SqlAlchemyTradingRepository(session)
+    session.rows_by_type[CalendarEvent] = [
+        SimpleNamespace(
+            calendar_event_id=calendar_id,
+            event_key="earnings:NVDA:2026-06-17",
+            event_type="earnings",
+            ticker="NVDA",
+            event_time=later,
+            published_at=earlier,
+            available_for_decision_at=earlier,
+            title="NVIDIA earnings",
+            severity_hint="high",
+            source="fixture",
+            metadata_json={},
+        ),
+        SimpleNamespace(
+            calendar_event_id=uuid.uuid4(),
+            event_key="earnings:AMD:2026-06-17",
+            event_type="earnings",
+            ticker="AMD",
+            event_time=later,
+            published_at=earlier,
+            available_for_decision_at=earlier,
+            title="AMD earnings",
+            severity_hint="high",
+            source="fixture",
+            metadata_json={},
+        ),
+        SimpleNamespace(
+            calendar_event_id=market_calendar_id,
+            event_key="fomc:2026-06-17",
+            event_type="macro",
+            ticker=None,
+            event_time=later,
+            published_at=earlier,
+            available_for_decision_at=earlier,
+            title="FOMC decision",
+            severity_hint="high",
+            source="fixture",
+            metadata_json={},
+        ),
+    ]
+    session.rows_by_type[PortfolioEventRiskAssessment] = [
+        SimpleNamespace(
+            portfolio_event_risk_assessment_id=assessment_id,
+            calendar_event_id=calendar_id,
+            portfolio_risk_snapshot_id=None,
+            decision_time=earlier,
+            available_for_decision_at=earlier,
+            ticker="NVDA",
+            risk_source="own_event",
+            severity="high",
+            event_type="earnings",
+            days_until_event=1,
+            affects_existing_position=True,
+            affects_pending_trade=False,
+            recommended_action="block_open",
+            rationale="Own earnings falls inside the lookahead window.",
+            metadata_json={},
+        ),
+    ]
+    session.rows_by_type[SocialMacroItem] = [
+        SimpleNamespace(
+            social_macro_item_id=macro_id,
+            ticker="NVDA",
+            category="geopolitical_news",
+            source_type="news",
+            source_key="geopolitical_news",
+            provider="global_context",
+            title="Export-control update hits semis",
+            summary="Policy risk is fresh for chip names.",
+            direction="negative",
+            sentiment_direction="negative",
+            importance_score=Decimal("0.8"),
+            importance_label="high",
+            policy_headwind_flag=True,
+            policy_tailwind_flag=False,
+            explicit_ticker_mention_flag=True,
+            explicit_theme_mention_flag=True,
+            theme_tags_json=["semiconductors"],
+            company_name_mentions_json=["NVIDIA"],
+            source_refs_json=[],
+            dedupe_key="macro-visible",
+            event_time=earlier,
+            published_at=earlier,
+            ingested_at=earlier,
+            available_for_decision_at=earlier,
+            raw_payload_ref=None,
+            metadata_json={},
+        ),
+    ]
+    session.rows_by_type[EventNewsItem] = [
+        SimpleNamespace(
+            event_news_item_id=event_id,
+            ticker="NVDA",
+            source_ticker=None,
+            event_type="company_specific",
+            direction="negative",
+            sentiment="negative",
+            importance="high",
+            headline="NVIDIA export restriction update",
+            summary="Fresh headline raises event risk.",
+            provider="alpaca",
+            source_refs_json=[],
+            dedupe_key="event-visible",
+            event_time=earlier,
+            published_at=earlier,
+            ingested_at=earlier,
+            available_for_decision_at=earlier,
+            raw_payload_ref=None,
+            metadata_json={},
+        ),
+    ]
+
+    calendar_events = repository.load_calendar_events(decision_time=decision_time, ticker="NVDA")
+    assessments = repository.load_portfolio_event_risk_assessments(decision_time=decision_time, ticker="NVDA")
+    macro_news = repository.load_decision_visible_macro_news(decision_time=decision_time, ticker="NVDA")
+    event_news = repository.load_decision_visible_event_news(decision_time=decision_time, ticker="NVDA")
+
+    assert [item.calendar_event_id for item in calendar_events] == [str(calendar_id), str(market_calendar_id)]
+    assert [item.portfolio_event_risk_assessment_id for item in assessments] == [str(assessment_id)]
+    assert [item.social_macro_item_id for item in macro_news] == [str(macro_id)]
+    assert [item.event_news_item_id for item in event_news] == [str(event_id)]
 
 
 def test_sqlalchemy_repository_persists_pr6_order_execution_snapshot_and_positions():

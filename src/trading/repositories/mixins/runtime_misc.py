@@ -287,51 +287,98 @@ class RuntimeMiscRepositoryMixin:
         row.metadata_json = dict(attempt.metadata_json)
         self.session.flush()
     def load_manual_review_audit_rows(self) -> tuple[ManualReviewAuditRow, ...]:
-        active_requests = [
-            row
-            for row in self.session.query(ManualTickerRequest).all()
-            if getattr(row, "status", None) == "active"
+        active_requests = (
+            self.session.query(ManualTickerRequest)
+            .filter(ManualTickerRequest.status == "active")
+            .all()
+        )
+        active_request_ids = [
+            request_id
+            for row in active_requests
+            if (request_id := _to_uuid_or_none(getattr(row, "manual_ticker_request_id", None))) is not None
         ]
         decisions_by_request_id: dict[str, Any] = {}
-        for row in self.session.query(TradingDecision).all():
+        decision_rows = (
+            self.session.query(TradingDecision)
+            .filter(TradingDecision.manual_request_id.in_(active_request_ids))
+            .all()
+            if active_request_ids
+            else ()
+        )
+        for row in decision_rows:
             request_id = _string_or_none(getattr(row, "manual_request_id", None))
             if request_id is None:
                 continue
             current = decisions_by_request_id.get(request_id)
-            if current is None or _latest_row_sort_key(row, "decision_time", "trading_decision_id") > _latest_row_sort_key(
-                current,
+            if current is None or _latest_row_sort_key(
+                row,
                 "decision_time",
                 "trading_decision_id",
-            ):
+            ) > _latest_row_sort_key(current, "decision_time", "trading_decision_id"):
                 decisions_by_request_id[request_id] = row
+        risk_ids = [
+            risk_id
+            for decision in decisions_by_request_id.values()
+            if (risk_id := _to_uuid_or_none(getattr(decision, "risk_decision_id", None))) is not None
+        ]
         risk_by_id = {
             _string_or_none(getattr(row, "risk_decision_id", None)): row
-            for row in self.session.query(RiskDecision).all()
+            for row in (
+                self.session.query(RiskDecision)
+                .filter(RiskDecision.risk_decision_id.in_(risk_ids))
+                .all()
+                if risk_ids
+                else ()
+            )
             if _string_or_none(getattr(row, "risk_decision_id", None)) is not None
         }
+        decision_ids = [
+            decision_id
+            for decision in decisions_by_request_id.values()
+            if (decision_id := _to_uuid_or_none(getattr(decision, "trading_decision_id", None))) is not None
+        ]
         orders_by_decision_id: dict[str, Any] = {}
-        for row in self.session.query(PaperOrder).all():
+        order_rows = (
+            self.session.query(PaperOrder)
+            .filter(PaperOrder.trading_decision_id.in_(decision_ids))
+            .all()
+            if decision_ids
+            else ()
+        )
+        for row in order_rows:
             decision_id = _string_or_none(getattr(row, "trading_decision_id", None))
             if decision_id is None:
                 continue
             current = orders_by_decision_id.get(decision_id)
-            if current is None or _latest_row_sort_key(row, "created_at", "paper_order_id") > _latest_row_sort_key(
-                current,
+            if current is None or _latest_row_sort_key(
+                row,
                 "created_at",
                 "paper_order_id",
-            ):
+            ) > _latest_row_sort_key(current, "created_at", "paper_order_id"):
                 orders_by_decision_id[decision_id] = row
+        order_ids = [
+            order_id
+            for order in orders_by_decision_id.values()
+            if (order_id := _to_uuid_or_none(getattr(order, "paper_order_id", None))) is not None
+        ]
         executions_by_order_id: dict[str, Any] = {}
-        for row in self.session.query(PaperExecution).all():
+        execution_rows = (
+            self.session.query(PaperExecution)
+            .filter(PaperExecution.paper_order_id.in_(order_ids))
+            .all()
+            if order_ids
+            else ()
+        )
+        for row in execution_rows:
             order_id = _string_or_none(getattr(row, "paper_order_id", None))
             if order_id is None:
                 continue
             current = executions_by_order_id.get(order_id)
-            if current is None or _latest_row_sort_key(row, "executed_at", "paper_execution_id") > _latest_row_sort_key(
-                current,
+            if current is None or _latest_row_sort_key(
+                row,
                 "executed_at",
                 "paper_execution_id",
-            ):
+            ) > _latest_row_sort_key(current, "executed_at", "paper_execution_id"):
                 executions_by_order_id[order_id] = row
 
         audit_rows: list[ManualReviewAuditRow] = []

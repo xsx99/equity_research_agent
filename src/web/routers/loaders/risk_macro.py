@@ -1,6 +1,7 @@
 """Risk and macro loader helpers for the today router."""
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Any
 
 from sqlalchemy.orm import Session as SQLAlchemySession
@@ -30,9 +31,15 @@ def _load_today_risk_macro(
         if trade_date is not None and decision_time is not None:
             intents = repository.load_portfolio_risk_intents(trade_date=trade_date)
             latest_intent = intents[-1] if intents else None
+            recent_news_since = decision_time - timedelta(days=4)
             risk_macro_context = repository.load_decision_available_risk_macro_context(
                 trade_date=trade_date,
                 decision_time=decision_time,
+                event_time_start=decision_time,
+                news_available_since=recent_news_since,
+                news_limit=250,
+                assessment_available_since=decision_time - timedelta(days=14),
+                assessment_limit=250,
             )
     if latest_macro_snapshot is not None:
         risk_macro_context = {

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from sqlalchemy import and_
 from sqlalchemy.orm import selectinload
 
 from src.db.models.trading import CandidateScore, TradingDecision
@@ -77,23 +78,143 @@ def _build_candidates_summary(
     }
 
 
-def _load_candidate_rows(session: Any) -> tuple[dict[str, Any], ...]:
-    rows = (
-        session.query(CandidateScore)
-        .options(
-            selectinload(CandidateScore.trade_classifications),
-            selectinload(CandidateScore.watch_candidates),
-        )
-        .order_by(CandidateScore.decision_time.desc(), CandidateScore.candidate_score.desc())
-        .limit(_CANDIDATE_LOOKBACK_LIMIT)
-        .all()
-    )
-    rows = _select_today_candidate_rows(rows)
+def _load_candidate_rows(
+    session: Any,
+    *,
+    tickers: tuple[str, ...] | None = None,
+) -> tuple[dict[str, Any], ...]:
+    rows = _load_current_candidate_run_rows(session, tickers=tickers)
     latest_decisions = _latest_trading_decisions_by_ticker(session, rows)
     return tuple(
         _candidate_row_payload(row, latest_decisions.get(str(row.ticker or "").strip().upper()))
         for row in rows
     )
+
+
+def _load_current_candidate_run_rows(
+    session: Any,
+    *,
+    tickers: tuple[str, ...] | None = None,
+) -> tuple[CandidateScore, ...]:
+    ticker_scope = _normalize_ticker_scope(tickers)
+    scanner_key = _latest_candidate_run_key_for_sources_from_db(session, {_SCANNER_SELECTION_SOURCE})
+    if scanner_key is None:
+        query = _candidate_score_query(session)
+        if ticker_scope is not None:
+            query = query.filter(CandidateScore.ticker.in_(ticker_scope))
+        rows = query.order_by(CandidateScore.decision_time.desc(), CandidateScore.candidate_score.desc()).limit(
+            _CANDIDATE_FALLBACK_LIMIT
+        ).all()
+        return tuple(rows)
+
+    rows = list(
+        _load_candidate_run_rows(
+            session,
+            scanner_key,
+            ticker_scope=ticker_scope,
+            limit=_CANDIDATE_LOOKBACK_LIMIT,
+        )
+    )
+    manual_key = _latest_candidate_run_key_for_sources_from_db(session, _MANUAL_SELECTION_SOURCES)
+    if manual_key is not None and manual_key != scanner_key:
+        rows.extend(
+            _load_candidate_run_rows(
+                session,
+                manual_key,
+                source_scope=_MANUAL_SELECTION_SOURCES,
+                ticker_scope=ticker_scope,
+                limit=_CANDIDATE_FALLBACK_LIMIT,
+            )
+        )
+    rows_by_id = {
+        getattr(row, "candidate_score_id", id(row)): row
+        for row in rows
+    }
+    return tuple(
+        sorted(
+            rows_by_id.values(),
+            key=lambda row: (
+                _reverse_timestamp_key(getattr(row, "decision_time", None)),
+                -(float(getattr(row, "candidate_score", 0.0) or 0.0)),
+            ),
+        )
+    )
+
+
+def _load_candidate_run_rows(
+    session: Any,
+    run_key: tuple[str, Any],
+    *,
+    source_scope: set[str] | None = None,
+    ticker_scope: tuple[str, ...] | None = None,
+    limit: int,
+) -> tuple[CandidateScore, ...]:
+    query = _candidate_score_query(session).filter(_candidate_run_filter(run_key))
+    if source_scope is not None:
+        query = query.filter(CandidateScore.selection_source.in_(source_scope))
+    if ticker_scope is not None:
+        query = query.filter(CandidateScore.ticker.in_(ticker_scope))
+    rows = query.order_by(*_candidate_run_order_by(run_key)).limit(limit).all()
+    return tuple(rows)
+
+
+def _candidate_score_query(session: Any) -> Any:
+    return session.query(CandidateScore).options(
+        selectinload(CandidateScore.trade_classifications),
+        selectinload(CandidateScore.watch_candidates),
+    )
+
+
+def _normalize_ticker_scope(tickers: tuple[str, ...] | None) -> tuple[str, ...] | None:
+    if tickers is None:
+        return None
+    normalized = tuple(
+        dict.fromkeys(
+            ticker
+            for raw_ticker in tickers
+            if (ticker := str(raw_ticker or "").strip().upper())
+        )
+    )
+    return normalized or None
+
+
+def _latest_candidate_run_key_for_sources_from_db(session: Any, sources: set[str]) -> tuple[str, Any] | None:
+    row = (
+        session.query(CandidateScore.strategy_run_id, CandidateScore.decision_time)
+        .filter(CandidateScore.selection_source.in_(sources))
+        .order_by(CandidateScore.decision_time.desc())
+        .first()
+    )
+    if row is None:
+        return None
+    return _candidate_run_key(row)
+
+
+def _candidate_run_filter(run_key: tuple[str, Any]) -> Any:
+    kind, value = run_key
+    if kind == "run":
+        return CandidateScore.strategy_run_id == value
+    if kind == "decision_time":
+        return and_(
+            CandidateScore.strategy_run_id.is_(None),
+            CandidateScore.decision_time == value,
+        )
+    return CandidateScore.candidate_score_id == value
+
+
+def _candidate_run_order_by(run_key: tuple[str, Any]) -> tuple[Any, ...]:
+    if run_key[0] == "run":
+        return (CandidateScore.candidate_score.desc(),)
+    return (CandidateScore.decision_time.desc(), CandidateScore.candidate_score.desc())
+
+
+def _reverse_timestamp_key(value: Any) -> float:
+    if value is None:
+        return float("inf")
+    timestamp = getattr(value, "timestamp", None)
+    if callable(timestamp):
+        return -float(timestamp())
+    return 0.0
 
 
 def _select_today_candidate_rows(rows: list[CandidateScore]) -> tuple[CandidateScore, ...]:
@@ -116,7 +237,7 @@ def _select_today_candidate_rows(rows: list[CandidateScore]) -> tuple[CandidateS
     return tuple(selected)
 
 
-def _latest_candidate_run_key_for_sources(rows: tuple[CandidateScore, ...], sources: set[str]) -> tuple[str, str] | None:
+def _latest_candidate_run_key_for_sources(rows: tuple[CandidateScore, ...], sources: set[str]) -> tuple[str, Any] | None:
     for row in rows:
         selection_source = str(getattr(row, "selection_source", "") or "").strip()
         if selection_source in sources:
@@ -124,14 +245,14 @@ def _latest_candidate_run_key_for_sources(rows: tuple[CandidateScore, ...], sour
     return None
 
 
-def _candidate_run_key(row: CandidateScore) -> tuple[str, str]:
+def _candidate_run_key(row: CandidateScore) -> tuple[str, Any]:
     strategy_run_id = getattr(row, "strategy_run_id", None)
     if strategy_run_id:
-        return ("run", str(strategy_run_id))
+        return ("run", strategy_run_id)
     decision_time = getattr(row, "decision_time", None)
     if decision_time is not None:
-        return ("decision_time", str(decision_time))
-    return ("row", str(id(row)))
+        return ("decision_time", decision_time)
+    return ("row", getattr(row, "candidate_score_id", id(row)))
 
 
 def _candidate_row_payload(row: CandidateScore, latest_decision: Any | None) -> dict[str, Any]:

@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import date, datetime
 from decimal import Decimal
 
+from sqlalchemy import or_
+
 from src.db.models.trading import (
     CalendarEvent,
     EventNewsItem,
@@ -62,10 +64,9 @@ class MacroCalendarRepositoryMixin:
         query = self.session.query(MacroSnapshot).filter(MacroSnapshot.trade_date == trade_date)
         if decision_time is not None:
             query = query.filter(MacroSnapshot.snapshot_time <= decision_time)
-        rows = query.all()
-        if not rows:
+        row = query.order_by(MacroSnapshot.snapshot_time.desc()).first()
+        if row is None:
             return None
-        row = max(rows, key=lambda item: item.snapshot_time)
         return _macro_snapshot_record(row)
     def save_calendar_events(
         self,
@@ -100,15 +101,26 @@ class MacroCalendarRepositoryMixin:
         *,
         decision_time: datetime,
         ticker: str | None = None,
+        event_time_start: datetime | None = None,
+        event_time_end: datetime | None = None,
+        limit: int | None = None,
     ) -> tuple[CalendarEventRecord, ...]:
         symbol = ticker.strip().upper() if isinstance(ticker, str) else None
-        rows = [
-            row
-            for row in self.session.query(CalendarEvent).all()
-            if row.available_for_decision_at <= decision_time
-            and (symbol is None or row.ticker in {None, symbol})
-        ]
-        rows.sort(key=lambda row: (row.event_time, row.event_key))
+        query = self.session.query(CalendarEvent).filter(
+            CalendarEvent.available_for_decision_at <= decision_time
+        )
+        if symbol is not None:
+            query = query.filter(
+                or_(CalendarEvent.ticker.is_(None), CalendarEvent.ticker == symbol)
+            )
+        if event_time_start is not None:
+            query = query.filter(CalendarEvent.event_time >= event_time_start)
+        if event_time_end is not None:
+            query = query.filter(CalendarEvent.event_time <= event_time_end)
+        query = query.order_by(CalendarEvent.event_time, CalendarEvent.event_key)
+        if limit is not None:
+            query = query.limit(limit)
+        rows = query.all()
         return tuple(_calendar_event_record(row) for row in rows)
     def save_portfolio_event_risk_assessments(
         self,
@@ -155,71 +167,90 @@ class MacroCalendarRepositoryMixin:
         *,
         decision_time: datetime,
         ticker: str | None = None,
+        available_since: datetime | None = None,
+        limit: int | None = None,
     ) -> tuple[PortfolioEventRiskAssessmentRecord, ...]:
         symbol = ticker.strip().upper() if isinstance(ticker, str) else None
-        rows = [
-            row
-            for row in self.session.query(PortfolioEventRiskAssessment).all()
-            if row.available_for_decision_at <= decision_time
-            and (symbol is None or row.ticker == symbol)
-        ]
-        rows.sort(
-            key=lambda row: (
-                row.available_for_decision_at,
-                str(row.portfolio_event_risk_assessment_id),
-            )
+        query = self.session.query(PortfolioEventRiskAssessment).filter(
+            PortfolioEventRiskAssessment.available_for_decision_at <= decision_time
         )
+        if symbol is not None:
+            query = query.filter(PortfolioEventRiskAssessment.ticker == symbol)
+        if available_since is not None:
+            query = query.filter(PortfolioEventRiskAssessment.available_for_decision_at >= available_since)
+        query = query.order_by(
+            PortfolioEventRiskAssessment.available_for_decision_at,
+            PortfolioEventRiskAssessment.portfolio_event_risk_assessment_id,
+        )
+        if limit is not None:
+            query = query.limit(limit)
+        rows = query.all()
         return tuple(_portfolio_event_risk_assessment_record(row) for row in rows)
     def load_decision_visible_macro_news(
         self,
         *,
         decision_time: datetime,
         ticker: str | None = None,
+        available_since: datetime | None = None,
+        limit: int | None = None,
     ) -> tuple[object, ...]:
         symbol = ticker.strip().upper() if isinstance(ticker, str) else None
-        rows = [
-            row
-            for row in self.session.query(SocialMacroItem).all()
-            if row.available_for_decision_at <= decision_time
-            and (symbol is None or row.ticker == symbol)
-        ]
-        rows.sort(
-            key=lambda row: (
-                row.available_for_decision_at,
-                str(row.social_macro_item_id),
-            )
+        query = self.session.query(SocialMacroItem).filter(
+            SocialMacroItem.available_for_decision_at <= decision_time
         )
+        if symbol is not None:
+            query = query.filter(SocialMacroItem.ticker == symbol)
+        if available_since is not None:
+            query = query.filter(SocialMacroItem.available_for_decision_at >= available_since)
+        query = query.order_by(
+            SocialMacroItem.available_for_decision_at.desc(),
+            SocialMacroItem.social_macro_item_id,
+        )
+        if limit is not None:
+            query = query.limit(limit)
+        rows = query.all()
+        rows.sort(key=lambda row: (row.available_for_decision_at, str(row.social_macro_item_id)))
         return tuple(self._to_social_macro_item_record(row) for row in rows)
     def load_decision_visible_event_news(
         self,
         *,
         decision_time: datetime,
         ticker: str | None = None,
+        available_since: datetime | None = None,
+        limit: int | None = None,
     ) -> tuple[object, ...]:
         symbol = ticker.strip().upper() if isinstance(ticker, str) else None
-        rows = [
-            row
-            for row in self.session.query(EventNewsItem).all()
-            if row.available_for_decision_at <= decision_time
-            and (
-                symbol is None
-                or row.ticker == symbol
-                or row.source_ticker == symbol
-            )
-        ]
-        rows.sort(
-            key=lambda row: (
-                row.available_for_decision_at,
-                str(row.event_news_item_id),
-            )
+        query = self.session.query(EventNewsItem).filter(
+            EventNewsItem.available_for_decision_at <= decision_time
         )
+        if symbol is not None:
+            query = query.filter(
+                or_(EventNewsItem.ticker == symbol, EventNewsItem.source_ticker == symbol)
+            )
+        if available_since is not None:
+            query = query.filter(EventNewsItem.available_for_decision_at >= available_since)
+        query = query.order_by(
+            EventNewsItem.available_for_decision_at.desc(),
+            EventNewsItem.event_news_item_id,
+        )
+        if limit is not None:
+            query = query.limit(limit)
+        rows = query.all()
+        rows.sort(key=lambda row: (row.available_for_decision_at, str(row.event_news_item_id)))
         return tuple(self._to_event_news_item_record(row) for row in rows)
+
     def load_decision_available_risk_macro_context(
         self,
         *,
         trade_date: date,
         decision_time: datetime,
         ticker: str | None = None,
+        event_time_start: datetime | None = None,
+        event_time_end: datetime | None = None,
+        news_available_since: datetime | None = None,
+        news_limit: int | None = None,
+        assessment_available_since: datetime | None = None,
+        assessment_limit: int | None = None,
     ) -> dict[str, object]:
         return {
             "macro_snapshot": self.load_latest_macro_snapshot(
@@ -229,17 +260,25 @@ class MacroCalendarRepositoryMixin:
             "calendar_events": self.load_calendar_events(
                 decision_time=decision_time,
                 ticker=ticker,
+                event_time_start=event_time_start,
+                event_time_end=event_time_end,
             ),
             "portfolio_event_risk_assessments": self.load_portfolio_event_risk_assessments(
                 decision_time=decision_time,
                 ticker=ticker,
+                available_since=assessment_available_since,
+                limit=assessment_limit,
             ),
             "macro_news": self.load_decision_visible_macro_news(
                 decision_time=decision_time,
                 ticker=ticker,
+                available_since=news_available_since,
+                limit=news_limit,
             ),
             "event_news": self.load_decision_visible_event_news(
                 decision_time=decision_time,
                 ticker=ticker,
+                available_since=news_available_since,
+                limit=news_limit,
             ),
         }
