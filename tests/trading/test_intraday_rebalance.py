@@ -497,6 +497,9 @@ def test_intraday_rebalance_pipeline_forces_reduce_from_portfolio_risk_intent(tm
     assert result.decisions[0].status == "approved"
     assert result.decisions[0].reason_code == "own_event_force_reduce"
     assert result.decisions[0].approved_quantity == 5.0
+    assert result.decisions[0].thesis != "Hold unless external risk overrides."
+    assert "own_event_force_reduce" in result.decisions[0].thesis
+    assert result.decisions[0].rationale == ("Forced reduce by lookahead risk: own_event_force_reduce.",)
 
 
 def test_intraday_rebalance_attaches_sector_cluster_generated_hedge_payload(tmp_path):

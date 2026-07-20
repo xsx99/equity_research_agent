@@ -1,8 +1,9 @@
 """Helpers for pre-open and intraday lookahead risk orchestration."""
 from __future__ import annotations
 
+import re
 from dataclasses import replace
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from src.trading.risk import (
@@ -122,7 +123,11 @@ class LookaheadRiskWorkflowHelper:
             for alert in tuple(getattr(request, "alerts", ())):
                 assessment = _intraday_cluster_assessment(request=request, alert=alert)
                 if assessment is None:
-                    assessment = _intraday_event_assessment(request=request, alert=alert)
+                    assessment = _intraday_event_assessment(
+                        request=request,
+                        alert=alert,
+                        decision_time=decision_time,
+                    )
                 if assessment is not None:
                     planner_event_assessments.append(assessment)
         return self.hedge_planner.plan(
@@ -313,6 +318,7 @@ def _intraday_event_assessment(
     *,
     request: object,
     alert: object,
+    decision_time: datetime,
 ) -> PortfolioEventRiskAssessmentRecord | None:
     if not isinstance(alert, dict):
         return None
@@ -327,11 +333,56 @@ def _intraday_event_assessment(
         risk_source="own_event",
         severity=severity,
         event_type=event_type,
-        days_until_event=0,
+        days_until_event=_alert_days_until_event(alert=alert, decision_time=decision_time),
         affects_existing_position=bool(getattr(request, "existing_position", False)),
         affects_pending_trade=not bool(getattr(request, "existing_position", False)),
         metadata_json={"source": "intraday_alert"},
     )
+
+
+def _alert_days_until_event(*, alert: dict[str, Any], decision_time: datetime) -> int:
+    event_date = _alert_event_date(alert)
+    if event_date is None:
+        return 0
+    return max((event_date - decision_time.date()).days, 0)
+
+
+def _alert_event_date(alert: dict[str, Any]) -> date | None:
+    metadata_json = alert.get("metadata_json")
+    metadata = metadata_json if isinstance(metadata_json, dict) else {}
+    for payload in (alert, metadata):
+        for key in ("known_event_date", "earnings_date", "event_date"):
+            parsed = _parse_event_date(payload.get(key))
+            if parsed is not None:
+                return parsed
+
+    for key in ("headline", "summary"):
+        parsed = _parse_event_date_from_text(alert.get(key))
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _parse_event_date(value: object) -> date | None:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if not isinstance(value, str):
+        return None
+    return _parse_event_date_from_text(value)
+
+
+def _parse_event_date_from_text(value: object) -> date | None:
+    if not isinstance(value, str):
+        return None
+    match = re.search(r"\b(20\d{2}-\d{2}-\d{2})\b", value)
+    if match is None:
+        return None
+    try:
+        return date.fromisoformat(match.group(1))
+    except ValueError:
+        return None
 
 
 def _intraday_cluster_assessment(

@@ -164,6 +164,7 @@ def _build_alert_map(alerts: tuple[object, ...]) -> dict[str, list[dict[str, Any
                 "readthrough_source_ticker": getattr(alert, "readthrough_source_ticker", None),
                 "affected_themes": list(getattr(alert, "affected_themes", ())),
                 "source_family": dict(getattr(alert, "metadata_json", {}) or {}).get("source_family", "events_news"),
+                "metadata_json": dict(getattr(alert, "metadata_json", {}) or {}),
             }
         )
     return alert_map

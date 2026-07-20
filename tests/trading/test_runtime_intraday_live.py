@@ -971,6 +971,57 @@ def test_intraday_helper_keeps_same_ticker_themed_earnings_alert_on_own_event_pa
     assert intent.hedge_actions == ()
 
 
+def test_intraday_helper_does_not_force_reduce_future_earnings_outside_lookahead_window():
+    helper = LookaheadRiskWorkflowHelper()
+    now = datetime(2026, 6, 4, 16, 0, tzinfo=timezone.utc)
+    portfolio_context = SimpleNamespace(
+        account_equity=100000.0,
+        total_margin_requirement=0.0,
+        margin_model_profile="estimated_fidelity_like_conservative_v1",
+        margin_model_version="v1",
+        positions=(
+            SimpleNamespace(
+                ticker="NVDA",
+                trade_identity="tactical_stock_trade",
+                sector="Semiconductors",
+            ),
+        ),
+    )
+    config = RiskConfigResolver().resolve(
+        risk_appetite="balanced",
+        portfolio_context=portfolio_context,
+        macro_risk_budget_multiplier=1.0,
+    )
+
+    intent = helper.build_intraday_portfolio_risk_intent(
+        rebalance_requests=(
+            SimpleNamespace(
+                ticker="NVDA",
+                trade_identity="tactical_stock_trade",
+                existing_position=True,
+                allow_open_new=False,
+                alerts=(
+                    {
+                        "alert_type": "own_earnings_upcoming",
+                        "severity": "high",
+                        "source_ticker": "NVDA",
+                        "headline": "NVDA earnings expected 2026-06-14",
+                    },
+                ),
+                metadata_json={"sector": "Semiconductors"},
+            ),
+        ),
+        portfolio_context=portfolio_context,
+        config=config,
+        decision_time=now,
+        macro_risk_state=None,
+    )
+
+    assert intent.aggregate_risk_state == "risk_normalized"
+    assert intent.position_actions == ()
+    assert intent.hedge_actions == ()
+
+
 def test_intraday_helper_ignores_non_dict_alert_before_cluster_path():
     helper = LookaheadRiskWorkflowHelper()
     now = datetime(2026, 6, 4, 16, 0, tzinfo=timezone.utc)

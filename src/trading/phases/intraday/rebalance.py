@@ -431,6 +431,8 @@ class IntradayRebalancePipeline:
         if planner_action.action in {"force_reduce", "reduce"} and request.existing_position:
             output["action"] = "reduce"
             output["target_weight"] = 0.0
+            output["thesis"] = _planner_reduce_thesis(request=request, planner_action=planner_action)
+            output["rationale"] = (f"Forced reduce by lookahead risk: {planner_action.reason_code}.",)
             return output, "approved", planner_action.reason_code
         return output, status, reason_code
 
@@ -653,6 +655,15 @@ def _matching_planner_position_action(
         return None
     priority = {"block_open": 0, "force_reduce": 1, "reduce": 2, "allow": 3}
     return sorted(matches, key=lambda action: priority.get(action.action, 99))[0]
+
+
+def _planner_reduce_thesis(*, request: IntradayRebalanceRequest, planner_action: PositionRiskActionRecord) -> str:
+    risk_source = planner_action.risk_source.replace("_", " ")
+    severity = planner_action.severity.replace("_", " ")
+    return (
+        f"Reduce {request.trade_identity} exposure because lookahead {risk_source} risk "
+        f"triggered {planner_action.reason_code} ({severity} severity)."
+    )
 
 
 def _generated_hedge_action(portfolio_risk_intent: PortfolioRiskIntentRecord | None) -> dict[str, object] | None:
