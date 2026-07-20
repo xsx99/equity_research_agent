@@ -775,6 +775,15 @@ def _dashboard_payload() -> dict:
             "llm_usage_summary": {
                 "count": 1,
                 "estimated_cost": Decimal("12.30"),
+                "scope_label": "All provider telemetry",
+                "basis_note": "Local estimate from recorded usage events; not settled provider billing.",
+            },
+            "gemini_usage_summary": {
+                "count": 0,
+                "estimated_cost": Decimal("0"),
+                "total_tokens": 0,
+                "scope_label": "Gemini API estimate",
+                "basis_note": "Recorded Gemini API estimate only; Google Console is the source of truth for the actual bill.",
             },
             "llm_usage_daily": (
                 {
@@ -1589,6 +1598,9 @@ class TestTodayDashboard:
         assert "Strategy Performance" in response.text
         assert "LLM Spend" in response.text
         assert "Usage Ledger" in response.text
+        assert "All provider telemetry" in response.text
+        assert "Gemini API estimate" in response.text
+        assert "Google Console is the source of truth" in response.text
         assert "Provider Usage" in response.text
         assert "Provider / Model" not in response.text
         assert "Bullish catalyst continuation respected" in response.text
@@ -3835,6 +3847,53 @@ def test_build_system_view_aggregates_llm_usage_by_normalized_model_not_provider
             "status_label": "Succeeded",
         },
     )
+
+
+def test_build_system_view_separates_gemini_estimate_from_all_provider_cost():
+    from datetime import datetime, timezone
+
+    from src.web.routers.today import _build_system_view
+
+    system = _build_system_view(
+        overview={"command_center": {"system_issues": ()}},
+        learning_strategies={},
+        ops_cost={
+            "llm_usage": (
+                {
+                    "created_at": datetime(2026, 7, 20, 15, 0, tzinfo=timezone.utc),
+                    "pipeline_name": "trading",
+                    "provider": "google",
+                    "model": "gemini-2.5-flash-lite",
+                    "estimated_cost": Decimal("0.95"),
+                    "total_tokens": 3_400_000,
+                    "latency_ms": 900,
+                    "status": "succeeded",
+                },
+                {
+                    "created_at": datetime(2026, 7, 20, 16, 0, tzinfo=timezone.utc),
+                    "pipeline_name": "reflection",
+                    "provider": "openrouter",
+                    "model": "moonshotai/kimi-k2.6",
+                    "estimated_cost": Decimal("1.25"),
+                    "total_tokens": 800_000,
+                    "latency_ms": 1200,
+                    "status": "succeeded",
+                },
+            ),
+            "provider_usage": (),
+        },
+        risk_macro={"events": (), "exposures": ()},
+    )
+
+    assert system["llm_usage_summary"]["scope_label"] == "All provider telemetry"
+    assert system["llm_usage_summary"]["estimated_cost"] == Decimal("2.20")
+    assert system["gemini_usage_summary"] == {
+        "count": 1,
+        "estimated_cost": Decimal("0.95"),
+        "total_tokens": 3_400_000,
+        "scope_label": "Gemini API estimate",
+        "basis_note": "Recorded Gemini API estimate only; Google Console is the source of truth for the actual bill.",
+    }
 
 
 def test_load_strategy_proposals_exposes_user_readable_llm_output():

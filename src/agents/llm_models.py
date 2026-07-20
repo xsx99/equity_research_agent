@@ -34,6 +34,55 @@ def get_openrouter_api_key() -> Optional[str]:
     return os.getenv("OPENROUTER_API_KEY") or getattr(app_config, "OPENROUTER_API_KEY", None)
 
 
+def run_gemini_chat_completion(
+    prompt: str,
+    model_name: str,
+    *,
+    generative_model_cls: type[Any] | None = None,
+    configure_fn: Any | None = None,
+    now_ms: Any | None = None,
+    monotonic_ms: Any | None = None,
+) -> dict[str, Any]:
+    """Call Gemini directly and preserve SDK token usage metadata."""
+    api_key = get_google_api_key()
+    if not api_key:
+        raise RuntimeError("Gemini model support requires GOOGLE_API_KEY.")
+
+    if generative_model_cls is None or configure_fn is None:
+        try:
+            import google.generativeai as genai
+        except Exception as exc:
+            raise RuntimeError(
+                "Gemini model support requires `google-generativeai` and GOOGLE_API_KEY."
+            ) from exc
+        if generative_model_cls is None:
+            generative_model_cls = genai.GenerativeModel
+        if configure_fn is None:
+            configure_fn = genai.configure
+
+    start_ms = int(time.monotonic() * 1000) if now_ms is None else int(now_ms())
+    configure_fn(api_key=api_key)
+    model = generative_model_cls(model_name=model_name)
+    response = model.generate_content(
+        prompt,
+        generation_config={"temperature": 0},
+    )
+    elapsed_ms = (
+        int(time.monotonic() * 1000) - start_ms
+        if monotonic_ms is None
+        else int(monotonic_ms()) - start_ms
+    )
+    usage = _normalize_gemini_usage(
+        response=response,
+        model_name=model_name,
+        elapsed_ms=max(elapsed_ms, 0),
+    )
+    return {
+        "content": _extract_gemini_content(response),
+        "usage": usage,
+    }
+
+
 def build_phi_model(
     model_name: str,
     *,
@@ -202,6 +251,60 @@ def _normalize_openrouter_usage(
         "estimated_cost": estimated_cost,
         "latency_ms": max(latency_ms, 0),
     }
+
+
+def _normalize_gemini_usage(
+    *,
+    response: Any,
+    model_name: str,
+    elapsed_ms: int,
+) -> dict[str, Any]:
+    usage_metadata = _attr_or_key(response, "usage_metadata") or {}
+    prompt_tokens = _int_or_none(_attr_or_key(usage_metadata, "prompt_token_count")) or 0
+    completion_tokens = _int_or_none(_attr_or_key(usage_metadata, "candidates_token_count")) or 0
+    total_tokens = _int_or_none(_attr_or_key(usage_metadata, "total_token_count"))
+    if total_tokens is None:
+        total_tokens = prompt_tokens + completion_tokens
+    return {
+        "provider": "google",
+        "model": model_name,
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": total_tokens,
+        "estimated_cost": estimate_llm_cost(
+            model_name,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+        ),
+        "latency_ms": elapsed_ms,
+    }
+
+
+def _extract_gemini_content(response: Any) -> str:
+    try:
+        text = getattr(response, "text", None)
+    except Exception:
+        text = None
+    if text is not None:
+        return str(text)
+
+    candidates = _attr_or_key(response, "candidates") or ()
+    if not candidates:
+        return ""
+    content = _attr_or_key(candidates[0], "content")
+    parts = _attr_or_key(content, "parts") or ()
+    text_parts = []
+    for part in parts:
+        part_text = _attr_or_key(part, "text")
+        if part_text is not None:
+            text_parts.append(str(part_text))
+    return "".join(text_parts)
+
+
+def _attr_or_key(value: Any, key: str) -> Any:
+    if isinstance(value, dict):
+        return value.get(key)
+    return getattr(value, key, None)
 
 
 def _int_or_none(value: Any) -> int | None:

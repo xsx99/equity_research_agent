@@ -137,6 +137,7 @@ def _build_system_view(
     provider_usage = tuple(ops_cost.get("provider_usage") or ())
     events = tuple(risk_macro.get("events") or ())
     summary_rows = llm_daily or llm_monthly
+    gemini_summary = _summarize_gemini_usage(summary_rows or llm_usage)
     return {
         "system_issues": tuple(overview.get("command_center", {}).get("system_issues") or ()),
         "learning_strategies": learning_strategies,
@@ -152,7 +153,10 @@ def _build_system_view(
         "llm_usage_summary": {
             "count": _sum_event_count(summary_rows) if summary_rows else len(llm_usage),
             "estimated_cost": _sum_estimated_cost(summary_rows) if summary_rows else today_loaders._safe_sum(llm_usage, "estimated_cost"),
+            "scope_label": "All provider telemetry",
+            "basis_note": "Local estimate from recorded usage events; not settled provider billing.",
         },
+        "gemini_usage_summary": gemini_summary,
         "llm_usage_daily": llm_daily,
         "llm_usage_monthly": llm_monthly,
         "provider_usage_summary": {
@@ -167,6 +171,23 @@ def _sum_event_count(rows: tuple[dict[str, Any], ...]) -> int:
 
 def _sum_estimated_cost(rows: tuple[dict[str, Any], ...]) -> Decimal:
     return sum((_decimal_or_zero(row.get("estimated_cost")) for row in rows), Decimal("0"))
+
+
+def _summarize_gemini_usage(rows: tuple[dict[str, Any], ...]) -> dict[str, Any]:
+    gemini_rows = tuple(row for row in rows if _is_gemini_usage_row(row))
+    return {
+        "count": _sum_event_count(gemini_rows) if gemini_rows else 0,
+        "estimated_cost": _sum_estimated_cost(gemini_rows) if gemini_rows else Decimal("0"),
+        "total_tokens": sum((_int_or_zero(row.get("total_tokens")) for row in gemini_rows), 0),
+        "scope_label": "Gemini API estimate",
+        "basis_note": "Recorded Gemini API estimate only; Google Console is the source of truth for the actual bill.",
+    }
+
+
+def _is_gemini_usage_row(row: dict[str, Any]) -> bool:
+    provider = str(row.get("provider") or "").strip().lower()
+    model = _normalize_llm_model_name(row.get("model")).lower()
+    return provider in {"google", "gemini"} or model.startswith("gemini")
 
 
 def _aggregate_llm_usage(

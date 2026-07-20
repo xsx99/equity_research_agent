@@ -11,8 +11,8 @@ from pydantic import ValidationError
 from src.agents.base import AgentResult, BaseAgent
 from src.agents.llm_models import (
     build_phi_model,
-    estimate_llm_cost,
     get_google_api_key,
+    run_gemini_chat_completion,
     run_openrouter_chat_completion,
     should_use_gemini_backend,
     should_use_openrouter_backend,
@@ -285,6 +285,8 @@ def _build_phi_model(model_name: str) -> Any:
 def _default_agent_runner(prompt: str, model_name: str) -> Any:
     if should_use_openrouter_backend(model_name):
         return run_openrouter_chat_completion(prompt, model_name)
+    if should_use_gemini_backend(model_name):
+        return run_gemini_chat_completion(prompt, model_name)
 
     try:
         from phi.agent import Agent
@@ -294,52 +296,4 @@ def _default_agent_runner(prompt: str, model_name: str) -> Any:
         ) from exc
     agent = Agent(model=_build_phi_model(model_name), markdown=False)
     response = agent.run(prompt)
-    if should_use_gemini_backend(model_name):
-        return _normalize_phi_runner_response(response, model_name)
     return getattr(response, "content", response)
-
-
-def _normalize_phi_runner_response(response: Any, model_name: str) -> dict[str, Any]:
-    content = getattr(response, "content", response)
-    metrics = getattr(response, "metrics", None) or {}
-    prompt_tokens = _metric_int(metrics.get("input_tokens"))
-    completion_tokens = _metric_int(metrics.get("output_tokens"))
-    total_tokens = _metric_int(metrics.get("total_tokens"))
-    if total_tokens == 0:
-        total_tokens = prompt_tokens + completion_tokens
-
-    latency_ms = int(_metric_seconds(metrics.get("time")) * 1000)
-    return {
-        "content": content,
-        "usage": {
-            "provider": "google",
-            "model": model_name,
-            "prompt_tokens": prompt_tokens,
-            "completion_tokens": completion_tokens,
-            "total_tokens": total_tokens,
-            "estimated_cost": estimate_llm_cost(
-                model_name,
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
-            ),
-            "latency_ms": max(latency_ms, 0),
-        },
-    }
-
-
-def _metric_int(value: Any) -> int:
-    if isinstance(value, (list, tuple)):
-        value = sum(_metric_int(item) for item in value)
-    try:
-        return int(value or 0)
-    except (TypeError, ValueError):
-        return 0
-
-
-def _metric_seconds(value: Any) -> float:
-    if isinstance(value, (list, tuple)):
-        return sum(_metric_seconds(item) for item in value)
-    try:
-        return float(value or 0.0)
-    except (TypeError, ValueError):
-        return 0.0

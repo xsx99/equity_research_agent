@@ -1,3 +1,7 @@
+from types import SimpleNamespace
+
+import pytest
+
 from src.agents import strategy_evolution
 from src.core import config as app_config
 
@@ -192,6 +196,64 @@ def test_openrouter_chat_completion_prefers_generation_total_cost(monkeypatch):
         "headers": {"Authorization": "Bearer router-key"},
         "params": {"id": "gen-abc123"},
     }
+
+
+def test_gemini_chat_completion_reads_sdk_usage_metadata(monkeypatch):
+    from src.agents.llm_models import run_gemini_chat_completion
+
+    configure_calls = []
+    generation_calls = []
+
+    class FakeGenerativeModel:
+        def __init__(self, *, model_name):
+            self.model_name = model_name
+
+        def generate_content(self, prompt, *, generation_config):
+            generation_calls.append(
+                {
+                    "model_name": self.model_name,
+                    "prompt": prompt,
+                    "generation_config": generation_config,
+                }
+            )
+            return SimpleNamespace(
+                text='{"ok": true}',
+                usage_metadata=SimpleNamespace(
+                    prompt_token_count=1_000,
+                    candidates_token_count=500,
+                    total_token_count=1_500,
+                ),
+            )
+
+    monkeypatch.setenv("GOOGLE_API_KEY", "google-key")
+
+    result = run_gemini_chat_completion(
+        "Return JSON",
+        "gemini-2.5-flash-lite",
+        generative_model_cls=FakeGenerativeModel,
+        configure_fn=lambda **kwargs: configure_calls.append(kwargs),
+        now_ms=lambda: 1000,
+        monotonic_ms=lambda: 1432,
+    )
+
+    assert result["content"] == '{"ok": true}'
+    assert result["usage"] == {
+        "provider": "google",
+        "model": "gemini-2.5-flash-lite",
+        "prompt_tokens": 1_000,
+        "completion_tokens": 500,
+        "total_tokens": 1_500,
+        "estimated_cost": pytest.approx(0.0003),
+        "latency_ms": 432,
+    }
+    assert configure_calls == [{"api_key": "google-key"}]
+    assert generation_calls == [
+        {
+            "model_name": "gemini-2.5-flash-lite",
+            "prompt": "Return JSON",
+            "generation_config": {"temperature": 0},
+        }
+    ]
 
 
 def test_estimate_llm_cost_uses_gemini_flash_lite_standard_text_pricing():

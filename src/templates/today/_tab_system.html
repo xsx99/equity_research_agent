@@ -15,7 +15,7 @@
         <article class="summary-tile">
           <span class="metric-label">LLM Spend</span>
           <strong>{{ fmt_currency(system.llm_usage_summary.estimated_cost) if system.llm_usage_summary.estimated_cost is not none else "—" }}</strong>
-          <span class="detail-muted">{{ system.llm_usage_summary.count }} usage row{% if system.llm_usage_summary.count != 1 %}s{% endif %}</span>
+          <span class="detail-muted">{{ system.llm_usage_summary.scope_label if system.llm_usage_summary.scope_label is defined else "Local estimate" }} · {{ system.llm_usage_summary.count }} usage row{% if system.llm_usage_summary.count != 1 %}s{% endif %}</span>
         </article>
         <article class="summary-tile">
           <span class="metric-label">Provider Calls</span>
@@ -173,8 +173,12 @@
         </div>
         {% set llm_daily = system.llm_usage_daily if system.llm_usage_daily is defined else () %}
         {% set llm_monthly = system.llm_usage_monthly if system.llm_usage_monthly is defined else () %}
+        {% set gemini_summary = system.gemini_usage_summary if system.gemini_usage_summary is defined else none %}
         {% if llm_daily or llm_monthly %}
-        <p class="detail-muted">{{ system.llm_usage_summary.count }} event{% if system.llm_usage_summary.count != 1 %}s{% endif %} · {{ fmt_currency(system.llm_usage_summary.estimated_cost) if system.llm_usage_summary.estimated_cost is not none else "—" }} estimated cost</p>
+        <p class="detail-muted">{{ system.llm_usage_summary.scope_label if system.llm_usage_summary.scope_label is defined else "All local telemetry" }} · {{ system.llm_usage_summary.count }} event{% if system.llm_usage_summary.count != 1 %}s{% endif %} · {{ fmt_currency(system.llm_usage_summary.estimated_cost) if system.llm_usage_summary.estimated_cost is not none else "—" }} estimated cost{% if system.llm_usage_summary.basis_note is defined and system.llm_usage_summary.basis_note %}. {{ system.llm_usage_summary.basis_note }}{% endif %}</p>
+        {% if gemini_summary %}
+        <p class="detail-muted">{{ gemini_summary.scope_label }} · {{ gemini_summary.count }} event{% if gemini_summary.count != 1 %}s{% endif %} · {{ fmt_currency(gemini_summary.estimated_cost) if gemini_summary.estimated_cost is not none else "—" }} estimated cost · {{ fmt_number(gemini_summary.total_tokens, 0) }} tokens. {{ gemini_summary.basis_note }}</p>
+        {% endif %}
         {% if llm_daily %}
         <div class="section-label">Daily</div>
         <div class="surface-table-wrap">
