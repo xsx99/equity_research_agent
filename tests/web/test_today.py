@@ -135,6 +135,8 @@ def _dashboard_payload() -> dict:
                     "ticker": "AAPL",
                     "trade_identity": "tactical_stock_trade",
                     "trade_identity_label": "Tactical Stock Trade",
+                    "pool": "satellite",
+                    "pool_label": "Satellite",
                     "strategy_id": "earnings_drift_v1",
                     "quantity": Decimal("10"),
                     "market_value": Decimal("2145.20"),
@@ -144,6 +146,8 @@ def _dashboard_payload() -> dict:
                     "ticker": "MSFT",
                     "trade_identity": "tactical_stock_trade",
                     "trade_identity_label": "Tactical Stock Trade",
+                    "pool": "satellite",
+                    "pool_label": "Satellite",
                     "strategy_id": "relative_strength_breakout_v1",
                     "quantity": Decimal("5"),
                     "market_value": Decimal("1550.80"),
@@ -157,6 +161,8 @@ def _dashboard_payload() -> dict:
                     "option_strategy_type_label": "Long Call",
                     "trade_identity": "tactical_option_trade",
                     "trade_identity_label": "Tactical Option Trade",
+                    "pool": "satellite",
+                    "pool_label": "Satellite",
                     "market_value": Decimal("840.75"),
                     "max_loss": Decimal("420.00"),
                 },
@@ -1228,6 +1234,8 @@ class TestTodayDashboard:
         assert "$300" in response.text
         assert "Avg Buy" in response.text
         assert "Bought" in response.text
+        assert response.text.count("<th>Pool</th>") == 2
+        assert response.text.count(">Satellite</td>") == 3
         assert "$182.01" in response.text
         assert "2026-06-05" in response.text
         assert "Earnings Drift V1" in response.text

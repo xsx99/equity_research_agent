@@ -68,9 +68,36 @@ def test_load_positions_exposes_enriched_stock_position_fields():
     assert position["held_days"] == 5
     assert position["total_pnl_pct"] == pytest.approx(0.25)
     assert position["sleeve"] == "Tactical Stock Trade"
+    assert position["pool"] == "satellite"
+    assert position["pool_label"] == "Satellite"
     assert position["filled_qty"] == 10
     assert position["opened_at"] == opened_at
     assert position["updated_at"] == datetime(2026, 6, 15, 12, 0, tzinfo=timezone.utc)
+
+
+def test_load_positions_labels_core_holding_pool():
+    row = SimpleNamespace(
+        ticker="VOO",
+        trade_identity="core_holding",
+        strategy_id="core_accumulation_on_pullback_v1",
+        quantity=3,
+        average_cost=500,
+        market_price=510,
+        market_value=1530,
+        unrealized_pnl=30,
+        opened_at=datetime(2026, 7, 1, 14, 30, tzinfo=timezone.utc),
+        updated_at=datetime(2026, 7, 6, 16, 0, tzinfo=timezone.utc),
+    )
+
+    positions = _load_positions(
+        _FakeSession([row]),
+        as_of=datetime(2026, 7, 6, 16, 0, tzinfo=timezone.utc),
+    )
+
+    position = positions[0]
+    assert position["trade_identity_label"] == "Core Holding"
+    assert position["pool"] == "core"
+    assert position["pool_label"] == "Core"
 
 
 def test_load_positions_computes_unrealized_pnl_when_row_has_no_column():

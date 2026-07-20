@@ -75,10 +75,13 @@ def _load_positions(session: Any, *, as_of: datetime | None = None) -> tuple[dic
             quantity=getattr(row, "quantity", None),
         )
         strategy_id = getattr(row, "strategy_id", None) or strategy_fallbacks.get(str(row.ticker).upper())
+        pool = _position_pool(getattr(row, "trade_identity", None))
         positions.append({
             "ticker": row.ticker,
             "trade_identity": row.trade_identity,
             "trade_identity_label": trade_identity_label(row.trade_identity),
+            "pool": pool,
+            "pool_label": _position_pool_label(pool),
             "strategy_id": strategy_id,
             "strategy_label": strategy_label(strategy_id),
             "quantity": row.quantity,
@@ -100,6 +103,22 @@ def _load_positions(session: Any, *, as_of: datetime | None = None) -> tuple[dic
             ),
         })
     return tuple(positions)
+
+
+def _position_pool(trade_identity: Any) -> str | None:
+    if trade_identity == "core_holding":
+        return "core"
+    if trade_identity in {"tactical_stock_trade", "tactical_option_trade"}:
+        return "satellite"
+    return None
+
+
+def _position_pool_label(pool: str | None) -> str | None:
+    if pool == "core":
+        return "Core"
+    if pool == "satellite":
+        return "Satellite"
+    return None
 
 
 def _load_position_strategy_fallbacks(session: Any, *, tickers: tuple[str, ...]) -> dict[str, str]:
@@ -217,20 +236,23 @@ def _load_option_positions(session: Any) -> tuple[dict[str, Any], ...]:
         .order_by(PaperOptionPosition.updated_at.desc())
         .all()
     )
-    return tuple(
-        {
+    positions = []
+    for row in rows:
+        pool = _position_pool(getattr(row, "trade_identity", None))
+        positions.append({
             "ticker": row.ticker,
             "option_strategy_type": row.option_strategy_type,
             "option_strategy_type_label": option_strategy_type_label(row.option_strategy_type),
             "trade_identity": row.trade_identity,
             "trade_identity_label": trade_identity_label(row.trade_identity),
+            "pool": pool,
+            "pool_label": _position_pool_label(pool),
             "quantity": getattr(row, "quantity", None),
             "expiry_label": row.expiry.strftime("%Y-%m-%d") if getattr(row, "expiry", None) else None,
             "buying_power_effect": getattr(row, "buying_power_effect", None),
             "max_loss": row.max_loss,
-        }
-        for row in rows
-    )
+        })
+    return tuple(positions)
 
 
 def _load_hedge_overlays(session: Any) -> tuple[dict[str, Any], ...]:
