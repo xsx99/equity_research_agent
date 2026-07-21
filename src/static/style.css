@@ -403,7 +403,7 @@ button:hover, .btn:hover { filter: brightness(1.12); text-decoration: none; }
 .dismiss-row { margin-top: 0.85rem; padding-top: 0.7rem; border-top: 1px solid var(--border); }
 .trades-last-run { margin: -0.35rem 0 0.75rem; font-family: var(--mono); font-size: var(--fs-xs); }
 /* Horizontal scroll wrapper for wide tables (e.g. the trades hero header table) */
-.table-scroll { overflow-x: auto; margin-top: 0.7rem; }
+.table-scroll { overflow-x: auto; max-width: 100%; min-width: 0; margin-top: 0.7rem; }
 .trade-header-table th, .trade-header-table td { white-space: nowrap; }
 .trade-header-table td.num, .trade-plan-table td.num { font-family: var(--mono); color: var(--text); }
 .trade-plan-table th, .trade-plan-table td { vertical-align: top; }
@@ -701,6 +701,13 @@ pre {
   border: 1px solid var(--border);
   background: var(--bg-elev-2);
   box-shadow: var(--shadow);
+}
+.trades-canvas,
+.ticker-workspace,
+.ticker-detail-panel,
+.ticker-detail-panel .subcard,
+.tab-panel {
+  min-width: 0;
 }
 .secondary-surface {
   border-radius: var(--radius-lg);
@@ -1553,6 +1560,8 @@ details > summary:hover { color: var(--text); }
 /* Trades detail — compact (folded hero, tight trade-plan facts) */
 .ticker-detail-panel { gap: .75rem; }
 .ticker-detail-panel .subcard { padding: .85rem 1rem; }
+.trade-plan-table td { white-space: normal; min-width: 8rem; }
+.trade-plan-table td.num { white-space: nowrap; min-width: auto; }
 .trade-plan-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: .5rem; margin-top: .3rem; }
 .trade-plan-facts > div { display: grid; gap: .15rem; padding: .5rem .65rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-elev-3); }
 .trade-plan-facts strong { font-family: var(--mono); color: var(--text); font-size: var(--fs-sm); }
