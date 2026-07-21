@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from contextlib import contextmanager
 from datetime import date
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -1398,8 +1399,41 @@ def test_live_intraday_refresh_runtime_refreshes_open_option_position_marks_and_
     assert request.metadata_json["option_mark_price"] == 320.0
 
 
+def _stub_owned_intraday_session(monkeypatch):
+    session = SimpleNamespace(commits=0, rollbacks=0)
+    saved_payloads: list[dict[str, object]] = []
+
+    @contextmanager
+    def _session_context():
+        yield session
+
+    class _Repository:
+        def __init__(self, received_session: object) -> None:
+            assert received_session is session
+
+        def save_runtime_run(self, payload: dict[str, object]) -> None:
+            saved_payloads.append(payload)
+
+    def _commit() -> None:
+        session.commits += 1
+
+    def _rollback() -> None:
+        session.rollbacks += 1
+
+    session.commit = _commit
+    session.rollback = _rollback
+    monkeypatch.setattr("src.db.connection.get_session", _session_context)
+    monkeypatch.setattr(
+        "src.trading.phases.intraday.SqlAlchemyTradingRepository",
+        _Repository,
+        raising=False,
+    )
+    return session, saved_payloads
+
+
 def test_run_live_intraday_refresh_once_builds_default_dependencies_when_not_injected(monkeypatch):
     runtime, _recorder, _pipeline, _repository, _refresh_service = _build_runtime()
+    session, saved_payloads = _stub_owned_intraday_session(monkeypatch)
 
     monkeypatch.setattr(
         "src.trading.runtime.intraday_refresh.build_live_intraday_refresh_dependencies",
@@ -1410,10 +1444,83 @@ def test_run_live_intraday_refresh_once_builds_default_dependencies_when_not_inj
 
     assert result["status"] == "passed"
     assert result["phase"] == "intraday_refresh"
+    assert session.commits == 1
+    assert len(saved_payloads) == 1
+
+
+def test_run_live_intraday_refresh_once_persists_runtime_run_when_session_owned(monkeypatch):
+    runtime, _recorder, _pipeline, _repository, _refresh_service = _build_runtime()
+    session, saved_payloads = _stub_owned_intraday_session(monkeypatch)
+    monkeypatch.setattr(
+        "src.trading.runtime.intraday_refresh.build_live_intraday_refresh_dependencies",
+        lambda _session: runtime.dependencies,
+    )
+
+    result = run_live_intraday_refresh_once(now=lambda: datetime(2026, 6, 4, 16, 0, tzinfo=timezone.utc))
+
+    assert result["status"] == "passed"
+    assert session.commits == 1
+    assert session.rollbacks == 0
+    assert saved_payloads == [
+        {
+            "phase": "intraday_refresh",
+            "status": "passed",
+            "trade_date": date(2026, 6, 4),
+            "as_of": result["as_of"],
+            "started_at": result["as_of"],
+            "completed_at": result["as_of"],
+            "summary_json": result["summary"],
+            "execution_json": result["execution"],
+            "metadata_json": {
+                "source": "run_live_intraday_refresh_once",
+                "report_version": "v1",
+            },
+        }
+    ]
+
+
+def test_run_live_intraday_refresh_once_persists_failed_runtime_run_when_session_owned(monkeypatch):
+    session, saved_payloads = _stub_owned_intraday_session(monkeypatch)
+    failure = RuntimeError("dependency build failed")
+    now = datetime(2026, 6, 4, 16, 0, tzinfo=timezone.utc)
+
+    def _raise_failure(_session):
+        raise failure
+
+    monkeypatch.setattr(
+        "src.trading.runtime.intraday_refresh.build_live_intraday_refresh_dependencies",
+        _raise_failure,
+    )
+
+    with pytest.raises(RuntimeError, match="dependency build failed"):
+        run_live_intraday_refresh_once(now=lambda: now)
+
+    assert session.commits == 1
+    assert session.rollbacks == 1
+    assert saved_payloads == [
+        {
+            "phase": "intraday_refresh",
+            "status": "failed",
+            "trade_date": date(2026, 6, 4),
+            "as_of": now,
+            "started_at": now,
+            "completed_at": now,
+            "summary_json": {
+                "reasons": ["dependency build failed"],
+                "exception_type": "RuntimeError",
+            },
+            "execution_json": {},
+            "metadata_json": {
+                "source": "run_live_intraday_refresh_once",
+                "report_version": "v1",
+            },
+        }
+    ]
 
 
 def test_run_live_intraday_refresh_once_builds_default_dependencies_for_option_execution(monkeypatch):
     runtime, _recorder, _pipeline, _repository, _refresh_service = _build_runtime()
+    session, saved_payloads = _stub_owned_intraday_session(monkeypatch)
 
     monkeypatch.setattr(
         "src.trading.runtime.intraday_refresh.build_live_intraday_refresh_dependencies",
@@ -1428,6 +1535,8 @@ def test_run_live_intraday_refresh_once_builds_default_dependencies_for_option_e
 
     assert result["status"] == "passed"
     assert result["execution"]["mode"] == "execute"
+    assert session.commits == 1
+    assert len(saved_payloads) == 1
 
 
 def test_runtime_dispatch_routes_intraday_refresh_to_live_runtime():

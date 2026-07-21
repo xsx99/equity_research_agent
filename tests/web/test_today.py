@@ -1992,6 +1992,7 @@ class TestTodayDashboard:
         }
 
         with ExitStack() as stack:
+            intraday_time = datetime(2026, 6, 3, 16, 0, tzinfo=timezone.utc)
             stack.enter_context(patch("src.web.routers.today._load_trade_rows", return_value=trade_rows))
             stack.enter_context(patch("src.web.routers.today._load_positions", return_value=()))
             stack.enter_context(
@@ -2092,6 +2093,13 @@ class TestTodayDashboard:
             stack.enter_context(patch("src.web.routers.today._load_peer_baskets", return_value=()))
             stack.enter_context(patch("src.web.routers.today._load_themes", return_value=()))
             stack.enter_context(patch("src.web.routers.today._load_news_by_ticker", return_value={}))
+            stack.enter_context(
+                patch(
+                    "src.web.routers.today._load_latest_intraday_scan_at",
+                    return_value=intraday_time,
+                    create=True,
+                )
+            )
             build_candidates = stack.enter_context(
                 patch(
                     "src.web.routers.today.build_today_candidates_view",
@@ -2116,6 +2124,7 @@ class TestTodayDashboard:
             row["ticker"] for row in build_candidates.call_args.kwargs["rows"]
         }
         assert candidate_tickers == {"REVIEW", "WATCH"}
+        assert build_candidates.call_args.kwargs["intraday_last_run_at"] == intraday_time
 
     def test_load_today_dashboard_populates_trade_bucket_recency_labels(self):
         from src.web.routers.today import load_today_dashboard

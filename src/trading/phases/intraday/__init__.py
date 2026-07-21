@@ -1,7 +1,7 @@
 """Public facade for the live intraday refresh phase."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Callable
 
 __all__ = [
@@ -59,12 +59,28 @@ def run_intraday_refresh_once(
     from src.db.connection import get_session
 
     with get_session() as session:
-        return LiveIntradayRefreshRuntime(
-            dependencies=build_live_intraday_refresh_dependencies(session),
-            now=now,
-            execute_paper_orders=execute_paper_orders,
-            execute_paper_option_orders=execute_paper_option_orders,
-        ).run()
+        started_at = _resolve_now(now)
+        try:
+            result = LiveIntradayRefreshRuntime(
+                dependencies=build_live_intraday_refresh_dependencies(session),
+                now=now,
+                execute_paper_orders=execute_paper_orders,
+                execute_paper_option_orders=execute_paper_option_orders,
+            ).run()
+        except Exception as exc:
+            session.rollback()
+            completed_at = _resolve_now(now)
+            save_failed_intraday_runtime_run(
+                session,
+                started_at=started_at,
+                completed_at=completed_at,
+                exc=exc,
+            )
+            session.commit()
+            raise
+        save_intraday_runtime_run(session, result)
+        session.commit()
+        return result
 
 
 def build_live_intraday_refresh_dependencies(session: object | None = None) -> object:
@@ -74,6 +90,99 @@ def build_live_intraday_refresh_dependencies(session: object | None = None) -> o
     )
 
     return _build_live_intraday_refresh_dependencies(session)
+
+
+def save_intraday_runtime_run(session: object, report: dict[str, object]) -> None:
+    _sqlalchemy_repository_cls()(session).save_runtime_run(_runtime_run_payload_from_report(report))
+
+
+def save_failed_intraday_runtime_run(
+    session: object,
+    *,
+    started_at: datetime,
+    completed_at: datetime,
+    exc: Exception,
+) -> None:
+    _sqlalchemy_repository_cls()(session).save_runtime_run(
+        _failed_runtime_run_payload(started_at=started_at, completed_at=completed_at, exc=exc)
+    )
+
+
+def _sqlalchemy_repository_cls() -> object:
+    repository_cls = globals().get("SqlAlchemyTradingRepository")
+    if repository_cls is not None:
+        return repository_cls
+    from src.trading.repositories.sqlalchemy import SqlAlchemyTradingRepository
+
+    return SqlAlchemyTradingRepository
+
+
+def _runtime_run_payload_from_report(report: dict[str, object]) -> dict[str, object]:
+    raw_as_of = report["as_of"]
+    raw_started_at = report.get("started_at") or raw_as_of
+    raw_completed_at = report.get("completed_at") or raw_as_of
+    trade_date = report.get("trade_date") or _datetime_like(raw_as_of).date()
+    return {
+        "phase": report["phase"],
+        "status": report["status"],
+        "trade_date": trade_date,
+        "as_of": raw_as_of,
+        "started_at": raw_started_at,
+        "completed_at": raw_completed_at,
+        "summary_json": dict(report.get("summary") or {}),
+        "execution_json": dict(report.get("execution") or {}),
+        "metadata_json": {
+            "source": "run_live_intraday_refresh_once",
+            "report_version": "v1",
+        },
+    }
+
+
+def _failed_runtime_run_payload(
+    *,
+    started_at: datetime,
+    completed_at: datetime,
+    exc: Exception,
+) -> dict[str, object]:
+    reason = str(exc).strip() or exc.__class__.__name__
+    return {
+        "phase": "intraday_refresh",
+        "status": "failed",
+        "trade_date": completed_at.date(),
+        "as_of": completed_at,
+        "started_at": started_at,
+        "completed_at": completed_at,
+        "summary_json": {
+            "reasons": [reason],
+            "exception_type": exc.__class__.__name__,
+        },
+        "execution_json": {},
+        "metadata_json": {
+            "source": "run_live_intraday_refresh_once",
+            "report_version": "v1",
+        },
+    }
+
+
+def _resolve_now(now: Callable[[], datetime] | None) -> datetime:
+    current = now() if now is not None else datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        return current.replace(tzinfo=timezone.utc)
+    return current
+
+
+def _datetime_like(value: object) -> datetime:
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value
+    text = str(value).strip()
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    parsed = datetime.fromisoformat(text)
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed
 
 
 def __getattr__(name: str):

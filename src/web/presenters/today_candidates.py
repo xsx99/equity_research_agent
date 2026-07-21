@@ -18,6 +18,7 @@ def build_today_candidates_view(
     peer_baskets: tuple[dict[str, Any], ...],
     thesis_history_by_ticker: dict[str, Any] | None = None,
     news_by_ticker: dict[str, Any] | None = None,
+    intraday_last_run_at: Any | None = None,
 ) -> dict[str, Any]:
     normalized_news_by_ticker = _normalize_news_by_ticker(news_by_ticker or {})
     enriched_rows = tuple(_attach_recent_news(row, normalized_news_by_ticker) for row in rows)
@@ -62,6 +63,7 @@ def build_today_candidates_view(
         "manual_candidates": manual_candidates,
         "last_run_at": last_run_at,
         "agent_last_run_at": agent_last_run_at,
+        "agent_last_intraday_scan_at": intraday_last_run_at,
         "manual_last_run_at": manual_last_run_at,
         "decision_readout": decision_readout,
         "rows": enriched_rows,

@@ -188,10 +188,12 @@ def test_build_today_candidates_view_reports_agent_and_manual_run_times_separate
         portfolio_intents=(),
         relationships=(),
         peer_baskets=(),
+        intraday_last_run_at="2026-07-07T16:00:00Z",
     )
 
     assert payload["last_run_at"] == "2026-07-07T12:50:00Z"
     assert payload["agent_last_run_at"] == "2026-07-07T12:45:00Z"
+    assert payload["agent_last_intraday_scan_at"] == "2026-07-07T16:00:00Z"
     assert payload["manual_last_run_at"] == "2026-07-07T12:50:00Z"
 
 

@@ -21,6 +21,7 @@ from src.db.models.trading import (
     DailyReflection,
     EventNewsItem,
     IntradayRebalanceDecision,
+    IntradaySignalScan,
     IntradaySignalSnapshot,
     LearningFactor,
     LlmUsageEvent,
@@ -526,6 +527,7 @@ def load_today_dashboard(
         relationships = _load_relationships(session)
         peer_baskets = _load_peer_baskets(session)
         themes = _load_themes(session)
+        intraday_last_run_at = _load_latest_intraday_scan_at(session)
         candidates = build_today_candidates_view(
             rows=candidate_surface_rows,
             manual_requests=manual_requests,
@@ -536,6 +538,7 @@ def load_today_dashboard(
             peer_baskets=peer_baskets,
             thesis_history_by_ticker=thesis_history_by_ticker,
             news_by_ticker=_load_news_by_ticker(session),
+            intraday_last_run_at=intraday_last_run_at,
         )
         candidates = _attach_candidate_summary(candidates)
     else:
@@ -630,6 +633,18 @@ def load_today_dashboard(
         "ops_cost": ops_cost,
         "system": system,
     }
+
+
+def _load_latest_intraday_scan_at(session: SQLAlchemySession) -> Any | None:
+    scan = (
+        session.query(IntradaySignalScan)
+        .order_by(
+            IntradaySignalScan.decision_time.desc(),
+            IntradaySignalScan.created_at.desc(),
+        )
+        .first()
+    )
+    return scan.decision_time if scan else None
 
 
 def _filter_trade_rows_for_display(

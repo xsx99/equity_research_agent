@@ -94,6 +94,7 @@
     {% set agent_rows = candidates.agent_candidates if candidates.agent_candidates is defined else decision_readout %}
     {% set manual_rows = candidates.manual_candidates if candidates.manual_candidates is defined else manual_review_queue %}
     {% set agent_last_run_at = candidates.agent_last_run_at if candidates.agent_last_run_at is defined else candidates.last_run_at %}
+    {% set agent_last_intraday_scan_at = candidates.agent_last_intraday_scan_at if candidates.agent_last_intraday_scan_at is defined else none %}
     {% set manual_last_run_at = candidates.manual_last_run_at if candidates.manual_last_run_at is defined else candidates.last_run_at %}
     {% set universe_filter = candidates.active_universe_filter if candidates.active_universe_filter is defined else none %}
 
@@ -198,7 +199,7 @@
     <div class="panel">
       <div class="panel-head">
         <h3>🔎 Agent-Scored Candidates</h3>
-        <span class="meta">{{ candidates.aggregate_summary.scored }} scored · {{ candidates.aggregate_summary.actionable }} actionable · {{ candidates.aggregate_summary.watch }} watch · {{ candidates.aggregate_summary.blocked }} blocked{% if agent_last_run_at %} · Last run <time datetime="{{ agent_last_run_at | iso_datetime }}" data-local-time-format="datetime">{{ agent_last_run_at | local_time('datetime') }}</time>{% endif %}</span>
+        <span class="meta">{{ candidates.aggregate_summary.scored }} scored · {{ candidates.aggregate_summary.actionable }} actionable · {{ candidates.aggregate_summary.watch }} watch · {{ candidates.aggregate_summary.blocked }} blocked{% if agent_last_run_at %} · Candidate run <time datetime="{{ agent_last_run_at | iso_datetime }}" data-local-time-format="datetime">{{ agent_last_run_at | local_time('datetime') }}</time>{% endif %}{% if agent_last_intraday_scan_at %} · Last intraday scan <time datetime="{{ agent_last_intraday_scan_at | iso_datetime }}" data-local-time-format="datetime">{{ agent_last_intraday_scan_at | local_time('datetime') }}</time>{% endif %}</span>
       </div>
       <div class="panel-body">
         {% if agent_rows %}
