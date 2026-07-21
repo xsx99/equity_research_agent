@@ -1592,6 +1592,37 @@ class TestTodayDashboard:
             dashboard["ticker_workspace"]["detail"]["latest_conclusion"]["trade_decision"]["confidence"] == Decimal("0.74")
         )
 
+    def test_merge_audit_detail_preserves_corrected_trade_plan_thesis(self):
+        from src.web.routers.today import _merge_audit_detail_into_workspace_detail
+
+        corrected_summary = (
+            "Reduce tactical stock trade exposure to zero because lookahead own event risk required "
+            "closing the position."
+        )
+        detail = {
+            "latest_conclusion": {
+                "trade_decision": {"summary": corrected_summary},
+                "trade_plan": {"thesis": corrected_summary},
+                "risk_summary": {},
+                "bull_bear": {},
+            },
+            "tabs": {},
+        }
+        audit_detail = {
+            "thesis": "The company has received multiple positive price target revisions from analysts.",
+            "key_drivers": [],
+            "counterarguments": [],
+            "invalidators": [],
+            "core_signal_evidence": {},
+        }
+
+        merged = _merge_audit_detail_into_workspace_detail(detail, audit_detail)
+
+        latest = merged["latest_conclusion"]
+        assert latest["trade_decision"]["summary"] == corrected_summary
+        assert latest["trade_plan"]["thesis"] == corrected_summary
+        assert "positive price target" not in latest["trade_plan"]["thesis"]
+
     def test_system_tab_renders_learning_and_ops_modules(self, client):
         payload = _dashboard_payload()
         payload["selected_tab"] = "system"

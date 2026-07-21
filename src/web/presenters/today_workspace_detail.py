@@ -84,7 +84,6 @@ def _build_detail(
     closed_position = closed_positions_by_ticker.get(selected_ticker) or {}
     risk = risk_by_ticker.get(selected_ticker) or {}
     risk_history = _build_risk_history(risk.get("history"))
-    trade_summary = _decision_summary(latest_decision)
     key_drivers = _decision_rationale_items(latest_decision, "key_drivers")
     counterarguments = _decision_rationale_items(latest_decision, "counterarguments")
     invalidators = _decision_invalidators(latest_decision)
@@ -105,6 +104,7 @@ def _build_detail(
         "applied_rules": tuple(risk.get("applied_rules") or ()),
         "rule_checks": tuple(risk.get("rule_checks") or ()),
     }
+    trade_summary = _risk_override_trade_summary(latest_decision, risk) or _decision_summary(latest_decision)
 
     latest_conclusion = {
         "trade_decision": {
@@ -194,6 +194,38 @@ def _build_detail(
         "latest_conclusion": latest_conclusion,
         "tabs": tabs,
     }
+
+
+def _risk_override_trade_summary(latest_decision: dict[str, Any], risk: dict[str, Any]) -> str | None:
+    decision = str(latest_decision.get("decision") or "").strip().lower()
+    if decision not in {"reduce", "exit"}:
+        return None
+
+    target_weight = _float_or_none(latest_decision.get("target_weight"))
+    approved_weight = _float_or_none(latest_decision.get("approved_weight"))
+    if target_weight not in (None, 0.0) or approved_weight not in (None, 0.0):
+        return None
+
+    reason = str(risk.get("reason") or "").strip()
+    lookahead_risk_source = str(risk.get("lookahead_risk_source") or "").strip()
+    if "force_reduce" not in reason and "lookahead" not in reason and not lookahead_risk_source:
+        return None
+
+    trade_identity = latest_decision.get("trade_identity") or "position"
+    risk_source = lookahead_risk_source or "lookahead"
+    return (
+        f"{_humanize_label(decision)} {operator_text(trade_identity).lower()} exposure to zero "
+        f"because lookahead {operator_text(risk_source).lower()} risk required closing the position."
+    )
+
+
+def _float_or_none(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 def _build_signal_summary(signal_history: Any) -> dict[str, Any]:
     summary_items = signal_history.get("summary") if isinstance(signal_history, dict) else signal_history

@@ -870,6 +870,56 @@ def test_build_ticker_workspace_surfaces_lookahead_risk_source_and_hedge_overlay
     assert "raw_json" not in workspace["detail"]["tabs"]["risk"]
 
 
+def test_build_ticker_workspace_replaces_stale_bullish_thesis_for_forced_reduce():
+    workspace = build_ticker_workspace(
+        trade_rows=[
+            {
+                "ticker": "GH",
+                "decision": "reduce",
+                "selected_strategy_id": "catalyst_breakout_v1",
+                "expression_bucket_id": "long_stock",
+                "trade_identity": "tactical_stock_trade",
+                "confidence": 0.70,
+                "target_weight": 0.0,
+                "approved_weight": 0.0,
+                "time_horizon": "intraday",
+                "thesis": "The company has received multiple positive price target revisions and has upside.",
+                "created_at": "2026-07-20T14:00:00Z",
+            },
+        ],
+        selected_ticker="GH",
+        positions_by_ticker={},
+        closed_positions_by_ticker={
+            "GH": {
+                "status": "closed",
+                "opened_at": "2026-07-20T13:33:54Z",
+                "closed_at": "2026-07-20T14:00:00Z",
+            }
+        },
+        risk_by_ticker={
+            "GH": {
+                "status": "approved",
+                "reason": "own_event_force_reduce",
+                "lookahead_risk_source": "own_event",
+            }
+        },
+        signal_history_by_ticker={},
+        news_by_ticker={},
+        fundamentals_by_ticker={},
+        as_of=datetime(2026, 7, 20, 14, 5, tzinfo=timezone.utc),
+    )
+
+    latest = workspace["detail"]["latest_conclusion"]
+
+    expected = (
+        "Reduce tactical stock trade exposure to zero because lookahead own event risk required "
+        "closing the position."
+    )
+    assert latest["trade_decision"]["summary"] == expected
+    assert latest["trade_plan"]["thesis"] == expected
+    assert "positive price target" not in latest["trade_decision"]["summary"]
+
+
 def test_build_ticker_workspace_surfaces_discrete_fill_price():
     workspace = build_ticker_workspace(
         trade_rows=[

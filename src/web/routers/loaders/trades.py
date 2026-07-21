@@ -286,7 +286,10 @@ def _merge_audit_detail_into_workspace_detail(
         trade_decision["approved_weight"] = audit_detail.get("approved_weight")
 
     trade_plan = dict(latest_conclusion.get("trade_plan") or {})
-    if audit_detail.get("thesis"):
+    existing_trade_plan_thesis = str(trade_plan.get("thesis") or "").strip()
+    if audit_detail.get("thesis") and (
+        not existing_trade_plan_thesis or existing_trade_plan_thesis == "No material update"
+    ):
         trade_plan["thesis"] = _audit_trade_summary(audit_detail)
     if audit_detail.get("time_horizon") is not None:
         trade_plan["time_horizon"] = audit_detail.get("time_horizon")
