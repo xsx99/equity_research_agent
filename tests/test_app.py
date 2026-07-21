@@ -125,6 +125,26 @@ def _make_run(
                     "source": "FRED:VIXCLS",
                     "unit": "index",
                     "value": 17.9,
+                    "previous_close": 17.32,
+                    "return_vs_previous_close": 0.033487,
+                    "observed_on": "2026-03-22",
+                },
+                "oil_price": {
+                    "label": "WTI Crude Oil Spot Price",
+                    "source": "FRED:DCOILWTICO",
+                    "unit": "USD/bbl",
+                    "value": 79.2,
+                    "previous_close": 78.4,
+                    "return_vs_previous_close": 0.010204,
+                    "observed_on": "2026-03-22",
+                },
+                "gold_price": {
+                    "label": "Gold Proxy (GLD ETF)",
+                    "source": "ALPACA:GLD_PROXY",
+                    "unit": "USD/share",
+                    "value": 374.42,
+                    "previous_close": 370.0,
+                    "return_vs_previous_close": 0.011946,
                     "observed_on": "2026-03-22",
                 },
                 "us_treasury_10y": {
@@ -132,6 +152,8 @@ def _make_run(
                     "source": "FRED:DGS10",
                     "unit": "pct",
                     "value": 4.12,
+                    "previous_close": 4.08,
+                    "return_vs_previous_close": 0.009804,
                     "observed_on": "2026-03-22",
                 },
             },
@@ -463,6 +485,12 @@ class TestResearchDetail:
         assert "Jane Doe" in resp.text
         assert "Global Context" in resp.text
         assert "CBOE Volatility Index" in resp.text
+        assert "+3.35% vs prev close" in resp.text
+        assert "WTI Crude Oil Spot Price" in resp.text
+        assert "+1.02% vs prev close" in resp.text
+        assert "Gold Proxy (GLD ETF)" in resp.text
+        assert "+1.19% vs prev close" in resp.text
+        assert "+0.98% vs prev close" not in resp.text
         assert "Official White House statement" in resp.text
         assert "AP geopolitical update" in resp.text
         assert "Input JSON" not in resp.text

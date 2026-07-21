@@ -124,6 +124,40 @@ def test_today_risk_macro_presenter_builds_command_center_from_canonical_rows():
             "basis_note": "risk_off, volatility=elevated",
             "favored_exposures": ["defensive_quality"],
             "availability_issues": [],
+            "indicators": {
+                "vix": {
+                    "label": "CBOE Volatility Index",
+                    "unit": "index",
+                    "value": 17.01,
+                    "previous_close": 16.5,
+                    "return_vs_previous_close": 0.030909,
+                    "observed_on": "2026-07-21",
+                },
+                "oil_price": {
+                    "label": "WTI Crude Oil Spot Price",
+                    "unit": "USD/bbl",
+                    "value": 79.2,
+                    "previous_close": 78.4,
+                    "return_vs_previous_close": 0.010204,
+                    "observed_on": "2026-07-13",
+                },
+                "gold_price": {
+                    "label": "Gold Proxy (GLD ETF)",
+                    "unit": "USD/share",
+                    "value": 374.42,
+                    "previous_close": 370.0,
+                    "return_vs_previous_close": 0.011946,
+                    "observed_on": "2026-07-21",
+                },
+                "us_treasury_10y": {
+                    "label": "US Treasury 10Y",
+                    "unit": "pct",
+                    "value": 4.55,
+                    "previous_close": 4.5,
+                    "return_vs_previous_close": 0.011111,
+                    "observed_on": "2026-07-17",
+                },
+            },
         },
     )
     event = CalendarEventRecord(
@@ -204,6 +238,16 @@ def test_today_risk_macro_presenter_builds_command_center_from_canonical_rows():
     assert payload["events"][0]["scheduled_at_label"] == "Jun 16, 2026"
     assert payload["risk_sources"][0]["recommended_action_label"] == "Block New Entry"
     assert payload["command_center"]["exposure_usage_pct"] == 42.0
+    assert tuple(row["key"] for row in payload["macro_indicators"]) == (
+        "vix",
+        "oil_price",
+        "gold_price",
+        "us_treasury_10y",
+    )
+    assert payload["macro_indicators"][0]["display_value"] == "17.01 index"
+    assert payload["macro_indicators"][0]["return_label"] == "+3.09% vs prev close"
+    assert payload["macro_indicators"][2]["return_label"] == "+1.19% vs prev close"
+    assert payload["macro_indicators"][3]["return_label"] is None
 
 
 def test_today_risk_macro_presenter_formats_event_dates_without_raw_timestamps():

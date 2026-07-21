@@ -121,6 +121,9 @@ def _normalize_insider_trades(items: list[Any]) -> list[dict[str, Any]]:
     return list(grouped.values())
 
 
+_INDICATOR_RETURN_KEYS = {"vix", "oil_price", "gold_price"}
+
+
 def _normalize_indicators(global_indicators: dict) -> list[dict[str, Any]]:
     normalized = []
     for key, item in global_indicators.items():
@@ -137,9 +140,51 @@ def _normalize_indicators(global_indicators: dict) -> list[dict[str, Any]]:
                 "unit": item.get("unit"),
                 "value": val,
                 "observed_on": item.get("observed_on"),
+                "return_label": _indicator_return_label(key, item),
+                "return_tone": _indicator_return_tone(item),
             }
         )
     return normalized
+
+
+def _indicator_return_label(key: str, item: dict[str, Any]) -> str | None:
+    if key not in _INDICATOR_RETURN_KEYS:
+        return None
+    return_value = _indicator_return_value(item)
+    if return_value is None:
+        return None
+    return f"{return_value * 100:+.2f}% vs prev close"
+
+
+def _indicator_return_tone(item: dict[str, Any]) -> str | None:
+    return_value = _indicator_return_value(item)
+    if return_value is None:
+        return None
+    if return_value > 0:
+        return "pos"
+    if return_value < 0:
+        return "neg"
+    return "flat"
+
+
+def _indicator_return_value(item: dict[str, Any]) -> float | None:
+    value = item.get("return_vs_previous_close")
+    if value is None:
+        current_value = _to_float(item.get("value"))
+        previous_close = _to_float(item.get("previous_close") or item.get("previous_value"))
+        if current_value is None or previous_close in (None, 0.0):
+            return None
+        return (current_value - previous_close) / previous_close
+    return _to_float(value)
+
+
+def _to_float(value: object) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 # ---------------------------------------------------------------------------

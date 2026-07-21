@@ -98,6 +98,7 @@ class MacroSnapshotPipeline:
                     liquidity_state=liquidity_state,
                     freshness_status=freshness["status"],
                 ),
+                "indicators": _indicator_metadata(indicators),
             },
         )
 
@@ -108,6 +109,40 @@ def _indicator_value(indicators: dict[str, Any], key: str) -> float | None:
     if value is None:
         return None
     return float(value)
+
+
+def _indicator_metadata(indicators: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    rows: dict[str, dict[str, Any]] = {}
+    for key, raw_payload in indicators.items():
+        payload = dict(raw_payload or {})
+        value = _to_float(payload.get("value"))
+        previous_close = _to_float(
+            payload.get("previous_close")
+            if payload.get("previous_close") is not None
+            else payload.get("previous_value")
+        )
+        return_vs_previous_close = _to_float(payload.get("return_vs_previous_close"))
+        if return_vs_previous_close is None and value is not None and previous_close not in (None, 0.0):
+            return_vs_previous_close = (value - previous_close) / previous_close
+        rows[str(key)] = {
+            "label": payload.get("label"),
+            "source": payload.get("source"),
+            "unit": payload.get("unit"),
+            "value": value,
+            "previous_close": previous_close,
+            "return_vs_previous_close": return_vs_previous_close,
+            "observed_on": payload.get("observed_on"),
+        }
+    return rows
+
+
+def _to_float(value: object) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _source_freshness(*, indicators: dict[str, Any], as_of: datetime) -> dict[str, Any]:

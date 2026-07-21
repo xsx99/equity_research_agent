@@ -1507,6 +1507,17 @@ details > summary:hover { color: var(--text); }
 .warn-banner { margin-top: var(--sp-3); padding: .7rem .9rem; border: 1px solid rgba(255,180,84,.3); border-radius: var(--radius-sm); background: var(--warn-soft); color: var(--warn); font-size: var(--fs-sm); }
 .summary-box { margin-top: var(--sp-3); padding: .9rem 1rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-elev-1); color: var(--text-dim); line-height: 1.6; }
 
+/* Macro indicator cards */
+.macro-indicator-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: .75rem; }
+.macro-indicator-card { min-width: 0; padding: .9rem 1rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-elev-3); }
+.macro-indicator-label { margin-bottom: .45rem; font-size: var(--fs-2xs); text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); font-weight: 700; }
+.macro-indicator-value { font-family: var(--mono); font-size: var(--fs-lg); font-weight: 700; color: var(--text); line-height: 1.15; }
+.macro-indicator-return { display: block; margin-top: .3rem; font-family: var(--mono); font-size: var(--fs-sm); font-weight: 700; }
+.macro-indicator-return.pos { color: var(--pos); }
+.macro-indicator-return.neg { color: var(--neg); }
+.macro-indicator-return.flat { color: var(--text-muted); }
+.macro-indicator-date { margin-top: .3rem; color: var(--text-muted); font-size: var(--fs-sm); }
+
 /* Current Summary — clear hierarchy: context chips, prominent lead, crisp points */
 .summary-context { margin-bottom: .9rem; padding-bottom: .85rem; border-bottom: 1px solid var(--border); }
 .summary-lead { font-size: var(--fs-md); color: var(--text); font-weight: 500; line-height: 1.5; margin: 0 0 .9rem; }

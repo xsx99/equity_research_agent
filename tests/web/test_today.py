@@ -468,6 +468,40 @@ def _dashboard_payload() -> dict:
                 "warning_banner": "Risk context degraded; review macro and provider availability before acting.",
                 "basis_note": "Macro summary uses canonical risk + event context.",
             },
+            "macro_indicators": (
+                {
+                    "key": "vix",
+                    "label": "CBOE Volatility Index",
+                    "display_value": "17.01 index",
+                    "observed_on": "2026-07-21",
+                    "return_label": "+3.09% vs prev close",
+                    "return_tone": "pos",
+                },
+                {
+                    "key": "oil_price",
+                    "label": "WTI Crude Oil Spot Price",
+                    "display_value": "79.2 USD/bbl",
+                    "observed_on": "2026-07-13",
+                    "return_label": "+1.02% vs prev close",
+                    "return_tone": "pos",
+                },
+                {
+                    "key": "gold_price",
+                    "label": "Gold Proxy (GLD ETF)",
+                    "display_value": "374.42 USD/share",
+                    "observed_on": "2026-07-21",
+                    "return_label": "+1.19% vs prev close",
+                    "return_tone": "pos",
+                },
+                {
+                    "key": "us_treasury_10y",
+                    "label": "US Treasury 10Y",
+                    "display_value": "4.55 pct",
+                    "observed_on": "2026-07-17",
+                    "return_label": None,
+                    "return_tone": None,
+                },
+            ),
             "binding_constraints": ("theme cap near limit",),
             "summary": {
                 "risk_status": "Within Limits",
@@ -1052,6 +1086,15 @@ class TestTodayDashboard:
 
         assert response.status_code == 200
         assert "Risk Status" in response.text
+        assert 'data-testid="macro-indicators"' in response.text
+        assert "CBOE Volatility Index" in response.text
+        assert "+3.09% vs prev close" in response.text
+        assert "WTI Crude Oil Spot Price" in response.text
+        assert "+1.02% vs prev close" in response.text
+        assert "Gold Proxy (GLD ETF)" in response.text
+        assert "+1.19% vs prev close" in response.text
+        assert "US Treasury 10Y" in response.text
+        assert "4.55 pct" in response.text
         assert "Top Risk Sources" in response.text
         assert "Other Risk Actions" not in response.text
         assert "Data / Model Availability" in response.text

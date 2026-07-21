@@ -19,6 +19,26 @@
       </section>
       {% endif %}
 
+      {% if risk_macro.macro_indicators %}
+      <section class="surface-block" data-testid="macro-indicators">
+        <div class="surface-block-head">
+          <div class="section-label">Macro Indicators</div>
+        </div>
+        <div class="macro-indicator-grid">
+          {% for item in risk_macro.macro_indicators %}
+          <article class="macro-indicator-card macro-indicator-{{ item.key }}">
+            <div class="macro-indicator-label">{{ item.label }}</div>
+            <div class="macro-indicator-value">{{ item.display_value }}</div>
+            {% if item.return_label %}
+            <div class="macro-indicator-return {{ item.return_tone or 'flat' }}">{{ item.return_label }}</div>
+            {% endif %}
+            <div class="macro-indicator-date">Observed {{ item.observed_on or "—" }}</div>
+          </article>
+          {% endfor %}
+        </div>
+      </section>
+      {% endif %}
+
       {# Split events once; reused by the calendar block below and to dedupe risk actions. #}
       {% set ev = namespace(calendar=(), earnings=(), earn_tickers=[], cal_high=0, earn_high=0) %}
       {% for row in risk_macro.events or () %}

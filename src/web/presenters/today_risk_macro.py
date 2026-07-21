@@ -13,6 +13,15 @@ from src.web.presenters.today_copy import (
     risk_source_label,
 )
 
+_MACRO_INDICATOR_ORDER = ("vix", "oil_price", "gold_price", "us_treasury_10y")
+_MACRO_INDICATOR_DEFAULTS = {
+    "vix": {"label": "CBOE Volatility Index", "unit": "index"},
+    "oil_price": {"label": "WTI Crude Oil Spot Price", "unit": "USD/bbl"},
+    "gold_price": {"label": "Gold Proxy (GLD ETF)", "unit": "USD/share"},
+    "us_treasury_10y": {"label": "US Treasury 10Y", "unit": "pct"},
+}
+_SHOW_PREVIOUS_CLOSE_RETURN = {"vix", "oil_price", "gold_price"}
+
 
 def build_today_risk_macro_payload(
     *,
@@ -93,6 +102,7 @@ def build_today_risk_macro_payload(
             "updated_at": getattr(macro_snapshot, "snapshot_time", None),
             "basis_note": _basis_note(macro_snapshot),
         },
+        "macro_indicators": _macro_indicator_rows(macro_snapshot),
         "events": tuple(
             _event_row(event)
             for event in sorted(calendar_events, key=_event_sort_key)
@@ -269,6 +279,42 @@ def _availability(*, macro_snapshot: object | None, latest_intent: object | None
         "updated_at": getattr(macro_snapshot, "snapshot_time", None),
         "basis_note": _basis_note(macro_snapshot),
     }
+
+
+def _macro_indicator_rows(macro_snapshot: object | None) -> tuple[dict[str, Any], ...]:
+    indicators = _macro_metadata(macro_snapshot).get("indicators")
+    if not isinstance(indicators, dict):
+        return ()
+    rows: list[dict[str, Any]] = []
+    for key in _MACRO_INDICATOR_ORDER:
+        raw_payload = indicators.get(key)
+        if not isinstance(raw_payload, dict):
+            continue
+        defaults = _MACRO_INDICATOR_DEFAULTS[key]
+        value = _to_float(raw_payload.get("value"))
+        unit = str(raw_payload.get("unit") or defaults["unit"])
+        return_value = _to_float(raw_payload.get("return_vs_previous_close"))
+        return_label = None
+        return_tone = None
+        if key in _SHOW_PREVIOUS_CLOSE_RETURN and return_value is not None:
+            return_label = f"{return_value * 100:+.2f}% vs prev close"
+            if return_value > 0:
+                return_tone = "pos"
+            elif return_value < 0:
+                return_tone = "neg"
+            else:
+                return_tone = "flat"
+        rows.append(
+            {
+                "key": key,
+                "label": str(raw_payload.get("label") or defaults["label"]),
+                "display_value": f"{_format_compact_number(value)} {unit}" if value is not None else "—",
+                "observed_on": raw_payload.get("observed_on"),
+                "return_label": return_label,
+                "return_tone": return_tone,
+            }
+        )
+    return tuple(rows)
 
 
 def _event_row(event: object) -> dict[str, Any]:
@@ -589,6 +635,15 @@ def _humanize_identifier(value: object) -> str:
     if not normalized:
         return ""
     return " ".join(part.capitalize() for part in normalized.split())
+
+
+def _format_compact_number(value: float | None) -> str:
+    if value is None:
+        return "—"
+    text = f"{value:,.2f}"
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text
 
 
 def _string_list(value: object) -> list[str]:

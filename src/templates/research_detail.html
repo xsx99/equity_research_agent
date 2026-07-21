@@ -311,6 +311,9 @@
           {% if item.value is not none %}{{ item.value }}{% else %}—{% endif %}
           {% if item.unit %}<span class="detail-muted">{{ item.unit }}</span>{% endif %}
         </span>
+        {% if item.return_label %}
+        <span class="macro-indicator-return {{ item.return_tone or 'flat' }}">{{ item.return_label }}</span>
+        {% endif %}
         {% if item.observed_on %}
         <span class="detail-muted">Observed {{ item.observed_on }}</span>
         {% endif %}

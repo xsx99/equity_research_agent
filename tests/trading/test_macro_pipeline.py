@@ -1,5 +1,7 @@
 from datetime import date, datetime, timezone
 
+import pytest
+
 from src.trading.data_sources.provider_resilience import InMemoryProviderRequestRecorder
 from src.trading.macro import MacroSnapshotRecord
 from src.trading.macro.pipeline import MacroSnapshotPipeline
@@ -21,6 +23,7 @@ def _global_context(
                 "source": "FRED:VIXCLS",
                 "unit": "index",
                 "value": vix,
+                "previous_close": 17.5,
                 "observed_on": observed_on,
             },
             "us_treasury_10y": {
@@ -28,6 +31,7 @@ def _global_context(
                 "source": "FRED:DGS10",
                 "unit": "pct",
                 "value": treasury_10y,
+                "previous_close": 4.15,
                 "observed_on": observed_on,
             },
             "credit_spread": {
@@ -64,6 +68,8 @@ def test_macro_snapshot_pipeline_builds_balanced_snapshot():
     assert snapshot.volatility_state == "normal"
     assert snapshot.blocked_strategy_tags == ()
     assert snapshot.source_freshness["global_context"]["status"] == "fresh"
+    assert snapshot.metadata_json["indicators"]["vix"]["return_vs_previous_close"] == pytest.approx(1 / 17.5)
+    assert snapshot.metadata_json["indicators"]["us_treasury_10y"]["previous_close"] == 4.15
     assert recorder.runs[-1].status == "succeeded"
 
 

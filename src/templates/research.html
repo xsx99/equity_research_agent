@@ -118,6 +118,9 @@
       <span class="metric-value" style="font-size:15px;">
         {% if item.value is not none %}{{ item.value }}{% if item.unit %} {{ item.unit }}{% endif %}{% else %}—{% endif %}
       </span>
+      {% if item.return_label %}
+      <span class="macro-indicator-return {{ item.return_tone or 'flat' }}">{{ item.return_label }}</span>
+      {% endif %}
       {% if item.observed_on %}
       <span class="detail-muted" style="font-size:11px;">obs {{ item.observed_on }}</span>
       {% endif %}

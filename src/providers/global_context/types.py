@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional, Protocol, TypedDict
+from typing import NotRequired, Optional, Protocol, TypedDict
 
 
 class MacroIndicatorValue(TypedDict):
@@ -11,6 +11,8 @@ class MacroIndicatorValue(TypedDict):
     unit: str
     value: Optional[float]
     observed_on: Optional[str]
+    previous_close: NotRequired[Optional[float]]
+    return_vs_previous_close: NotRequired[Optional[float]]
 
 
 class GlobalNewsItem(TypedDict):

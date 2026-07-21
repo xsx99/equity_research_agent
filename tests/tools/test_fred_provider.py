@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
+import pytest
+
 from src.providers.global_context.fred_provider import FredMacroDataProvider
 
 
@@ -16,6 +18,14 @@ class _StubResponse:
 
     def json(self) -> dict:
         return self._json_data
+
+
+class _CsvClient:
+    def get(self, _url, *, params=None, **_kwargs):
+        series_id = (params or {}).get("id")
+        return _StubResponse(
+            text=f"observation_date,{series_id}\n2026-07-18,78.4\n2026-07-21,79.2\n"
+        )
 
 
 def test_fetch_from_csv_reads_observation_date_header():
@@ -81,3 +91,18 @@ def test_fetch_indicators_uses_gold_proxy_for_gold_without_querying_removed_fred
         "observed_on": "2026-03-26",
     }
     assert "GOLDAMGBD228NLBM" not in queried_series
+
+
+def test_fetch_indicators_populates_previous_close_for_return_display():
+    provider = FredMacroDataProvider(client=_CsvClient())
+    provider._fetch_gold_proxy_from_market_data = MagicMock(return_value=(374.42, "2026-07-21", 370.0))
+    provider._fetch_live_vix_from_yahoo = MagicMock(return_value=(None, None))
+
+    indicators = provider.fetch_indicators(datetime(2026, 7, 21, 21, 0, tzinfo=timezone.utc))
+
+    assert indicators["oil_price"]["value"] == 79.2
+    assert indicators["oil_price"]["previous_close"] == 78.4
+    assert indicators["oil_price"]["return_vs_previous_close"] == pytest.approx((79.2 - 78.4) / 78.4)
+    assert indicators["vix"]["previous_close"] == 78.4
+    assert indicators["gold_price"]["previous_close"] == 370.0
+    assert indicators["gold_price"]["return_vs_previous_close"] == pytest.approx((374.42 - 370.0) / 370.0)
