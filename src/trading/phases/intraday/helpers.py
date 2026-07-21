@@ -14,6 +14,7 @@ from src.trading.signals.event_news import build_event_news_signals
 from src.trading.signals.insider import build_insider_signals
 from src.trading.signals.social_macro import build_social_macro_signals
 from src.trading.signals.sources import SourceRecord
+from src.trading.signals.technical import build_technical_signals
 
 
 def _build_intraday_refresh_payload(
@@ -27,16 +28,33 @@ def _build_intraday_refresh_payload(
     option_chain_rows: tuple[SourceRecord, ...] = (),
     instrument_type: str = "stock",
 ) -> tuple[dict[str, dict[str, Any]], dict[str, str]]:
-    bars = list((technical_rows[-1].payload or {}).get("bars") or []) if technical_rows else []
-    last_bar = bars[-1] if bars else {}
+    baseline_technical = dict(baseline.signal_json.get("technical", {}) or {})
+    technical_values = (
+        build_technical_signals(technical_rows).values
+        if technical_rows
+        else {}
+    )
+    refreshed_technical = {
+        "last_price": float(
+            technical_values.get("last_price") or baseline_technical.get("last_price") or 0.0
+        ),
+        "atr_pct": float(technical_values.get("atr_pct") or baseline_technical.get("atr_pct") or 0.0),
+        "dollar_volume": float(
+            technical_values.get("dollar_volume") or baseline_technical.get("dollar_volume") or 0.0
+        ),
+    }
+    for key in (
+        "vwap_now",
+        "price_vs_vwap_now",
+        "vwap_return_since_open",
+        "vwap_return_since_last_close",
+        "vwap_ma_20",
+    ):
+        value = technical_values.get(key)
+        if value is not None:
+            refreshed_technical[key] = value
     refreshed = {
-        "technical": {
-            "last_price": float(
-                last_bar.get("close") or baseline.signal_json.get("technical", {}).get("last_price") or 0.0
-            ),
-            "atr_pct": float(baseline.signal_json.get("technical", {}).get("atr_pct") or 0.0),
-            "dollar_volume": float(baseline.signal_json.get("technical", {}).get("dollar_volume") or 0.0),
-        }
+        "technical": refreshed_technical
     }
     freshness = {"technical": "fresh" if technical_rows else "missing"}
     if event_news_rows:

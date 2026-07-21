@@ -58,6 +58,17 @@ class DailyBar(TypedDict):
     volume: Optional[int]
 
 
+class IntradayBar(TypedDict):
+    """Normalized intraday OHLCV bar used for session VWAP signals."""
+
+    timestamp: datetime
+    open: Optional[float]
+    high: Optional[float]
+    low: Optional[float]
+    close: float
+    volume: Optional[int]
+
+
 class UniverseAssetPayload(TypedDict):
     """Provider-neutral universe/asset row."""
 
@@ -91,6 +102,9 @@ class MarketDataProvider(Protocol):
 
     def fetch_premarket_price(self, ticker: str, as_of: datetime) -> Optional[float]:
         """Return the latest premarket price at or before *as_of* when available."""
+
+    def fetch_intraday_bars(self, ticker: str, as_of: datetime) -> list[IntradayBar]:
+        """Return regular-session intraday bars in ascending time order."""
 
     def fetch_context(self, ticker: str) -> dict[str, Any]:
         """Return optional context fields such as sector and earnings distance."""

@@ -17,7 +17,7 @@ from src.providers.market_data.helpers import (
     _to_float_or_none,
     _to_int_or_none,
 )
-from src.providers.market_data.types import DailyBar
+from src.providers.market_data.types import DailyBar, IntradayBar
 from src.providers.market_data.yfinance_fundamentals import YFinanceFundamentalsProvider
 
 DEFAULT_ALPACA_DATA_BASE_URL = "https://data.alpaca.markets"
@@ -308,6 +308,58 @@ class AlpacaMarketDataProvider:
                 continue
             latest_price = float(close_raw)
         return latest_price
+
+    def fetch_intraday_bars(self, ticker: str, as_of: datetime) -> list[IntradayBar]:
+        """Return regular-session 1-minute bars through *as_of* in ascending order."""
+        symbol = ticker.upper()
+        cutoff = _normalized_now(as_of)
+        session_open = datetime.combine(
+            cutoff.astimezone(MARKET_TIMEZONE).date(),
+            REGULAR_MARKET_OPEN,
+            tzinfo=MARKET_TIMEZONE,
+        ).astimezone(timezone.utc)
+        if cutoff <= session_open:
+            return []
+        response = self._client.get(
+            f"{self.data_base_url}/v2/stocks/bars",
+            params={
+                "symbols": symbol,
+                "timeframe": "1Min",
+                "start": session_open.isoformat(),
+                "end": cutoff.isoformat(),
+                "sort": "asc",
+                "adjustment": "split",
+                "feed": "iex",
+            },
+            headers=self._auth_headers(),
+        )
+        response.raise_for_status()
+        payload = response.json()
+        bars_payload = payload.get("bars", {})
+        if isinstance(bars_payload, dict):
+            bars = bars_payload.get(symbol, [])
+        elif isinstance(bars_payload, list):
+            bars = bars_payload
+        else:
+            bars = []
+
+        intraday_bars: list[IntradayBar] = []
+        for item in sorted(bars, key=lambda bar: str(bar.get("t", ""))):
+            bar_time = _parse_bar_timestamp(item.get("t"))
+            close_raw = item.get("c")
+            if bar_time is None or close_raw is None or bar_time > cutoff or bar_time < session_open:
+                continue
+            intraday_bars.append(
+                {
+                    "timestamp": bar_time,
+                    "open": _to_float_or_none(item.get("o")),
+                    "high": _to_float_or_none(item.get("h")),
+                    "low": _to_float_or_none(item.get("l")),
+                    "close": float(close_raw),
+                    "volume": _to_int_or_none(item.get("v")),
+                }
+            )
+        return intraday_bars
 
     def fetch_context(self, ticker: str) -> dict[str, Any]:
         symbol = ticker.upper()

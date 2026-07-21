@@ -5,6 +5,8 @@ from datetime import date
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
+import pytest
+
 from src.trading.intraday.signals import IntradaySignalScanRecord, IntradaySignalSnapshotRecord
 from src.trading.events import CalendarEventPipeline, PortfolioEventRiskAssessmentPipeline
 from src.trading.risk import HedgeActionRecord, PortfolioRiskIntentRecord, RiskConfigResolver
@@ -17,6 +19,7 @@ from src.trading.runtime.intraday_refresh import (
 from src.trading.runtime.intraday_refresh_dependencies import build_live_intraday_refresh_dependencies
 from src.trading.runtime import intraday_refresh_dependencies as intraday_deps
 from src.trading.runtime.lookahead_risk import LookaheadRiskWorkflowHelper
+from src.trading.phases.intraday.helpers import _build_intraday_refresh_payload
 from src.trading.signals import SignalSnapshotResult
 from src.trading.signals.sources import EventNewsItemRecord, SourceRecord
 
@@ -319,6 +322,40 @@ def _baseline_snapshot(*, ticker: str, sector: str | None = None) -> SignalSnaps
         selection_source="scanner",
         manual_request_id=None,
     )
+
+
+def test_intraday_refresh_payload_carries_canonical_vwap_fields():
+    decision_time = datetime(2026, 7, 21, 17, 0, tzinfo=timezone.utc)
+    refreshed, freshness = _build_intraday_refresh_payload(
+        baseline=_baseline_snapshot(ticker="AAPL"),
+        decision_time=decision_time,
+        technical_rows=(
+            _source_record(
+                ticker="AAPL",
+                family="technical",
+                payload={
+                    "bars": [
+                        {"date": date(2026, 7, 17), "open": 96.0, "high": 101.0, "low": 95.0, "close": 100.0, "volume": 1_000_000},
+                        {"date": date(2026, 7, 20), "open": 100.0, "high": 103.0, "low": 99.0, "close": 102.0, "volume": 1_100_000},
+                    ],
+                    "intraday_bars": [
+                        {"timestamp": datetime(2026, 7, 21, 13, 30, tzinfo=timezone.utc), "open": 103.0, "high": 104.0, "low": 102.0, "close": 103.0, "volume": 100},
+                        {"timestamp": datetime(2026, 7, 21, 13, 31, tzinfo=timezone.utc), "open": 103.0, "high": 106.0, "low": 104.0, "close": 105.0, "volume": 200},
+                    ],
+                },
+            ),
+        ),
+    )
+
+    expected_vwap = ((103.0 * 100) + (105.0 * 200)) / 300
+    technical = refreshed["technical"]
+    assert freshness["technical"] == "fresh"
+    assert technical["last_price"] == pytest.approx(105.0)
+    assert technical["vwap_now"] == pytest.approx(expected_vwap)
+    assert technical["price_vs_vwap_now"] == pytest.approx((105.0 - expected_vwap) / expected_vwap)
+    assert technical["vwap_return_since_open"] == pytest.approx((expected_vwap - 103.0) / 103.0)
+    assert technical["vwap_return_since_last_close"] == pytest.approx((expected_vwap - 102.0) / 102.0)
+    assert technical["vwap_ma_20"] is not None
 
 
 def _previous_intraday(*, ticker: str) -> IntradaySignalSnapshotRecord:

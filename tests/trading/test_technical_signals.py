@@ -43,5 +43,42 @@ def test_technical_signals_build_price_volume_and_relative_strength_fields():
     assert "return_5d" in signals.missing
 
 
+def test_technical_signals_build_intraday_vwap_fields():
+    available_at = datetime(2026, 7, 21, 17, 0, tzinfo=timezone.utc)
+    record = SourceRecord(
+        ticker="AAPL",
+        source_family="technical",
+        source="fixture",
+        source_table="market_bars",
+        source_record_id="bars-1",
+        event_time=available_at,
+        published_at=available_at,
+        ingested_at=available_at,
+        available_for_decision_at=available_at,
+        payload={
+            "bars": [
+                {"date": date(2026, 7, 17), "open": 96.0, "high": 101.0, "low": 95.0, "close": 100.0, "volume": 1_000_000},
+                {"date": date(2026, 7, 20), "open": 100.0, "high": 103.0, "low": 99.0, "close": 102.0, "volume": 1_100_000},
+            ],
+            "intraday_bars": [
+                {"timestamp": "2026-07-21T13:30:00+00:00", "open": 103.0, "high": 104.0, "low": 102.0, "close": 103.0, "volume": 100},
+                {"timestamp": "2026-07-21T13:31:00+00:00", "open": 103.0, "high": 106.0, "low": 104.0, "close": 105.0, "volume": 200},
+                {"timestamp": "2026-07-21T13:32:00+00:00", "open": 105.0, "high": 107.0, "low": 105.0, "close": 106.0, "volume": 300},
+            ],
+        },
+    )
+
+    signals = build_technical_signals([record])
+
+    first_vwap = 103.0
+    second_vwap = ((103.0 * 100) + (105.0 * 200)) / 300
+    final_vwap = ((103.0 * 100) + (105.0 * 200) + (106.0 * 300)) / 600
+    assert signals.values["vwap_now"] == pytest.approx(final_vwap)
+    assert signals.values["price_vs_vwap_now"] == pytest.approx((106.0 - final_vwap) / final_vwap)
+    assert signals.values["vwap_return_since_open"] == pytest.approx((final_vwap - 103.0) / 103.0)
+    assert signals.values["vwap_return_since_last_close"] == pytest.approx((final_vwap - 102.0) / 102.0)
+    assert signals.values["vwap_ma_20"] == pytest.approx((first_vwap + second_vwap + final_vwap) / 3)
+
+
 def test_compute_relative_strength_subtracts_benchmark_return_from_ticker_return():
     assert compute_relative_strength(0.12, 0.05) == pytest.approx(0.07)

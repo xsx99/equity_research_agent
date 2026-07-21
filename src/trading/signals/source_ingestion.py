@@ -311,6 +311,14 @@ class SourceIngestionService:
         event_time = _latest_bar_event_time(normalized_bars, fallback=as_of)
         benchmark_returns = self._benchmark_returns_1d(as_of, policy)
         premarket_gap_pct = self._premarket_gap_pct(ticker, as_of, normalized_bars, policy)
+        intraday_bars = self._intraday_bars(ticker, as_of, policy)
+        payload: dict[str, Any] = {
+            "bars": normalized_bars,
+            "benchmark_returns": benchmark_returns,
+            "premarket_gap_pct": premarket_gap_pct,
+        }
+        if intraday_bars:
+            payload["intraday_bars"] = intraday_bars
         return SourceRecord(
             ticker=ticker,
             source_family="technical",
@@ -321,11 +329,7 @@ class SourceIngestionService:
             published_at=as_of,
             ingested_at=as_of,
             available_for_decision_at=as_of,
-            payload={
-                "bars": normalized_bars,
-                "benchmark_returns": benchmark_returns,
-                "premarket_gap_pct": premarket_gap_pct,
-            },
+            payload=payload,
         )
 
     def _benchmark_returns_1d(
@@ -380,6 +384,26 @@ class SourceIngestionService:
         if not isinstance(premarket_price, (int, float)):
             return None
         return (float(premarket_price) - prior_close) / prior_close
+
+    def _intraday_bars(
+        self,
+        ticker: str,
+        as_of: datetime,
+        policy: ProviderResiliencePolicy,
+    ) -> list[dict[str, Any]]:
+        intraday_fetch = getattr(self.market_provider, "fetch_intraday_bars", None)
+        if intraday_fetch is None:
+            return []
+        try:
+            bars = policy.execute(
+                f"{ticker}:intraday_bars",
+                lambda: intraday_fetch(ticker, as_of),
+            )
+        except Exception:
+            return []
+        if not isinstance(bars, list):
+            return []
+        return [dict(bar) for bar in bars if isinstance(bar, dict)]
 
     def _refresh_fundamental(
         self,

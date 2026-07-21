@@ -307,6 +307,59 @@ def test_source_ingestion_service_leaves_premarket_gap_empty_when_price_unavaila
     assert result.source_records[0].payload["premarket_gap_pct"] is None
 
 
+def test_source_ingestion_service_adds_intraday_bars_when_provider_supports_it():
+    now = datetime(2026, 7, 21, 17, 0, tzinfo=timezone.utc)
+
+    class _IntradayMarketProvider(_FakeMarketProvider):
+        def __init__(self) -> None:
+            super().__init__()
+            self.intraday_calls: list[tuple[str, datetime]] = []
+
+        def fetch_intraday_bars(self, ticker: str, as_of: datetime):
+            self.intraday_calls.append((ticker, as_of))
+            return [
+                {
+                    "timestamp": datetime(2026, 7, 21, 13, 30, tzinfo=timezone.utc),
+                    "open": 102.0,
+                    "high": 104.0,
+                    "low": 101.0,
+                    "close": 103.0,
+                    "volume": 100,
+                },
+            ]
+
+    market_provider = _IntradayMarketProvider()
+
+    result = SourceIngestionService(
+        market_provider=market_provider,
+        news_provider=None,
+        source_repository=InMemorySignalSourceRepository(),
+        artifact_repository=InMemoryTradingRepository(),
+        provider_name="fixture",
+        now=lambda: now,
+        sleeper=lambda seconds: None,
+    ).refresh_tickers(("AAPL",), as_of=now, run_type="targeted", source_families=("technical",))
+
+    assert result.source_records[0].payload["intraday_bars"][0]["close"] == 103.0
+    assert market_provider.intraday_calls == [("AAPL", now)]
+
+
+def test_source_ingestion_service_skips_intraday_bars_when_provider_lacks_method():
+    now = datetime(2026, 7, 21, 17, 0, tzinfo=timezone.utc)
+
+    result = SourceIngestionService(
+        market_provider=_FakeMarketProvider(),
+        news_provider=None,
+        source_repository=InMemorySignalSourceRepository(),
+        artifact_repository=InMemoryTradingRepository(),
+        provider_name="fixture",
+        now=lambda: now,
+        sleeper=lambda seconds: None,
+    ).refresh_tickers(("AAPL",), as_of=now, run_type="targeted", source_families=("technical",))
+
+    assert "intraday_bars" not in result.source_records[0].payload
+
+
 def test_source_ingestion_service_condenses_news_and_records_run_metadata():
     now = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
     source_repository = InMemorySignalSourceRepository()

@@ -56,11 +56,18 @@ def build_technical_signals(records: list[SourceRecord] | tuple[SourceRecord, ..
         return TechnicalSignals(values={}, missing=("market_bars",))
     record = max(records, key=lambda item: item.available_for_decision_at)
     bars = list(record.payload.get("bars") or [])
+    intraday_bars = list(record.payload.get("intraday_bars") or [])
     closes = [_as_float(bar.get("close")) for bar in bars if _as_float(bar.get("close")) is not None]
     volumes = [_as_float(bar.get("volume")) for bar in bars if _as_float(bar.get("volume")) is not None]
-    latest_close = closes[-1] if closes else None
+    latest_intraday_close = _latest_intraday_close(intraday_bars)
+    latest_close = latest_intraday_close if latest_intraday_close is not None else (closes[-1] if closes else None)
     latest_volume = volumes[-1] if volumes else None
     return_1d = _return_over(closes, 1)
+    vwap_fields = _intraday_vwap_fields(
+        intraday_bars=intraday_bars,
+        latest_price=latest_close,
+        prior_close=closes[-1] if closes else None,
+    )
     values: dict[str, Any] = {
         "last_price": latest_close,
         "return_1d": return_1d,
@@ -87,6 +94,7 @@ def build_technical_signals(records: list[SourceRecord] | tuple[SourceRecord, ..
             else None
         ),
         "premarket_gap_pct": record.payload.get("premarket_gap_pct"),
+        **vwap_fields,
     }
     benchmark_returns = record.payload.get("benchmark_returns") or {}
     values["rs_vs_spy_1d"] = compute_relative_strength(return_1d, benchmark_returns.get("SPY"))
@@ -99,6 +107,58 @@ def _as_float(value: object) -> float | None:
     if isinstance(value, (int, float)):
         return float(value)
     return None
+
+
+def _latest_intraday_close(bars: list[dict[str, Any]]) -> float | None:
+    for bar in reversed(bars):
+        close = _as_float(bar.get("close")) if isinstance(bar, dict) else None
+        if close is not None:
+            return close
+    return None
+
+
+def _intraday_vwap_fields(
+    *,
+    intraday_bars: list[dict[str, Any]],
+    latest_price: float | None,
+    prior_close: float | None,
+) -> dict[str, float | None]:
+    cumulative_notional = 0.0
+    cumulative_volume = 0.0
+    cumulative_vwaps: list[float] = []
+    session_open: float | None = None
+
+    for bar in intraday_bars:
+        if not isinstance(bar, dict):
+            continue
+        high = _as_float(bar.get("high"))
+        low = _as_float(bar.get("low"))
+        close = _as_float(bar.get("close"))
+        volume = _as_float(bar.get("volume"))
+        if session_open is None:
+            session_open = _as_float(bar.get("open"))
+        if high is None or low is None or close is None or volume is None or volume <= 0:
+            continue
+        typical_price = (high + low + close) / 3
+        cumulative_notional += typical_price * volume
+        cumulative_volume += volume
+        if cumulative_volume > 0:
+            cumulative_vwaps.append(cumulative_notional / cumulative_volume)
+
+    vwap_now = cumulative_vwaps[-1] if cumulative_vwaps else None
+    return {
+        "vwap_now": vwap_now,
+        "price_vs_vwap_now": _distance(latest_price, vwap_now),
+        "vwap_return_since_open": _distance(vwap_now, session_open),
+        "vwap_return_since_last_close": _distance(vwap_now, prior_close),
+        "vwap_ma_20": statistics.fmean(cumulative_vwaps[-20:]) if cumulative_vwaps else None,
+    }
+
+
+def _distance(value: float | None, baseline: float | None) -> float | None:
+    if value is None or baseline is None or baseline == 0:
+        return None
+    return (value - baseline) / baseline
 
 
 def _return_over(closes: list[float], lookback: int) -> float | None:

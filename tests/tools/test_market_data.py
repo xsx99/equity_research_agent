@@ -570,6 +570,73 @@ def test_alpaca_provider_fetches_latest_premarket_price_before_cutoff():
     assert call["params"]["feed"] == "iex"
 
 
+def test_alpaca_provider_fetches_regular_session_intraday_bars_before_cutoff():
+    client = _CapturingClient(
+        {
+            "bars": {
+                "AAPL": [
+                    {
+                        "t": "2026-07-21T13:31:00Z",
+                        "o": 103.0,
+                        "h": 106.0,
+                        "l": 104.0,
+                        "c": 105.0,
+                        "v": 200,
+                    },
+                    {
+                        "t": "2026-07-21T13:30:00Z",
+                        "o": 102.0,
+                        "h": 104.0,
+                        "l": 101.0,
+                        "c": 103.0,
+                        "v": 100,
+                    },
+                    {
+                        "t": "2026-07-21T17:01:00Z",
+                        "o": 110.0,
+                        "h": 111.0,
+                        "l": 109.0,
+                        "c": 110.5,
+                        "v": 50,
+                    },
+                ]
+            }
+        }
+    )
+    provider = AlpacaMarketDataProvider(api_key="k", secret_key="s", client=client)
+
+    bars = provider.fetch_intraday_bars(
+        "aapl",
+        datetime(2026, 7, 21, 17, 0, tzinfo=timezone.utc),
+    )
+
+    assert bars == [
+        {
+            "timestamp": datetime(2026, 7, 21, 13, 30, tzinfo=timezone.utc),
+            "open": 102.0,
+            "high": 104.0,
+            "low": 101.0,
+            "close": 103.0,
+            "volume": 100,
+        },
+        {
+            "timestamp": datetime(2026, 7, 21, 13, 31, tzinfo=timezone.utc),
+            "open": 103.0,
+            "high": 106.0,
+            "low": 104.0,
+            "close": 105.0,
+            "volume": 200,
+        },
+    ]
+    call = client.calls[0]
+    assert call["url"] == "https://data.alpaca.markets/v2/stocks/bars"
+    assert call["params"]["symbols"] == "AAPL"
+    assert call["params"]["timeframe"] == "1Min"
+    assert call["params"]["start"] == "2026-07-21T13:30:00+00:00"
+    assert call["params"]["end"] == "2026-07-21T17:00:00+00:00"
+    assert call["params"]["feed"] == "iex"
+
+
 def test_get_market_snapshot_includes_return_since_market_open_during_session():
     class _StubProvider:
         def fetch_daily_bars(self, ticker, lookback_days):
