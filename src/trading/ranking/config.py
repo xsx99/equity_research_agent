@@ -7,16 +7,25 @@ from math import isclose, isfinite
 from typing import Any
 
 
+V1_RETURN_WINDOWS = (1, 5, 20, 60)
+V1_ALPHA_WINDOWS = (5, 20, 60)
+V1_RELATIVE_VOLUME_WINDOW = 20
+V1_REALIZED_VOLATILITY_WINDOW = 20
+V1_DRAWDOWN_WINDOW = 60
+V1_CONCENTRATION_WINDOW = 20
+V1_MINIMUM_BATCH_REQUEST_SESSIONS = max(V1_RETURN_WINDOWS) + 1
+
+
 @dataclass(frozen=True)
 class RankingConfig:
     """Serializable constants that define the frozen v1 ranking model."""
 
-    alpha_windows: tuple[int, ...] = (5, 20, 60)
-    return_windows: tuple[int, ...] = (1, 5, 20, 60)
-    relative_volume_window: int = 20
-    realized_volatility_window: int = 20
-    drawdown_window: int = 60
-    concentration_window: int = 20
+    alpha_windows: tuple[int, ...] = V1_ALPHA_WINDOWS
+    return_windows: tuple[int, ...] = V1_RETURN_WINDOWS
+    relative_volume_window: int = V1_RELATIVE_VOLUME_WINDOW
+    realized_volatility_window: int = V1_REALIZED_VOLATILITY_WINDOW
+    drawdown_window: int = V1_DRAWDOWN_WINDOW
+    concentration_window: int = V1_CONCENTRATION_WINDOW
     batch_request_sessions: int = 65
     top_n: int = 100
     min_cohort_size: int = 10
@@ -49,6 +58,8 @@ class RankingConfig:
         object.__setattr__(self, "return_windows", tuple(self.return_windows))
         _validate_windows("alpha_windows", self.alpha_windows)
         _validate_windows("return_windows", self.return_windows)
+        _validate_exact_v1("alpha_windows", self.alpha_windows, V1_ALPHA_WINDOWS)
+        _validate_exact_v1("return_windows", self.return_windows, V1_RETURN_WINDOWS)
         for field_name in (
             "relative_volume_window",
             "realized_volatility_window",
@@ -60,6 +71,17 @@ class RankingConfig:
             "full_cohort_size",
         ):
             _validate_positive_integer(field_name, getattr(self, field_name))
+        for field_name, expected in (
+            ("relative_volume_window", V1_RELATIVE_VOLUME_WINDOW),
+            ("realized_volatility_window", V1_REALIZED_VOLATILITY_WINDOW),
+            ("drawdown_window", V1_DRAWDOWN_WINDOW),
+            ("concentration_window", V1_CONCENTRATION_WINDOW),
+        ):
+            _validate_exact_v1(field_name, getattr(self, field_name), expected)
+        if self.batch_request_sessions < V1_MINIMUM_BATCH_REQUEST_SESSIONS:
+            raise ValueError(
+                "batch_request_sessions must cover at least 61 sessions for v1"
+            )
         for field_name in (
             "confidence_floor",
             "peer_weight",
@@ -142,6 +164,11 @@ def _validate_windows(field_name: str, windows: tuple[int, ...]) -> None:
 def _validate_positive_integer(field_name: str, value: int) -> None:
     if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
         raise ValueError(f"{field_name} must be a positive integer")
+
+
+def _validate_exact_v1(field_name: str, value: object, expected: object) -> None:
+    if value != expected:
+        raise ValueError(f"{field_name} is frozen at {expected!r} for cross_sectional_rs_v1")
 
 
 def _validate_unit_interval(field_name: str, value: float) -> None:

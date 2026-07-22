@@ -96,7 +96,7 @@ Accepted clean-branch baseline on 2026-07-22: `970 passed, 12 failed`. The 12 fa
 
 | Task | Status | Evidence |
 | --- | --- | --- |
-| 1. Pure metric and percentile primitives | Complete | `pytest tests/trading/ranking/test_metrics.py -q` → 40 passed |
+| 1. Pure metric and percentile primitives | Complete | `pytest tests/trading/ranking/test_metrics.py -q` → 48 passed |
 | 2. Cohort scoring, forced reasons, confidence, rank, shortlist | Pending | — |
 | 3. ORM, migration, repository persistence | Pending | — |
 | 4. Bounded input loader and ranking pipeline | Pending | — |

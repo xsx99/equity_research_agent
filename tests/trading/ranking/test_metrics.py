@@ -479,6 +479,39 @@ def test_config_rejects_invalid_v1_invariants(overrides: dict[str, object]) -> N
         RankingConfig(**overrides)  # type: ignore[arg-type]
 
 
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"return_windows": (1, 5, 20, 40)},
+        {"alpha_windows": (5, 20, 40)},
+        {"relative_volume_window": 10},
+        {"realized_volatility_window": 10},
+        {"drawdown_window": 30},
+        {"concentration_window": 10},
+        {"batch_request_sessions": 60},
+    ],
+)
+def test_config_rejects_non_v1_metric_windows(overrides: dict[str, object]) -> None:
+    with pytest.raises(ValueError):
+        RankingConfig(**overrides)  # type: ignore[arg-type]
+
+
+def test_config_allows_operational_overrides_without_changing_v1_formulas() -> None:
+    config = RankingConfig(
+        top_n=50,
+        min_cohort_size=12,
+        confidence_floor=0.70,
+        batch_request_sessions=61,
+    )
+
+    assert config.top_n == 50
+    assert config.min_cohort_size == 12
+    assert config.confidence_floor == 0.70
+    assert config.batch_request_sessions == 61
+    assert config.return_windows == (1, 5, 20, 60)
+    assert config.alpha_windows == (5, 20, 60)
+
+
 def test_bar_records_are_immutable() -> None:
     bar = _bars([100.0])[0]
     with pytest.raises(FrozenInstanceError):
