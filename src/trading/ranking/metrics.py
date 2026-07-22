@@ -59,24 +59,30 @@ def build_raw_metrics(
     if normalized.invalid_reason is not None:
         return _invalid_metrics(ticker, normalized, spy_normalized, normalized.invalid_reason)
 
-    closes = [float(bar.close) for bar in normalized.bars if _valid_close(bar.close)]
-    volumes = [float(bar.volume) for bar in normalized.bars if _valid_volume(bar.volume)]
-    spy_closes = [
-        float(bar.close) for bar in spy_normalized.bars if _valid_close(bar.close)
-    ]
+    closes = [_close_value(bar.close) for bar in normalized.bars]
+    volumes = [_volume_value(bar.volume) for bar in normalized.bars]
+    spy_closes = [_close_value(bar.close) for bar in spy_normalized.bars]
+    valid_close_count = sum(value is not None for value in closes)
+    valid_volume_count = sum(value is not None for value in volumes)
+    valid_spy_close_count = sum(value is not None for value in spy_closes)
     returns = {window: _simple_return(closes, window) for window in (1, 5, 20, 60)}
     spy_returns = {window: _simple_return(spy_closes, window) for window in (5, 20, 60)}
     daily_returns = _daily_returns(closes)
+    final_sessions_match = bool(normalized.bars and spy_normalized.bars) and (
+        normalized.bars[-1].session_date == spy_normalized.bars[-1].session_date
+    )
 
     missing: list[str] = []
-    if len(closes) < 61:
+    if valid_close_count < 61:
         missing.append("valid_closes_61")
-    if len(volumes) < 21:
+    if valid_volume_count < 21:
         missing.append("valid_volumes_21")
     if spy_normalized.invalid_reason is not None:
         missing.append(f"spy_{spy_normalized.invalid_reason}")
-    if len(spy_closes) < 61:
+    if valid_spy_close_count < 61:
         missing.append("spy_valid_closes_61")
+    if not final_sessions_match:
+        missing.append("spy_final_session_mismatch")
     if not normalized.bars or not all(bar.is_adjusted for bar in normalized.bars):
         missing.append("adjusted_bars")
     if not normalized.bars or not all(bar.split_adjusted for bar in normalized.bars):
@@ -105,6 +111,7 @@ def build_raw_metrics(
             if ticker_return is not None
             and spy_return is not None
             and spy_normalized.invalid_reason is None
+            and final_sessions_match
             and spy_is_adjusted
             and spy_is_split_adjusted
             else None
@@ -120,13 +127,22 @@ def build_raw_metrics(
             else "relative_volume_20d"
         )
 
-    realized_volatility = (
-        stdev(daily_returns[-20:]) * sqrt(252) if len(daily_returns) >= 20 else None
-    )
+    recent_daily_returns = daily_returns[-20:]
+    realized_volatility = None
+    if len(recent_daily_returns) == 20 and all(
+        value is not None for value in recent_daily_returns
+    ):
+        realized_volatility = stdev(
+            value for value in recent_daily_returns if value is not None
+        ) * sqrt(252)
     if realized_volatility is None:
         missing.append("realized_volatility_20d")
 
-    drawdown = closes[-1] / max(closes[-60:]) - 1 if len(closes) >= 60 else None
+    recent_closes = closes[-60:]
+    drawdown = None
+    if len(recent_closes) == 60 and all(value is not None for value in recent_closes):
+        valid_recent_closes = [value for value in recent_closes if value is not None]
+        drawdown = valid_recent_closes[-1] / max(valid_recent_closes) - 1
     if drawdown is None:
         missing.append("drawdown_60d")
 
@@ -183,9 +199,15 @@ def _provenance(
     spy_normalized: NormalizedBarSet,
 ) -> dict[str, object]:
     all_input_bars = (*normalized.bars, *spy_normalized.bars)
+    last_valid_close_bar = next(
+        (bar for bar in reversed(normalized.bars) if _valid_close(bar.close)),
+        None,
+    )
     return {
         "bar_count": len(normalized.bars),
-        "last_bar_date": normalized.bars[-1].session_date if normalized.bars else None,
+        "last_bar_date": (
+            last_valid_close_bar.session_date if last_valid_close_bar is not None else None
+        ),
         "all_bars_adjusted": bool(all_input_bars)
         and all(bar.is_adjusted for bar in all_input_bars),
         "all_bars_split_adjusted": bool(all_input_bars)
@@ -208,40 +230,61 @@ def _provenance(
     }
 
 
-def _simple_return(closes: list[float], sessions: int) -> float | None:
-    if len(closes) <= sessions or closes[-sessions - 1] == 0:
+def _simple_return(closes: list[float | None], sessions: int) -> float | None:
+    if len(closes) <= sessions:
         return None
-    return closes[-1] / closes[-sessions - 1] - 1
+    latest = closes[-1]
+    baseline = closes[-sessions - 1]
+    if latest is None or baseline is None:
+        return None
+    return latest / baseline - 1
 
 
-def _daily_returns(closes: list[float]) -> list[float]:
+def _daily_returns(closes: list[float | None]) -> list[float | None]:
     return [
-        current / previous - 1
+        current / previous - 1 if current is not None and previous is not None else None
         for previous, current in zip(closes, closes[1:])
-        if previous != 0
     ]
 
 
-def _relative_volume(volumes: list[float], window: int) -> tuple[float | None, bool]:
+def _relative_volume(
+    volumes: list[float | None],
+    window: int,
+) -> tuple[float | None, bool]:
     if len(volumes) <= window:
         return None, False
-    baseline = fmean(volumes[-window - 1 : -1])
+    latest = volumes[-1]
+    baseline_values = volumes[-window - 1 : -1]
+    if latest is None or any(value is None for value in baseline_values):
+        return None, False
+    baseline = fmean(value for value in baseline_values if value is not None)
     if baseline == 0:
         return None, True
-    return volumes[-1] / baseline, False
+    return latest / baseline, False
 
 
 def _positive_return_concentration(
-    daily_returns: list[float],
+    daily_returns: list[float | None],
     window: int,
 ) -> float | None:
     if len(daily_returns) < window:
         return None
     recent = daily_returns[-window:]
-    positive_sum = sum(max(value, 0.0) for value in recent)
+    if any(value is None for value in recent):
+        return None
+    valid_recent = [value for value in recent if value is not None]
+    positive_sum = sum(max(value, 0.0) for value in valid_recent)
     if positive_sum == 0:
         return 0.0
-    return max(recent[-1], 0.0) / positive_sum
+    return max(valid_recent[-1], 0.0) / positive_sum
+
+
+def _close_value(value: float | None) -> float | None:
+    return float(value) if _valid_close(value) else None
+
+
+def _volume_value(value: float | None) -> float | None:
+    return float(value) if _valid_volume(value) else None
 
 
 def _valid_close(value: float | None) -> bool:

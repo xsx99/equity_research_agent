@@ -22,7 +22,7 @@ DECISION_TIME = datetime(2026, 7, 22, 13, 0, tzinfo=timezone.utc)
 
 
 def _bars(
-    closes: list[float],
+    closes: list[float | None],
     *,
     volumes: list[float | None] | None = None,
     start: date = date(2026, 4, 1),
@@ -95,6 +95,23 @@ def test_relative_volume_excludes_latest_and_zero_baseline_is_missing() -> None:
     assert zero_baseline.is_fully_eligible is False
 
 
+def test_missing_latest_volume_does_not_shift_relative_volume_window() -> None:
+    closes = [100.0 + index for index in range(61)]
+    volumes: list[float | None] = [1_000.0] * 61
+    volumes[-1] = None
+
+    metrics = build_raw_metrics(
+        ticker="ABC",
+        bars=_bars(closes, volumes=volumes),
+        spy_bars=_bars(closes, source_prefix="spy"),
+        decision_time=DECISION_TIME,
+    )
+
+    assert metrics.relative_volume_20d is None
+    assert metrics.is_fully_eligible is False
+    assert "relative_volume_20d" in metrics.missing_inputs
+
+
 def test_realized_volatility_drawdown_and_positive_return_concentration() -> None:
     closes = [100.0]
     daily_returns = [0.01, -0.005, 0.02, -0.01] * 15
@@ -147,6 +164,70 @@ def test_insufficient_history_keeps_inputs_explicit() -> None:
     assert "valid_volumes_21" in metrics.missing_inputs
     assert "return_20d" in metrics.missing_inputs
     assert "realized_volatility_20d" in metrics.missing_inputs
+
+
+def test_missing_latest_close_does_not_relabel_previous_session_as_latest() -> None:
+    closes: list[float | None] = [100.0 + index for index in range(61)]
+    closes[-1] = None
+
+    metrics = build_raw_metrics(
+        ticker="ABC",
+        bars=_bars(closes),
+        spy_bars=_bars([200.0 + index for index in range(61)], source_prefix="spy"),
+        decision_time=DECISION_TIME,
+    )
+
+    assert metrics.return_1d is None
+    assert metrics.return_5d is None
+    assert metrics.return_20d is None
+    assert metrics.return_60d is None
+    assert metrics.realized_volatility_20d is None
+    assert metrics.drawdown_60d is None
+    assert metrics.one_day_concentration_20d is None
+    assert metrics.last_bar_date == date(2026, 4, 1) + timedelta(days=59)
+    assert metrics.is_fully_eligible is False
+
+
+def test_missing_close_keeps_return_lookbacks_on_original_sessions() -> None:
+    closes: list[float | None] = [100.0 + index for index in range(61)]
+    closes[-6] = None
+
+    metrics = build_raw_metrics(
+        ticker="ABC",
+        bars=_bars(closes),
+        spy_bars=_bars([200.0 + index for index in range(61)], source_prefix="spy"),
+        decision_time=DECISION_TIME,
+    )
+
+    assert metrics.return_1d == pytest.approx(160.0 / 159.0 - 1)
+    assert metrics.return_5d is None
+    assert metrics.return_20d == pytest.approx(160.0 / 140.0 - 1)
+    assert metrics.realized_volatility_20d is None
+    assert metrics.drawdown_60d is None
+    assert metrics.one_day_concentration_20d is None
+    assert metrics.is_fully_eligible is False
+
+
+def test_spy_alpha_requires_the_same_final_session_as_ticker() -> None:
+    closes = [100.0 + index for index in range(61)]
+    spy_bars = _bars(
+        [200.0 + index for index in range(61)],
+        start=date(2026, 3, 31),
+        source_prefix="spy",
+    )
+
+    metrics = build_raw_metrics(
+        ticker="ABC",
+        bars=_bars(closes),
+        spy_bars=spy_bars,
+        decision_time=DECISION_TIME,
+    )
+
+    assert metrics.alpha_vs_spy_5d is None
+    assert metrics.alpha_vs_spy_20d is None
+    assert metrics.alpha_vs_spy_60d is None
+    assert metrics.is_fully_eligible is False
+    assert "spy_final_session_mismatch" in metrics.missing_inputs
 
 
 def test_normalization_sorts_bars_and_excludes_future_available_bars() -> None:
