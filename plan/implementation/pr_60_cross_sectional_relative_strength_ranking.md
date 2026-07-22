@@ -96,7 +96,7 @@ Accepted clean-branch baseline on 2026-07-22: `970 passed, 12 failed`. The 12 fa
 
 | Task | Status | Evidence |
 | --- | --- | --- |
-| 1. Pure metric and percentile primitives | Pending | — |
+| 1. Pure metric and percentile primitives | Complete | `pytest tests/trading/ranking/test_metrics.py -q` → 20 passed |
 | 2. Cohort scoring, forced reasons, confidence, rank, shortlist | Pending | — |
 | 3. ORM, migration, repository persistence | Pending | — |
 | 4. Bounded input loader and ranking pipeline | Pending | — |
@@ -117,27 +117,27 @@ Accepted clean-branch baseline on 2026-07-22: `970 passed, 12 failed`. The 12 fa
 - Create `src/trading/ranking/__init__.py`
 - Create `tests/trading/ranking/test_metrics.py`
 
-- [ ] **Step 1: Write failing metric tests**
+- [x] **Step 1: Write failing metric tests**
 
   Cover 1/5/20/60-session simple returns, SPY alpha, latest-volume versus previous-20 mean, sample 20-return annualized volatility, 60-close drawdown, positive-return concentration, invalid zero baselines, insufficient history, duplicate dates, bars after `decision_time`, and provenance fields.
 
-- [ ] **Step 2: Run RED metric tests**
+- [x] **Step 2: Run RED metric tests**
 
   Run: `source ~/.venv/bin/activate && pytest tests/trading/ranking/test_metrics.py -q`
 
   Expected: collection/import failure because `src.trading.ranking` does not exist.
 
-- [ ] **Step 3: Implement immutable inputs and formulas**
+- [x] **Step 3: Implement immutable inputs and formulas**
 
   Normalize bars ascending by session date, discard rows not available by the decision cutoff, reject duplicate session dates deterministically, require 61 closes and 21 volumes, and use `statistics.stdev(...)*sqrt(252)` for realized volatility.
 
-- [ ] **Step 4: Add failing percentile tests**
+- [x] **Step 4: Add failing percentile tests**
 
   Test zero-based average rank divided by `n-1`, tied values, missing values excluded from cohorts, single-value behavior, deterministic output independent of input order, and average-rank liquidity quartiles with `[0,.25)`, `[.25,.50)`, `[.50,.75)`, `[.75,1]` boundaries.
 
-- [ ] **Step 5: Implement percentile and quartile helpers**
+- [x] **Step 5: Implement percentile and quartile helpers**
 
-- [ ] **Step 6: Run GREEN metric tests and update tracker**
+- [x] **Step 6: Run GREEN metric tests and update tracker**
 
   Run: `source ~/.venv/bin/activate && pytest tests/trading/ranking/test_metrics.py -q`
 
