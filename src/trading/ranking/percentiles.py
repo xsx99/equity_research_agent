@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from math import isfinite
 
 
 def average_rank_percentiles(
@@ -10,10 +11,7 @@ def average_rank_percentiles(
     singleton_percentile: float = 0.5,
 ) -> dict[str, float | None]:
     """Return ascending zero-based average-rank percentiles, excluding missing values."""
-    present = sorted(
-        ((key, float(value)) for key, value in values_by_key.items() if value is not None),
-        key=lambda item: (item[1], item[0]),
-    )
+    present = sorted(_finite_items(values_by_key), key=lambda item: (item[1], item[0]))
     result: dict[str, float | None] = {key: None for key in values_by_key}
     if len(present) == 1:
         result[present[0][0]] = singleton_percentile
@@ -50,7 +48,7 @@ def liquidity_quartiles(
 
 
 def _quartile(percentile: float | None) -> str | None:
-    if percentile is None:
+    if percentile is None or not isfinite(percentile):
         return None
     if percentile < 0.25:
         return "q1"
@@ -59,3 +57,16 @@ def _quartile(percentile: float | None) -> str | None:
     if percentile < 0.75:
         return "q3"
     return "q4"
+
+
+def _finite_items(
+    values_by_key: Mapping[str, float | None],
+) -> list[tuple[str, float]]:
+    items: list[tuple[str, float]] = []
+    for key, value in values_by_key.items():
+        if value is None:
+            continue
+        numeric_value = float(value)
+        if isfinite(numeric_value):
+            items.append((key, numeric_value))
+    return items

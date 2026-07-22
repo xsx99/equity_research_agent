@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 from datetime import date, datetime, timedelta, timezone
 from math import sqrt
 from statistics import stdev
@@ -230,6 +230,50 @@ def test_spy_alpha_requires_the_same_final_session_as_ticker() -> None:
     assert "spy_final_session_mismatch" in metrics.missing_inputs
 
 
+def test_spy_alpha_requires_matching_baseline_session_for_each_horizon() -> None:
+    closes = [100.0 + index for index in range(61)]
+    spy_bars = _bars([200.0 + index for index in range(61)], source_prefix="spy")
+    spy_bars[0] = replace(
+        spy_bars[0],
+        session_date=spy_bars[0].session_date - timedelta(days=1),
+    )
+
+    metrics = build_raw_metrics(
+        ticker="ABC",
+        bars=_bars(closes),
+        spy_bars=spy_bars,
+        decision_time=DECISION_TIME,
+    )
+
+    assert metrics.alpha_vs_spy_5d is not None
+    assert metrics.alpha_vs_spy_20d is not None
+    assert metrics.alpha_vs_spy_60d is None
+    assert metrics.is_fully_eligible is False
+    assert "spy_60d_session_mismatch" in metrics.missing_inputs
+
+
+@pytest.mark.parametrize("bad_value", [float("nan"), float("inf")])
+def test_non_finite_latest_bar_values_are_explicitly_missing(bad_value: float) -> None:
+    closes = [100.0 + index for index in range(61)]
+    volumes = [1_000.0] * 61
+    closes[-1] = bad_value
+    volumes[-1] = bad_value
+
+    metrics = build_raw_metrics(
+        ticker="ABC",
+        bars=_bars(closes, volumes=volumes),
+        spy_bars=_bars([200.0 + index for index in range(61)], source_prefix="spy"),
+        decision_time=DECISION_TIME,
+    )
+
+    assert metrics.return_1d is None
+    assert metrics.relative_volume_20d is None
+    assert metrics.realized_volatility_20d is None
+    assert metrics.drawdown_60d is None
+    assert metrics.one_day_concentration_20d is None
+    assert metrics.is_fully_eligible is False
+
+
 def test_normalization_sorts_bars_and_excludes_future_available_bars() -> None:
     bars = _bars([100.0 + index for index in range(61)])
     future_bar = AdjustedDailyBar(
@@ -340,6 +384,19 @@ def test_average_rank_percentiles_handle_ties_missing_and_input_order() -> None:
     assert forward == {"A": 0.0, "B": 0.5, "C": 0.5, "D": 1.0, "E": None}
 
 
+def test_average_rank_percentiles_exclude_non_finite_values_deterministically() -> None:
+    forward = average_rank_percentiles(
+        {"NAN": float("nan"), "POS_INF": float("inf"), "NEG_INF": -float("inf"), "OK": 1.0}
+    )
+    reverse = average_rank_percentiles(
+        {"OK": 1.0, "NEG_INF": -float("inf"), "POS_INF": float("inf"), "NAN": float("nan")}
+    )
+
+    expected = {"NAN": None, "POS_INF": None, "NEG_INF": None, "OK": 0.5}
+    assert forward == expected
+    assert reverse == {key: expected[key] for key in reverse}
+
+
 def test_singleton_percentile_is_neutral() -> None:
     assert average_rank_percentiles({"ONLY": 42.0, "MISSING": None}) == {
         "ONLY": 0.5,
@@ -383,6 +440,43 @@ def test_config_is_immutable_and_has_deterministic_v1_serialization() -> None:
     assert config.to_json().startswith('{"alpha_windows":[5,20,60],')
     with pytest.raises(FrozenInstanceError):
         config.top_n = 5  # type: ignore[misc]
+
+
+def test_config_normalizes_sequence_inputs_to_immutable_tuples() -> None:
+    return_windows = [1, 5, 20, 60]
+    alpha_windows = [5, 20, 60]
+
+    config = RankingConfig(
+        return_windows=return_windows,  # type: ignore[arg-type]
+        alpha_windows=alpha_windows,  # type: ignore[arg-type]
+    )
+    return_windows.append(120)
+    alpha_windows.append(120)
+
+    assert config.return_windows == (1, 5, 20, 60)
+    assert config.alpha_windows == (5, 20, 60)
+    assert json.loads(config.to_json())["return_windows"] == [1, 5, 20, 60]
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"top_n": 0},
+        {"min_cohort_size": 0},
+        {"return_windows": (1, 0, 20, 60)},
+        {"relative_volume_window": 0},
+        {"confidence_floor": float("nan")},
+        {"confidence_floor": 1.01},
+        {"peer_weight": -0.01},
+        {"peer_weight": float("inf")},
+        {"peer_weight": 0.31},
+        {"concentration_penalty_start": 0.8, "concentration_penalty_full": 0.7},
+        {"concentration_penalty_max": 1.01},
+    ],
+)
+def test_config_rejects_invalid_v1_invariants(overrides: dict[str, object]) -> None:
+    with pytest.raises(ValueError):
+        RankingConfig(**overrides)  # type: ignore[arg-type]
 
 
 def test_bar_records_are_immutable() -> None:

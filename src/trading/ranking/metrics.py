@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from collections import Counter
 from datetime import datetime
-from math import sqrt
+from math import isfinite, sqrt
 from statistics import fmean, stdev
 from typing import Iterable
 
@@ -71,6 +71,14 @@ def build_raw_metrics(
     final_sessions_match = bool(normalized.bars and spy_normalized.bars) and (
         normalized.bars[-1].session_date == spy_normalized.bars[-1].session_date
     )
+    horizon_sessions_match = {
+        window: _horizon_sessions_match(
+            normalized.bars,
+            spy_normalized.bars,
+            window,
+        )
+        for window in (5, 20, 60)
+    }
 
     missing: list[str] = []
     if valid_close_count < 61:
@@ -83,6 +91,9 @@ def build_raw_metrics(
         missing.append("spy_valid_closes_61")
     if not final_sessions_match:
         missing.append("spy_final_session_mismatch")
+    for window, sessions_match in horizon_sessions_match.items():
+        if not sessions_match:
+            missing.append(f"spy_{window}d_session_mismatch")
     if not normalized.bars or not all(bar.is_adjusted for bar in normalized.bars):
         missing.append("adjusted_bars")
     if not normalized.bars or not all(bar.split_adjusted for bar in normalized.bars):
@@ -112,6 +123,7 @@ def build_raw_metrics(
             and spy_return is not None
             and spy_normalized.invalid_reason is None
             and final_sessions_match
+            and horizon_sessions_match[window]
             and spy_is_adjusted
             and spy_is_split_adjusted
             else None
@@ -279,6 +291,19 @@ def _positive_return_concentration(
     return max(valid_recent[-1], 0.0) / positive_sum
 
 
+def _horizon_sessions_match(
+    bars: tuple[AdjustedDailyBar, ...],
+    spy_bars: tuple[AdjustedDailyBar, ...],
+    window: int,
+) -> bool:
+    if len(bars) <= window or len(spy_bars) <= window:
+        return False
+    return (
+        bars[-1].session_date == spy_bars[-1].session_date
+        and bars[-window - 1].session_date == spy_bars[-window - 1].session_date
+    )
+
+
 def _close_value(value: float | None) -> float | None:
     return float(value) if _valid_close(value) else None
 
@@ -288,8 +313,8 @@ def _volume_value(value: float | None) -> float | None:
 
 
 def _valid_close(value: float | None) -> bool:
-    return value is not None and value > 0
+    return value is not None and isfinite(value) and value > 0
 
 
 def _valid_volume(value: float | None) -> bool:
-    return value is not None and value >= 0
+    return value is not None and isfinite(value) and value >= 0

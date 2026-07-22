@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass
+from math import isclose, isfinite
 from typing import Any
 
 
@@ -43,6 +44,60 @@ class RankingConfig:
     full_cohort_size: int = 30
     singleton_percentile: float = 0.50
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "alpha_windows", tuple(self.alpha_windows))
+        object.__setattr__(self, "return_windows", tuple(self.return_windows))
+        _validate_windows("alpha_windows", self.alpha_windows)
+        _validate_windows("return_windows", self.return_windows)
+        for field_name in (
+            "relative_volume_window",
+            "realized_volatility_window",
+            "drawdown_window",
+            "concentration_window",
+            "batch_request_sessions",
+            "top_n",
+            "min_cohort_size",
+            "full_cohort_size",
+        ):
+            _validate_positive_integer(field_name, getattr(self, field_name))
+        for field_name in (
+            "confidence_floor",
+            "peer_weight",
+            "sector_weight",
+            "market_alpha_weight",
+            "persistence_weight",
+            "direction_agreement_weight",
+            "relative_volume_weight",
+            "concentration_penalty_start",
+            "concentration_penalty_full",
+            "concentration_penalty_max",
+            "risk_percentile_penalty_start",
+            "volatility_penalty_max",
+            "drawdown_penalty_max",
+            "confidence_component_coverage_weight",
+            "confidence_freshness_weight",
+            "confidence_cohort_quality_weight",
+            "confidence_benchmark_coverage_weight",
+            "singleton_percentile",
+        ):
+            _validate_unit_interval(field_name, getattr(self, field_name))
+        if self.concentration_penalty_full <= self.concentration_penalty_start:
+            raise ValueError(
+                "concentration_penalty_full must exceed concentration_penalty_start"
+            )
+        if not isclose(sum(self.positive_weights.values()), 1.0):
+            raise ValueError("positive component weights must sum to 1")
+        confidence_weight_total = sum(
+            (
+                self.confidence_component_coverage_weight,
+                self.confidence_freshness_weight,
+                self.confidence_cohort_quality_weight,
+                self.confidence_benchmark_coverage_weight,
+            )
+        )
+        if not isclose(confidence_weight_total, 1.0):
+            raise ValueError("confidence weights must sum to 1")
+
     @property
     def positive_weights(self) -> dict[str, float]:
         return {
@@ -64,4 +119,31 @@ class RankingConfig:
 
     def to_json(self) -> str:
         """Serialize using stable key ordering and separators for replay hashes."""
-        return json.dumps(self.to_dict(), sort_keys=True, separators=(",", ":"))
+        return json.dumps(
+            self.to_dict(),
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+
+def _validate_windows(field_name: str, windows: tuple[int, ...]) -> None:
+    if not windows:
+        raise ValueError(f"{field_name} must not be empty")
+    if any(
+        not isinstance(window, int) or isinstance(window, bool) or window <= 0
+        for window in windows
+    ):
+        raise ValueError(f"{field_name} must contain only positive integers")
+    if tuple(sorted(set(windows))) != windows:
+        raise ValueError(f"{field_name} must be strictly increasing and unique")
+
+
+def _validate_positive_integer(field_name: str, value: int) -> None:
+    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+        raise ValueError(f"{field_name} must be a positive integer")
+
+
+def _validate_unit_interval(field_name: str, value: float) -> None:
+    if not isfinite(value) or value < 0 or value > 1:
+        raise ValueError(f"{field_name} must be finite and between 0 and 1")
