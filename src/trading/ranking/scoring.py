@@ -206,6 +206,7 @@ def rank_universe(
             normalized[ticker],
             forced.get(ticker, ()),
             (benchmark_horizons_by_ticker or {}).get(ticker),
+            len(metrics),
             config,
         )
         for ticker in sorted(metrics)
@@ -255,14 +256,31 @@ def _build_row(
     components: NormalizedRankingComponents,
     forced_reasons: tuple[str, ...],
     benchmark_horizons: int | None,
+    eligible_market_size: int,
     config: RankingConfig,
 ) -> RankedTicker:
     score = score_components(components, config)
+    if not metrics.is_fully_eligible:
+        score = replace(
+            score,
+            status="insufficient_data",
+            score=None,
+            positive_score=None,
+            missing_inputs=tuple(
+                dict.fromkeys(
+                    (*score.missing_inputs, "raw_metrics_not_fully_eligible")
+                )
+            ),
+        )
     freshness = _freshness(
         asset.freshness_classification if asset else None,
         asset.freshness_session_lag if asset else None,
     )
-    specificity, size = _primary_cohort(resolution, components)
+    specificity, size = _primary_cohort(
+        resolution,
+        components,
+        eligible_market_size,
+    )
     cohort_quality = specificity * min(size / config.full_cohort_size, 1.0)
     benchmark_count = (
         benchmark_horizons
@@ -350,15 +368,36 @@ def _direction_agreement(metrics: RawRankingMetrics) -> float | None:
 def _primary_cohort(
     resolution: CohortResolution,
     components: NormalizedRankingComponents,
+    eligible_market_size: int,
 ) -> tuple[float, int]:
     candidates = (
         (resolution.peer, components.peer_or_fallback_20d_percentile),
         (resolution.sector, components.sector_or_fallback_20d_percentile),
-        (resolution.relative_volume, components.relative_volume_percentile),
     )
     for selection, value in candidates:
         if selection.cohort_type != "unavailable" and value is not None:
             return _SPECIFICITY[selection.cohort_type], len(selection.members)
+    if (
+        resolution.relative_volume.cohort_type == "liquidity"
+        and components.relative_volume_percentile is not None
+    ):
+        return _SPECIFICITY["liquidity"], len(resolution.relative_volume.members)
+    market_components = (
+        components.market_20d_alpha_percentile,
+        components.relative_strength_60d_persistence,
+        components.multi_horizon_direction_agreement,
+        components.relative_volume_percentile
+        if resolution.relative_volume.cohort_type == "market"
+        else None,
+    )
+    if any(value is not None for value in market_components):
+        market_size = (
+            len(resolution.market.members)
+            if resolution.market is not None
+            and resolution.market.cohort_type == "market"
+            else eligible_market_size
+        )
+        return _SPECIFICITY["market"], market_size
     return 0.0, 0
 
 

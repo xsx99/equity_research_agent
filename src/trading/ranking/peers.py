@@ -64,7 +64,22 @@ def resolve_cohorts(
     for ticker in eligible:
         configured = _configured_selection(ticker, basket_ids_by_ticker, baskets_by_id)
         industry = _relationship_selection(ticker, "industry", relationship_records, relationship_groups)
-        sector = _relationship_selection(ticker, "sector", relationship_records, relationship_groups)
+        sector_candidate = _relationship_selection(
+            ticker,
+            "sector",
+            relationship_records,
+            relationship_groups,
+        )
+        raw_sector_relative_20d = _relative_return(
+            ticker,
+            sector_candidate.members,
+            metrics,
+        )
+        sector = (
+            sector_candidate
+            if len(sector_candidate.members) >= config.min_cohort_size
+            else CohortSelection.unavailable("sector")
+        )
         peer = configured if len(configured.members) >= config.min_cohort_size else replace(
             industry,
             fallback="configured_peer",
@@ -87,7 +102,7 @@ def resolve_cohorts(
             relative_volume=relative_volume,
             raw_configured_peer_relative_20d=_relative_return(ticker, configured.members, metrics),
             raw_industry_relative_20d=_relative_return(ticker, industry.members, metrics),
-            raw_sector_relative_20d=_relative_return(ticker, sector.members, metrics),
+            raw_sector_relative_20d=raw_sector_relative_20d,
             market=market,
         )
     return resolutions
