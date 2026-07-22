@@ -125,8 +125,8 @@ rules.
 The ranking stage adds only rank-data eligibility:
 
 - at least 61 valid adjusted daily closes so 60-day returns can be calculated;
-- sufficient volume history for the relative-volume component;
-- a valid broad-market benchmark series for the same horizons;
+- at least 21 valid daily volumes so 20-day relative volume can be calculated;
+- valid SPY returns over 5, 20, and 60 sessions from the same bar cutoff;
 - no duplicate symbol in the frozen cohort;
 - all data used has `available_for_decision_at <= decision_time`.
 
@@ -155,6 +155,21 @@ same adjusted daily-bar cutoff:
 - one-day return concentration relative to the 20-day move;
 - bar count, last bar date, and market-data provenance.
 
+V1 metric formulas are fixed as follows:
+
+```text
+return_Nd = latest_close / close_N_sessions_ago - 1
+alpha_vs_spy_Nd = ticker_return_Nd - spy_return_Nd
+relative_volume_20d = latest_volume / mean(previous_20_session_volumes)
+realized_volatility_20d = sample_stdev(last_20_simple_daily_returns) * sqrt(252)
+drawdown_60d = latest_close / max(last_60_closes) - 1
+```
+
+The latest session is excluded from the relative-volume baseline. A zero baseline
+volume makes relative volume missing. Returns use split-adjusted closes and simple,
+not logarithmic, returns. Realized volatility uses the sample standard deviation;
+it is missing when fewer than 20 daily returns are available.
+
 SPY is the single broad-market benchmark in the weighted score. QQQ relative
 returns may remain in technical evidence for display and diagnostics, but SPY and
 QQQ must not both contribute independent weights to the canonical score. A mapped
@@ -162,34 +177,41 @@ sector ETF or configured peer basket supplies the more specific comparison.
 
 ## Comparable Cohorts
 
-The cohort resolver uses the most specific point-in-time grouping that has enough
-members:
+V1 uses component-specific cohorts so the same broad fallback is not accidentally
+counted twice as both a peer and sector signal.
 
 ```text
-configured peer basket
-  -> industry
-  -> sector
-  -> similar-liquidity cohort
-  -> entire eligible universe
+peer component: configured peer basket -> industry -> unavailable
+sector component: sector -> unavailable
+market-alpha and 60d components: entire eligible universe
+relative-volume component: similar-liquidity cohort -> entire eligible universe
 ```
 
 The minimum cohort size is configurable and defaults to 10. Peer, industry, and
 sector metadata must come from already-persisted point-in-time records or existing
 relationship configuration; the ranker must not make N external company-profile
-requests. Similar-liquidity cohorts are deterministic buckets derived from the
-eligible cohort's average dollar volume.
+requests.
+
+Similar-liquidity cohorts are quartiles of average dollar volume across the
+eligible universe. Average-rank dollar-volume percentiles assign rows to
+`q1 = [0, .25)`, `q2 = [.25, .50)`, `q3 = [.50, .75)`, and `q4 = [.75, 1]`.
+If a quartile has fewer than 10 rows, the relative-volume component uses the full
+eligible universe. Rows missing average dollar volume cannot use a liquidity
+cohort and use the full eligible universe.
 
 Each ranking row records the selected cohort type, cohort identifier, cohort size,
-and any fallback chain used. A fallback is valid ranking behavior, not missing
-data, but it lowers confidence when it is materially less comparable than the
-preferred cohort.
+and any fallback used. Missing peer or sector metadata makes that optional score
+component unavailable; it is not replaced with the market cohort. This prevents
+the same market comparison from receiving multiple weights.
 
 ## Cross-Sectional Normalization
 
 Each continuous component is converted into a deterministic percentile within
-its resolved cohort. Ties use average-rank percentiles. Missing values remain
-missing; they are never imputed to zero. Symbol is the final deterministic
-tie-breaker for output rank.
+its resolved cohort. For cohort size `n > 1`, percentile is the zero-based average
+rank among ascending values divided by `n - 1`, so the lowest value is 0 and the
+highest is 1. Ties use their average rank. Missing values remain missing; they are
+never imputed to zero. Symbol is the final deterministic tie-breaker for output
+rank.
 
 Percentiles are preferred over raw z-scores in v1 because they are bounded,
 interpretable, robust to extreme returns, and easy to reproduce. Raw metrics remain
@@ -214,17 +236,33 @@ Positive components:
 
 Definitions:
 
-- `peer_or_fallback_20d_percentile` ranks 20-day performance in the most specific
-  valid comparable cohort.
-- `sector_or_fallback_20d_percentile` ranks 20-day performance in the sector or
-  next valid fallback cohort.
+- `peer_or_fallback_20d_percentile` ranks 20-day return in a configured peer
+  basket, falling back only to a valid industry cohort. It is missing when neither
+  cohort has at least 10 members.
+- `sector_or_fallback_20d_percentile` ranks 20-day return inside a valid sector
+  cohort. It is missing when sector is absent or has fewer than 10 members.
 - `market_20d_alpha_percentile` ranks 20-day SPY alpha across the eligible market.
-- `relative_strength_60d_persistence` is the comparable-cohort percentile of
-  60-day benchmark/peer outperformance.
+- `relative_strength_60d_persistence` is the eligible-market percentile of
+  60-day SPY alpha.
 - `multi_horizon_direction_agreement` is the fraction of 5-day, 20-day, and 60-day
   broad-benchmark alpha values that are positive.
-- `relative_volume_percentile` ranks current relative volume in the comparable
-  cohort; it confirms a move but cannot dominate it.
+- `relative_volume_percentile` ranks `relative_volume_20d` in the ticker's
+  liquidity quartile, falling back to the eligible universe when the quartile is
+  too small.
+
+The market-alpha, 60-day persistence, direction-agreement, and relative-volume
+components are required. Peer and sector components are optional because current
+full-universe metadata coverage is incomplete. Missing optional components are
+omitted and the positive weights are renormalized:
+
+```text
+weighted_positive_components =
+    sum(configured_weight_i * component_i for available components)
+    / sum(configured_weight_i for available components)
+```
+
+Required components are never renormalized away. If a required component is
+missing, the row is `insufficient_data` and receives no score or automatic rank.
 
 Penalties:
 
@@ -233,14 +271,32 @@ one_day_concentration_penalty: 0.00 to 0.10
 volatility_drawdown_penalty:   0.00 to 0.10
 ```
 
-The one-day penalty increases when an outsized fraction of the positive 20-day
-move came from the latest day. It is zero when the 20-day move is non-positive or
-when concentration is below the configured threshold; it must handle near-zero
-denominators without division instability.
+The one-day concentration ratio and penalty are:
+
+```text
+positive_return_sum_20d = sum(max(daily_return, 0) for last_20_daily_returns)
+one_day_concentration_ratio =
+    max(return_1d, 0) / positive_return_sum_20d
+    if positive_return_sum_20d > 0 else 0
+one_day_concentration_penalty =
+    0.10 * clamp((one_day_concentration_ratio - 0.35) / 0.30, 0, 1)
+```
+
+The penalty begins when the latest day supplies more than 35% of the last 20
+sessions' cumulative positive returns and reaches its 10-point maximum at 65%.
 
 The volatility/drawdown penalty combines cross-sectional realized-volatility and
-drawdown severity percentiles. It must not independently reject a stock; it only
-prevents unstable price action from looking like persistent relative strength.
+drawdown severity percentiles across the eligible universe:
+
+```text
+drawdown_severity = max(-drawdown_60d, 0)
+volatility_drawdown_penalty =
+    0.05 * clamp((realized_volatility_percentile - 0.50) / 0.50, 0, 1)
+  + 0.05 * clamp((drawdown_severity_percentile - 0.50) / 0.50, 0, 1)
+```
+
+Only the riskier half of the cohort receives either sub-penalty. The combined
+penalty cannot exceed 0.10 and cannot independently reject a row.
 
 The final score is:
 
@@ -259,17 +315,40 @@ until walk-forward evidence supports a new version.
 
 ## Confidence
 
-`data_confidence` is separate from `relative_strength_score`. It is derived from:
+`data_confidence` is separate from `relative_strength_score`. V1 uses:
 
-- required history completeness;
-- component availability;
-- source freshness;
-- cohort specificity and size;
-- benchmark and peer coverage.
+```text
+component_coverage = sum(configured weights of available positive components)
+freshness = 1.0 when latest bar is the expected last completed session,
+            0.5 when one completed session late,
+            0.0 otherwise
+cohort_specificity = 1.0 configured peer basket
+                     0.9 industry
+                     0.75 sector
+                     0.55 liquidity quartile
+                     0.40 eligible universe
+cohort_size_factor = min(primary_cohort_size / 30, 1.0)
+cohort_quality = cohort_specificity * cohort_size_factor
+benchmark_coverage = available SPY horizons among 5d/20d/60d divided by 3
+
+data_confidence = clamp(
+    0.50 * component_coverage
+  + 0.20 * freshness
+  + 0.20 * cohort_quality
+  + 0.10 * benchmark_coverage,
+  0,
+  1,
+)
+```
+
+The primary cohort is the most specific valid peer/industry/sector/liquidity group
+used by any component, or the eligible universe when none is available. Required
+history and benchmark inputs still act as eligibility gates; confidence does not
+convert missing required data into a score.
 
 Confidence does not boost score. A high score with weak confidence remains visible
 for forced/manual review but is not eligible for automatic Top-N selection below
-the configurable minimum confidence threshold.
+the configurable threshold, which defaults to 0.60.
 
 The output also records top positive and negative contributors as structured
 component/value/contribution rows. These are deterministic explanations, not LLM
@@ -284,9 +363,11 @@ Eligible rows are ordered by:
 3. average dollar volume descending;
 4. ticker ascending.
 
-Each row receives `overall_rank` and `overall_percentile`. The automatic research
-set consists of the configured Top-N rows meeting the confidence threshold. The
-default N is 100.
+Each scored row receives `overall_rank` and `overall_percentile` across all scored
+rows, including low-confidence rows. Automatic shortlist selection first filters
+to `status = ranked` and `data_confidence >= 0.60`, then applies the same ordering
+and takes the first N. Therefore, when fewer than N rows meet the confidence
+threshold, the automatic shortlist is smaller than N. The default N is 100.
 
 Forced tickers are appended after automatic selection and deduplicated. Their
 ranking rows retain their original rank and carry one or more inclusion reasons:
@@ -388,9 +469,14 @@ research priority; it is not copied wholesale into every candidate score.
   `insufficient_data` and rank the remaining eligible cohort.
 - If a preferred peer cohort is missing or too small, use the documented fallback
   chain and lower confidence.
-- If the broad-market benchmark is missing, the run is degraded or failed
-  according to the configured minimum viable component set; it must not fabricate
-  alpha.
+- If SPY lacks sufficient bars for any required 5/20/60 horizon, the ranking run
+  is `failed`; broad-benchmark components are never optional or renormalized away.
+- After a usable benchmark is loaded, individual rows missing any required metric
+  are `insufficient_data`. A run is `failed` when fewer than
+  `max(10, ceil(0.20 * input_count))` rows can be scored, `degraded` when fewer
+  than 90% of input rows can be scored or one or more batch chunks failed, and
+  `succeeded` otherwise. Missing optional peer/sector metadata alone does not
+  degrade the run.
 - If persistence fails, do not pass an unpersisted ranking into strategy scoring.
 - Provider request failures and coverage are recorded through the existing
   resilience/telemetry conventions.
