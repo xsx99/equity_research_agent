@@ -1,7 +1,7 @@
 # Cross-Sectional Relative-Strength Universe Ranking
 
 Date: 2026-07-21
-Status: Approved in conversation; pending written-spec review
+Status: Approved in conversation and independent spec review
 
 ## Summary
 
