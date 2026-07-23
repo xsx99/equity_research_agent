@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -230,3 +231,57 @@ class RankingResult:
     full_cohort: tuple[RankedTicker, ...]
     automatic_tickers: tuple[str, ...]
     research_tickers: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class UniverseRankingRunRecord:
+    """Persisted lifecycle metadata for one complete ranking cohort."""
+
+    universe_ranking_run_id: str
+    universe_snapshot_id: str
+    decision_time: datetime
+    model_version: str
+    config_json: dict[str, Any]
+    input_count: int
+    eligible_count: int
+    shortlist_count: int
+    status: str
+    source_metadata_json: dict[str, Any]
+    error_metadata_json: dict[str, Any]
+    started_at: datetime
+    completed_at: datetime | None
+
+
+@dataclass(frozen=True)
+class UniverseRankingRecord:
+    """Persisted, replayable result for one ticker in a ranking cohort."""
+
+    universe_ranking_id: str
+    universe_ranking_run_id: str
+    ticker: str
+    decision_time: datetime
+    status: str
+    overall_rank: int | None
+    overall_percentile: float | None
+    relative_strength_score: float | None
+    data_confidence: float | None
+    peer_group_type: str | None
+    peer_group_id: str | None
+    peer_group_size: int | None
+    is_automatic_shortlist: bool
+    forced_inclusion_reasons: tuple[str, ...]
+    raw_metrics_json: dict[str, Any]
+    normalized_metrics_json: dict[str, Any]
+    positive_contributors_json: tuple[dict[str, Any], ...]
+    negative_contributors_json: tuple[dict[str, Any], ...]
+    missing_inputs: tuple[str, ...]
+    source_refs: tuple[str, ...]
+    available_for_decision_at: datetime
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "ticker", self.ticker.strip().upper())
+        object.__setattr__(self, "forced_inclusion_reasons", tuple(self.forced_inclusion_reasons))
+        object.__setattr__(self, "positive_contributors_json", tuple(self.positive_contributors_json))
+        object.__setattr__(self, "negative_contributors_json", tuple(self.negative_contributors_json))
+        object.__setattr__(self, "missing_inputs", tuple(self.missing_inputs))
+        object.__setattr__(self, "source_refs", tuple(self.source_refs))

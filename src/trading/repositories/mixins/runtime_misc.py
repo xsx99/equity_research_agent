@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -13,12 +13,22 @@ from src.db.models.trading import (
     ManualTickerRequest,
     PaperExecution,
     PaperOrder,
+    PeerBasket,
     RiskDecision,
+    TickerRelationship as TickerRelationshipModel,
     TradingDecision,
     TradingRuntimeRun,
     UniverseFilterConfig,
     UniverseSnapshot,
     UniverseSymbol,
+    UniverseRanking,
+    UniverseRankingRun,
+)
+from src.trading.ranking.records import (
+    PeerBasketMembership,
+    TickerRelationship,
+    UniverseRankingRecord,
+    UniverseRankingRunRecord,
 )
 from src.trading.execution.attempts import ExecutionAttemptRecord
 from src.trading.data_sources.universe import UniverseFilterConfig as UniverseFilterConfigRecord
@@ -149,6 +159,204 @@ class RuntimeMiscRepositoryMixin:
             symbol_row.exclusion_reason = decision.exclusion_reason
             symbol_row.metadata_json = {}
         self.session.flush()
+
+    def save_universe_ranking_run(
+        self,
+        run: UniverseRankingRunRecord,
+        rankings: tuple[UniverseRankingRecord, ...] | list[UniverseRankingRecord],
+    ) -> None:
+        """Upsert a run and its full ticker cohort before it is consumed downstream."""
+        run_id = _to_uuid(run.universe_ranking_run_id)
+        row = self.session.query(UniverseRankingRun).filter_by(
+            universe_ranking_run_id=run_id
+        ).one_or_none()
+        if row is None:
+            row = UniverseRankingRun(universe_ranking_run_id=run_id)
+            self.session.add(row)
+        row.universe_snapshot_id = _to_uuid(run.universe_snapshot_id)
+        row.decision_time = run.decision_time
+        row.model_version = run.model_version
+        row.config_json = dict(run.config_json)
+        row.input_count = int(run.input_count)
+        row.eligible_count = int(run.eligible_count)
+        row.shortlist_count = int(run.shortlist_count)
+        row.status = run.status
+        row.source_metadata_json = dict(run.source_metadata_json)
+        row.error_metadata_json = dict(run.error_metadata_json)
+        row.started_at = run.started_at
+        row.completed_at = run.completed_at
+
+        for ranking in rankings:
+            if ranking.universe_ranking_run_id != run.universe_ranking_run_id:
+                raise ValueError("ranking_run_id_mismatch")
+            ranking_row = self.session.query(UniverseRanking).filter_by(
+                universe_ranking_run_id=run_id,
+                ticker=ranking.ticker,
+            ).one_or_none()
+            if ranking_row is None:
+                ranking_row = UniverseRanking(
+                    universe_ranking_id=_to_uuid(ranking.universe_ranking_id),
+                    universe_ranking_run_id=run_id,
+                    ticker=ranking.ticker,
+                )
+                self.session.add(ranking_row)
+            ranking_row.decision_time = ranking.decision_time
+            ranking_row.status = ranking.status
+            ranking_row.overall_rank = ranking.overall_rank
+            ranking_row.overall_percentile = _decimal_or_none(ranking.overall_percentile)
+            ranking_row.relative_strength_score = _decimal_or_none(ranking.relative_strength_score)
+            ranking_row.data_confidence = _decimal_or_none(ranking.data_confidence)
+            ranking_row.peer_group_type = ranking.peer_group_type
+            ranking_row.peer_group_id = ranking.peer_group_id
+            ranking_row.peer_group_size = ranking.peer_group_size
+            ranking_row.is_automatic_shortlist = bool(ranking.is_automatic_shortlist)
+            ranking_row.forced_inclusion_reasons_json = list(ranking.forced_inclusion_reasons)
+            ranking_row.raw_metrics_json = dict(ranking.raw_metrics_json)
+            ranking_row.normalized_metrics_json = dict(ranking.normalized_metrics_json)
+            ranking_row.positive_contributors_json = list(ranking.positive_contributors_json)
+            ranking_row.negative_contributors_json = list(ranking.negative_contributors_json)
+            ranking_row.missing_inputs_json = list(ranking.missing_inputs)
+            ranking_row.source_refs_json = list(ranking.source_refs)
+            ranking_row.available_for_decision_at = ranking.available_for_decision_at
+        self.session.flush()
+
+    def load_universe_ranking_run(self, universe_ranking_run_id: str) -> UniverseRankingRunRecord | None:
+        row = self.session.query(UniverseRankingRun).filter_by(
+            universe_ranking_run_id=_to_uuid(universe_ranking_run_id)
+        ).one_or_none()
+        return self._universe_ranking_run_record(row) if row is not None else None
+
+    def load_latest_universe_ranking_run(
+        self,
+        *,
+        decision_time: datetime,
+    ) -> UniverseRankingRunRecord | None:
+        rows = [
+            row
+            for row in self.session.query(UniverseRankingRun).all()
+            if row.decision_time <= decision_time
+        ]
+        if not rows:
+            return None
+        return self._universe_ranking_run_record(
+            max(rows, key=lambda row: (row.decision_time, str(row.universe_ranking_run_id)))
+        )
+
+    def load_universe_rankings(
+        self,
+        universe_ranking_run_id: str,
+    ) -> tuple[UniverseRankingRecord, ...]:
+        rows = self.session.query(UniverseRanking).filter_by(
+            universe_ranking_run_id=_to_uuid(universe_ranking_run_id)
+        ).all()
+        return tuple(
+            self._universe_ranking_record(row)
+            for row in sorted(rows, key=lambda row: (row.overall_rank is None, row.overall_rank or 0, row.ticker))
+        )
+
+    def load_peer_basket_memberships(
+        self,
+        *,
+        decision_time: datetime,
+    ) -> tuple[PeerBasketMembership, ...]:
+        """Return the latest decision-available version of every configured basket."""
+        eligible = [
+            row
+            for row in self.session.query(PeerBasket).all()
+            if row.trade_date <= decision_time.date()
+        ]
+        latest_by_basket: dict[tuple[str, str], PeerBasket] = {}
+        for row in eligible:
+            key = (row.basket_key, row.version)
+            current = latest_by_basket.get(key)
+            if current is None or row.trade_date > current.trade_date:
+                latest_by_basket[key] = row
+        memberships: list[PeerBasketMembership] = []
+        for row in latest_by_basket.values():
+            valid_from = datetime.combine(row.trade_date, time.min, tzinfo=timezone.utc)
+            for ticker in row.members_json or ():
+                memberships.append(
+                    PeerBasketMembership(
+                        ticker=str(ticker),
+                        basket_id=f"{row.basket_key}:{row.version}",
+                        valid_from=valid_from,
+                        valid_to=None,
+                        available_for_decision_at=valid_from,
+                        source_refs=tuple(row.source_refs_json or ()),
+                    )
+                )
+        return tuple(sorted(memberships, key=lambda item: (item.basket_id, item.ticker)))
+
+    def load_ticker_relationships(
+        self,
+        *,
+        decision_time: datetime,
+    ) -> tuple[TickerRelationship, ...]:
+        """Load only relationships whose validity window is open at decision time."""
+        rows = [
+            row
+            for row in self.session.query(TickerRelationshipModel).all()
+            if row.valid_from <= decision_time
+            and (row.valid_until is None or row.valid_until >= decision_time)
+        ]
+        return tuple(
+            TickerRelationship(
+                ticker=row.source_ticker,
+                relationship_type=row.relationship_type,
+                relationship_id=row.theme_id or row.target_ticker,
+                valid_from=row.valid_from,
+                valid_to=row.valid_until,
+                available_for_decision_at=row.valid_from,
+                source_refs=tuple(row.source_refs_json or ()),
+            )
+            for row in sorted(rows, key=lambda item: (item.source_ticker, item.relationship_type, item.target_ticker))
+        )
+
+    @staticmethod
+    def _universe_ranking_run_record(row: UniverseRankingRun) -> UniverseRankingRunRecord:
+        return UniverseRankingRunRecord(
+            universe_ranking_run_id=str(row.universe_ranking_run_id),
+            universe_snapshot_id=str(row.universe_snapshot_id),
+            decision_time=row.decision_time,
+            model_version=row.model_version,
+            config_json=dict(row.config_json or {}),
+            input_count=int(row.input_count),
+            eligible_count=int(row.eligible_count),
+            shortlist_count=int(row.shortlist_count),
+            status=row.status,
+            source_metadata_json=dict(row.source_metadata_json or {}),
+            error_metadata_json=dict(row.error_metadata_json or {}),
+            started_at=row.started_at,
+            completed_at=row.completed_at,
+        )
+
+    @staticmethod
+    def _universe_ranking_record(row: UniverseRanking) -> UniverseRankingRecord:
+        return UniverseRankingRecord(
+            universe_ranking_id=str(row.universe_ranking_id),
+            universe_ranking_run_id=str(row.universe_ranking_run_id),
+            ticker=row.ticker,
+            decision_time=row.decision_time,
+            status=row.status,
+            overall_rank=row.overall_rank,
+            overall_percentile=float(row.overall_percentile) if row.overall_percentile is not None else None,
+            relative_strength_score=(
+                float(row.relative_strength_score) if row.relative_strength_score is not None else None
+            ),
+            data_confidence=float(row.data_confidence) if row.data_confidence is not None else None,
+            peer_group_type=row.peer_group_type,
+            peer_group_id=row.peer_group_id,
+            peer_group_size=row.peer_group_size,
+            is_automatic_shortlist=bool(row.is_automatic_shortlist),
+            forced_inclusion_reasons=tuple(row.forced_inclusion_reasons_json or ()),
+            raw_metrics_json=dict(row.raw_metrics_json or {}),
+            normalized_metrics_json=dict(row.normalized_metrics_json or {}),
+            positive_contributors_json=tuple(row.positive_contributors_json or ()),
+            negative_contributors_json=tuple(row.negative_contributors_json or ()),
+            missing_inputs=tuple(row.missing_inputs_json or ()),
+            source_refs=tuple(row.source_refs_json or ()),
+            available_for_decision_at=row.available_for_decision_at,
+        )
     def save_prompt_template(self, template: object) -> None:
         row = self.session.query(LlmPromptTemplate).filter_by(
             prompt_id=str(template.prompt_id),

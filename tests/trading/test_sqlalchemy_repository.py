@@ -42,6 +42,8 @@ from src.db.models.trading import (
     TradingRuntimeRun,
     TradingDecision,
     UniverseFilterConfig,
+    UniverseRanking,
+    UniverseRankingRun,
     UniverseSnapshot,
     UniverseSymbol,
 )
@@ -58,6 +60,7 @@ from src.trading.options.strategy import OptionStrategyDecisionRecord, OptionStr
 from src.trading.portfolio.state import PortfolioSnapshot, StockPosition
 from src.trading.post_close.reflection import DailyReflectionRecord, LearningFactorRecord
 from src.trading.repositories.sqlalchemy import SqlAlchemyTradingRepository, _trading_decision_payload
+from src.trading.ranking.records import UniverseRankingRecord, UniverseRankingRunRecord
 from src.trading.runtime.trade_day import local_day_bounds_utc
 from src.trading.workflows.paper_execution import PaperExecutionWorkflow
 from src.trading.manual_review.requests import ManualTickerRequestService
@@ -130,6 +133,136 @@ class _AutoflushFakeSession(_FakeSession):
             if getattr(row, "title", None) is None:
                 raise AssertionError("autoflush attempted before learning factor fields were populated")
         super().flush()
+
+
+_RANKING_RUN_ID = str(uuid.uuid5(uuid.NAMESPACE_URL, "ranking-run"))
+_UNIVERSE_SNAPSHOT_ID = str(uuid.uuid5(uuid.NAMESPACE_URL, "universe-snapshot"))
+
+
+def _ranking_run_record(*, run_id: str = _RANKING_RUN_ID, decision_time: datetime | None = None) -> UniverseRankingRunRecord:
+    timestamp = decision_time or datetime(2026, 7, 21, 13, 30, tzinfo=timezone.utc)
+    return UniverseRankingRunRecord(
+        universe_ranking_run_id=run_id,
+        universe_snapshot_id=_UNIVERSE_SNAPSHOT_ID,
+        decision_time=timestamp,
+        model_version="cross_sectional_relative_strength_v1",
+        config_json={"top_n": 20},
+        input_count=2,
+        eligible_count=1,
+        shortlist_count=1,
+        status="succeeded",
+        source_metadata_json={"provider": "test"},
+        error_metadata_json={},
+        started_at=timestamp,
+        completed_at=timestamp,
+    )
+
+
+def _ranking_row_record(*, row_id: str, run_id: str = _RANKING_RUN_ID, ticker: str, automatic: bool) -> UniverseRankingRecord:
+    timestamp = datetime(2026, 7, 21, 13, 30, tzinfo=timezone.utc)
+    return UniverseRankingRecord(
+        universe_ranking_id=row_id,
+        universe_ranking_run_id=run_id,
+        ticker=ticker,
+        decision_time=timestamp,
+        status="ranked" if automatic else "insufficient_data",
+        overall_rank=1 if automatic else None,
+        overall_percentile=1.0 if automatic else None,
+        relative_strength_score=0.75 if automatic else None,
+        data_confidence=0.9 if automatic else 0.3,
+        peer_group_type="industry",
+        peer_group_id="software",
+        peer_group_size=12,
+        is_automatic_shortlist=automatic,
+        forced_inclusion_reasons=("open_position",) if not automatic else (),
+        raw_metrics_json={"return_20d": 0.12},
+        normalized_metrics_json={"market_20d_alpha_percentile": 0.8},
+        positive_contributors_json=({"name": "alpha", "impact": 0.2},),
+        negative_contributors_json=(),
+        missing_inputs=("return_60d",) if not automatic else (),
+        source_refs=("bar:AAA",),
+        available_for_decision_at=timestamp,
+    )
+
+
+def test_sqlalchemy_repository_persists_and_loads_complete_universe_ranking_cohort_idempotently():
+    session = _FakeSession()
+    repo = SqlAlchemyTradingRepository(session)
+    run = _ranking_run_record()
+    rows = (
+        _ranking_row_record(row_id=str(uuid.uuid5(uuid.NAMESPACE_URL, "ranking-aaa")), ticker="AAA", automatic=True),
+        _ranking_row_record(row_id=str(uuid.uuid5(uuid.NAMESPACE_URL, "ranking-bbb")), ticker="BBB", automatic=False),
+    )
+
+    repo.save_universe_ranking_run(run, rows)
+    repo.save_universe_ranking_run(run, rows)
+
+    persisted_runs = session.query(UniverseRankingRun).all()
+    persisted_rows = session.query(UniverseRanking).all()
+    assert len(persisted_runs) == 1
+    assert len(persisted_rows) == 2
+    assert persisted_rows[1].forced_inclusion_reasons_json == ["open_position"]
+    assert persisted_rows[0].raw_metrics_json == {"return_20d": 0.12}
+
+    assert repo.load_universe_ranking_run(run.universe_ranking_run_id) == run
+    assert repo.load_universe_rankings(run.universe_ranking_run_id) == rows
+    assert repo.load_latest_universe_ranking_run(decision_time=run.decision_time) == run
+
+
+def test_in_memory_repository_upserts_universe_ranking_cohort():
+    from src.trading.repositories.in_memory import InMemoryTradingRepository
+
+    repo = InMemoryTradingRepository()
+    run = _ranking_run_record()
+    rows = (_ranking_row_record(row_id=str(uuid.uuid5(uuid.NAMESPACE_URL, "ranking-aaa")), ticker="AAA", automatic=True),)
+
+    repo.save_universe_ranking_run(run, rows)
+    repo.save_universe_ranking_run(run, rows)
+
+    assert repo.load_universe_ranking_run(run.universe_ranking_run_id) == run
+    assert repo.load_universe_rankings(run.universe_ranking_run_id) == rows
+
+
+def test_sqlalchemy_repository_persists_candidate_ranking_references():
+    session = _FakeSession()
+    repo = SqlAlchemyTradingRepository(session)
+    candidate = SimpleNamespace(
+        candidate_score_id=str(uuid.uuid4()),
+        strategy_run_id=str(uuid.uuid4()),
+        signal_snapshot_id=None,
+        universe_ranking_run_id=_RANKING_RUN_ID,
+        universe_ranking_id=str(uuid.uuid5(uuid.NAMESPACE_URL, "ranking-aaa")),
+        ticker="AAA",
+        strategy_id="relative_strength_rotation",
+        strategy_version="v1",
+        strategy_definition_id=None,
+        candidate_score=0.75,
+        candidate_status="actionable",
+        direction="long",
+        action="buy",
+        typical_horizon="swing",
+        core_signal_evidence={},
+        missing_required_signals=[],
+        unsupported_missing_signal_families=[],
+        invalidators=[],
+        risk_tags=[],
+        macro_compatibility="neutral",
+        selection_source="scanner",
+        manual_request_id=None,
+        selection_reason="ranked",
+        rejection_reason=None,
+        benchmark_context={},
+        decision_time=datetime(2026, 7, 21, 13, 30, tzinfo=timezone.utc),
+        available_for_decision_at=datetime(2026, 7, 21, 13, 30, tzinfo=timezone.utc),
+        source_record_refs_json=[],
+    )
+
+    repo.save_candidate_scores([candidate])
+
+    persisted = session.query(CandidateScore).one_or_none()
+    assert persisted is not None
+    assert str(persisted.universe_ranking_run_id) == _RANKING_RUN_ID
+    assert str(persisted.universe_ranking_id) == candidate.universe_ranking_id
 
 
 def test_sqlalchemy_repository_persists_llm_prompt_telemetry_rows():

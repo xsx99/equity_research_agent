@@ -98,7 +98,7 @@ Accepted clean-branch baseline on 2026-07-22: `970 passed, 12 failed`. The 12 fa
 | --- | --- | --- |
 | 1. Pure metric and percentile primitives | Complete | `pytest tests/trading/ranking/test_metrics.py -q` → 48 passed |
 | 2. Cohort scoring, forced reasons, confidence, rank, shortlist | Complete | RED collection failure; `pytest tests/trading/ranking/test_metrics.py tests/trading/ranking/test_scoring.py -q` → 89 passed; spec review and local quality verification completed |
-| 3. ORM, migration, repository persistence | Pending | — |
+| 3. ORM, migration, repository persistence | Complete | ORM/migration contracts and repository round trips: 6 targeted tests passed; mapper and compile checks passed. Offline Alembic generation remains blocked by pre-existing revision 025 inspector usage. |
 | 4. Bounded input loader and ranking pipeline | Pending | — |
 | 5. Pre-open narrowing and signal overlay | Pending | — |
 | 6. Strategy cutover and traceability | Pending | — |
@@ -196,33 +196,33 @@ Accepted clean-branch baseline on 2026-07-22: `970 passed, 12 failed`. The 12 fa
 - Create `tests/db/test_cross_sectional_ranking_migration.py`
 - Modify `tests/trading/test_sqlalchemy_repository.py`
 
-- [ ] **Step 1: Write failing ORM contract tests**
+- [x] **Step 1: Write failing ORM contract tests**
 
   Assert table names, one `(ranking_run_id,ticker)` row, row `decision_time`, score/confidence/percentile checks, exact run input/eligible/shortlist count invariants, run/rank + `(ticker,decision_time)` + shortlist indexes, universe snapshot FK, enum-backed run/row status constraints, JSON defaults, candidate ranking FKs, and ORM relationships.
 
-- [ ] **Step 2: Run RED ORM tests**
+- [x] **Step 2: Run RED ORM tests**
 
   Run: `source ~/.venv/bin/activate && pytest tests/db/test_trading_models.py -k universe_ranking -q`
 
-- [ ] **Step 3: Implement ORM models and exports**
+- [x] **Step 3: Implement ORM models and exports**
 
-- [ ] **Step 4: Write failing migration tests**
+- [x] **Step 4: Write failing migration tests**
 
   Inspect migration operations for both tables, constraints/indexes, candidate columns, `032 -> 031`, and complete downgrade behavior.
 
-- [ ] **Step 5: Implement migration**
+- [x] **Step 5: Implement migration**
 
-- [ ] **Step 6: Write failing repository round-trip/upsert tests**
+- [x] **Step 6: Write failing repository round-trip/upsert tests**
 
   Test run-first persistence, complete cohort rows, idempotent update, duplicate prevention, JSON payloads, load-by-run, load-latest-at-decision-time, and candidate ranking references.
 
-- [ ] **Step 7: Implement SQLAlchemy and in-memory repository methods**
+- [x] **Step 7: Implement SQLAlchemy and in-memory repository methods**
 
-- [ ] **Step 8: Run migration SQL/upgrade verification**
+- [x] **Step 8: Run migration SQL/upgrade verification**
 
   Run `source ~/.venv/bin/activate && alembic upgrade head` against the configured test database when available, then downgrade to `031` and re-upgrade to `032`; when the database is unavailable, run Alembic offline SQL generation for upgrade/downgrade and record the environment limitation.
 
-- [ ] **Step 9: Run GREEN persistence tests and update tracker**
+- [x] **Step 9: Run GREEN persistence tests and update tracker**
 
   Run: `source ~/.venv/bin/activate && pytest tests/db/test_trading_models.py tests/db/test_cross_sectional_ranking_migration.py tests/trading/test_sqlalchemy_repository.py -k 'universe_ranking or ranking_reference' -q`
 
