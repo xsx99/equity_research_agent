@@ -67,6 +67,10 @@ from src.db.models.trading import (
     TradingRuntimeRun,
     WatchCandidate,
     UniverseFilterConfig,
+    UniverseRanking,
+    UniverseRankingRun,
+    UniverseRankingRunStatus,
+    UniverseRankingStatus,
     UniverseSnapshot,
     UniverseSymbol,
     UniverseSymbolStatus,
@@ -140,6 +144,13 @@ def test_new_status_enums_expose_choices():
     )
     assert ThemeLifecycleStatus.choices() == ("active", "retired")
     assert UniverseSymbolStatus.choices() == ("included", "excluded")
+    assert UniverseRankingRunStatus.choices() == (
+        "running",
+        "succeeded",
+        "degraded",
+        "failed",
+    )
+    assert UniverseRankingStatus.choices() == ("ranked", "insufficient_data")
     assert ManualTickerRequestMode.choices() == ("review_only", "paper_trade_eligible")
     assert ManualTickerRequestStatus.choices() == ("active", "dismissed", "cancelled")
     assert ProviderRequestStatus.choices() == (
@@ -1438,3 +1449,95 @@ def test_dead_persistence_cleanup_migration_drops_only_target_tables():
     assert '"learning_factor_applications"' in text
     assert '"macro_readthrough_events"' in text
     assert '"historical_replay_runs"' not in text
+
+
+def test_universe_ranking_models_preserve_complete_point_in_time_cohort_contract():
+    run_columns = set(UniverseRankingRun.__table__.columns.keys())
+    row_columns = set(UniverseRanking.__table__.columns.keys())
+    candidate_columns = set(CandidateScore.__table__.columns.keys())
+
+    assert {
+        "universe_ranking_run_id",
+        "universe_snapshot_id",
+        "decision_time",
+        "model_version",
+        "config_json",
+        "input_count",
+        "eligible_count",
+        "shortlist_count",
+        "status",
+        "source_metadata_json",
+        "error_metadata_json",
+    } <= run_columns
+    assert {
+        "universe_ranking_id",
+        "universe_ranking_run_id",
+        "ticker",
+        "decision_time",
+        "status",
+        "overall_rank",
+        "overall_percentile",
+        "relative_strength_score",
+        "data_confidence",
+        "peer_group_type",
+        "peer_group_id",
+        "peer_group_size",
+        "is_automatic_shortlist",
+        "forced_inclusion_reasons_json",
+        "raw_metrics_json",
+        "normalized_metrics_json",
+        "positive_contributors_json",
+        "negative_contributors_json",
+        "missing_inputs_json",
+        "source_refs_json",
+        "available_for_decision_at",
+    } <= row_columns
+    assert {"universe_ranking_run_id", "universe_ranking_id"} <= candidate_columns
+
+    run_constraints = " ".join(
+        str(item.sqltext)
+        for item in UniverseRankingRun.__table__.constraints
+        if isinstance(item, CheckConstraint)
+    )
+    row_constraints = " ".join(
+        str(item.sqltext)
+        for item in UniverseRanking.__table__.constraints
+        if isinstance(item, CheckConstraint)
+    )
+    assert "status IN ('running', 'succeeded', 'degraded', 'failed')" in run_constraints
+    assert "status IN ('ranked', 'insufficient_data')" in row_constraints
+    assert "relative_strength_score >= 0 AND relative_strength_score <= 1" in row_constraints
+    assert "data_confidence >= 0 AND data_confidence <= 1" in row_constraints
+    assert "overall_percentile >= 0 AND overall_percentile <= 1" in row_constraints
+
+    unique_constraints = {
+        tuple(column.name for column in constraint.columns)
+        for constraint in UniverseRanking.__table__.constraints
+        if getattr(constraint, "columns", None)
+    }
+    assert ("universe_ranking_run_id", "ticker") in unique_constraints
+    indexes = {
+        tuple(column.name for column in index.columns)
+        for index in UniverseRanking.__table__.indexes
+    }
+    assert ("universe_ranking_run_id", "overall_rank") in indexes
+    assert ("ticker", "decision_time") in indexes
+    assert ("is_automatic_shortlist",) in indexes
+
+
+def test_cross_sectional_ranking_migration_defines_schema_and_reversible_contract():
+    migration_path = Path("alembic/versions/032_cross_sectional_relative_strength_ranking.py")
+    text = migration_path.read_text(encoding="utf-8")
+
+    assert 'down_revision: Union[str, None] = "031"' in text
+    assert '"universe_ranking_runs"' in text
+    assert '"universe_rankings"' in text
+    assert '"candidate_scores"' in text
+    assert '"universe_ranking_run_id"' in text
+    assert '"universe_ranking_id"' in text
+    assert '"decision_time"' in text
+    assert "uq_universe_rankings_run_ticker" in text
+    assert "ix_universe_rankings_run_rank" in text
+    assert "ix_universe_rankings_ticker_decision_time" in text
+    assert "ix_universe_rankings_automatic_shortlist" in text
+    assert "def downgrade" in text

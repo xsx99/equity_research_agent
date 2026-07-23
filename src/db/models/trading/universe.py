@@ -195,11 +195,118 @@ class UniverseSnapshot(Base):
 
     filter_config = relationship("UniverseFilterConfig", back_populates="universe_snapshots")
     symbols = relationship("UniverseSymbol", back_populates="universe_snapshot")
+    ranking_runs = relationship("UniverseRankingRun", back_populates="universe_snapshot")
 
     __table_args__ = (
         CheckConstraint("included_count >= 0", name="ck_universe_snapshots_included_count"),
         CheckConstraint("excluded_count >= 0", name="ck_universe_snapshots_excluded_count"),
         Index("ix_universe_snapshots_date_provider", "snapshot_date", "provider"),
+    )
+
+
+class UniverseRankingRun(Base):
+    """One persisted full-universe cross-sectional ranking decision."""
+
+    __tablename__ = "universe_ranking_runs"
+
+    universe_ranking_run_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    universe_snapshot_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("universe_snapshots.universe_snapshot_id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    decision_time = Column(DateTime(timezone=True), nullable=False, index=True)
+    model_version = Column(String(64), nullable=False)
+    config_json = Column(JSONB, nullable=False, default=dict)
+    input_count = Column(Integer, nullable=False, default=0, server_default="0")
+    eligible_count = Column(Integer, nullable=False, default=0, server_default="0")
+    shortlist_count = Column(Integer, nullable=False, default=0, server_default="0")
+    status = Column(String(32), nullable=False, index=True)
+    source_metadata_json = Column(JSONB, nullable=False, default=dict)
+    error_metadata_json = Column(JSONB, nullable=False, default=dict)
+    started_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    universe_snapshot = relationship("UniverseSnapshot", back_populates="ranking_runs")
+    rankings = relationship("UniverseRanking", back_populates="ranking_run")
+
+    __table_args__ = (
+        CheckConstraint(
+            f"status IN {UniverseRankingRunStatus.check_in_sql()}",
+            name="ck_universe_ranking_runs_status",
+        ),
+        CheckConstraint("input_count >= 0", name="ck_universe_ranking_runs_input_count"),
+        CheckConstraint("eligible_count >= 0", name="ck_universe_ranking_runs_eligible_count"),
+        CheckConstraint("shortlist_count >= 0", name="ck_universe_ranking_runs_shortlist_count"),
+        CheckConstraint("eligible_count <= input_count", name="ck_universe_ranking_runs_eligible_input"),
+        CheckConstraint("shortlist_count <= eligible_count", name="ck_universe_ranking_runs_shortlist_eligible"),
+        Index("ix_universe_ranking_runs_snapshot_decision", "universe_snapshot_id", "decision_time"),
+    )
+
+
+class UniverseRanking(Base):
+    """One complete cohort row, including insufficient-data symbols."""
+
+    __tablename__ = "universe_rankings"
+
+    universe_ranking_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    universe_ranking_run_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("universe_ranking_runs.universe_ranking_run_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    ticker = Column(String(16), nullable=False, index=True)
+    decision_time = Column(DateTime(timezone=True), nullable=False, index=True)
+    status = Column(String(32), nullable=False, index=True)
+    overall_rank = Column(Integer, nullable=True)
+    overall_percentile = Column(Numeric, nullable=True)
+    relative_strength_score = Column(Numeric, nullable=True)
+    data_confidence = Column(Numeric, nullable=True)
+    peer_group_type = Column(String(32), nullable=True)
+    peer_group_id = Column(String(128), nullable=True)
+    peer_group_size = Column(Integer, nullable=True)
+    is_automatic_shortlist = Column(Boolean, nullable=False, default=False, server_default="false", index=True)
+    forced_inclusion_reasons_json = Column(JSONB, nullable=False, default=list)
+    raw_metrics_json = Column(JSONB, nullable=False, default=dict)
+    normalized_metrics_json = Column(JSONB, nullable=False, default=dict)
+    positive_contributors_json = Column(JSONB, nullable=False, default=list)
+    negative_contributors_json = Column(JSONB, nullable=False, default=list)
+    missing_inputs_json = Column(JSONB, nullable=False, default=list)
+    source_refs_json = Column(JSONB, nullable=False, default=list)
+    available_for_decision_at = Column(DateTime(timezone=True), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    ranking_run = relationship("UniverseRankingRun", back_populates="rankings")
+    candidate_scores = relationship("CandidateScore", back_populates="universe_ranking")
+
+    __table_args__ = (
+        UniqueConstraint("universe_ranking_run_id", "ticker", name="uq_universe_rankings_run_ticker"),
+        CheckConstraint(
+            f"status IN {UniverseRankingStatus.check_in_sql()}",
+            name="ck_universe_rankings_status",
+        ),
+        CheckConstraint(
+            "relative_strength_score IS NULL OR "
+            "(relative_strength_score >= 0 AND relative_strength_score <= 1)",
+            name="ck_universe_rankings_score_range",
+        ),
+        CheckConstraint(
+            "data_confidence IS NULL OR (data_confidence >= 0 AND data_confidence <= 1)",
+            name="ck_universe_rankings_confidence_range",
+        ),
+        CheckConstraint(
+            "overall_percentile IS NULL OR "
+            "(overall_percentile >= 0 AND overall_percentile <= 1)",
+            name="ck_universe_rankings_percentile_range",
+        ),
+        CheckConstraint("overall_rank IS NULL OR overall_rank >= 0", name="ck_universe_rankings_rank"),
+        CheckConstraint("peer_group_size IS NULL OR peer_group_size >= 0", name="ck_universe_rankings_peer_size"),
+        Index("ix_universe_rankings_run_rank", "universe_ranking_run_id", "overall_rank"),
+        Index("ix_universe_rankings_ticker_decision_time", "ticker", "decision_time"),
+        Index("ix_universe_rankings_automatic_shortlist", "is_automatic_shortlist"),
     )
 
 class UniverseSymbol(Base):
