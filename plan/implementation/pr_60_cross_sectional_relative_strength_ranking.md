@@ -97,7 +97,7 @@ Accepted clean-branch baseline on 2026-07-22: `970 passed, 12 failed`. The 12 fa
 | Task | Status | Evidence |
 | --- | --- | --- |
 | 1. Pure metric and percentile primitives | Complete | `pytest tests/trading/ranking/test_metrics.py -q` → 48 passed |
-| 2. Cohort scoring, forced reasons, confidence, rank, shortlist | Pending | — |
+| 2. Cohort scoring, forced reasons, confidence, rank, shortlist | Complete | RED collection failure; `pytest tests/trading/ranking/test_metrics.py tests/trading/ranking/test_scoring.py -q` → 89 passed; spec review and local quality verification completed |
 | 3. ORM, migration, repository persistence | Pending | — |
 | 4. Bounded input loader and ranking pipeline | Pending | — |
 | 5. Pre-open narrowing and signal overlay | Pending | — |
@@ -150,33 +150,33 @@ Accepted clean-branch baseline on 2026-07-22: `970 passed, 12 failed`. The 12 fa
 - Create `src/trading/ranking/peers.py`
 - Create `tests/trading/ranking/test_scoring.py`
 
-- [ ] **Step 1: Write failing cohort-resolution tests**
+- [x] **Step 1: Write failing cohort-resolution tests**
 
   Test peer basket → industry → unavailable, sector → unavailable, market cohorts, liquidity quartile → market fallback, configurable minimum cohort size, and the rule that missing peer/sector does not fall back to market. Also test point-in-time `PeerBasket`/`TickerRelationship` validity windows, intersection with the frozen universe, exact membership/source refs, and raw sector/industry/peer relative-return metrics.
 
-- [ ] **Step 2: Run RED scoring tests**
+- [x] **Step 2: Run RED scoring tests**
 
   Run: `source ~/.venv/bin/activate && pytest tests/trading/ranking/test_scoring.py -q`
 
-- [ ] **Step 3: Write failing formula and missing-component tests**
+- [x] **Step 3: Write failing formula and missing-component tests**
 
   Lock configured weights `0.30/0.20/0.15/0.15/0.10/0.10`, optional-only renormalization, each required-component missing state, one-day concentration thresholds/max, both volatility/drawdown sub-penalties, combined penalty max, final score clamp, and peer/sector relative-return persistence.
 
-- [ ] **Step 4: Implement cohort resolution, component normalization, and v1 scoring**
+- [x] **Step 4: Implement cohort resolution, component normalization, and v1 scoring**
 
-- [ ] **Step 5: Add failing confidence/contributor tests**
+- [x] **Step 5: Add failing confidence/contributor tests**
 
   Lock component coverage, freshness `1/.5/0`, primary cohort specificity/size, benchmark coverage, structured positive/negative contributors, and missing input details.
 
-- [ ] **Step 6: Implement confidence and explanations**
+- [x] **Step 6: Implement confidence and explanations**
 
-- [ ] **Step 7: Add failing rank/selection/forced-reason tests**
+- [x] **Step 7: Add failing rank/selection/forced-reason tests**
 
   Lock score → confidence → average dollar volume → ticker ordering, overall percentile, confidence filtering before Top-N, independent `manual_request`/`watchlist_pin`/`open_position`/`manual_include` reasons, multi-reason aggregation, deduplication, insufficient forced tickers, and automatic shortlist smaller than N.
 
-- [ ] **Step 8: Implement forced resolver, rank, and research-set selection**
+- [x] **Step 8: Implement forced resolver, rank, and research-set selection**
 
-- [ ] **Step 9: Run GREEN scoring tests and update tracker**
+- [x] **Step 9: Run GREEN scoring tests and update tracker**
 
   Run: `source ~/.venv/bin/activate && pytest tests/trading/ranking/test_metrics.py tests/trading/ranking/test_scoring.py -q`
 
