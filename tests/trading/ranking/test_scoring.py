@@ -445,8 +445,10 @@ def test_market_components_supply_primary_confidence_fallback_for_insufficient_f
     ).full_cohort[0]
     assert row.status == "insufficient_data"
     assert row.coverage == pytest.approx(0.40)
-    assert row.cohort_quality == pytest.approx(0.40 * 15 / 30)
-    assert row.confidence == pytest.approx(0.50 * 0.40 + 0.20 + 0.20 * 0.20 + 0.10)
+    assert row.cohort_quality == pytest.approx(0.40 * 1 / 30)
+    assert row.confidence == pytest.approx(
+        0.50 * 0.40 + 0.20 + 0.20 * (0.40 / 30) + 0.10
+    )
 
 
 def test_market_confidence_fallback_uses_eligible_universe_when_resolution_omits_market() -> None:
@@ -638,10 +640,88 @@ def test_raw_metrics_eligibility_is_a_hard_gate_even_when_components_exist() -> 
     assert row.overall_rank is None
     assert row.overall_percentile is None
     assert row.missing_inputs == (
+        "market_20d_alpha_percentile",
         "peer_or_fallback_20d_percentile",
         "raw_metrics_not_fully_eligible",
+        "relative_strength_60d_persistence",
+        "relative_volume_percentile",
         "sector_or_fallback_20d_percentile",
         "unadjusted_bar",
     )
     assert result.automatic_tickers == ()
     assert result.research_tickers == ("A",)
+
+
+def test_ineligible_numeric_row_cannot_change_eligible_normalization_score_or_rank() -> None:
+    config = RankingConfig(confidence_floor=0.0)
+    alone_metrics = {"A": _raw("A")}
+    alone = rank_universe(
+        alone_metrics,
+        [_asset("A", 100)],
+        resolutions={"A": _unavailable_resolution("A", ("A",))},
+        config=config,
+    )
+    with_outlier_metrics = {
+        "A": _raw("A"),
+        "Z": _raw(
+            "Z",
+            alpha_vs_spy_20d=999.0,
+            alpha_vs_spy_60d=999.0,
+            relative_volume_20d=999.0,
+            realized_volatility_20d=999.0,
+            drawdown_60d=-0.99,
+            is_fully_eligible=False,
+            missing_inputs=("invalid_adjustment",),
+        ),
+    }
+    with_outlier = rank_universe(
+        with_outlier_metrics,
+        [_asset("A", 100), _asset("Z", 999)],
+        resolutions={
+            ticker: _unavailable_resolution(ticker, ("A", "Z"))
+            for ticker in with_outlier_metrics
+        },
+        manual_requests=("Z",),
+        config=config,
+    )
+    alone_a = alone.full_cohort[0]
+    with_outlier_a = next(row for row in with_outlier.full_cohort if row.ticker == "A")
+    assert with_outlier_a.normalized_metrics == alone_a.normalized_metrics
+    assert with_outlier_a.score == alone_a.score
+    assert with_outlier_a.overall_rank == alone_a.overall_rank == 0
+    outlier = next(row for row in with_outlier.full_cohort if row.ticker == "Z")
+    assert outlier.status == "insufficient_data"
+    assert outlier.overall_rank is None
+    assert with_outlier.research_tickers == ("A", "Z")
+
+
+def test_ineligible_rows_do_not_count_toward_cohorts_liquidity_or_market_size() -> None:
+    metrics = {ticker: _raw(ticker) for ticker in "ABCDEFGH"}
+    metrics["Z"] = _raw("Z", is_fully_eligible=False, missing_inputs=("invalid_bar",))
+    assets = [
+        *[_asset(ticker, float(index)) for index, ticker in enumerate("ABCDEFGH", 1)],
+        _asset("Z", 1.5),
+    ]
+    shared_relationships = [
+        _relationship("A", "industry", "two-member-industry"),
+        _relationship("Z", "industry", "two-member-industry"),
+        _relationship("A", "sector", "two-member-sector"),
+        _relationship("Z", "sector", "two-member-sector"),
+    ]
+    resolutions = resolve_cohorts(
+        metrics,
+        assets,
+        (_basket("A", "two-member-basket"), _basket("Z", "two-member-basket")),
+        shared_relationships,
+        DECISION_TIME,
+        RankingConfig(min_cohort_size=2),
+    )
+    resolution = resolutions["A"]
+    assert resolution.peer.cohort_type == "unavailable"
+    assert resolution.sector.cohort_type == "unavailable"
+    assert resolution.relative_volume.cohort_type == "liquidity"
+    assert resolution.relative_volume.members == ("A", "B")
+    assert resolution.market is not None
+    assert resolution.market.members == tuple("ABCDEFGH")
+    assert resolutions["Z"].market is not None
+    assert resolutions["Z"].market.size == 8

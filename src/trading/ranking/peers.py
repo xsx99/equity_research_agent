@@ -28,7 +28,10 @@ def resolve_cohorts(
 ) -> dict[str, CohortResolution]:
     """Resolve exact cohorts using only relationships valid at decision time."""
     metrics = {_ticker(key): value for key, value in metrics_by_ticker.items()}
-    eligible = tuple(sorted(metrics))
+    all_tickers = tuple(sorted(metrics))
+    eligible = tuple(
+        ticker for ticker in all_tickers if metrics[ticker].is_fully_eligible
+    )
     eligible_set = set(eligible)
     asset_by_ticker = {_ticker(asset.ticker): asset for asset in assets if _ticker(asset.ticker) in eligible_set}
     basket_records = tuple(
@@ -61,7 +64,7 @@ def resolve_cohorts(
     )
 
     resolutions: dict[str, CohortResolution] = {}
-    for ticker in eligible:
+    for ticker in all_tickers:
         configured = _configured_selection(ticker, basket_ids_by_ticker, baskets_by_id)
         industry = _relationship_selection(ticker, "industry", relationship_records, relationship_groups)
         sector_candidate = _relationship_selection(

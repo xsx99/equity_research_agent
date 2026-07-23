@@ -117,16 +117,22 @@ def normalize_components(
 ) -> dict[str, NormalizedRankingComponents]:
     """Normalize all v1 inputs against each resolved cohort."""
     tickers = tuple(sorted(metrics_by_ticker))
+    eligible = tuple(
+        ticker for ticker in tickers if metrics_by_ticker[ticker].is_fully_eligible
+    )
     alpha20 = average_rank_percentiles(
-        {ticker: metrics_by_ticker[ticker].alpha_vs_spy_20d for ticker in tickers},
+        {ticker: metrics_by_ticker[ticker].alpha_vs_spy_20d for ticker in eligible},
         singleton_percentile=config.singleton_percentile,
     )
     alpha60 = average_rank_percentiles(
-        {ticker: metrics_by_ticker[ticker].alpha_vs_spy_60d for ticker in tickers},
+        {ticker: metrics_by_ticker[ticker].alpha_vs_spy_60d for ticker in eligible},
         singleton_percentile=config.singleton_percentile,
     )
     volatility = average_rank_percentiles(
-        {ticker: metrics_by_ticker[ticker].realized_volatility_20d for ticker in tickers},
+        {
+            ticker: metrics_by_ticker[ticker].realized_volatility_20d
+            for ticker in eligible
+        },
         singleton_percentile=config.singleton_percentile,
     )
     drawdown = average_rank_percentiles(
@@ -136,7 +142,7 @@ def normalize_components(
                 if metrics_by_ticker[ticker].drawdown_60d is not None
                 else None
             )
-            for ticker in tickers
+            for ticker in eligible
         },
         singleton_percentile=config.singleton_percentile,
     )
@@ -153,12 +159,12 @@ def normalize_components(
         ticker: NormalizedRankingComponents(
             peer_or_fallback_20d_percentile=peer[ticker],
             sector_or_fallback_20d_percentile=sector[ticker],
-            market_20d_alpha_percentile=alpha20[ticker],
-            relative_strength_60d_persistence=alpha60[ticker],
+            market_20d_alpha_percentile=alpha20.get(ticker),
+            relative_strength_60d_persistence=alpha60.get(ticker),
             multi_horizon_direction_agreement=_direction_agreement(metrics_by_ticker[ticker]),
             relative_volume_percentile=relative_volume[ticker],
-            realized_volatility_percentile=volatility[ticker],
-            drawdown_severity_percentile=drawdown[ticker],
+            realized_volatility_percentile=volatility.get(ticker),
+            drawdown_severity_percentile=drawdown.get(ticker),
             one_day_concentration_20d=metrics_by_ticker[ticker].one_day_concentration_20d,
         )
         for ticker in tickers
@@ -206,7 +212,7 @@ def rank_universe(
             normalized[ticker],
             forced.get(ticker, ()),
             (benchmark_horizons_by_ticker or {}).get(ticker),
-            len(metrics),
+            sum(metric.is_fully_eligible for metric in metrics.values()),
             config,
         )
         for ticker in sorted(metrics)
@@ -346,7 +352,7 @@ def _cohort_percentiles(
                 {
                     member: getattr(metrics[member], metric_name)
                     for member in selection.members
-                    if member in metrics
+                    if member in metrics and metrics[member].is_fully_eligible
                 },
                 singleton_percentile=config.singleton_percentile,
             )
@@ -391,13 +397,7 @@ def _primary_cohort(
         else None,
     )
     if any(value is not None for value in market_components):
-        market_size = (
-            len(resolution.market.members)
-            if resolution.market is not None
-            and resolution.market.cohort_type == "market"
-            else eligible_market_size
-        )
-        return _SPECIFICITY["market"], market_size
+        return _SPECIFICITY["market"], eligible_market_size
     return 0.0, 0
 
 
