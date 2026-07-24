@@ -99,7 +99,7 @@ Accepted clean-branch baseline on 2026-07-22: `970 passed, 12 failed`. The 12 fa
 | 1. Pure metric and percentile primitives | Complete | `pytest tests/trading/ranking/test_metrics.py -q` → 48 passed |
 | 2. Cohort scoring, forced reasons, confidence, rank, shortlist | Complete | RED collection failure; `pytest tests/trading/ranking/test_metrics.py tests/trading/ranking/test_scoring.py -q` → 89 passed; spec review and local quality verification completed |
 | 3. ORM, migration, repository persistence | Complete | ORM/migration contracts and repository round trips: 6 targeted tests passed; mapper and compile checks passed. Offline Alembic generation remains blocked by pre-existing revision 025 inspector usage. |
-| 4. Bounded input loader and ranking pipeline | Pending | — |
+| 4. Bounded input loader and ranking pipeline | Complete | `pytest tests/trading/ranking/test_calendar.py tests/trading/ranking/test_loader.py tests/trading/ranking/test_pipeline.py -q` → 8 passed |
 | 5. Pre-open narrowing and signal overlay | Pending | — |
 | 6. Strategy cutover and traceability | Pending | — |
 | 7. Replay and walk-forward evaluation | Pending | — |
@@ -238,33 +238,33 @@ Accepted clean-branch baseline on 2026-07-22: `970 passed, 12 failed`. The 12 fa
 - Create `tests/trading/ranking/test_pipeline.py`
 - Modify `requirements.txt`
 
-- [ ] **Step 1: Write failing exchange-calendar tests**
+- [x] **Step 1: Write failing exchange-calendar tests**
 
   Lock `XNYS` session selection on ordinary weekdays, weekends, US market holidays, early-close sessions, and decision times immediately before and after the scheduled close. The adapter must return the latest fully completed session and expose its scheduled close in UTC.
 
-- [ ] **Step 2: Implement the calendar adapter and bounded dependency**
+- [x] **Step 2: Implement the calendar adapter and bounded dependency**
 
   Add `exchange-calendars>=4.5,<5` to `requirements.txt`, isolate its API behind `RankingSessionCalendar`, and inject the adapter into the loader so tests and replay can use a deterministic fake.
 
-- [ ] **Step 3: Write failing loader tests**
+- [x] **Step 3: Write failing loader tests**
 
   Use a fake batch provider to assert one bounded request per configured chunk, 65-session lookback, SPY included without per-ticker calls, NYSE-calendar expected-last-completed-session cutoff, same cutoff/provenance/`available_for_decision_at`, existing provider-resilience request telemetry, partial chunk errors retained, and duplicate symbols removed.
 
-- [ ] **Step 4: Run RED calendar/loader tests**
+- [x] **Step 4: Run RED calendar/loader tests**
 
   Run: `source ~/.venv/bin/activate && pytest tests/trading/ranking/test_calendar.py tests/trading/ranking/test_loader.py -q`
 
-- [ ] **Step 5: Implement the bounded loader**
+- [x] **Step 5: Implement the bounded loader**
 
   Keep network I/O outside pure scoring, accept the provider/`RankingSessionCalendar`/telemetry recorder by dependency injection, map provider bar timestamps into auditable availability/provenance, and return explicit benchmark/failure metadata. Do not infer freshness from weekday arithmetic.
 
-- [ ] **Step 6: Write failing pipeline status/persistence tests**
+- [x] **Step 6: Write failing pipeline status/persistence tests**
 
   Cover failed benchmark, fewer than `max(10, ceil(.20*input_count))` scored rows, degraded `<90%` or partial chunks, succeeded otherwise, insufficient rows persisted, persistence failure stops consumption, and full run/rows saved before result returned.
 
-- [ ] **Step 7: Implement ranking pipeline lifecycle**
+- [x] **Step 7: Implement ranking pipeline lifecycle**
 
-- [ ] **Step 8: Run GREEN calendar/loader/pipeline tests and update tracker**
+- [x] **Step 8: Run GREEN calendar/loader/pipeline tests and update tracker**
 
   Run: `source ~/.venv/bin/activate && pytest tests/trading/ranking/test_calendar.py tests/trading/ranking/test_loader.py tests/trading/ranking/test_pipeline.py -q`
 
