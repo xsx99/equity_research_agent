@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any, Iterable
 
@@ -13,6 +13,7 @@ from src.trading.signals.point_in_time import filter_point_in_time_records
 from src.trading.signals.social_macro import build_social_macro_signals
 from src.trading.signals.sources import SourceRecord
 from src.trading.signals.technical import build_technical_signals, compute_relative_strength
+from src.trading.ranking.records import UniverseRankingRecord
 
 
 @dataclass(frozen=True)
@@ -105,6 +106,51 @@ def build_signal_snapshot(
         point_in_time_passed=audit.point_in_time_passed,
         selection_source=selection_source,
         manual_request_id=manual_request_id,
+    )
+
+
+def apply_universe_ranking_overlay(
+    snapshot: SignalSnapshotResult,
+    ranking: UniverseRankingRecord,
+) -> SignalSnapshotResult:
+    """Attach the persisted canonical rank without replacing diagnostic technical inputs."""
+    if snapshot.ticker != ranking.ticker:
+        raise ValueError("ranking_ticker_mismatch")
+    technical = dict(snapshot.signal_json.get("technical") or {})
+    overlay = {
+        "relative_strength_score": ranking.relative_strength_score,
+        "relative_strength_rank": ranking.overall_rank,
+        "relative_strength_percentile": ranking.overall_percentile,
+        "relative_strength_confidence": ranking.data_confidence,
+        "relative_strength_status": ranking.status,
+        "relative_strength_peer_group_type": ranking.peer_group_type,
+        "relative_strength_peer_group_id": ranking.peer_group_id,
+        "relative_strength_peer_group_size": ranking.peer_group_size,
+        "relative_strength_forced_inclusion_reasons": list(ranking.forced_inclusion_reasons),
+        "relative_strength_ranking_run_id": ranking.universe_ranking_run_id,
+        "relative_strength_ranking_id": ranking.universe_ranking_id,
+        "relative_strength_available_for_decision_at": ranking.available_for_decision_at.isoformat(),
+        "relative_strength_raw_metrics": dict(ranking.raw_metrics_json),
+        "relative_strength_normalized_metrics": dict(ranking.normalized_metrics_json),
+    }
+    technical.update(overlay)
+    signals = dict(snapshot.signal_json)
+    signals["technical"] = technical
+    missing = list(snapshot.missing_signals_json)
+    canonical_missing = "technical.relative_strength_score"
+    if ranking.relative_strength_score is None:
+        if canonical_missing not in missing:
+            missing.append(canonical_missing)
+    else:
+        missing = [item for item in missing if item != canonical_missing]
+    refs = list(snapshot.source_record_refs_json)
+    refs.extend({"source_family": "universe_ranking", "source_id": ref} for ref in ranking.source_refs)
+    return replace(
+        snapshot,
+        signal_json=signals,
+        missing_signals_json=missing,
+        source_record_refs_json=refs,
+        available_for_decision_at=max(snapshot.available_for_decision_at, ranking.available_for_decision_at),
     )
 
 

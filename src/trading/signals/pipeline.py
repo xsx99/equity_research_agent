@@ -7,7 +7,9 @@ from typing import Protocol
 from src.trading.signals.coverage import is_insider_data_covered
 from src.trading.manual_review.requests import ManualTickerRequestService
 from src.trading.signals import SignalSnapshotResult, build_signal_snapshot
+from src.trading.signals.snapshots import apply_universe_ranking_overlay
 from src.trading.data_sources.universe import UniverseSnapshotResult
+from src.trading.ranking.records import UniverseRankingRecord
 
 
 class SignalSourceRepositoryProtocol(Protocol):
@@ -62,8 +64,10 @@ class SignalPipeline:
         *,
         universe_result: UniverseSnapshotResult,
         decision_time: datetime,
+        research_tickers: tuple[str, ...] | None = None,
+        rankings_by_ticker: dict[str, UniverseRankingRecord] | None = None,
     ) -> tuple[SignalSnapshotResult, ...]:
-        included_symbols = list(universe_result.included_symbols)
+        included_symbols = list(research_tickers or universe_result.included_symbols)
         manual_requests = self.manual_request_service.load_active()
         manual_by_ticker = _manual_requests_by_ticker(manual_requests)
         tickers = included_symbols + [
@@ -93,6 +97,9 @@ class SignalPipeline:
                 manual_request_id=manual_request.request_id if manual_request is not None else None,
                 insider_data_covered=insider_data_covered,
             )
+            ranking = (rankings_by_ticker or {}).get(ticker)
+            if ranking is not None:
+                snapshot = apply_universe_ranking_overlay(snapshot, ranking)
             snapshots.append(snapshot)
             if self.snapshot_repository is not None:
                 self.snapshot_repository.save_signal_snapshot(snapshot)

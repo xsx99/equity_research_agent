@@ -40,6 +40,12 @@ from src.trading.strategies.matching import CandidateScoreRecord, StrategyDefini
 from src.trading.strategies.classifier import TradeClassificationRecord
 from src.trading.strategies.selector import WatchCandidateRecord
 from src.trading.data_sources.universe import UniverseSnapshotResult
+from src.trading.ranking.records import (
+    PeerBasketMembership,
+    TickerRelationship,
+    UniverseRankingRecord,
+    UniverseRankingRunRecord,
+)
 
 if TYPE_CHECKING:
     from src.trading.intraday.rebalance import IntradayRebalanceDecisionRecord
@@ -56,6 +62,10 @@ class InMemoryTradingRepository:
 
     def __init__(self) -> None:
         self.universe_snapshots: list[UniverseSnapshotResult] = []
+        self.universe_ranking_runs: list[UniverseRankingRunRecord] = []
+        self.universe_rankings: list[UniverseRankingRecord] = []
+        self.peer_basket_memberships: list[PeerBasketMembership] = []
+        self.ticker_relationships: list[TickerRelationship] = []
         self.signal_snapshots: list[SignalSnapshotResult] = []
         self.source_ingestion_runs: list[SourceIngestionRunRecord] = []
         self.provider_request_runs: list[ProviderRequestRunRecord] = []
@@ -105,6 +115,92 @@ class InMemoryTradingRepository:
 
     def save_universe_snapshot(self, snapshot: UniverseSnapshotResult) -> None:
         self.universe_snapshots.append(snapshot)
+
+    def save_universe_ranking_run(
+        self,
+        run: UniverseRankingRunRecord,
+        rankings: tuple[UniverseRankingRecord, ...] | list[UniverseRankingRecord],
+    ) -> None:
+        if any(item.universe_ranking_run_id != run.universe_ranking_run_id for item in rankings):
+            raise ValueError("ranking_run_id_mismatch")
+        self.universe_ranking_runs = [
+            item
+            for item in self.universe_ranking_runs
+            if item.universe_ranking_run_id != run.universe_ranking_run_id
+        ]
+        self.universe_ranking_runs.append(run)
+        tickers = {item.ticker for item in rankings}
+        self.universe_rankings = [
+            item
+            for item in self.universe_rankings
+            if item.universe_ranking_run_id != run.universe_ranking_run_id or item.ticker not in tickers
+        ]
+        self.universe_rankings.extend(rankings)
+
+    def load_universe_ranking_run(self, universe_ranking_run_id: str) -> UniverseRankingRunRecord | None:
+        return next(
+            (
+                item
+                for item in self.universe_ranking_runs
+                if item.universe_ranking_run_id == universe_ranking_run_id
+            ),
+            None,
+        )
+
+    def load_latest_universe_ranking_run(
+        self,
+        *,
+        decision_time: datetime,
+    ) -> UniverseRankingRunRecord | None:
+        eligible = [item for item in self.universe_ranking_runs if item.decision_time <= decision_time]
+        return max(eligible, key=lambda item: (item.decision_time, item.universe_ranking_run_id)) if eligible else None
+
+    def load_universe_rankings(
+        self,
+        universe_ranking_run_id: str,
+    ) -> tuple[UniverseRankingRecord, ...]:
+        return tuple(
+            sorted(
+                (
+                    item
+                    for item in self.universe_rankings
+                    if item.universe_ranking_run_id == universe_ranking_run_id
+                ),
+                key=lambda item: (item.overall_rank is None, item.overall_rank or 0, item.ticker),
+            )
+        )
+
+    def save_peer_basket_memberships(self, memberships: tuple[PeerBasketMembership, ...]) -> None:
+        self.peer_basket_memberships = list(memberships)
+
+    def load_peer_basket_memberships(
+        self,
+        *,
+        decision_time: datetime,
+    ) -> tuple[PeerBasketMembership, ...]:
+        return tuple(
+            item
+            for item in self.peer_basket_memberships
+            if item.valid_from <= decision_time
+            and (item.valid_to is None or item.valid_to >= decision_time)
+            and item.available_for_decision_at <= decision_time
+        )
+
+    def save_ticker_relationships(self, relationships: tuple[TickerRelationship, ...]) -> None:
+        self.ticker_relationships = list(relationships)
+
+    def load_ticker_relationships(
+        self,
+        *,
+        decision_time: datetime,
+    ) -> tuple[TickerRelationship, ...]:
+        return tuple(
+            item
+            for item in self.ticker_relationships
+            if item.valid_from <= decision_time
+            and (item.valid_to is None or item.valid_to >= decision_time)
+            and item.available_for_decision_at <= decision_time
+        )
 
     def save_signal_snapshot(self, snapshot: SignalSnapshotResult) -> None:
         self.signal_snapshots.append(snapshot)
