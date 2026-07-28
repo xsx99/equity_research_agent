@@ -98,6 +98,8 @@ class CandidateScoreRecord:
     actionable_score_threshold: float = DEFAULT_ACTIONABLE_SCORE_THRESHOLD
     strategy_lifecycle_status: str = "active"
     strategy_source: str = "seed"
+    universe_ranking_run_id: str | None = None
+    universe_ranking_id: str | None = None
 
     @property
     def is_actionable(self) -> bool:

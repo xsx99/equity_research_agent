@@ -3,7 +3,36 @@ from datetime import date, datetime, timezone
 import pytest
 
 from src.trading.signals.sources import SourceRecord
+from src.trading.signals.snapshots import SignalSnapshotResult, apply_universe_ranking_overlay
 from src.trading.signals.technical import build_technical_signals, compute_relative_strength
+from src.trading.ranking.records import UniverseRankingRecord
+
+
+def test_ranking_overlay_keeps_one_day_diagnostics_and_marks_insufficient_score_missing():
+    timestamp = datetime(2026, 7, 21, 13, 30, tzinfo=timezone.utc)
+    snapshot = SignalSnapshotResult(
+        signal_snapshot_id="snapshot", ticker="AAA", snapshot_type="pre_open", decision_time=timestamp,
+        available_for_decision_at=timestamp, max_input_available_for_decision_at=timestamp,
+        signal_json={"technical": {"rs_vs_spy_1d": 0.03}}, source_freshness_json={},
+        missing_signals_json=[], stale_signals_json=[], source_record_refs_json=[],
+        source_available_times_json={}, excluded_future_source_count=0, point_in_time_passed=True,
+    )
+    ranking = UniverseRankingRecord(
+        universe_ranking_id="ranking", universe_ranking_run_id="run", ticker="AAA", decision_time=timestamp,
+        status="insufficient_data", overall_rank=None, overall_percentile=None,
+        relative_strength_score=None, data_confidence=0.2, peer_group_type="market", peer_group_id="market",
+        peer_group_size=3, is_automatic_shortlist=False, forced_inclusion_reasons=("open_position",),
+        raw_metrics_json={"return_20d": None}, normalized_metrics_json={}, positive_contributors_json=(),
+        negative_contributors_json=(), missing_inputs=("valid_closes_61",), source_refs=("bars:AAA",),
+        available_for_decision_at=timestamp,
+    )
+
+    result = apply_universe_ranking_overlay(snapshot, ranking)
+
+    assert result.signal_json["technical"]["rs_vs_spy_1d"] == 0.03
+    assert result.signal_json["technical"]["relative_strength_score"] is None
+    assert result.signal_json["technical"]["relative_strength_forced_inclusion_reasons"] == ["open_position"]
+    assert "technical.relative_strength_score" in result.missing_signals_json
 
 
 def test_technical_signals_build_price_volume_and_relative_strength_fields():

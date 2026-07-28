@@ -198,6 +198,12 @@ class StrategyRepositoryMixin:
                 self.session.add(row)
             row.strategy_run_id = _to_uuid(candidate.strategy_run_id)
             row.signal_snapshot_id = _to_uuid_or_none(candidate.signal_snapshot_id)
+            row.universe_ranking_run_id = _to_uuid_or_none(
+                getattr(candidate, "universe_ranking_run_id", None)
+            )
+            row.universe_ranking_id = _to_uuid_or_none(
+                getattr(candidate, "universe_ranking_id", None)
+            )
             row.ticker = candidate.ticker
             row.strategy_id = candidate.strategy_id
             row.strategy_version = candidate.strategy_version

@@ -233,6 +233,18 @@ class CandidateScore(Base):
         nullable=True,
         index=True,
     )
+    universe_ranking_run_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("universe_ranking_runs.universe_ranking_run_id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    universe_ranking_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("universe_rankings.universe_ranking_id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     ticker = Column(String(16), nullable=False, index=True)
     strategy_id = Column(String(64), nullable=False, index=True)
     strategy_version = Column(String(16), nullable=False)
@@ -265,6 +277,8 @@ class CandidateScore(Base):
 
     strategy_run = relationship("StrategyRun", back_populates="candidate_scores")
     signal_snapshot = relationship("SignalSnapshot")
+    universe_ranking_run = relationship("UniverseRankingRun")
+    universe_ranking = relationship("UniverseRanking", back_populates="candidate_scores")
     strategy_definition = relationship("StrategyDefinition")
     trade_classifications = relationship("TradeClassification", back_populates="candidate_score")
     watch_candidates = relationship("WatchCandidate", back_populates="candidate_score")

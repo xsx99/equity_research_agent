@@ -56,6 +56,18 @@ class UniverseSymbolStatus(ChoiceEnum):
     INCLUDED = "included"
     EXCLUDED = "excluded"
 
+
+class UniverseRankingRunStatus(ChoiceEnum):
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    DEGRADED = "degraded"
+    FAILED = "failed"
+
+
+class UniverseRankingStatus(ChoiceEnum):
+    RANKED = "ranked"
+    INSUFFICIENT_DATA = "insufficient_data"
+
 class ManualTickerRequestMode(ChoiceEnum):
     REVIEW_ONLY = "review_only"
     PAPER_TRADE_ELIGIBLE = "paper_trade_eligible"
