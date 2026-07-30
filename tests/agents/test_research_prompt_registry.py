@@ -189,6 +189,8 @@ def _valid_input() -> dict:
                     "unit": "index",
                     "value": 18.2,
                     "observed_on": "2026-03-21",
+                    "previous_close": 17.9,
+                    "return_vs_previous_close": (18.2 - 17.9) / 17.9,
                 }
             },
             "official_updates": [],
@@ -214,7 +216,12 @@ def _valid_output() -> dict:
 def test_research_input_payload_accepts_valid_data():
     payload = ResearchInputPayload.model_validate(_valid_input())
     assert payload.ticker == "AAPL"
-    assert payload.global_context.indicators["vix"].value == 18.2
+    indicator = payload.global_context.indicators["vix"]
+    assert indicator.value == 18.2
+    assert indicator.previous_close == pytest.approx(17.9)
+    assert indicator.return_vs_previous_close == pytest.approx(
+        (18.2 - 17.9) / 17.9
+    )
 
 
 def test_research_input_payload_requires_global_context():

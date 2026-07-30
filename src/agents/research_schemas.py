@@ -105,6 +105,8 @@ class ResearchGlobalIndicator(BaseModel):
     unit: str
     value: Optional[float] = None
     observed_on: Optional[str] = None
+    previous_close: Optional[float] = None
+    return_vs_previous_close: Optional[float] = None
 
 
 class ResearchGlobalEventItem(BaseModel):

@@ -23,9 +23,9 @@
 
 | Task | Status | Evidence |
 | --- | --- | --- |
-| 1. Add the failing research-input compatibility regression | Pending | — |
-| 2. Add the minimal schema compatibility fields | Pending | — |
-| 3. Run focused and full verification, then update tracker | Pending | — |
+| 1. Add the failing research-input compatibility regression | Complete | Focused test failed with exactly two `extra_forbidden` errors for the provider fields |
+| 2. Add the minimal schema compatibility fields | Complete | Focused regression `1 passed`; complete schema file `22 passed` |
+| 3. Run focused and full verification, then update tracker | Complete | Related suites `39 passed`; full suite unchanged at `1074 passed, 12 failed`; compile and diff checks passed |
 
 ## Task 1: Add The Failing Research-Input Compatibility Regression
 
@@ -33,7 +33,7 @@
 
 - Modify: `tests/agents/test_research_prompt_registry.py:183-217`
 
-- [ ] **Step 1: Extend the valid provider-shaped input**
+- [x] **Step 1: Extend the valid provider-shaped input**
 
 Add the two fields now emitted for the VIX indicator:
 
@@ -57,7 +57,7 @@ assert indicator.previous_close == pytest.approx(17.9)
 assert indicator.return_vs_previous_close == pytest.approx((18.2 - 17.9) / 17.9)
 ```
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
 Run:
 
@@ -69,7 +69,7 @@ pytest tests/agents/test_research_prompt_registry.py::test_research_input_payloa
 Expected: one failure containing `previous_close` and
 `return_vs_previous_close` with Pydantic error type `extra_forbidden`.
 
-- [ ] **Step 3: Record RED evidence in the progress table**
+- [x] **Step 3: Record RED evidence in the progress table**
 
 Update Task 1 to `Complete` and record the exact failing command and expected
 two-field validation failure.
@@ -81,7 +81,7 @@ two-field validation failure.
 - Modify: `src/agents/research_schemas.py:100-107`
 - Test: `tests/agents/test_research_prompt_registry.py`
 
-- [ ] **Step 1: Declare both optional consumer fields**
+- [x] **Step 1: Declare both optional consumer fields**
 
 Add exactly these fields to `ResearchGlobalIndicator`:
 
@@ -92,7 +92,7 @@ return_vs_previous_close: Optional[float] = None
 
 Keep `model_config = ConfigDict(extra="forbid")` unchanged.
 
-- [ ] **Step 2: Re-run the focused test and verify GREEN**
+- [x] **Step 2: Re-run the focused test and verify GREEN**
 
 Run:
 
@@ -103,7 +103,7 @@ pytest tests/agents/test_research_prompt_registry.py::test_research_input_payloa
 
 Expected: `1 passed`.
 
-- [ ] **Step 3: Run the complete research-schema test file**
+- [x] **Step 3: Run the complete research-schema test file**
 
 Run:
 
@@ -114,7 +114,7 @@ pytest tests/agents/test_research_prompt_registry.py -q
 
 Expected: all tests pass.
 
-- [ ] **Step 4: Record GREEN evidence in the progress table**
+- [x] **Step 4: Record GREEN evidence in the progress table**
 
 Update Task 2 to `Complete` with the focused and file-level pass counts.
 
@@ -125,7 +125,7 @@ Update Task 2 to `Complete` with the focused and file-level pass counts.
 - Modify: `plan/progress_tracker.md`
 - Modify: `plan/implementation/pr_61_research_global_indicator_schema_compatibility.md`
 
-- [ ] **Step 1: Run the related producer/consumer suites**
+- [x] **Step 1: Run the related producer/consumer suites**
 
 Run:
 
@@ -140,7 +140,7 @@ pytest \
 
 Expected: all tests pass.
 
-- [ ] **Step 2: Run the full unit-test suite**
+- [x] **Step 2: Run the full unit-test suite**
 
 Run:
 
@@ -152,7 +152,7 @@ pytest -q
 Expected: no new failures relative to the repository's documented baseline.
 Record all pre-existing failures exactly if the suite is not fully green.
 
-- [ ] **Step 3: Run static and diff verification**
+- [x] **Step 3: Run static and diff verification**
 
 Run:
 
@@ -164,9 +164,9 @@ git diff --check
 
 Expected: both commands exit successfully with no output.
 
-- [ ] **Step 4: Update project tracking**
+- [x] **Step 4: Update project tracking**
 
-Prepend a 2026-07-28 entry to `plan/progress_tracker.md` describing:
+Prepend a 2026-07-30 entry to `plan/progress_tracker.md` describing:
 
 - the provider/consumer schema mismatch;
 - the two optional fields added while retaining `extra="forbid"`;
@@ -175,7 +175,7 @@ Prepend a 2026-07-28 entry to `plan/progress_tracker.md` describing:
 
 Mark all tasks in this plan `Complete` and record the final evidence.
 
-- [ ] **Step 5: Review the final diff**
+- [x] **Step 5: Review the final diff**
 
 Run:
 
