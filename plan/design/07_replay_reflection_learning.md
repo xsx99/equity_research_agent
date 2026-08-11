@@ -4,7 +4,7 @@
 
 ### Historical Replay and Outcome Evaluator
 
-Reflection should not be the first component to judge whether a strategy worked. Before reflection runs, `HistoricalReplayOutcomeEvaluator` must compute deterministic outcomes from point-in-time snapshots:
+Reflection should not be the first component to judge whether a strategy worked. Before reflection runs, the production `OutcomeEvaluationPipeline` must compute deterministic outcomes from the candidate scores actually persisted at each decision time. It must not rematch historical signal snapshots with current strategy definitions or create replacement candidate cohorts. The separate `HistoricalReplayRunner` may reconstruct candidates from point-in-time snapshots for controlled offline research, but it is not the source of truth for continuous production maturation. Both paths produce the same outcome contract for:
 
 - every selected trade
 - every rejected candidate that reached candidate scoring
@@ -12,7 +12,7 @@ Reflection should not be the first component to judge whether a strategy worked.
 - active and shadow strategy candidates
 - manual ticker requests
 
-The evaluator measures each item over the selected strategy's configured horizon and any interim checkpoints. It compares absolute return and risk-adjusted return against:
+The production evaluator measures each persisted item over its original strategy's configured horizon and canonical interim/final checkpoints. A selected trade-path candidate becomes final at complete position close or horizon expiry, whichever comes first; non-traded candidates become final at horizon expiry. Directional returns, MFE/MAE, alpha, and comparator information ratios are sign-adjusted for bullish versus bearish/risk-off theses. Directional `watch_only`, rejected, manual-review, and shadow outcomes may support proposal and shadow-to-experimental gates; neutral outcomes remain observational. Experimental-to-active promotion requires cited final outcomes linked to selected trade paths with paper fills. Unsupported legacy directions are surfaced and never inferred from free-form text. It compares absolute return and risk-adjusted return against:
 
 - `SPY`
 - `QQQ`

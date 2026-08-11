@@ -1,5 +1,15 @@
 # PR 38 Wire Historical Replay To Production Implementation Plan
 
+> **Superseded production direction (2026-08-11):** Do not wire the existing
+> `HistoricalReplayRunner` directly into the daily production learning loop. The
+> approved design in
+> `plan/design/2026-08-11-strategy-learning-loop-recovery.md` evaluates the
+> `candidate_scores` actually persisted at each decision time, avoiding current
+> strategy-definition lookahead and duplicate historical candidate cohorts. This
+> document remains useful for the separate offline candidate-reconstruction replay
+> path. A new implementation plan will be written from the approved recovery
+> design.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax.
 
 > **Direction gate (read first):** Backlog #6 frames this as a decision — *"decide replay direction; build if the learning loop is near-term."* This is **feature work**, not a reliability fix; do NOT start it ahead of PR 35/36 unless the user has confirmed the learning loop is near-term. The schema anchor is deliberately retained (memory: keep `historical_replay_runs`; replay wired up later as A3-ii). If the user has confirmed: proceed. If not: this doc stays a ready-to-execute spec.
