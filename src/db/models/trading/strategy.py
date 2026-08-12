@@ -206,7 +206,7 @@ class StrategyRun(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "snapshot_type IN ('pre_open', 'intraday')",
+            "snapshot_type IN ('pre_open', 'manual', 'intraday')",
             name="ck_strategy_runs_snapshot_type",
         ),
         CheckConstraint(

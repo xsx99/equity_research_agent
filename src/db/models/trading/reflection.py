@@ -33,6 +33,7 @@ class HistoricalReplayRun(Base):
     historical_replay_run_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     decision_time = Column(DateTime(timezone=True), nullable=False, index=True)
     snapshot_type = Column(String(32), nullable=False, index=True)
+    evaluation_as_of_session = Column(DateTime(timezone=True), nullable=True, index=True)
     status = Column(String(32), nullable=False, index=True)
     started_at = Column(DateTime(timezone=True), nullable=False)
     completed_at = Column(DateTime(timezone=True), nullable=True)
@@ -45,7 +46,7 @@ class HistoricalReplayRun(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "snapshot_type IN ('pre_open', 'intraday')",
+            "snapshot_type IN ('pre_open', 'manual', 'intraday')",
             name="ck_historical_replay_runs_snapshot_type",
         ),
         CheckConstraint(
@@ -127,6 +128,18 @@ class CandidateOutcomeEvaluation(Base):
         ),
         Index("ix_candidate_outcomes_strategy_bucket", "strategy_id", "confidence_bucket"),
         Index("ix_candidate_outcomes_ticker_horizon", "ticker", "horizon_end_at"),
+        UniqueConstraint(
+            "candidate_score_id",
+            "evaluation_status",
+            "horizon_end_at",
+            name="uq_candidate_outcomes_maturation_checkpoint",
+        ),
+        Index(
+            "ix_candidate_outcomes_due_checkpoint",
+            "candidate_score_id",
+            "evaluation_status",
+            "horizon_end_at",
+        ),
     )
 
 class DailyReflection(Base):

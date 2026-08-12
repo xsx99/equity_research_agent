@@ -9,6 +9,7 @@ from src.db.models.trading import (
     CandidateOutcomeEvaluation,
     CandidateScore,
     DailyReflection,
+    HistoricalReplayRun,
     LearningFactor,
     StrategyDefinition,
     StrategyEvaluationResult,
@@ -24,6 +25,8 @@ from src.trading.strategies.matching import (
     StrategyRunRecord,
 )
 from src.trading.strategies.selector import WatchCandidateRecord
+from src.trading.phases.replay.historical import HistoricalReplayRunRecord
+from src.trading.phases.replay.outcomes import CandidateOutcomeEvaluationRecord
 from src.trading.repositories._base_common import _to_uuid, _to_uuid_or_none
 from src.trading.repositories._base_payloads import _rejected_candidate_payload
 from src.trading.repositories._base_records import (
@@ -42,6 +45,72 @@ LONG_HORIZON_LOOKBACK_DAYS = 60
 
 
 class StrategyRepositoryMixin:
+    def save_historical_replay_run(self, run: HistoricalReplayRunRecord) -> None:
+        _require_choice(run.snapshot_type, {"pre_open", "manual", "intraday"}, "snapshot_type")
+        _require_choice(run.status, {"running", "succeeded", "failed"}, "historical_replay_run_status")
+        row = self.session.query(HistoricalReplayRun).filter_by(
+            historical_replay_run_id=_to_uuid(run.historical_replay_run_id)
+        ).one_or_none()
+        if row is None:
+            row = HistoricalReplayRun(historical_replay_run_id=_to_uuid(run.historical_replay_run_id))
+            self.session.add(row)
+        row.decision_time = run.decision_time
+        row.snapshot_type = run.snapshot_type
+        row.evaluation_as_of_session = run.evaluation_as_of_session
+        row.status = run.status
+        row.started_at = run.started_at
+        row.completed_at = run.completed_at
+        row.decision_filter_json = dict(run.decision_filter_json)
+        row.outcome_horizon_policy_json = dict(run.outcome_horizon_policy_json)
+        row.metadata_json = dict(run.metadata_json)
+        self.session.flush()
+
+    def save_candidate_outcome_evaluations(
+        self,
+        outcomes: list[CandidateOutcomeEvaluationRecord] | tuple[CandidateOutcomeEvaluationRecord, ...],
+    ) -> None:
+        for outcome in outcomes:
+            _require_choice(
+                outcome.trade_identity,
+                {"core_holding", "tactical_stock_trade", "tactical_option_trade", "risk_hedge_overlay", "watch_only"},
+                "trade_identity",
+            )
+            _require_choice(outcome.evaluation_status, {"interim", "final"}, "evaluation_status")
+            row = self.session.query(CandidateOutcomeEvaluation).filter_by(
+                candidate_outcome_evaluation_id=_to_uuid(outcome.candidate_outcome_evaluation_id)
+            ).one_or_none()
+            if row is None:
+                row = CandidateOutcomeEvaluation(
+                    candidate_outcome_evaluation_id=_to_uuid(outcome.candidate_outcome_evaluation_id)
+                )
+                self.session.add(row)
+            row.historical_replay_run_id = _to_uuid_or_none(outcome.historical_replay_run_id)
+            row.candidate_score_id = _to_uuid_or_none(outcome.candidate_score_id)
+            row.trade_classification_id = _to_uuid_or_none(outcome.trade_classification_id)
+            row.ticker = outcome.ticker
+            row.strategy_id = outcome.strategy_id
+            row.strategy_version = outcome.strategy_version
+            row.expression_bucket_id = outcome.expression_bucket_id
+            row.trade_identity = outcome.trade_identity
+            row.direction = outcome.direction
+            row.catalyst_type = outcome.catalyst_type
+            row.confidence_bucket = outcome.confidence_bucket
+            row.decision_time = outcome.decision_time
+            row.horizon_start_at = outcome.horizon_start_at
+            row.horizon_end_at = outcome.horizon_end_at
+            row.evaluation_status = outcome.evaluation_status
+            row.candidate_return = _decimal_or_none(outcome.candidate_return)
+            row.benchmark_returns_json = dict(outcome.benchmark_returns)
+            row.peer_basket_id = _to_uuid_or_none(outcome.peer_basket_id)
+            row.peer_basket_return = _decimal_or_none(outcome.peer_basket_return)
+            row.alpha = _decimal_or_none(outcome.alpha)
+            row.max_favorable_excursion = _decimal_or_none(outcome.max_favorable_excursion)
+            row.max_adverse_excursion = _decimal_or_none(outcome.max_adverse_excursion)
+            row.regime = outcome.regime
+            row.sector_theme = outcome.sector_theme
+            row.metadata_json = dict(outcome.metadata_json)
+        self.session.flush()
+
     def save_strategy_definition(self, definition: StrategyDefinitionRecord) -> None:
         row = self.session.query(StrategyDefinition).filter_by(
             strategy_definition_id=_to_uuid(definition.strategy_definition_id)
@@ -309,3 +378,12 @@ class StrategyRepositoryMixin:
             selected_strategy_context_json=dict(row.selected_strategy_context_json or {}),
             decision_time=row.decision_time,
         )
+
+
+def _decimal_or_none(value: object) -> Decimal | None:
+    return Decimal(str(value)) if value is not None else None
+
+
+def _require_choice(value: str, allowed: set[str], name: str) -> None:
+    if value not in allowed:
+        raise ValueError(f"unsupported_{name}:{value}")

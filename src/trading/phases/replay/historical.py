@@ -33,6 +33,7 @@ class HistoricalReplayRunRecord:
     completed_at: datetime | None
     decision_filter_json: dict[str, Any]
     outcome_horizon_policy_json: dict[str, Any]
+    evaluation_as_of_session: datetime | None = None
     metadata_json: dict[str, Any] = field(default_factory=dict)
 
 

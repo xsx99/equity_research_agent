@@ -520,13 +520,24 @@ class InMemoryTradingRepository:
         return None
 
     def save_historical_replay_run(self, run: HistoricalReplayRunRecord) -> None:
+        self.historical_replay_runs = [
+            item
+            for item in self.historical_replay_runs
+            if item.historical_replay_run_id != run.historical_replay_run_id
+        ]
         self.historical_replay_runs.append(run)
 
     def save_candidate_outcome_evaluations(
         self,
         outcomes: list[CandidateOutcomeEvaluationRecord] | tuple[CandidateOutcomeEvaluationRecord, ...],
     ) -> None:
-        self.candidate_outcome_evaluations.extend(outcomes)
+        by_id = {
+            item.candidate_outcome_evaluation_id: item
+            for item in self.candidate_outcome_evaluations
+        }
+        for outcome in outcomes:
+            by_id[outcome.candidate_outcome_evaluation_id] = outcome
+        self.candidate_outcome_evaluations = list(by_id.values())
 
     def save_position_sizing_decision(self, decision: PositionSizingDecisionRecord) -> None:
         self.position_sizing_decisions.append(decision)
