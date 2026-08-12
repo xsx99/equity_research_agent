@@ -13,6 +13,7 @@ from src.trading.phases.strategy_evolution.evidence import (
     EvidenceGatePolicy,
     evaluate_proposal_evidence,
 )
+from src.trading.phases.strategy_evolution.evidence_builder import StrategyEvolutionEvidenceBuilder
 from src.trading.phases.reflection.pipeline import DailyReflectionRecord, LearningFactorRecord
 from src.trading.strategies.policy import experimental_strategy_weight_cap
 from src.trading.phases.replay.outcomes import CandidateOutcomeEvaluationRecord
@@ -91,6 +92,7 @@ class StrategyEvolutionResult:
     strategy_definitions: tuple[StrategyDefinitionRecord, ...]
     strategy_evaluation_results: tuple[StrategyEvaluationResultRecord, ...]
     lifecycle_updates: tuple[StrategyEvaluationResultRecord, ...]
+    skip_reason: str | None = None
 
 
 class StrategyEvolutionPipeline:
@@ -113,10 +115,9 @@ class StrategyEvolutionPipeline:
         )
 
     def run(self, *, request: StrategyEvolutionRequest) -> StrategyEvolutionResult:
-        payload = {
+        raw_payload = {
             "trade_date": request.trade_date.isoformat(),
             "decision_time": request.decision_time.isoformat(),
-            "available_for_decision_at": request.available_for_decision_at.isoformat(),
             "strategy_proposal_hints": [
                 hint
                 for reflection in request.daily_reflections
@@ -139,6 +140,40 @@ class StrategyEvolutionPipeline:
             "existing_strategies": [
                 _strategy_payload(row) for row in self.repository.load_strategy_definitions()
             ],
+        }
+        evidence = StrategyEvolutionEvidenceBuilder().build(
+            trade_date=raw_payload["trade_date"],
+            decision_time=raw_payload["decision_time"],
+            reflections=raw_payload["strategy_proposal_hints"],
+            learning_factors=[
+                *raw_payload["candidate_learning_factors"],
+                *raw_payload["observation_learning_factors"],
+            ],
+            rejected_candidates=raw_payload["rejected_candidates"],
+            outcomes=raw_payload["outcome_performance_summaries"],
+            existing_strategies=raw_payload["existing_strategies"],
+        )
+        if evidence.skip_reason is not None:
+            return StrategyEvolutionResult(
+                strategy_proposals=(),
+                strategy_definitions=(),
+                strategy_evaluation_results=(),
+                lifecycle_updates=(),
+                skip_reason=evidence.skip_reason,
+            )
+        bounded = evidence.payload
+        bounded_factors = tuple(bounded["learning_factors"])
+        payload = {
+            "trade_date": raw_payload["trade_date"],
+            "decision_time": raw_payload["decision_time"],
+            "available_for_decision_at": request.available_for_decision_at.isoformat(),
+            "strategy_proposal_hints": bounded["strategy_proposal_hints"],
+            "candidate_learning_factors": [row for row in bounded_factors if row.get("status") == "candidate"],
+            "observation_learning_factors": [row for row in bounded_factors if row.get("status") == "observation"],
+            "rejected_candidates": bounded["rejected_candidate_groups"],
+            "rejected_candidate_examples": bounded["rejected_candidate_examples"],
+            "outcome_performance_summaries": bounded["outcome_performance_summaries"],
+            "existing_strategies": bounded["existing_strategies"],
         }
         result = self.agent.run(payload, context=None)
         prompt_template = result.metadata["prompt_template"]

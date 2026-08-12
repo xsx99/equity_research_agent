@@ -40,6 +40,7 @@ class StrategyEvolutionInput(BaseModel):
     candidate_learning_factors: list[dict[str, Any]] = Field(default_factory=list)
     observation_learning_factors: list[dict[str, Any]] = Field(default_factory=list)
     rejected_candidates: list[dict[str, Any]] = Field(default_factory=list)
+    rejected_candidate_examples: list[dict[str, Any]] = Field(default_factory=list)
     outcome_performance_summaries: list[dict[str, Any]] = Field(default_factory=list)
     existing_strategies: list[dict[str, Any]] = Field(default_factory=list)
 

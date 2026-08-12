@@ -338,3 +338,33 @@ def test_strategy_evolution_pipeline_rejects_duplicates_and_persists_failed_prop
     assert failed_result.strategy_proposals[0].proposal_status == "proposal_failed"
     assert failed_result.strategy_proposals[0].source_daily_reflection_id == "reflection-1"
     assert failed_result.strategy_definitions == ()
+
+
+def test_strategy_evolution_pipeline_skips_without_calling_llm_when_input_exceeds_budget(tmp_path):
+    repository = InMemoryTradingRepository()
+    repository.save_strategy_definition(
+        StrategyDefinitionRecord(
+            strategy_definition_id="oversized-1",
+            strategy_id="oversized_strategy",
+            version="v1",
+            display_name="x" * (121 * 1024),
+            strategy_layer="tactical_pattern",
+            typical_horizon="intraday-3d",
+            config_json={},
+            lifecycle_status="active",
+            is_active=True,
+            source="seed",
+        )
+    )
+    calls = []
+    pipeline = StrategyEvolutionPipeline(
+        repository=repository,
+        prompt_registry=_write_prompt(tmp_path),
+        model_name="gpt-5",
+        agent_runner=lambda prompt, model_name: calls.append((prompt, model_name)),
+    )
+
+    result = pipeline.run(request=_request())
+
+    assert result.skip_reason == "input_budget_exceeded"
+    assert calls == []

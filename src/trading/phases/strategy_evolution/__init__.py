@@ -83,6 +83,13 @@ class LiveStrategyEvolutionRuntime:
                 summary={"reasons": list(load_result.reasons)},
             )
         result = self.dependencies.strategy_evolution_pipeline.run(request=load_result.request)
+        if getattr(result, "skip_reason", None):
+            return build_runtime_report(
+                phase="strategy_evolution",
+                as_of=decision_time,
+                status="skipped",
+                summary={"reasons": [result.skip_reason]},
+            )
         return build_runtime_report(
             phase="strategy_evolution",
             as_of=decision_time,
