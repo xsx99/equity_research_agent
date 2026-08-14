@@ -67,13 +67,13 @@ total_pnl      = account_equity - configured starting equity
 residual       = total_pnl - realized_pnl - unrealized_pnl
 ```
 
-The starting equity defaults to `$1,000,000` through one explicit portfolio-P&L configuration value; it is not duplicated in presenter or backfill code. The replay boundary is the earliest persisted portfolio snapshot that:
+The starting equity defaults to `$1,000,000` through one explicit portfolio-P&L configuration value; it is not duplicated in presenter or backfill code. The replay boundary is the latest persisted portfolio snapshot that represents a clean account reset:
 
 - has `account_equity` equal to the configured starting equity within currency tolerance;
 - has zero `stock_market_value` and zero `option_market_value`;
-- occurs no later than the first filled execution.
+- has no filled execution at the exact same timestamp; an ambiguous same-time candidate is skipped.
 
-That snapshot time becomes `pnl_tracking_started_at`. Executions before this boundary are excluded as belonging to an earlier account lifecycle. The backfill and live calculation abort if no valid boundary exists, if the first post-boundary state contains initial inventory without a corresponding buy execution, or if execution history is incomplete. The chosen boundary is written to snapshot metadata and dry-run output.
+That snapshot time becomes `pnl_tracking_started_at`. Only executions and snapshots at or after this boundary belong to the active account lifecycle; earlier rows are excluded from calculation and are not modified by the backfill. Selecting the latest clean reset makes repeated paper-account resets deterministic. The backfill and live calculation abort if no valid boundary exists, if the first post-boundary state contains initial inventory without a corresponding buy execution, or if post-boundary execution history is incomplete. The chosen boundary and excluded pre-boundary row counts are written to snapshot metadata and dry-run output.
 
 At live sync and at every historical cutoff, replayed open quantity per ticker must equal broker/local mirrored quantity within a small numeric tolerance. Replayed weighted-average cost must also agree with the broker average entry price within a currency tolerance. A quantity mismatch, missing initial inventory, duplicate execution id, or oversell is a validation failure and blocks persistence/backfill. A small cost mismatch is recorded as a reconciliation diagnostic and the replayed cost basis remains authoritative; a material cost mismatch is a validation failure. Dry-run output lists every mismatch and tolerance applied.
 
@@ -125,7 +125,7 @@ The script must verify that PostgreSQL uses a persistent, non-temporary data dir
 
 ### Dashboard consistency
 
-The header uses the latest persisted snapshot for both realized and unrealized P&L. It no longer changes the header value according to whether the selected tab happened to load positions. Position-table unrealized P&L remains independently calculated per row and is covered by a consistency test against the latest snapshot.
+The header uses the latest persisted snapshot for both realized and unrealized P&L. It no longer changes the header value according to whether the selected tab happened to load positions. Position-table unrealized P&L remains independently calculated per row and is covered by a consistency test against the latest snapshot using the same documented currency tolerance allowed for small broker-versus-replay cost differences.
 
 No template or CSS change is needed. Existing currency formatting and positive/negative tone remain in place.
 
