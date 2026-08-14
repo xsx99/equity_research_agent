@@ -1,0 +1,47 @@
+# Cumulative Portfolio P&L Reconciliation Progress
+
+**Design:** `plan/design/2026-08-14-cumulative-portfolio-pnl-reconciliation.md`  
+**Implementation plan:** `plan/implementation/2026-08-14-cumulative-portfolio-pnl-reconciliation.md`  
+**Status:** Plan approved; implementation not started  
+**Production data:** Unchanged; backfill not run
+
+## Tasks
+
+- [ ] Task 1: Build the pure weighted-average P&L ledger.
+- [ ] Task 2: Add active-lifecycle boundary selection and snapshot enrichment.
+- [ ] Task 3: Add normalized repository P&L inputs.
+- [ ] Task 4: Correct future stock execution cash effects.
+- [ ] Task 5: Enrich every live broker snapshot before persistence.
+- [ ] Task 6: Make Today header P&L snapshot-consistent across tabs.
+- [ ] Task 7: Add the safe historical repair command.
+- [ ] Task 8: Document operations and update trackers.
+- [ ] Task 9: Verify, dry-run, obtain explicit apply approval, apply, and render.
+
+## Required Gates
+
+- [x] User confirmed cumulative realized P&L means since the active `$1,000,000` account reset.
+- [x] User approved historical snapshot backfill in scope.
+- [x] User approved the design.
+- [x] Spec review approved after three iterations.
+- [x] User approved the written spec.
+- [x] Implementation plan review approved after two iterations.
+- [ ] Isolated implementation worktree created and baseline verified.
+- [ ] Every production behavior has a witnessed RED test before implementation.
+- [ ] Persistent Postgres data directory and host mount verified.
+- [ ] Production dry-run report reviewed.
+- [ ] User explicitly approves the exact dry-run report.
+- [ ] Production `--apply` completed atomically.
+- [ ] Second dry-run proves idempotency.
+- [ ] Overview, Risk & Macro, and System rendered and visually checked.
+- [ ] Final code review approved.
+
+## Evidence Log
+
+- 2026-08-13: Diagnosed absent Alpaca account `realized_pl`/`unrealized_pl` fields being defaulted to zero, tab-dependent unrealized header fallback, and negative sell `net_cash_effect` values.
+- 2026-08-13: Independent replay of 41 closed stock reductions produced approximately `-$11,065.49` cumulative realized P&L; screenshot-time account identity implied approximately `-$11,071.94`, leaving a small reconciliation difference to preserve rather than hide.
+- 2026-08-14: Design finalized and approved at `plan/design/2026-08-14-cumulative-portfolio-pnl-reconciliation.md`.
+- 2026-08-14: Detailed TDD implementation plan finalized and approved at `plan/implementation/2026-08-14-cumulative-portfolio-pnl-reconciliation.md`.
+
+## Final Results
+
+Pending implementation and production dry-run/apply.
