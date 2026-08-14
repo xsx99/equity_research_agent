@@ -40,7 +40,7 @@ Fetch and page through broker activities. This could eventually provide the most
 Add a small pure domain component under `src/trading/portfolio/` that consumes normalized filled-stock events:
 
 ```text
-ticker, executed_at, action, quantity, fill_price
+execution_id, ticker, executed_at, action, quantity, fill_price
 ```
 
 Supported actions:
@@ -49,7 +49,8 @@ Supported actions:
 - `reduce` and `exit` match no more than the currently open quantity and realize `(fill_price - average_cost) * matched_quantity`;
 - zero/non-positive quantities and prices are rejected;
 - a sell larger than the replayed open quantity is an explicit reconciliation error, not an invented short position;
-- event ordering is deterministic by execution timestamp and stable execution identifier.
+- `execution_id` is required and unique within the replay input;
+- event ordering is deterministic by `(executed_at, execution_id)`.
 
 The component exposes cumulative realized P&L and the remaining quantity/cost basis by ticker at any requested cutoff. It must not depend on SQLAlchemy, broker clients, or the dashboard.
 
@@ -57,17 +58,24 @@ The initial implementation covers stock executions only. Broker or simulated opt
 
 ### Live portfolio sync
 
-The broker portfolio sync already has the current broker positions before saving the snapshot. Extend the sync boundary to load normalized filled-stock events through the repository and enrich the broker account snapshot before persistence:
+The broker portfolio sync already has the current broker positions before saving the snapshot. Extend the sync boundary to load normalized filled-stock events through the repository and enrich the broker account snapshot before persistence. Both live sync and historical backfill use the replayed ledger cost basis; broker `average_entry_price` is an independent reconciliation input, not an alternative P&L basis:
 
 ```text
 realized_pnl   = ledger cumulative realized at snapshot time
-unrealized_pnl = sum(current_position.market_value
-                     - current_position.quantity * current_position.average_cost)
+unrealized_pnl = broker_stock_market_value - replayed_open_stock_cost_basis
 total_pnl      = account_equity - configured starting equity
 residual       = total_pnl - realized_pnl - unrealized_pnl
 ```
 
-The starting equity defaults to `$1,000,000` through one explicit portfolio-P&L configuration value; it is not duplicated in presenter or backfill code.
+The starting equity defaults to `$1,000,000` through one explicit portfolio-P&L configuration value; it is not duplicated in presenter or backfill code. The replay boundary is the earliest persisted portfolio snapshot that:
+
+- has `account_equity` equal to the configured starting equity within currency tolerance;
+- has zero `stock_market_value` and zero `option_market_value`;
+- occurs no later than the first filled execution.
+
+That snapshot time becomes `pnl_tracking_started_at`. Executions before this boundary are excluded as belonging to an earlier account lifecycle. The backfill and live calculation abort if no valid boundary exists, if the first post-boundary state contains initial inventory without a corresponding buy execution, or if execution history is incomplete. The chosen boundary is written to snapshot metadata and dry-run output.
+
+At live sync and at every historical cutoff, replayed open quantity per ticker must equal broker/local mirrored quantity within a small numeric tolerance. Replayed weighted-average cost must also agree with the broker average entry price within a currency tolerance. A quantity mismatch, missing initial inventory, duplicate execution id, or oversell is a validation failure and blocks persistence/backfill. A small cost mismatch is recorded as a reconciliation diagnostic and the replayed cost basis remains authoritative; a material cost mismatch is a validation failure. Dry-run output lists every mismatch and tolerance applied.
 
 Snapshot metadata records:
 
@@ -75,6 +83,7 @@ Snapshot metadata records:
 {
   "pnl_calculation_method": "weighted_average_stock_fills_v1",
   "pnl_starting_equity": 1000000.0,
+  "pnl_tracking_started_at": "2026-06-01T13:00:00+00:00",
   "pnl_reconciliation_residual": -6.45,
   "pnl_fill_count": 82
 }
@@ -100,15 +109,17 @@ The historical backfill repairs the sign of existing sell execution rows after v
 Provide a standalone, explicit script under `scripts/` with dry-run as its default. The script:
 
 1. loads filled stock executions joined to their order action;
-2. validates and replays them in deterministic order;
-3. walks portfolio snapshots in ascending time order;
-4. computes point-in-time realized P&L and remaining stock cost basis;
-5. computes snapshot unrealized P&L from `stock_market_value - remaining_cost_basis`;
-6. updates realized/unrealized fields and merges calculation metadata only when `--apply` is supplied;
-7. repairs sell `net_cash_effect` signs only with `--apply`;
-8. commits in one database transaction and rolls back on any validation failure.
+2. locates and validates the account-lifecycle replay boundary;
+3. validates unique execution ids and replays post-boundary events in deterministic order;
+4. walks portfolio snapshots in ascending time order;
+5. computes point-in-time realized P&L and remaining stock cost basis;
+6. computes snapshot unrealized P&L from `stock_market_value - remaining_cost_basis`;
+7. validates point-in-time quantities wherever a mirrored position state is available and validates the latest state against broker/local mirrored positions;
+8. updates realized/unrealized fields and merges calculation metadata only when `--apply` is supplied;
+9. repairs sell `net_cash_effect` signs only with `--apply`;
+10. commits in one database transaction and rolls back on any validation failure.
 
-Dry-run output includes row counts, earliest/latest snapshot, latest calculated P&L, maximum absolute reconciliation residual, sell cash-effect repair count, and validation errors. Re-running `--apply` produces the same values and no additional changes.
+Dry-run output includes the selected replay boundary, row counts, earliest/latest updated snapshot, latest calculated P&L, maximum absolute reconciliation residual, quantity/cost mismatches with tolerances, sell cash-effect repair count, and validation errors. Re-running `--apply` produces the same values and no additional changes.
 
 The script must verify that PostgreSQL uses a persistent, non-temporary data directory before applying changes, following `documents/general_instructions.md`.
 
@@ -122,6 +133,7 @@ No template or CSS change is needed. Existing currency formatting and positive/n
 
 - No schema migration is required; `portfolio_snapshots` already has realized/unrealized numeric columns and JSON metadata.
 - Repository interfaces gain a focused read model for filled stock events rather than exposing ORM rows to the domain ledger.
+- The normalized read model includes the stable `paper_execution_id` as `execution_id`; duplicate ids are rejected before replay.
 - Existing snapshot consumers keep the same field names and types.
 - Existing snapshots are changed only by the explicit backfill command.
 - The backfill is production-data mutation and is not run automatically by tests, migrations, application startup, or deployment.
@@ -135,11 +147,13 @@ Follow red-green-refactor for each behavior.
    - multiple buys followed by partial and complete reductions;
    - deterministic ordering;
    - invalid values and oversell rejection;
+   - duplicate execution-id rejection and equal-timestamp stable ordering;
    - cutoff behavior for historical snapshots.
 2. Broker/repository tests:
    - future buy/sell cash-effect signs;
    - normalized event loading;
    - live snapshot enrichment and residual metadata;
+   - missing boundary, initial inventory, quantity mismatch, and material cost mismatch failures;
    - persistence is skipped on invalid execution history.
 3. Backfill tests:
    - dry-run performs no writes;
