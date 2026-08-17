@@ -1,16 +1,23 @@
 """Pure weighted-average stock P&L replay helpers."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from math import isfinite
 from typing import Sequence
+
+from src.trading.portfolio.state import PortfolioSnapshot, StockPosition
 
 
 _BUY_ACTIONS = {"enter_long"}
 _SELL_ACTIONS = {"reduce", "exit"}
 _SUPPORTED_ACTIONS = _BUY_ACTIONS | _SELL_ACTIONS
 _ZERO_TOLERANCE = 1e-12
+
+QUANTITY_TOLERANCE = 1e-6
+CURRENCY_TOLERANCE = 0.01
+AVERAGE_COST_TOLERANCE = 0.01
+RECONCILIATION_RESIDUAL_TOLERANCE = 0.01
 
 
 class PortfolioPnlValidationError(ValueError):
@@ -28,6 +35,14 @@ class StockFillEvent:
 
 
 @dataclass(frozen=True)
+class PortfolioPnlPoint:
+    snapshot_time: datetime
+    account_equity: float
+    stock_market_value: float
+    option_market_value: float
+
+
+@dataclass(frozen=True)
 class OpenCostBasis:
     quantity: float
     average_cost: float
@@ -38,6 +53,88 @@ class StockPnlReplay:
     realized_pnl: float
     open_cost_basis: dict[str, OpenCostBasis]
     fill_count: int
+
+
+def select_active_lifecycle_boundary(
+    points: Sequence[PortfolioPnlPoint],
+    fills: Sequence[StockFillEvent],
+    *,
+    starting_equity: float,
+    currency_tolerance: float = CURRENCY_TOLERANCE,
+) -> datetime:
+    """Select the latest unambiguous flat snapshot at starting equity."""
+    fill_times = {fill.executed_at for fill in fills}
+    candidates = [
+        point.snapshot_time
+        for point in points
+        if abs(float(point.account_equity) - float(starting_equity)) <= currency_tolerance
+        and abs(float(point.stock_market_value)) <= currency_tolerance
+        and abs(float(point.option_market_value)) <= currency_tolerance
+        and point.snapshot_time not in fill_times
+    ]
+    if not candidates:
+        raise PortfolioPnlValidationError("missing_clean_reset")
+    return max(candidates)
+
+
+def enrich_snapshot_with_stock_pnl(
+    snapshot: PortfolioSnapshot,
+    *,
+    positions: Sequence[StockPosition],
+    points: Sequence[PortfolioPnlPoint],
+    fills: Sequence[StockFillEvent],
+    starting_equity: float,
+) -> PortfolioSnapshot:
+    """Return a broker snapshot enriched from the canonical local fill replay."""
+    started_at = select_active_lifecycle_boundary(
+        points,
+        fills,
+        starting_equity=starting_equity,
+    )
+    replay = replay_stock_fills(
+        fills,
+        started_at=started_at,
+        through=snapshot.as_of,
+    )
+    cost_diagnostics = _validate_positions(
+        positions=positions,
+        open_cost_basis=replay.open_cost_basis,
+    )
+    replayed_open_cost = sum(
+        basis.quantity * basis.average_cost
+        for basis in replay.open_cost_basis.values()
+    )
+    unrealized_pnl = float(snapshot.stock_market_value) - replayed_open_cost
+    total_pnl = float(snapshot.account_equity) - float(starting_equity)
+    residual = total_pnl - replay.realized_pnl - unrealized_pnl
+    metadata = {
+        **dict(snapshot.metadata_json),
+        "pnl_calculation_method": "weighted_average_stock_fills_v1",
+        "pnl_starting_equity": float(starting_equity),
+        "pnl_tracking_started_at": started_at.isoformat(),
+        "pnl_reconciliation_residual": residual,
+        "pnl_reconciled": abs(residual) <= RECONCILIATION_RESIDUAL_TOLERANCE,
+        "pnl_fill_count": replay.fill_count,
+        "pnl_excluded_pre_boundary_fill_count": sum(
+            1 for fill in fills if fill.executed_at < started_at
+        ),
+        "pnl_excluded_pre_boundary_snapshot_count": sum(
+            1 for point in points if point.snapshot_time < started_at
+        ),
+        "pnl_tolerances": {
+            "quantity": QUANTITY_TOLERANCE,
+            "currency": CURRENCY_TOLERANCE,
+            "average_cost": AVERAGE_COST_TOLERANCE,
+            "reconciliation_residual": RECONCILIATION_RESIDUAL_TOLERANCE,
+        },
+        "pnl_cost_basis_diagnostics": cost_diagnostics,
+    }
+    return replace(
+        snapshot,
+        realized_pnl=replay.realized_pnl,
+        unrealized_pnl=unrealized_pnl,
+        metadata_json=metadata,
+    )
 
 
 def replay_stock_fills(
@@ -122,3 +219,40 @@ def _validate_fill(fill: StockFillEvent) -> StockFillEvent:
         quantity=quantity,
         fill_price=fill_price,
     )
+
+
+def _validate_positions(
+    *,
+    positions: Sequence[StockPosition],
+    open_cost_basis: dict[str, OpenCostBasis],
+) -> list[dict[str, float | str]]:
+    broker_by_ticker = {str(position.ticker).upper(): position for position in positions}
+    diagnostics: list[dict[str, float | str]] = []
+    for ticker in sorted(set(broker_by_ticker) | set(open_cost_basis)):
+        position = broker_by_ticker.get(ticker)
+        basis = open_cost_basis.get(ticker)
+        broker_quantity = float(position.quantity) if position is not None else 0.0
+        replayed_quantity = float(basis.quantity) if basis is not None else 0.0
+        if abs(broker_quantity - replayed_quantity) > QUANTITY_TOLERANCE:
+            raise PortfolioPnlValidationError(
+                f"quantity_mismatch:{ticker}:{broker_quantity}!={replayed_quantity}"
+            )
+        if position is None or basis is None or replayed_quantity <= QUANTITY_TOLERANCE:
+            continue
+        broker_average_cost = float(position.average_cost)
+        replayed_average_cost = float(basis.average_cost)
+        difference = broker_average_cost - replayed_average_cost
+        if abs(difference) > AVERAGE_COST_TOLERANCE + _ZERO_TOLERANCE:
+            raise PortfolioPnlValidationError(
+                f"average_cost_mismatch:{ticker}:{broker_average_cost}!={replayed_average_cost}"
+            )
+        if abs(difference) > _ZERO_TOLERANCE:
+            diagnostics.append(
+                {
+                    "ticker": ticker,
+                    "broker_average_cost": broker_average_cost,
+                    "replayed_average_cost": replayed_average_cost,
+                    "difference": difference,
+                }
+            )
+    return diagnostics
