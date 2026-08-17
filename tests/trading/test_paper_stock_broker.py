@@ -13,6 +13,7 @@ from src.trading.brokers.paper_option import (
     PaperOptionOrderRequest,
 )
 from src.trading.brokers.paper_stock import PaperOrderRequest, PaperStockBroker
+from src.trading.portfolio.state import PortfolioSnapshot
 from src.trading.repositories.in_memory import InMemoryTradingRepository
 from src.trading.risk import OptionRiskAssessment, RiskDecisionRecord
 from src.trading.workflows.paper_execution import PaperExecutionWorkflow
@@ -31,9 +32,16 @@ class _StubResponse:
 
 
 class _CapturingClient:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        symbol: str = "AAPL",
+        expose_position_before_order: bool = True,
+    ) -> None:
         self.posts: list[dict[str, Any]] = []
         self.gets: list[dict[str, Any]] = []
+        self.symbol = symbol
+        self.expose_position_before_order = expose_position_before_order
 
     def post(self, url: str, *, json: dict[str, Any], headers: dict[str, str]) -> _StubResponse:
         self.posts.append({"url": url, "json": json, "headers": headers})
@@ -55,11 +63,12 @@ class _CapturingClient:
         self.gets.append({"url": url, "params": params, "headers": headers})
         if url.endswith("/v2/orders:by_client_order_id"):
             client_order_id = (params or {})["client_order_id"]
+            symbol = self.posts[-1]["json"]["symbol"] if self.posts else self.symbol
             return _StubResponse(
                 {
                     "id": "broker-order-1",
                     "client_order_id": client_order_id,
-                    "symbol": "AAPL",
+                    "symbol": symbol,
                     "qty": "0.01",
                     "filled_qty": "0.01",
                     "filled_avg_price": "227.15",
@@ -85,10 +94,13 @@ class _CapturingClient:
                 }
             )
         if url.endswith("/v2/positions"):
+            if not self.posts and not self.expose_position_before_order:
+                return _StubResponse([])
+            symbol = self.posts[-1]["json"]["symbol"] if self.posts else self.symbol
             return _StubResponse(
                 [
                     {
-                        "symbol": "AAPL",
+                        "symbol": symbol,
                         "qty": "0.01",
                         "avg_entry_price": "227.15",
                         "current_price": "227.27",
@@ -590,6 +602,33 @@ def test_paper_execution_workflow_executes_generated_risk_hedge_overlay():
     assert repository.risk_hedge_decisions[0].ticker == "QQQ"
 
 
+def _seed_clean_portfolio_reset(repository: InMemoryTradingRepository) -> None:
+    repository.save_portfolio_snapshot(
+        PortfolioSnapshot(
+            as_of=datetime(2026, 6, 2, 13, 0, tzinfo=timezone.utc),
+            cash_balance=1_000_000,
+            account_equity=1_000_000,
+            net_liquidation_value=1_000_000,
+            buying_power=4_000_000,
+            excess_liquidity=1_000_000,
+            stock_market_value=0,
+            option_market_value=0,
+            stock_margin_requirement=0,
+            option_margin_requirement=0,
+            total_margin_requirement=0,
+            initial_margin_requirement=0,
+            maintenance_margin_requirement=0,
+            margin_model_profile="alpaca_paper_account",
+            margin_model_version="broker",
+            margin_requirement_source="broker_reported",
+            day_pnl=0,
+            realized_pnl=0,
+            unrealized_pnl=0,
+            metadata_json={},
+        )
+    )
+
+
 def test_paper_execution_workflow_closes_existing_generated_risk_hedge_overlay_without_strategy_type_hint():
     now = datetime(2026, 6, 2, 16, 31, tzinfo=timezone.utc)
     repository = InMemoryTradingRepository()
@@ -776,6 +815,7 @@ def test_paper_stock_broker_records_positive_cash_effect_for_filled_sell(action:
 def test_paper_execution_workflow_persists_broker_sourced_order_account_and_positions():
     now = datetime(2026, 6, 2, 16, 31, tzinfo=timezone.utc)
     repository = InMemoryTradingRepository()
+    _seed_clean_portfolio_reset(repository)
     workflow = PaperExecutionWorkflow(
         repository=repository,
         broker=PaperStockBroker(api_key="key", secret_key="secret", client=_CapturingClient()),
@@ -800,6 +840,7 @@ def test_paper_execution_workflow_persists_broker_sourced_order_account_and_posi
 def test_paper_execution_workflow_reconciles_delayed_stock_fill_before_returning_no_fill():
     now = datetime(2026, 6, 2, 16, 31, tzinfo=timezone.utc)
     repository = InMemoryTradingRepository()
+    _seed_clean_portfolio_reset(repository)
     client = _DelayedFillClient()
     workflow = PaperExecutionWorkflow(
         repository=repository,
@@ -1161,9 +1202,14 @@ def test_paper_execution_workflow_persists_avoid_event_option_without_filled_ord
 def test_paper_execution_workflow_falls_back_to_stock_when_option_expression_is_rejected():
     now = datetime(2026, 6, 2, 16, 31, tzinfo=timezone.utc)
     repository = InMemoryTradingRepository()
+    _seed_clean_portfolio_reset(repository)
     workflow = PaperExecutionWorkflow(
         repository=repository,
-        broker=PaperStockBroker(api_key="key", secret_key="secret", client=_CapturingClient()),
+        broker=PaperStockBroker(
+            api_key="key",
+            secret_key="secret",
+            client=_CapturingClient(symbol="NVDA", expose_position_before_order=False),
+        ),
         option_broker=PaperOptionBroker(now=lambda: now),
         manual_request_service=ManualTickerRequestService(now=lambda: now),
     )
@@ -1274,6 +1320,7 @@ def test_paper_execution_workflow_falls_back_to_stock_when_option_expression_is_
 def test_paper_execution_workflow_reapproves_stock_fallback_before_submitting_order():
     now = datetime(2026, 6, 2, 16, 31, tzinfo=timezone.utc)
     repository = InMemoryTradingRepository()
+    _seed_clean_portfolio_reset(repository)
     captured_requests: list[dict[str, Any]] = []
 
     class _ConfigResolver:
@@ -1334,7 +1381,11 @@ def test_paper_execution_workflow_reapproves_stock_fallback_before_submitting_or
 
     workflow = PaperExecutionWorkflow(
         repository=repository,
-        broker=PaperStockBroker(api_key="key", secret_key="secret", client=_CapturingClient()),
+        broker=PaperStockBroker(
+            api_key="key",
+            secret_key="secret",
+            client=_CapturingClient(symbol="NVDA", expose_position_before_order=False),
+        ),
         option_broker=PaperOptionBroker(now=lambda: now),
         manual_request_service=ManualTickerRequestService(now=lambda: now),
         config_resolver=_ConfigResolver(),
@@ -1444,6 +1495,7 @@ def test_paper_execution_workflow_reapproves_stock_fallback_before_submitting_or
 def test_paper_execution_workflow_reapproves_option_fallback_before_submitting_option_order():
     now = datetime(2026, 6, 2, 16, 31, tzinfo=timezone.utc)
     repository = InMemoryTradingRepository()
+    _seed_clean_portfolio_reset(repository)
     captured_requests: list[dict[str, Any]] = []
     captured_option_risk_inputs: list[dict[str, Any]] = []
 
@@ -1526,7 +1578,11 @@ def test_paper_execution_workflow_reapproves_option_fallback_before_submitting_o
 
     workflow = PaperExecutionWorkflow(
         repository=repository,
-        broker=PaperStockBroker(api_key="key", secret_key="secret", client=_CapturingClient()),
+        broker=PaperStockBroker(
+            api_key="key",
+            secret_key="secret",
+            client=_CapturingClient(symbol="NVDA", expose_position_before_order=False),
+        ),
         option_broker=PaperOptionBroker(now=lambda: now),
         manual_request_service=ManualTickerRequestService(now=lambda: now),
         config_resolver=_ConfigResolver(),

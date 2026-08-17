@@ -22,6 +22,7 @@ from src.trading.phases.replay.historical import HistoricalReplayRunner
 from src.trading.phases.replay.outcomes import OutcomeEvaluator, PricePoint
 from src.trading.phases.manual_review import LiveManualReviewDependencies, LiveManualReviewRuntime
 from src.trading.phases.manual_review.requests import ManualTickerRequestService
+from src.trading.portfolio.state import PortfolioSnapshot
 from src.trading.repositories.in_memory import InMemoryTradingRepository
 from src.trading.risk import HedgeActionRecord, PortfolioRiskIntentRecord, RiskDecisionRecord
 from src.trading.risk.config import RiskConfigResolver
@@ -281,6 +282,30 @@ def _run_manual_review_fixture() -> dict[str, Any]:
 def _run_manual_review_execution_fixture() -> dict[str, Any]:
     decision_time = _fixed_now()
     repository = InMemoryTradingRepository()
+    repository.save_portfolio_snapshot(
+        PortfolioSnapshot(
+            as_of=decision_time - timedelta(minutes=30),
+            cash_balance=1_000_000,
+            account_equity=1_000_000,
+            net_liquidation_value=1_000_000,
+            buying_power=4_000_000,
+            excess_liquidity=1_000_000,
+            stock_market_value=0,
+            option_market_value=0,
+            stock_margin_requirement=0,
+            option_margin_requirement=0,
+            total_margin_requirement=0,
+            initial_margin_requirement=0,
+            maintenance_margin_requirement=0,
+            margin_model_profile="fixture",
+            margin_model_version="v1",
+            margin_requirement_source="fixture",
+            day_pnl=0,
+            realized_pnl=0,
+            unrealized_pnl=0,
+            metadata_json={},
+        )
+    )
     manual_service = ManualTickerRequestService(now=lambda: decision_time)
     request = manual_service.create("AAPL", "fixture executable request", "paper_trade_eligible")
     broker = _FakePaperStockBroker()

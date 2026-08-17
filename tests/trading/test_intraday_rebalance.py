@@ -5,9 +5,9 @@ from typing import Any
 
 from src.agents.prompt_registry import PromptRegistry
 from src.trading.brokers.paper_option import PaperOptionBroker, PaperOptionPosition
-from src.trading.brokers.paper_stock import PaperStockBroker
+from src.trading.brokers.paper_stock import PaperExecutionRecord, PaperOrderRecord, PaperStockBroker
 from src.trading.intraday.rebalance import IntradayRebalancePipeline, IntradayRebalanceRequest
-from src.trading.portfolio.state import PortfolioLedger
+from src.trading.portfolio.state import PortfolioLedger, PortfolioSnapshot
 from src.trading.repositories.in_memory import InMemoryTradingRepository
 from src.trading.risk import HedgeActionRecord, PortfolioRiskIntentRecord, PositionRiskActionRecord
 
@@ -47,6 +47,7 @@ class _CapturingClient:
     def get(self, url: str, *, params: dict[str, Any] | None = None, headers: dict[str, str]) -> _StubResponse:
         self.gets.append({"url": url, "params": params, "headers": headers})
         if url.endswith("/v2/orders:by_client_order_id"):
+            side = self.posts[-1]["json"]["side"]
             return _StubResponse(
                 {
                     "id": "broker-order-1",
@@ -55,12 +56,12 @@ class _CapturingClient:
                     "qty": "5",
                     "filled_qty": "5",
                     "filled_avg_price": "125.0",
-                    "side": "sell",
+                    "side": side,
                     "type": "market",
                     "time_in_force": "day",
                     "status": "filled",
-                    "submitted_at": "2026-06-02T16:31:00+00:00",
-                    "filled_at": "2026-06-02T16:31:02+00:00",
+                    "submitted_at": "2026-06-02T15:30:00+00:00",
+                    "filled_at": "2026-06-02T15:30:00+00:00",
                 }
             )
         if url.endswith("/v2/account"):
@@ -77,6 +78,19 @@ class _CapturingClient:
                 }
             )
         if url.endswith("/v2/positions"):
+            if self.posts and self.posts[-1]["json"]["side"] == "buy":
+                return _StubResponse(
+                    [
+                        {
+                            "symbol": "AAPL",
+                            "qty": "5",
+                            "avg_entry_price": "125.0",
+                            "current_price": "125.0",
+                            "market_value": "625.0",
+                            "side": "long",
+                        }
+                    ]
+                )
             return _StubResponse([])
         raise AssertionError(f"unexpected_get:{url}")
 
@@ -97,6 +111,72 @@ def _write_prompt(tmp_path) -> PromptRegistry:
         encoding="utf-8",
     )
     return PromptRegistry(root=tmp_path / "prompts")
+
+
+def _seed_pnl_lifecycle(
+    repository: InMemoryTradingRepository,
+    *,
+    existing_quantity: float = 0,
+) -> None:
+    reset_at = datetime(2026, 6, 2, 13, 0, tzinfo=timezone.utc)
+    repository.save_portfolio_snapshot(
+        PortfolioSnapshot(
+            as_of=reset_at,
+            cash_balance=1_000_000,
+            account_equity=1_000_000,
+            net_liquidation_value=1_000_000,
+            buying_power=4_000_000,
+            excess_liquidity=1_000_000,
+            stock_market_value=0,
+            option_market_value=0,
+            stock_margin_requirement=0,
+            option_margin_requirement=0,
+            total_margin_requirement=0,
+            initial_margin_requirement=0,
+            maintenance_margin_requirement=0,
+            margin_model_profile="fixture",
+            margin_model_version="v1",
+            margin_requirement_source="fixture",
+            day_pnl=0,
+            realized_pnl=0,
+            unrealized_pnl=0,
+            metadata_json={},
+        )
+    )
+    if not existing_quantity:
+        return
+    executed_at = datetime(2026, 6, 2, 14, 0, tzinfo=timezone.utc)
+    repository.save_paper_order(
+        PaperOrderRecord(
+            paper_order_id="opening-order",
+            broker_order_id="opening-broker-order",
+            client_order_id="opening-client-order",
+            trading_decision_id="opening-decision",
+            risk_decision_id="opening-risk",
+            ticker="AAPL",
+            strategy_id="relative_strength_rotation_v1",
+            action="enter_long",
+            trade_date=executed_at.date(),
+            quantity=existing_quantity,
+            limit_price=125,
+            status="filled",
+            rejection_reason=None,
+            created_at=executed_at,
+        )
+    )
+    repository.save_paper_execution(
+        PaperExecutionRecord(
+            paper_execution_id="opening-execution",
+            paper_order_id="opening-order",
+            broker_order_id="opening-broker-order",
+            ticker="AAPL",
+            quantity=existing_quantity,
+            fill_price=125,
+            trade_date=executed_at.date(),
+            executed_at=executed_at,
+            net_cash_effect=-existing_quantity * 125,
+        )
+    )
 
 
 def _request(
@@ -284,6 +364,7 @@ def test_intraday_rebalance_pipeline_blocks_open_new_without_permission(tmp_path
 
 def test_intraday_rebalance_pipeline_executes_exit_for_existing_position(tmp_path):
     repository = InMemoryTradingRepository()
+    _seed_pnl_lifecycle(repository, existing_quantity=5)
     registry = _write_prompt(tmp_path)
     now = datetime(2026, 6, 2, 15, 30, tzinfo=timezone.utc)
     ledger = PortfolioLedger(starting_cash_balance=100000.0)
@@ -330,12 +411,13 @@ def test_intraday_rebalance_pipeline_executes_exit_for_existing_position(tmp_pat
 
     assert result.decisions[0].action == "exit"
     assert result.decisions[0].status == "approved"
-    assert len(repository.paper_orders) == 1
-    assert repository.paper_orders[0].action == "exit"
+    assert len(repository.paper_orders) == 2
+    assert repository.paper_orders[-1].action == "exit"
 
 
 def test_intraday_rebalance_pipeline_preserves_manual_request_identity_on_executed_decision(tmp_path):
     repository = InMemoryTradingRepository()
+    _seed_pnl_lifecycle(repository)
     registry = _write_prompt(tmp_path)
     now = datetime(2026, 6, 2, 15, 30, tzinfo=timezone.utc)
     ledger = PortfolioLedger(starting_cash_balance=100000.0)
@@ -570,6 +652,7 @@ def test_intraday_rebalance_executes_generated_risk_hedge_overlay_with_reduce(tm
     monkeypatch.delenv("ALPACA_SECRET_KEY", raising=False)
     monkeypatch.delenv("ALPACA_API_SECRET", raising=False)
     repository = InMemoryTradingRepository()
+    _seed_pnl_lifecycle(repository, existing_quantity=5)
     registry = _write_prompt(tmp_path)
     now = datetime(2026, 6, 2, 15, 30, tzinfo=timezone.utc)
     ledger = PortfolioLedger(starting_cash_balance=100000.0)
@@ -641,7 +724,8 @@ def test_intraday_rebalance_executes_generated_risk_hedge_overlay_with_reduce(tm
         "orders_failed": 0,
         "skip_reasons": {},
     }
-    assert len(repository.paper_orders) == 1
+    assert len(repository.paper_orders) == 2
+    assert repository.paper_orders[-1].action == "reduce"
     assert len(repository.paper_option_orders) == 1
     assert repository.paper_option_orders[0].trade_identity == "risk_hedge_overlay"
     assert len(repository.risk_hedge_decisions) == 1

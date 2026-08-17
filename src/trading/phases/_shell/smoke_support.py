@@ -312,6 +312,7 @@ class _FakePaperStockBroker:
                 "broker_order_id": "broker-order-1",
                 "client_order_id": "client-order-1",
                 "ticker": request.ticker,
+                "action": request.action,
                 "status": "filled",
                 "rejection_reason": None,
             },

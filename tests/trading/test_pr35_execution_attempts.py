@@ -19,7 +19,7 @@ from src.trading.execution.attempts import (
     skipped,
 )
 from src.trading.intraday.rebalance import IntradayRebalancePipeline, IntradayRebalanceRequest
-from src.trading.portfolio.state import PortfolioLedger
+from src.trading.portfolio.state import PortfolioLedger, PortfolioSnapshot
 from src.trading.repositories.in_memory import InMemoryTradingRepository
 from src.trading.repositories.sqlalchemy import SqlAlchemyTradingRepository
 from src.trading.risk import RiskDecisionRecord
@@ -453,6 +453,30 @@ def test_paper_execution_workflow_records_not_authorized_attempt_from_typed_fiel
 
 def test_paper_execution_workflow_records_submitted_attempt_for_filled_stock_order():
     repository = InMemoryTradingRepository()
+    repository.save_portfolio_snapshot(
+        PortfolioSnapshot(
+            as_of=datetime(2026, 6, 26, 13, 0, tzinfo=timezone.utc),
+            cash_balance=1_000_000,
+            account_equity=1_000_000,
+            net_liquidation_value=1_000_000,
+            buying_power=4_000_000,
+            excess_liquidity=1_000_000,
+            stock_market_value=0,
+            option_market_value=0,
+            stock_margin_requirement=0,
+            option_margin_requirement=0,
+            total_margin_requirement=0,
+            initial_margin_requirement=0,
+            maintenance_margin_requirement=0,
+            margin_model_profile="fixture",
+            margin_model_version="v1",
+            margin_requirement_source="fixture",
+            day_pnl=0,
+            realized_pnl=0,
+            unrealized_pnl=0,
+            metadata_json={},
+        )
+    )
     workflow = PaperExecutionWorkflow(
         repository=repository,
         broker=_FilledStockBroker(),
