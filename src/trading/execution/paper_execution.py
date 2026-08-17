@@ -537,7 +537,6 @@ class PaperExecutionWorkflow:
                 manual_request_mode=manual_request_mode,
             )
         )
-        self.repository.save_paper_order(order)
         orders.append(order)
         execution = self.broker.find_execution_by_order_id(order.paper_order_id)
         if execution is None:
@@ -545,9 +544,9 @@ class PaperExecutionWorkflow:
             if refreshed_order is not order:
                 order = refreshed_order
                 orders[-1] = order
-                self.repository.save_paper_order(order)
                 execution = self.broker.find_execution_by_order_id(order.paper_order_id)
         if execution is None:
+            self.repository.save_paper_order(order)
             self._save_execution_attempt(
                 skipped(
                     trading_decision=trading_decision,
@@ -559,6 +558,7 @@ class PaperExecutionWorkflow:
             )
             return
         if self.repository.has_paper_execution(execution.paper_execution_id):
+            self.repository.save_paper_order(order)
             self._save_execution_attempt(
                 submitted(
                     trading_decision=trading_decision,
@@ -569,23 +569,22 @@ class PaperExecutionWorkflow:
                 attempts=attempts,
             )
             return
-        self.repository.save_paper_execution(execution)
-        self._save_execution_attempt(
-            submitted(
-                trading_decision=trading_decision,
-                phase=phase,
-                paper_order_id=order.paper_order_id,
-                risk_decision_id=risk_decision.risk_decision_id,
-            ),
-            attempts=attempts,
+        submitted_attempt = submitted(
+            trading_decision=trading_decision,
+            phase=phase,
+            paper_order_id=order.paper_order_id,
+            risk_decision_id=risk_decision.risk_decision_id,
         )
-        checkpoint_fill = getattr(
+        persist_fill = getattr(
             self.repository,
-            "commit_irreversible_stock_fill",
+            "persist_irreversible_stock_fill",
             None,
         )
-        if callable(checkpoint_fill):
-            checkpoint_fill()
+        if callable(persist_fill):
+            persist_fill(order=order, execution=execution, attempt=submitted_attempt)
+        self.repository.save_paper_order(order)
+        self.repository.save_paper_execution(execution)
+        self._save_execution_attempt(submitted_attempt, attempts=attempts)
         sync_result = self.portfolio_sync.run(
             as_of=execution.executed_at,
             extra_position_metadata={

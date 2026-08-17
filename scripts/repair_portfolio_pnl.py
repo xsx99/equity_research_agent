@@ -20,7 +20,6 @@ from src.trading.portfolio.pnl import (
     PortfolioPnlPoint,
     PortfolioPnlValidationError,
     StockFillEvent,
-    _validate_positions,
     replay_stock_fills,
     select_active_lifecycle_boundary,
 )
@@ -32,11 +31,26 @@ _UNSAFE_DATA_ROOTS = (PurePosixPath("/tmp"), PurePosixPath("/run"), PurePosixPat
 
 def run_repair(*, session: Any, apply: bool, starting_equity: float) -> dict[str, object]:
     """Preview or atomically repair the latest clean account lifecycle."""
+    report_context: dict[str, object] = {
+        "boundary": None,
+        "excluded_pre_boundary_snapshot_count": 0,
+        "excluded_pre_boundary_fill_count": 0,
+        "active_snapshot_count": 0,
+        "active_fill_count": 0,
+        "snapshot_repair_count": 0,
+        "cash_effect_repair_count": 0,
+        "earliest_snapshot_to_update": None,
+        "latest_snapshot_to_update": None,
+        "unverified_historical_snapshot_count": 0,
+        "earliest_unverified_historical_snapshot": None,
+        "latest_unverified_historical_snapshot": None,
+        "tolerances": _tolerances(),
+    }
     try:
         snapshots = _load_rows(session, PortfolioSnapshot, apply=apply)
         orders = _load_rows(session, PaperOrder, apply=apply)
         executions = _load_rows(session, PaperExecution, apply=apply)
-        positions = _load_rows(session, PaperPosition, apply=apply, status="open")
+        positions = _load_rows(session, PaperPosition, apply=apply)
         points = tuple(
             PortfolioPnlPoint(
                 snapshot_time=row.snapshot_time,
@@ -67,15 +81,47 @@ def run_repair(*, session: Any, apply: bool, starting_equity: float) -> dict[str
             started_at=boundary,
             through=latest_snapshot.snapshot_time,
         )
-        cost_diagnostics = _validate_positions(
-            positions=_stock_positions(positions, as_of=latest_snapshot.snapshot_time),
+        cost_diagnostics, position_mismatches = _collect_position_validation(
+            positions=_stock_positions(
+                [row for row in positions if str(row.status).lower() == "open"],
+                as_of=latest_snapshot.snapshot_time,
+            ),
             open_cost_basis=latest_replay.open_cost_basis,
         )
 
         excluded_fill_count = sum(fill.executed_at < boundary for fill in fills)
         excluded_snapshot_count = sum(point.snapshot_time < boundary for point in points)
+        cash_repairs = _cash_effect_repairs(
+            executions=executions,
+            execution_actions=execution_actions,
+            boundary=boundary,
+        )
+        report_context.update(
+            {
+                "boundary": boundary.isoformat(),
+                "excluded_pre_boundary_snapshot_count": excluded_snapshot_count,
+                "excluded_pre_boundary_fill_count": excluded_fill_count,
+                "active_snapshot_count": len(active_snapshots),
+                "active_fill_count": latest_replay.fill_count,
+                "cash_effect_repair_count": len(cash_repairs),
+            }
+        )
+        if position_mismatches:
+            validation_errors = [_position_mismatch_message(item) for item in position_mismatches]
+            if apply:
+                raise PortfolioPnlValidationError(";".join(validation_errors))
+            session.rollback()
+            return _blocked_report(
+                session=session,
+                report_context=report_context,
+                validation_errors=validation_errors,
+                position_mismatches=position_mismatches,
+            )
+
         proposed_snapshots: list[tuple[Any, Decimal, Decimal, dict[str, object]]] = []
         residuals: list[float] = []
+        unverified_historical_snapshots: list[Any] = []
+        historical_validation_errors: list[str] = []
         for row in active_snapshots:
             replay = replay_stock_fills(
                 fills,
@@ -88,11 +134,18 @@ def run_repair(*, session: Any, apply: bool, starting_equity: float) -> dict[str
                 for basis in replay.open_cost_basis.values()
             )
             if snapshot_has_inventory != replay_has_inventory:
-                raise PortfolioPnlValidationError(
+                historical_validation_errors.append(
                     "historical_inventory_mismatch:"
                     f"{row.snapshot_time.isoformat()}:"
                     f"snapshot={snapshot_has_inventory}:replay={replay_has_inventory}"
                 )
+                continue
+            if row is not latest_snapshot and snapshot_has_inventory:
+                # Historical aggregate market value cannot prove per-ticker quantities.
+                # Leave the row untouched; only the latest inventory is validated against
+                # the broker-mirrored position table before repair.
+                unverified_historical_snapshots.append(row)
+                continue
             open_cost = sum(
                 basis.quantity * basis.average_cost
                 for basis in replay.open_cost_basis.values()
@@ -134,11 +187,42 @@ def run_repair(*, session: Any, apply: bool, starting_equity: float) -> dict[str
             for proposal in proposed_snapshots
             if _snapshot_differs(*proposal)
         ]
-        cash_repairs = _cash_effect_repairs(
-            executions=executions,
-            execution_actions=execution_actions,
-            boundary=boundary,
+        report_context.update(
+            {
+                "snapshot_repair_count": len(snapshot_repairs),
+                "earliest_snapshot_to_update": (
+                    snapshot_repairs[0][0].snapshot_time.isoformat()
+                    if snapshot_repairs
+                    else None
+                ),
+                "latest_snapshot_to_update": (
+                    snapshot_repairs[-1][0].snapshot_time.isoformat()
+                    if snapshot_repairs
+                    else None
+                ),
+                "unverified_historical_snapshot_count": len(unverified_historical_snapshots),
+                "earliest_unverified_historical_snapshot": (
+                    unverified_historical_snapshots[0].snapshot_time.isoformat()
+                    if unverified_historical_snapshots
+                    else None
+                ),
+                "latest_unverified_historical_snapshot": (
+                    unverified_historical_snapshots[-1].snapshot_time.isoformat()
+                    if unverified_historical_snapshots
+                    else None
+                ),
+            }
         )
+        if historical_validation_errors:
+            if apply:
+                raise PortfolioPnlValidationError(";".join(historical_validation_errors))
+            session.rollback()
+            return _blocked_report(
+                session=session,
+                report_context=report_context,
+                validation_errors=historical_validation_errors,
+                position_mismatches=[],
+            )
         data_directory = _read_postgres_data_directory(session)
         if apply:
             validate_persistent_postgres_storage(session, data_directory=data_directory)
@@ -158,29 +242,12 @@ def run_repair(*, session: Any, apply: bool, starting_equity: float) -> dict[str
         return {
             "status": "applied" if apply else "dry_run",
             "applied": apply,
-            "boundary": boundary.isoformat(),
             "data_directory": data_directory,
-            "excluded_pre_boundary_snapshot_count": excluded_snapshot_count,
-            "excluded_pre_boundary_fill_count": excluded_fill_count,
-            "active_snapshot_count": len(active_snapshots),
-            "active_fill_count": latest_replay.fill_count,
-            "snapshot_repair_count": len(snapshot_repairs),
-            "cash_effect_repair_count": len(cash_repairs),
-            "earliest_snapshot_to_update": (
-                snapshot_repairs[0][0].snapshot_time.isoformat()
-                if snapshot_repairs
-                else None
-            ),
-            "latest_snapshot_to_update": (
-                snapshot_repairs[-1][0].snapshot_time.isoformat()
-                if snapshot_repairs
-                else None
-            ),
+            **report_context,
             "latest_realized_pnl": latest_realized,
             "latest_unrealized_pnl": latest_unrealized,
             "latest_reconciliation_residual": latest_residual,
             "maximum_absolute_residual": max(abs(value) for value in residuals),
-            "tolerances": _tolerances(),
             "position_mismatches": [],
             "cost_basis_diagnostics": cost_diagnostics,
             "validation_errors": [],
@@ -193,6 +260,7 @@ def run_repair(*, session: Any, apply: bool, starting_equity: float) -> dict[str
             "status": "blocked",
             "applied": False,
             "data_directory": _safe_read_postgres_data_directory(session),
+            **report_context,
             "validation_errors": [str(exc)],
             "position_mismatches": _structured_position_mismatches(exc),
         }
@@ -376,6 +444,82 @@ def _structured_position_mismatches(
             "replayed": float(values[1]),
         }
     ]
+
+
+def _collect_position_validation(
+    *,
+    positions: tuple[StockPosition, ...],
+    open_cost_basis: dict[str, Any],
+) -> tuple[list[dict[str, float | str]], list[dict[str, object]]]:
+    mirrored_by_ticker = {position.ticker.upper(): position for position in positions}
+    diagnostics: list[dict[str, float | str]] = []
+    mismatches: list[dict[str, object]] = []
+    for ticker in sorted(set(mirrored_by_ticker) | set(open_cost_basis)):
+        position = mirrored_by_ticker.get(ticker)
+        basis = open_cost_basis.get(ticker)
+        mirrored_quantity = float(position.quantity) if position is not None else 0.0
+        replayed_quantity = float(basis.quantity) if basis is not None else 0.0
+        if abs(mirrored_quantity - replayed_quantity) > QUANTITY_TOLERANCE:
+            mismatches.append(
+                {
+                    "kind": "quantity",
+                    "ticker": ticker,
+                    "mirrored": mirrored_quantity,
+                    "replayed": replayed_quantity,
+                }
+            )
+            continue
+        if position is None or basis is None or replayed_quantity <= QUANTITY_TOLERANCE:
+            continue
+        mirrored_cost = float(position.average_cost)
+        replayed_cost = float(basis.average_cost)
+        difference = mirrored_cost - replayed_cost
+        if abs(difference) > AVERAGE_COST_TOLERANCE + 1e-12:
+            mismatches.append(
+                {
+                    "kind": "average_cost",
+                    "ticker": ticker,
+                    "mirrored": mirrored_cost,
+                    "replayed": replayed_cost,
+                }
+            )
+        elif abs(difference) > 1e-12:
+            diagnostics.append(
+                {
+                    "ticker": ticker,
+                    "broker_average_cost": mirrored_cost,
+                    "replayed_average_cost": replayed_cost,
+                    "difference": difference,
+                }
+            )
+    return diagnostics, mismatches
+
+
+def _position_mismatch_message(mismatch: dict[str, object]) -> str:
+    kind = "quantity_mismatch" if mismatch["kind"] == "quantity" else "average_cost_mismatch"
+    return f"{kind}:{mismatch['ticker']}:{mismatch['mirrored']}!={mismatch['replayed']}"
+
+
+def _blocked_report(
+    *,
+    session: Any,
+    report_context: dict[str, object],
+    validation_errors: list[str],
+    position_mismatches: list[dict[str, object]],
+) -> dict[str, object]:
+    return {
+        "status": "blocked",
+        "applied": False,
+        "data_directory": _safe_read_postgres_data_directory(session),
+        **report_context,
+        "latest_realized_pnl": None,
+        "latest_unrealized_pnl": None,
+        "latest_reconciliation_residual": None,
+        "maximum_absolute_residual": None,
+        "cost_basis_diagnostics": [],
+        "validation_errors": validation_errors,
+        "position_mismatches": position_mismatches,
+    }
 
 
 def _tolerances() -> dict[str, float]:

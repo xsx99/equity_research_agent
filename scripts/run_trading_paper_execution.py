@@ -65,7 +65,7 @@ def run_execution(
         "status": "passed" if order is not None and getattr(order, "status", None) == "filled" else "failed",
         "order": _order_json(order),
         "portfolio_snapshot": _snapshot_json(snapshot),
-        "positions": [_position_json(position) for position in repository.paper_positions],
+        "positions": [_position_json(position) for position in repository.load_paper_positions()],
     }
 
 

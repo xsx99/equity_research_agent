@@ -113,6 +113,8 @@ class _FakeSession:
         self.rows_by_type: dict[type, list[object]] = {}
         self.flush_calls = 0
         self.commit_calls = 0
+        self.rollback_calls = 0
+        self.close_calls = 0
 
     def add(self, row: object) -> None:
         self.rows_by_type.setdefault(type(row), []).append(row)
@@ -125,6 +127,12 @@ class _FakeSession:
 
     def commit(self) -> None:
         self.commit_calls += 1
+
+    def rollback(self) -> None:
+        self.rollback_calls += 1
+
+    def close(self) -> None:
+        self.close_calls += 1
 
 
 class _AutoflushFakeSession(_FakeSession):
@@ -1963,13 +1971,50 @@ def test_sqlalchemy_repository_preserves_null_option_strategy_decision_for_broke
     assert loaded_position.option_strategy_decision_id is None
 
 
-def test_sqlalchemy_repository_commits_irreversible_stock_fill_checkpoint():
-    session = _FakeSession()
-    repository = SqlAlchemyTradingRepository(session)
+def test_sqlalchemy_repository_persists_fill_in_isolated_session_without_committing_shared_work():
+    shared_session = _FakeSession()
+    checkpoint_session = _FakeSession()
+    repository = SqlAlchemyTradingRepository(
+        shared_session,
+        irreversible_fill_session_factory=lambda: checkpoint_session,
+    )
+    now = datetime(2026, 6, 2, 16, 31, tzinfo=timezone.utc)
+    order = PaperOrderRecord(
+        paper_order_id="11111111-1111-4111-8111-111111111111",
+        broker_order_id="broker-order-1",
+        client_order_id="client-order-1",
+        trading_decision_id="22222222-2222-4222-8222-222222222222",
+        risk_decision_id="33333333-3333-4333-8333-333333333333",
+        ticker="AAPL",
+        strategy_id="strategy-v1",
+        action="enter_long",
+        trade_date=now.date(),
+        quantity=1,
+        limit_price=None,
+        status="filled",
+        rejection_reason=None,
+        created_at=now,
+    )
+    execution = PaperExecutionRecord(
+        paper_execution_id="44444444-4444-4444-8444-444444444444",
+        paper_order_id=order.paper_order_id,
+        broker_order_id="broker-order-1",
+        ticker="AAPL",
+        quantity=1,
+        fill_price=100,
+        trade_date=now.date(),
+        executed_at=now,
+        net_cash_effect=-100,
+    )
 
-    repository.commit_irreversible_stock_fill()
+    repository.persist_irreversible_stock_fill(order=order, execution=execution)
 
-    assert session.commit_calls == 1
+    assert shared_session.commit_calls == 0
+    assert checkpoint_session.commit_calls == 1
+    assert checkpoint_session.close_calls == 1
+    assert len(checkpoint_session.rows_by_type[PaperOrder]) == 1
+    assert checkpoint_session.rows_by_type[PaperOrder][0].trading_decision_id is None
+    assert len(checkpoint_session.rows_by_type[PaperExecution]) == 1
 
 
 class _BrokerStub:
@@ -2036,7 +2081,11 @@ class _BrokerStub:
 def test_paper_execution_workflow_persists_into_sqlalchemy_repository():
     now = datetime(2026, 6, 2, 16, 31, tzinfo=timezone.utc)
     session = _FakeSession()
-    repository = SqlAlchemyTradingRepository(session)
+    checkpoint_session = _FakeSession()
+    repository = SqlAlchemyTradingRepository(
+        session,
+        irreversible_fill_session_factory=lambda: checkpoint_session,
+    )
     repository.save_portfolio_snapshot(
         PortfolioSnapshot(
             as_of=datetime(2026, 6, 2, 13, 0, tzinfo=timezone.utc),
@@ -2124,6 +2173,8 @@ def test_paper_execution_workflow_persists_into_sqlalchemy_repository():
     assert len(result.paper_orders) == 1
     assert repository.has_paper_execution("execution-1") is True
     assert repository.load_paper_positions()[0].ticker == "AAPL"
+    assert session.commit_calls == 0
+    assert checkpoint_session.commit_calls == 1
 
 
 def test_load_intraday_request_contexts_includes_option_execution_metadata():

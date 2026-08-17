@@ -64,6 +64,16 @@ class _FakeBroker:
         ]
 
 
+class _SqlShapedRepository:
+    def __init__(self, inner):
+        self.inner = inner
+
+    def __getattr__(self, name):
+        if name == "paper_positions":
+            raise AttributeError(name)
+        return getattr(self.inner, name)
+
+
 def test_run_trading_paper_execution_uses_workflow_and_returns_persisted_artifacts():
     repository = InMemoryTradingRepository()
     repository.save_portfolio_snapshot(
@@ -105,4 +115,45 @@ def test_run_trading_paper_execution_uses_workflow_and_returns_persisted_artifac
     assert result["order"]["ticker"] == "AAPL"
     assert result["order"]["status"] == "filled"
     assert result["portfolio_snapshot"]["cash_balance"] == 999996.85
+    assert result["positions"][0]["ticker"] == "AAPL"
+
+
+def test_run_execution_uses_repository_loader_instead_of_in_memory_attribute():
+    inner = InMemoryTradingRepository()
+    inner.save_portfolio_snapshot(
+        PortfolioSnapshot(
+            as_of=datetime(2026, 6, 2, 13, 0, tzinfo=timezone.utc),
+            cash_balance=1_000_000,
+            account_equity=1_000_000,
+            net_liquidation_value=1_000_000,
+            buying_power=4_000_000,
+            excess_liquidity=1_000_000,
+            stock_market_value=0,
+            option_market_value=0,
+            stock_margin_requirement=0,
+            option_margin_requirement=0,
+            total_margin_requirement=0,
+            initial_margin_requirement=0,
+            maintenance_margin_requirement=0,
+            margin_model_profile="fixture",
+            margin_model_version="v1",
+            margin_requirement_source="fixture",
+            day_pnl=0,
+            realized_pnl=0,
+            unrealized_pnl=0,
+            metadata_json={},
+        )
+    )
+
+    result = run_execution(
+        ticker="aapl",
+        strategy_id="relative_strength_rotation_v1",
+        trade_identity="tactical_stock_trade",
+        decision="enter_long",
+        quantity=0.01,
+        broker=_FakeBroker(),
+        repository=_SqlShapedRepository(inner),
+        as_of=datetime(2026, 6, 2, 16, 31, tzinfo=timezone.utc),
+    )
+
     assert result["positions"][0]["ticker"] == "AAPL"

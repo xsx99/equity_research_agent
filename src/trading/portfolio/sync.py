@@ -128,16 +128,18 @@ def _reconcile_late_stock_order_fills(*, repository: Any, broker: Any) -> dict[s
     metadata_by_ticker: dict[str, dict[str, Any]] = {}
     for order in load_orders():
         refreshed_order = refresh_order(order)
-        save_order(refreshed_order)
         execution = find_execution(refreshed_order.paper_order_id)
         if execution is None:
+            save_order(refreshed_order)
             continue
         if callable(has_execution_for_order) and has_execution_for_order(refreshed_order.paper_order_id):
+            save_order(refreshed_order)
             continue
+        persist_fill = getattr(repository, "persist_irreversible_stock_fill", None)
+        if callable(persist_fill):
+            persist_fill(order=refreshed_order, execution=execution)
+        save_order(refreshed_order)
         save_execution(execution)
-        checkpoint_fill = getattr(repository, "commit_irreversible_stock_fill", None)
-        if callable(checkpoint_fill):
-            checkpoint_fill()
         metadata_by_ticker[refreshed_order.ticker.upper()] = {
             "strategy_id": refreshed_order.strategy_id,
             "trade_identity": "tactical_stock_trade",

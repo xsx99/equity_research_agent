@@ -131,8 +131,9 @@ from src.trading.repositories._base_records import (
 
 
 class _RepositoryBase:
-    def __init__(self, session: Any) -> None:
+    def __init__(self, session: Any, *, irreversible_fill_session_factory: Any | None = None) -> None:
         self.session = session
+        self.irreversible_fill_session_factory = irreversible_fill_session_factory
 
     def _require_universe_filter_config_row(self, config: UniverseFilterConfigRecord) -> UniverseFilterConfig:
         row = self.session.query(UniverseFilterConfig).filter_by(

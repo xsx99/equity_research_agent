@@ -179,7 +179,7 @@ If either command points to tmpfs, `/tmp`, `/run`, `/dev/shm`, or an anonymous v
 
 ### Repairing cumulative portfolio P&L
 
-The repair command replays normalized stock fills from the latest clean `$1,000,000` account reset. It updates only snapshots and reduce/exit cash effects in that active lifecycle; earlier lifecycles remain unchanged. The command is dry-run by default and is idempotent.
+The repair command replays normalized stock fills from the latest clean `$1,000,000` account reset. It updates reduce/exit cash effects plus only snapshots whose inventory can be proved safe: flat historical snapshots and the latest snapshot after exact per-ticker quantity/cost validation. Non-flat historical snapshots are reported as unverified and left untouched because their aggregate market value cannot prove historical per-ticker quantities. Earlier lifecycles remain unchanged. The command is dry-run by default and is idempotent.
 
 Verify persistent storage, then preview the exact change set:
 
@@ -189,7 +189,7 @@ source ~/.venv/bin/activate
 PYTHONPATH=. python scripts/repair_portfolio_pnl.py --json
 ```
 
-Review the reported boundary, excluded rows, snapshot and cash-effect repair counts, latest realized/unrealized P&L, reconciliation residual, position diagnostics, tolerances, and data directory. Do not apply if any mismatch is reported or if the data directory is temporary or memory-backed.
+Review the reported boundary, excluded rows, snapshot and cash-effect repair counts, unverified historical snapshot range, latest realized/unrealized P&L, reconciliation residual, all position diagnostics, tolerances, and data directory. Do not apply if any mismatch is reported or if the data directory is temporary or memory-backed.
 
 Only after an operator explicitly approves that dry-run report, apply it:
 

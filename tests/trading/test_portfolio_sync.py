@@ -257,10 +257,12 @@ def test_late_filled_stock_execution_is_checkpointed_before_snapshot_validation(
             super().__init__()
             self.checkpointed_execution_ids: tuple[str, ...] = ()
 
-        def commit_irreversible_stock_fill(self) -> None:
-            self.checkpointed_execution_ids = tuple(
-                execution.paper_execution_id
-                for execution in self.paper_executions
+        def persist_irreversible_stock_fill(self, *, order, execution, attempt=None) -> None:
+            self.checkpointed_execution_ids = (execution.paper_execution_id,)
+            super().persist_irreversible_stock_fill(
+                order=order,
+                execution=execution,
+                attempt=attempt,
             )
 
     repository = _CheckpointRepository()

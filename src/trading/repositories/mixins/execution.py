@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import replace
 from decimal import Decimal
+from typing import Any
 
 from src.db.models.trading import (
     OptionStrategyDecision,
@@ -76,9 +78,66 @@ class ExecutionRepositoryMixin:
         row.executed_at = execution.executed_at
         row.net_cash_effect = Decimal(str(execution.net_cash_effect))
         self.session.flush()
-    def commit_irreversible_stock_fill(self) -> None:
-        """Checkpoint broker fill evidence before fallible portfolio reconciliation."""
-        self.session.commit()
+    def persist_irreversible_stock_fill(
+        self,
+        *,
+        order: PaperOrderRecord,
+        execution: PaperExecutionRecord,
+        attempt: Any | None = None,
+    ) -> None:
+        """Persist broker fill evidence in an isolated transaction."""
+        if self.irreversible_fill_session_factory is None:
+            from src.db.connection import SessionLocal
+
+            session_factory = SessionLocal
+        else:
+            session_factory = self.irreversible_fill_session_factory
+        checkpoint_session = session_factory()
+        try:
+            checkpoint_repository = type(self)(
+                checkpoint_session,
+                irreversible_fill_session_factory=session_factory,
+            )
+            existing_order = checkpoint_session.query(PaperOrder).filter_by(
+                client_order_id=order.client_order_id
+            ).one_or_none()
+            checkpoint_repository.save_paper_order(
+                PaperOrderRecord(
+                    paper_order_id=order.paper_order_id,
+                    broker_order_id=order.broker_order_id,
+                    client_order_id=order.client_order_id,
+                    trading_decision_id=(
+                        str(existing_order.trading_decision_id)
+                        if existing_order is not None and existing_order.trading_decision_id is not None
+                        else None
+                    ),  # type: ignore[arg-type]
+                    risk_decision_id=(
+                        str(existing_order.risk_decision_id)
+                        if existing_order is not None and existing_order.risk_decision_id is not None
+                        else None
+                    ),  # type: ignore[arg-type]
+                    ticker=order.ticker,
+                    strategy_id=order.strategy_id,
+                    action=order.action,
+                    trade_date=order.trade_date,
+                    quantity=order.quantity,
+                    limit_price=order.limit_price,
+                    status=order.status,
+                    rejection_reason=order.rejection_reason,
+                    created_at=order.created_at,
+                )
+            )
+            checkpoint_repository.save_paper_execution(execution)
+            if attempt is not None:
+                checkpoint_repository.save_execution_attempt(
+                    replace(attempt, trading_decision_id=None, risk_decision_id=None)
+                )
+            checkpoint_session.commit()
+        except Exception:
+            checkpoint_session.rollback()
+            raise
+        finally:
+            checkpoint_session.close()
     def has_paper_execution(self, paper_execution_id: str) -> bool:
         return self.session.query(PaperExecution).filter_by(
             paper_execution_id=_to_uuid(paper_execution_id)

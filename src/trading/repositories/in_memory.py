@@ -620,9 +620,12 @@ class InMemoryTradingRepository:
         if execution.paper_execution_id not in {item.paper_execution_id for item in self.paper_executions}:
             self.paper_executions.append(execution)
 
-    def commit_irreversible_stock_fill(self) -> None:
-        """Match the SQL repository checkpoint contract for deterministic workflows."""
-        return None
+    def persist_irreversible_stock_fill(self, *, order, execution, attempt=None) -> None:
+        """Match the durable-fill repository contract for deterministic workflows."""
+        self.save_paper_order(order)
+        self.save_paper_execution(execution)
+        if attempt is not None:
+            self.save_execution_attempt(attempt)
 
     def has_paper_execution(self, paper_execution_id: str) -> bool:
         return any(item.paper_execution_id == paper_execution_id for item in self.paper_executions)

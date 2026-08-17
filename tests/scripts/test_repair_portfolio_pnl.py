@@ -90,7 +90,15 @@ def repair_case():
     sell_order, sell_execution = _fill(
         "sell", "AAPL", "reduce", 5, 120, reset_at + timedelta(hours=1, minutes=30), cash=-600
     )
-    position = SimpleNamespace(ticker="AAPL", quantity=Decimal("5"), average_cost=Decimal("100"), status="open")
+    position = SimpleNamespace(
+        ticker="AAPL",
+        quantity=Decimal("5"),
+        average_cost=Decimal("100"),
+        status="open",
+        opened_at=reset_at + timedelta(minutes=1),
+        updated_at=reset_at + timedelta(hours=2),
+        closed_at=None,
+    )
     return _FakeSession(
         snapshots=[before, reset, marked, latest],
         orders=[pre_order, pre_exit_order, buy_order, sell_order],
@@ -110,7 +118,7 @@ def test_dry_run_reports_changes_without_mutating_rows(repair_case):
     )
 
     assert report["status"] == "dry_run"
-    assert report["snapshot_repair_count"] == 3
+    assert report["snapshot_repair_count"] == 2
     assert report["cash_effect_repair_count"] == 1
     assert report["earliest_snapshot_to_update"] == "2026-06-02T13:00:00+00:00"
     assert report["latest_snapshot_to_update"] == "2026-06-02T15:00:00+00:00"
@@ -138,8 +146,8 @@ def test_apply_commits_snapshot_metadata_and_positive_sell_cash_effect(repair_ca
     assert before.realized_pnl == Decimal("7")
     assert before.unrealized_pnl == Decimal("8")
     assert reset.metadata_json["existing"] == "keep"
-    assert marked.realized_pnl == Decimal("0.0")
-    assert marked.unrealized_pnl == Decimal("100.0")
+    assert marked.realized_pnl == Decimal("0")
+    assert marked.unrealized_pnl == Decimal("0")
     assert latest.realized_pnl == Decimal("100.0")
     assert latest.unrealized_pnl == Decimal("100.0")
     assert latest.metadata_json["pnl_calculation_method"] == "weighted_average_stock_fills_v1"
@@ -224,6 +232,51 @@ def test_dry_run_returns_structured_position_mismatch(repair_case):
         }
     ]
     assert repair_case.rollback_count == 1
+
+
+def test_dry_run_reports_all_position_mismatches_and_complete_scope(repair_case):
+    repair_case.rows[PaperPosition][0].quantity = Decimal("4")
+    repair_case.rows[PaperPosition].append(
+        SimpleNamespace(
+            ticker="MSFT",
+            quantity=Decimal("2"),
+            average_cost=Decimal("50"),
+            status="open",
+            opened_at=repair_case.rows[PortfolioSnapshot][1].snapshot_time,
+            updated_at=repair_case.rows[PortfolioSnapshot][-1].snapshot_time,
+            closed_at=None,
+        )
+    )
+
+    report = repair_portfolio_pnl.run_repair(
+        session=repair_case,
+        apply=False,
+        starting_equity=1_000_000,
+    )
+
+    assert report["status"] == "blocked"
+    assert report["boundary"] == "2026-06-02T13:00:00+00:00"
+    assert report["active_snapshot_count"] == 3
+    assert report["tolerances"]["quantity"] > 0
+    assert report["position_mismatches"] == [
+        {"kind": "quantity", "ticker": "AAPL", "mirrored": 4.0, "replayed": 5.0},
+        {"kind": "quantity", "ticker": "MSFT", "mirrored": 2.0, "replayed": 0.0},
+    ]
+
+
+def test_nonflat_historical_inventory_is_skipped_instead_of_fabricating_unrealized(repair_case):
+    historical = repair_case.rows[PortfolioSnapshot][2]
+
+    report = repair_portfolio_pnl.run_repair(
+        session=repair_case,
+        apply=False,
+        starting_equity=1_000_000,
+    )
+
+    assert report["unverified_historical_snapshot_count"] == 1
+    assert report["earliest_unverified_historical_snapshot"] == historical.snapshot_time.isoformat()
+    assert report["latest_unverified_historical_snapshot"] == historical.snapshot_time.isoformat()
+    assert historical.unrealized_pnl == Decimal("0")
 
 
 def test_historical_inventory_without_fill_blocks_even_when_latest_account_is_flat():

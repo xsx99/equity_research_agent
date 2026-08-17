@@ -75,7 +75,9 @@ The starting equity defaults to `$1,000,000` through one explicit portfolio-P&L 
 
 That snapshot time becomes `pnl_tracking_started_at`. Only executions and snapshots at or after this boundary belong to the active account lifecycle; earlier rows are excluded from calculation and are not modified by the backfill. Selecting the latest clean reset makes repeated paper-account resets deterministic. The backfill and live calculation abort if no valid boundary exists, if the first post-boundary state contains initial inventory without a corresponding buy execution, or if post-boundary execution history is incomplete. The chosen boundary and excluded pre-boundary row counts are written to snapshot metadata and dry-run output.
 
-At live sync and at every historical cutoff, replayed open quantity per ticker must equal broker/local mirrored quantity within a small numeric tolerance. Replayed weighted-average cost must also agree with the broker average entry price within a currency tolerance. A quantity mismatch, missing initial inventory, duplicate execution id, or oversell is a validation failure and blocks persistence/backfill. A small cost mismatch is recorded as a reconciliation diagnostic and the replayed cost basis remains authoritative; a material cost mismatch is a validation failure. Dry-run output lists every mismatch and tolerance applied.
+At live sync and for the latest repair cutoff, replayed open quantity per ticker must equal broker/local mirrored quantity within a small numeric tolerance. Replayed weighted-average cost must also agree with the broker average entry price within a currency tolerance. A quantity mismatch, missing initial inventory, duplicate execution id, or oversell is a validation failure and blocks persistence/backfill. A small cost mismatch is recorded as a reconciliation diagnostic and the replayed cost basis remains authoritative; a material cost mismatch is a validation failure. Dry-run output lists every mismatch and tolerance applied.
+
+Historical `paper_positions` are lifecycle rows rather than point-in-time position snapshots, so a non-flat historical `stock_market_value` cannot prove its per-ticker quantities. The repair therefore leaves every non-flat historical snapshot untouched and reports its exact unverified count/range. It repairs flat historical snapshots, whose zero inventory is independently checkable, and the latest snapshot, whose replayed quantities and costs are checked against the current broker mirror. This narrows the original backfill scope to avoid fabricating historical unrealized P&L from incomplete fills.
 
 Snapshot metadata records:
 
@@ -177,7 +179,7 @@ Follow red-green-refactor for each behavior.
 - The latest production snapshot displays cumulative realized stock P&L near the independently diagnosed `-$11.07k`, not zero.
 - Unrealized P&L reflects current broker positions and is not zero unless the actual open-position sum is zero.
 - The same latest realized/unrealized values appear on every `/today` tab.
-- Historical snapshot values are point-in-time backfilled after an explicitly approved apply run.
+- Verifiable flat historical snapshots and the fully validated latest snapshot are backfilled after an explicitly approved apply run; non-flat historical snapshots remain unchanged and are explicitly reported as unverified.
 - Future sell executions have positive cash effect and buys have negative cash effect.
 - Reconciliation residuals are auditable and never silently added to realized P&L.
 - Tests and the standalone dry-run demonstrate that no production data changes occur without `--apply`.
