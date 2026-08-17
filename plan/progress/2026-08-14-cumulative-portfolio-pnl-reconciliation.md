@@ -10,7 +10,7 @@
 - [x] Task 1: Build the pure weighted-average P&L ledger.
 - [x] Task 2: Add active-lifecycle boundary selection and snapshot enrichment.
 - [x] Task 3: Add normalized repository P&L inputs.
-- [ ] Task 4: Correct future stock execution cash effects.
+- [x] Task 4: Correct future stock execution cash effects.
 - [ ] Task 5: Enrich every live broker snapshot before persistence.
 - [ ] Task 6: Make Today header P&L snapshot-consistent across tabs.
 - [ ] Task 7: Add the safe historical repair command.
@@ -44,6 +44,7 @@
 - 2026-08-17: Task 1 RED failed during collection because `src.trading.portfolio.pnl` did not exist; GREEN passed `tests/trading/test_portfolio_pnl.py` (`10 passed`). The pure ledger now covers weighted-average buys, partial/full reductions, gains/losses, deterministic equal-time ordering, cutoff filtering, duplicate ids, invalid values, and oversells.
 - 2026-08-17: Task 2 RED failed because the lifecycle/enrichment contracts and tolerance constants were absent; GREEN passed `tests/trading/test_portfolio_pnl.py` (`18 passed`). Snapshot enrichment now selects the latest clean reset, rejects ambiguous reset timestamps and position mismatches, preserves metadata, uses replay cost basis, and audits residuals/excluded rows with shared tolerances.
 - 2026-08-17: Task 3 RED produced two missing-loader failures; GREEN passed the two focused SQLAlchemy/in-memory repository tests and `tests/trading/test_portfolio_sync.py` (`5 passed`). Both repositories now emit deterministically ordered filled-stock events joined to order action plus ascending portfolio P&L points, and reject orphan executions.
+- 2026-08-17: Task 4 RED showed both `reduce` and `exit` fills persisted `-2.2715` instead of `+2.2715`; GREEN passed the focused cases and the full `tests/trading/test_paper_stock_broker.py` module (`20 passed`). Future long buys remain cash outflows while reductions/exits are cash inflows.
 
 ## Final Results
 

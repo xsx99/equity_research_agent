@@ -87,6 +87,13 @@ class PaperExecutionRecord:
     net_cash_effect: float
 
 
+def _stock_fill_cash_effect(*, action: str, quantity: float, fill_price: float) -> float:
+    notional = float(quantity) * float(fill_price)
+    if action in {"reduce", "exit"}:
+        return notional
+    return -notional
+
+
 class PaperStockBroker:
     """Alpaca paper trading broker with local guardrails and audit artifacts."""
 
@@ -305,7 +312,11 @@ class PaperStockBroker:
                 fill_price=float(filled_avg_price),
                 trade_date=order.trade_date,
                 executed_at=filled_at or submitted_at,
-                net_cash_effect=-float(filled_qty) * float(filled_avg_price),
+                net_cash_effect=_stock_fill_cash_effect(
+                    action=order.action,
+                    quantity=float(filled_qty),
+                    fill_price=float(filled_avg_price),
+                ),
             )
             self.executions.append(execution)
             self._executions_by_order_id[order.paper_order_id] = execution

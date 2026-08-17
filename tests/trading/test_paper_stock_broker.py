@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+import pytest
+
 from src.trading.manual_review.requests import ManualTickerRequestService
 from src.trading.brokers.paper_option import (
     LocalPaperOptionBroker,
@@ -530,6 +532,7 @@ def test_paper_stock_broker_submits_alpaca_market_day_order_and_reads_fill_by_cl
     assert execution is not None
     assert execution.fill_price == 227.15
     assert execution.quantity == 0.01
+    assert execution.net_cash_effect == pytest.approx(-2.2715)
 
 
 def test_paper_execution_workflow_executes_generated_risk_hedge_overlay():
@@ -747,10 +750,11 @@ def test_paper_execution_workflow_adjusts_existing_generated_risk_hedge_overlay_
     assert repository.risk_hedge_decisions[0].protected_notional == 120000.0
 
 
-def test_paper_stock_broker_submits_sell_order_for_exit_action():
+@pytest.mark.parametrize("action", ("reduce", "exit"))
+def test_paper_stock_broker_records_positive_cash_effect_for_filled_sell(action: str):
     client = _CapturingClient()
     broker = PaperStockBroker(api_key="key", secret_key="secret", client=client)
-    decision = _trading_decision(decision="exit")
+    decision = _trading_decision(decision=action)
     risk = _risk_decision()
 
     order = broker.submit_order(
@@ -761,9 +765,12 @@ def test_paper_stock_broker_submits_sell_order_for_exit_action():
             manual_request_mode=None,
         )
     )
+    execution = broker.find_execution_by_order_id(order.paper_order_id)
 
     assert client.posts[0]["json"]["side"] == "sell"
     assert order.status == "filled"
+    assert execution is not None
+    assert execution.net_cash_effect == pytest.approx(2.2715)
 
 
 def test_paper_execution_workflow_persists_broker_sourced_order_account_and_positions():
