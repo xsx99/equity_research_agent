@@ -177,6 +177,30 @@ Expected result:
 
 If either command points to tmpfs, `/tmp`, `/run`, `/dev/shm`, or an anonymous volume, stop and fix the Compose volume mapping before continuing.
 
+### Repairing cumulative portfolio P&L
+
+The repair command replays normalized stock fills from the latest clean `$1,000,000` account reset. It updates only snapshots and reduce/exit cash effects in that active lifecycle; earlier lifecycles remain unchanged. The command is dry-run by default and is idempotent.
+
+Verify persistent storage, then preview the exact change set:
+
+```bash
+docker exec postgres_db psql -U postgres -d mono_db -c "SHOW data_directory;"
+source ~/.venv/bin/activate
+PYTHONPATH=. python scripts/repair_portfolio_pnl.py --json
+```
+
+Review the reported boundary, excluded rows, snapshot and cash-effect repair counts, latest realized/unrealized P&L, reconciliation residual, position diagnostics, tolerances, and data directory. Do not apply if any mismatch is reported or if the data directory is temporary or memory-backed.
+
+Only after an operator explicitly approves that dry-run report, apply it:
+
+```bash
+source ~/.venv/bin/activate
+PYTHONPATH=. python scripts/repair_portfolio_pnl.py --apply --json
+PYTHONPATH=. python scripts/repair_portfolio_pnl.py --json
+```
+
+The final dry-run must report zero additional snapshot and cash-effect repairs. `--apply` is blocked for `/tmp`, `/run`, and `/dev/shm`; it also validates the latest replayed quantity and average cost against the current open broker-mirrored stock positions before writing anything.
+
 ## Redeploying After a Code Change
 
 ```bash
