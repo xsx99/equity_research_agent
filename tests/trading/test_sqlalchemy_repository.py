@@ -1513,6 +1513,141 @@ def test_sqlalchemy_repository_persists_pr6_order_execution_snapshot_and_positio
     assert session.flush_calls >= 4
 
 
+def test_sqlalchemy_repository_loads_filled_stock_events_and_portfolio_pnl_points() -> None:
+    session = _FakeSession()
+    repository = SqlAlchemyTradingRepository(session)
+    early = datetime(2026, 6, 1, 13, 0, tzinfo=timezone.utc)
+    late = datetime(2026, 6, 2, 13, 0, tzinfo=timezone.utc)
+    filled_order_id = str(uuid.uuid4())
+    accepted_order_id = str(uuid.uuid4())
+    filled_execution_id = str(uuid.uuid4())
+    accepted_execution_id = str(uuid.uuid4())
+    for order_id, status, action, created_at in (
+        (filled_order_id, "filled", "reduce", late),
+        (accepted_order_id, "accepted", "enter_long", early),
+    ):
+        repository.save_paper_order(
+            PaperOrderRecord(
+                paper_order_id=order_id,
+                broker_order_id=None,
+                client_order_id=f"client-{order_id}",
+                trading_decision_id="",
+                risk_decision_id="",
+                ticker="AAPL",
+                strategy_id="test_strategy",
+                action=action,
+                trade_date=created_at.date(),
+                quantity=1,
+                limit_price=100,
+                status=status,
+                rejection_reason=None,
+                created_at=created_at,
+            )
+        )
+    for execution_id, order_id, executed_at in (
+        (filled_execution_id, filled_order_id, late),
+        (accepted_execution_id, accepted_order_id, early),
+    ):
+        repository.save_paper_execution(
+            PaperExecutionRecord(
+                paper_execution_id=execution_id,
+                paper_order_id=order_id,
+                broker_order_id=None,
+                ticker="AAPL",
+                quantity=1,
+                fill_price=110,
+                trade_date=executed_at.date(),
+                executed_at=executed_at,
+                net_cash_effect=-110,
+            )
+        )
+    repository.save_portfolio_snapshot(_repository_snapshot(as_of=late, equity=999_900, stock_market_value=100))
+    repository.save_portfolio_snapshot(_repository_snapshot(as_of=early, equity=1_000_000, stock_market_value=0))
+
+    events = repository.load_filled_stock_events()
+    points = repository.load_portfolio_pnl_points()
+
+    assert len(events) == 1
+    assert events[0].execution_id == filled_execution_id
+    assert events[0].action == "reduce"
+    assert events[0].executed_at == late
+    assert [point.snapshot_time for point in points] == [early, late]
+    assert points[0].account_equity == 1_000_000
+    assert points[1].stock_market_value == 100
+
+
+def test_in_memory_repository_loads_filled_stock_events_and_portfolio_pnl_points() -> None:
+    from src.trading.repositories.in_memory import InMemoryTradingRepository
+
+    repository = InMemoryTradingRepository()
+    early = datetime(2026, 6, 1, 13, 0, tzinfo=timezone.utc)
+    late = datetime(2026, 6, 2, 13, 0, tzinfo=timezone.utc)
+    order_id = str(uuid.uuid4())
+    execution_id = str(uuid.uuid4())
+    repository.save_paper_order(
+        PaperOrderRecord(
+            paper_order_id=order_id,
+            broker_order_id=None,
+            client_order_id="filled-aapl",
+            trading_decision_id="",
+            risk_decision_id="",
+            ticker="AAPL",
+            strategy_id="test_strategy",
+            action="enter_long",
+            trade_date=late.date(),
+            quantity=2,
+            limit_price=100,
+            status="filled",
+            rejection_reason=None,
+            created_at=late,
+        )
+    )
+    repository.save_paper_execution(
+        PaperExecutionRecord(
+            paper_execution_id=execution_id,
+            paper_order_id=order_id,
+            broker_order_id=None,
+            ticker="AAPL",
+            quantity=2,
+            fill_price=100,
+            trade_date=late.date(),
+            executed_at=late,
+            net_cash_effect=-200,
+        )
+    )
+    repository.save_portfolio_snapshot(_repository_snapshot(as_of=late, equity=1_000_010, stock_market_value=210))
+    repository.save_portfolio_snapshot(_repository_snapshot(as_of=early, equity=1_000_000, stock_market_value=0))
+
+    assert repository.load_filled_stock_events()[0].execution_id == execution_id
+    assert repository.load_filled_stock_events()[0].action == "enter_long"
+    assert [point.snapshot_time for point in repository.load_portfolio_pnl_points()] == [early, late]
+
+
+def _repository_snapshot(*, as_of: datetime, equity: float, stock_market_value: float) -> PortfolioSnapshot:
+    return PortfolioSnapshot(
+        as_of=as_of,
+        cash_balance=equity - stock_market_value,
+        account_equity=equity,
+        net_liquidation_value=equity,
+        buying_power=equity,
+        excess_liquidity=equity,
+        stock_market_value=stock_market_value,
+        option_market_value=0,
+        stock_margin_requirement=0,
+        option_margin_requirement=0,
+        total_margin_requirement=0,
+        initial_margin_requirement=0,
+        maintenance_margin_requirement=0,
+        margin_model_profile="alpaca_paper_account",
+        margin_model_version="broker",
+        margin_requirement_source="broker_reported",
+        day_pnl=0,
+        realized_pnl=0,
+        unrealized_pnl=0,
+        metadata_json={},
+    )
+
+
 def test_sqlalchemy_repository_closes_missing_positions_on_replace():
     now = datetime(2026, 6, 2, 16, 31, tzinfo=timezone.utc)
     session = _FakeSession()

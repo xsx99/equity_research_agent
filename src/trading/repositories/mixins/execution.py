@@ -22,6 +22,11 @@ from src.trading.brokers.paper_option import (
 from src.trading.brokers.paper_stock import PaperExecutionRecord, PaperOrderRecord
 from src.trading.options.strategy import OptionStrategyDecisionRecord, OptionStrategyLegRecord
 from src.trading.portfolio.state import PortfolioSnapshot, StockPosition
+from src.trading.portfolio.pnl import (
+    PortfolioPnlPoint,
+    PortfolioPnlValidationError,
+    StockFillEvent,
+)
 from src.trading.repositories._base_common import (
     _decimal_or_none,
     _format_option_contract_symbol,
@@ -106,6 +111,30 @@ class ExecutionRepositoryMixin:
             )
             for row in rows
         )
+    def load_filled_stock_events(self) -> tuple[StockFillEvent, ...]:
+        order_rows = self.session.query(PaperOrder).all()
+        orders_by_id = {row.paper_order_id: row for row in order_rows}
+        execution_rows = self.session.query(PaperExecution).all()
+        events: list[StockFillEvent] = []
+        for row in execution_rows:
+            order = orders_by_id.get(row.paper_order_id)
+            if order is None:
+                raise PortfolioPnlValidationError(
+                    f"orphan_execution:{row.paper_execution_id}:{row.paper_order_id}"
+                )
+            if str(order.status).lower() != "filled":
+                continue
+            events.append(
+                StockFillEvent(
+                    execution_id=str(row.paper_execution_id),
+                    ticker=row.ticker,
+                    executed_at=row.executed_at,
+                    action=order.action,
+                    quantity=float(row.quantity),
+                    fill_price=float(row.fill_price),
+                )
+            )
+        return tuple(sorted(events, key=lambda event: (event.executed_at, event.execution_id)))
     def load_paper_positions(self) -> tuple[StockPosition, ...]:
         rows = self.session.query(PaperPosition).filter_by(status="open").all()
         positions = [
@@ -185,6 +214,17 @@ class ExecutionRepositoryMixin:
         )
         self.session.add(row)
         self.session.flush()
+    def load_portfolio_pnl_points(self) -> tuple[PortfolioPnlPoint, ...]:
+        rows = self.session.query(PortfolioSnapshotModel).all()
+        return tuple(
+            PortfolioPnlPoint(
+                snapshot_time=row.snapshot_time,
+                account_equity=float(row.account_equity),
+                stock_market_value=float(row.stock_market_value),
+                option_market_value=float(row.option_market_value),
+            )
+            for row in sorted(rows, key=lambda item: item.snapshot_time)
+        )
     def save_option_strategy_decision(self, decision: OptionStrategyDecisionRecord) -> None:
         row = self.session.query(OptionStrategyDecision).filter_by(
             option_strategy_decision_id=_to_uuid(decision.option_strategy_decision_id)

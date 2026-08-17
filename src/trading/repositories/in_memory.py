@@ -22,6 +22,11 @@ from src.trading.risk.hedges import RiskHedgeDecisionRecord
 from src.trading.risk.options import OptionRiskSnapshotRecord
 from src.trading.options.strategy import OptionStrategyDecisionRecord, OptionStrategyLegRecord
 from src.trading.portfolio.state import PortfolioSnapshot, StockPosition
+from src.trading.portfolio.pnl import (
+    PortfolioPnlPoint,
+    PortfolioPnlValidationError,
+    StockFillEvent,
+)
 from src.trading.risk import (
     PortfolioRiskIntentRecord,
     PortfolioRiskSnapshotRecord,
@@ -629,6 +634,29 @@ class InMemoryTradingRepository:
             if str(order.status).lower() not in terminal_statuses
         )
 
+    def load_filled_stock_events(self) -> tuple[StockFillEvent, ...]:
+        orders_by_id = {order.paper_order_id: order for order in self.paper_orders}
+        events: list[StockFillEvent] = []
+        for execution in self.paper_executions:
+            order = orders_by_id.get(execution.paper_order_id)
+            if order is None:
+                raise PortfolioPnlValidationError(
+                    f"orphan_execution:{execution.paper_execution_id}:{execution.paper_order_id}"
+                )
+            if str(order.status).lower() != "filled":
+                continue
+            events.append(
+                StockFillEvent(
+                    execution_id=execution.paper_execution_id,
+                    ticker=execution.ticker,
+                    executed_at=execution.executed_at,
+                    action=order.action,
+                    quantity=execution.quantity,
+                    fill_price=execution.fill_price,
+                )
+            )
+        return tuple(sorted(events, key=lambda event: (event.executed_at, event.execution_id)))
+
     def save_execution_attempt(self, attempt: ExecutionAttemptRecord) -> None:
         self.execution_attempts = [
             item
@@ -675,6 +703,17 @@ class InMemoryTradingRepository:
 
     def save_portfolio_snapshot(self, snapshot: PortfolioSnapshot) -> None:
         self.portfolio_snapshots.append(snapshot)
+
+    def load_portfolio_pnl_points(self) -> tuple[PortfolioPnlPoint, ...]:
+        return tuple(
+            PortfolioPnlPoint(
+                snapshot_time=snapshot.as_of,
+                account_equity=snapshot.account_equity,
+                stock_market_value=snapshot.stock_market_value,
+                option_market_value=snapshot.option_market_value,
+            )
+            for snapshot in sorted(self.portfolio_snapshots, key=lambda item: item.as_of)
+        )
 
     def save_intraday_signal_scan(self, scan: IntradaySignalScanRecord) -> None:
         self.intraday_signal_scans.append(scan)
