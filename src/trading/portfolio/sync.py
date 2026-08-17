@@ -6,7 +6,9 @@ from datetime import datetime
 from typing import Any
 import uuid
 
+from src.core.config import PAPER_ACCOUNT_STARTING_EQUITY
 from src.trading.brokers.paper_option import PaperOptionPosition
+from src.trading.portfolio.pnl import enrich_snapshot_with_stock_pnl
 from src.trading.portfolio.state import (
     OptionPosition,
     PortfolioSnapshot,
@@ -78,6 +80,13 @@ class BrokerPortfolioSyncWorkflow:
         snapshot = build_portfolio_snapshot_from_account(
             account_payload,
             as_of=as_of,
+        )
+        snapshot = enrich_snapshot_with_stock_pnl(
+            snapshot,
+            positions=synced_positions,
+            points=self.repository.load_portfolio_pnl_points(),
+            fills=self.repository.load_filled_stock_events(),
+            starting_equity=PAPER_ACCOUNT_STARTING_EQUITY,
         )
         if persist:
             _reconcile_local_option_positions(

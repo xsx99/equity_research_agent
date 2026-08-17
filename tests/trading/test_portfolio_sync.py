@@ -1,11 +1,14 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
+import pytest
+
 from src.trading.brokers.paper_option import PaperOptionPosition
-from src.trading.brokers.paper_stock import PaperOrderRecord, PaperStockBroker
-from src.trading.portfolio.state import StockPosition
+from src.trading.brokers.paper_stock import PaperExecutionRecord, PaperOrderRecord, PaperStockBroker
+from src.trading.portfolio.pnl import PortfolioPnlValidationError
+from src.trading.portfolio.state import PortfolioSnapshot, StockPosition
 from src.trading.repositories.in_memory import InMemoryTradingRepository
 from src.trading.workflows.portfolio_sync import BrokerPortfolioSyncWorkflow
 
@@ -73,6 +76,17 @@ class _BrokerWithOptionStub:
         ]
 
 
+class _ProfitableBrokerStub(_BrokerStub):
+    def sync_account(self) -> dict[str, Any]:
+        return {
+            **super().sync_account(),
+            "cash": "1000017.85",
+            "equity": "1000020.12",
+            "portfolio_value": "1000020.12",
+            "last_equity": "1000000.00",
+        }
+
+
 class _LateFilledOrderClient:
     def get(self, url: str, *, params: dict[str, Any] | None = None, headers: dict[str, str]):
         if url.endswith("/v2/orders:by_client_order_id"):
@@ -134,6 +148,17 @@ def test_broker_portfolio_sync_workflow_persists_broker_state_and_builds_portfol
     opened_at = datetime(2026, 6, 2, 16, 31, tzinfo=timezone.utc)
     synced_at = datetime(2026, 6, 3, 16, 31, tzinfo=timezone.utc)
     repository = InMemoryTradingRepository()
+    _seed_clean_reset(repository)
+    _seed_filled_stock_order(
+        repository,
+        execution_id="aapl-buy-execution",
+        order_id="aapl-buy-order",
+        ticker="AAPL",
+        action="enter_long",
+        quantity=0.01,
+        price=227.15,
+        executed_at=datetime(2026, 6, 2, 15, 0, tzinfo=timezone.utc),
+    )
     repository.save_paper_position(
         StockPosition(
             ticker="AAPL",
@@ -165,12 +190,16 @@ def test_broker_portfolio_sync_workflow_persists_broker_state_and_builds_portfol
     assert repository.paper_positions[0].strategy_id == "relative_strength_rotation_v1"
     assert repository.paper_positions[0].opened_at == opened_at
     assert repository.portfolio_snapshots[-1].account_equity == 1000000.12
+    assert result.snapshot.realized_pnl == 0.0
+    assert result.snapshot.unrealized_pnl == pytest.approx(-0.0015)
+    assert result.snapshot.metadata_json["pnl_calculation_method"] == "weighted_average_stock_fills_v1"
 
 
 def test_broker_portfolio_sync_workflow_reconciles_late_filled_stock_orders():
     submitted_at = datetime(2026, 6, 2, 16, 31, tzinfo=timezone.utc)
     synced_at = datetime(2026, 6, 2, 16, 33, tzinfo=timezone.utc)
     repository = InMemoryTradingRepository()
+    _seed_clean_reset(repository)
     repository.save_paper_order(
         PaperOrderRecord(
             paper_order_id="paper-order-1",
@@ -205,6 +234,7 @@ def test_broker_portfolio_sync_workflow_reconciles_late_filled_stock_orders():
 def test_broker_portfolio_sync_workflow_uses_broker_option_positions_without_local_overlay():
     now = datetime(2026, 6, 2, 16, 31, tzinfo=timezone.utc)
     repository = InMemoryTradingRepository()
+    _seed_aapl_history(repository, before=now)
     repository.save_paper_option_position(
         PaperOptionPosition(
             paper_option_position_id="option-position-1",
@@ -255,6 +285,7 @@ def test_broker_portfolio_sync_workflow_uses_broker_option_positions_without_loc
 def test_broker_portfolio_sync_workflow_persists_broker_option_positions_without_local_overlay():
     now = datetime(2026, 6, 2, 16, 31, tzinfo=timezone.utc)
     repository = InMemoryTradingRepository()
+    _seed_aapl_history(repository, before=now)
     workflow = BrokerPortfolioSyncWorkflow(
         repository=repository,
         broker=_BrokerWithOptionStub(),
@@ -282,6 +313,7 @@ def test_broker_portfolio_sync_workflow_persists_broker_option_positions_without
 def test_broker_portfolio_sync_workflow_reconciles_missing_broker_option_positions():
     now = datetime(2026, 6, 2, 16, 31, tzinfo=timezone.utc)
     repository = InMemoryTradingRepository()
+    _seed_aapl_history(repository, before=now)
     repository.save_paper_option_position(
         PaperOptionPosition(
             paper_option_position_id="option-position-1",
@@ -321,3 +353,160 @@ def test_broker_portfolio_sync_workflow_reconciles_missing_broker_option_positio
     assert result.snapshot.option_market_value == 0.0
     assert reconciled.status == "closed"
     assert reconciled.metadata_json["reconciliation_status"] == "broker_position_missing"
+
+
+def test_broker_portfolio_sync_workflow_persists_replayed_realized_and_unrealized_pnl() -> None:
+    synced_at = datetime(2026, 6, 3, 16, 31, tzinfo=timezone.utc)
+    repository = InMemoryTradingRepository()
+    _seed_clean_reset(repository)
+    _seed_filled_stock_order(
+        repository,
+        execution_id="aapl-buy-execution",
+        order_id="aapl-buy-order",
+        ticker="AAPL",
+        action="enter_long",
+        quantity=0.01,
+        price=227.15,
+        executed_at=datetime(2026, 6, 2, 15, 0, tzinfo=timezone.utc),
+    )
+    _seed_filled_stock_order(
+        repository,
+        execution_id="loss-buy-execution",
+        order_id="loss-buy-order",
+        ticker="LOSS",
+        action="enter_long",
+        quantity=1,
+        price=100,
+        executed_at=datetime(2026, 6, 2, 15, 1, tzinfo=timezone.utc),
+    )
+    _seed_filled_stock_order(
+        repository,
+        execution_id="loss-sell-execution",
+        order_id="loss-sell-order",
+        ticker="LOSS",
+        action="exit",
+        quantity=1,
+        price=120,
+        executed_at=datetime(2026, 6, 2, 15, 2, tzinfo=timezone.utc),
+    )
+
+    result = BrokerPortfolioSyncWorkflow(
+        repository=repository,
+        broker=_ProfitableBrokerStub(),
+    ).run(as_of=synced_at)
+
+    assert result.snapshot.realized_pnl == pytest.approx(20.0)
+    assert result.snapshot.unrealized_pnl == pytest.approx(-0.0015)
+    assert result.snapshot.metadata_json["pnl_reconciliation_residual"] == pytest.approx(0.1215)
+    assert repository.portfolio_snapshots[-1] == result.snapshot
+
+
+def test_broker_portfolio_sync_workflow_does_not_persist_invalid_pnl_history() -> None:
+    synced_at = datetime(2026, 6, 3, 16, 31, tzinfo=timezone.utc)
+    repository = InMemoryTradingRepository()
+    _seed_clean_reset(repository)
+    _seed_filled_stock_order(
+        repository,
+        execution_id="mismatched-buy-execution",
+        order_id="mismatched-buy-order",
+        ticker="AAPL",
+        action="enter_long",
+        quantity=0.02,
+        price=227.15,
+        executed_at=datetime(2026, 6, 2, 15, 0, tzinfo=timezone.utc),
+    )
+
+    with pytest.raises(PortfolioPnlValidationError, match="quantity_mismatch"):
+        BrokerPortfolioSyncWorkflow(
+            repository=repository,
+            broker=_BrokerStub(),
+        ).run(as_of=synced_at)
+
+    assert len(repository.portfolio_snapshots) == 1
+    assert repository.paper_positions == []
+
+
+def _seed_aapl_history(repository: InMemoryTradingRepository, *, before: datetime) -> None:
+    _seed_clean_reset(repository)
+    _seed_filled_stock_order(
+        repository,
+        execution_id="aapl-buy-execution",
+        order_id="aapl-buy-order",
+        ticker="AAPL",
+        action="enter_long",
+        quantity=0.01,
+        price=227.15,
+        executed_at=before - timedelta(hours=1),
+    )
+
+
+def _seed_clean_reset(repository: InMemoryTradingRepository) -> None:
+    reset_at = datetime(2026, 6, 1, 13, 0, tzinfo=timezone.utc)
+    repository.save_portfolio_snapshot(
+        PortfolioSnapshot(
+            as_of=reset_at,
+            cash_balance=1_000_000,
+            account_equity=1_000_000,
+            net_liquidation_value=1_000_000,
+            buying_power=4_000_000,
+            excess_liquidity=1_000_000,
+            stock_market_value=0,
+            option_market_value=0,
+            stock_margin_requirement=0,
+            option_margin_requirement=0,
+            total_margin_requirement=0,
+            initial_margin_requirement=0,
+            maintenance_margin_requirement=0,
+            margin_model_profile="alpaca_paper_account",
+            margin_model_version="broker",
+            margin_requirement_source="broker_reported",
+            day_pnl=0,
+            realized_pnl=0,
+            unrealized_pnl=0,
+            metadata_json={},
+        )
+    )
+
+
+def _seed_filled_stock_order(
+    repository: InMemoryTradingRepository,
+    *,
+    execution_id: str,
+    order_id: str,
+    ticker: str,
+    action: str,
+    quantity: float,
+    price: float,
+    executed_at: datetime,
+) -> None:
+    repository.save_paper_order(
+        PaperOrderRecord(
+            paper_order_id=order_id,
+            broker_order_id=None,
+            client_order_id=f"{order_id}-client",
+            trading_decision_id="",
+            risk_decision_id="",
+            ticker=ticker,
+            strategy_id="test_strategy",
+            action=action,
+            trade_date=executed_at.date(),
+            quantity=quantity,
+            limit_price=price,
+            status="filled",
+            rejection_reason=None,
+            created_at=executed_at,
+        )
+    )
+    repository.save_paper_execution(
+        PaperExecutionRecord(
+            paper_execution_id=execution_id,
+            paper_order_id=order_id,
+            broker_order_id=None,
+            ticker=ticker,
+            quantity=quantity,
+            fill_price=price,
+            trade_date=executed_at.date(),
+            executed_at=executed_at,
+            net_cash_effect=(-1 if action == "enter_long" else 1) * quantity * price,
+        )
+    )

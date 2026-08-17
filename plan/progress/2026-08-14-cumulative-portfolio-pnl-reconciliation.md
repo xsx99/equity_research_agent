@@ -11,7 +11,7 @@
 - [x] Task 2: Add active-lifecycle boundary selection and snapshot enrichment.
 - [x] Task 3: Add normalized repository P&L inputs.
 - [x] Task 4: Correct future stock execution cash effects.
-- [ ] Task 5: Enrich every live broker snapshot before persistence.
+- [x] Task 5: Enrich every live broker snapshot before persistence.
 - [ ] Task 6: Make Today header P&L snapshot-consistent across tabs.
 - [ ] Task 7: Add the safe historical repair command.
 - [ ] Task 8: Document operations and update trackers.
@@ -25,7 +25,7 @@
 - [x] Spec review approved after three iterations.
 - [x] User approved the written spec.
 - [x] Implementation plan review approved after two iterations.
-- [ ] Isolated implementation worktree created and baseline verified.
+- [x] Isolated implementation worktree created and baseline verified.
 - [ ] Every production behavior has a witnessed RED test before implementation.
 - [ ] Persistent Postgres data directory and host mount verified.
 - [ ] Production dry-run report reviewed.
@@ -45,6 +45,7 @@
 - 2026-08-17: Task 2 RED failed because the lifecycle/enrichment contracts and tolerance constants were absent; GREEN passed `tests/trading/test_portfolio_pnl.py` (`18 passed`). Snapshot enrichment now selects the latest clean reset, rejects ambiguous reset timestamps and position mismatches, preserves metadata, uses replay cost basis, and audits residuals/excluded rows with shared tolerances.
 - 2026-08-17: Task 3 RED produced two missing-loader failures; GREEN passed the two focused SQLAlchemy/in-memory repository tests and `tests/trading/test_portfolio_sync.py` (`5 passed`). Both repositories now emit deterministically ordered filled-stock events joined to order action plus ascending portfolio P&L points, and reject orphan executions.
 - 2026-08-17: Task 4 RED showed both `reduce` and `exit` fills persisted `-2.2715` instead of `+2.2715`; GREEN passed the focused cases and the full `tests/trading/test_paper_stock_broker.py` module (`20 passed`). Future long buys remain cash outflows while reductions/exits are cash inflows.
+- 2026-08-17: Task 5 RED showed live sync still persisted `realized_pnl=0.0` and accepted a fill/broker quantity mismatch; GREEN passed `tests/trading/test_portfolio_sync.py` (`7 passed`) plus live runtime regression (`52 passed`). Every broker snapshot is now enriched from the active-lifecycle ledger and validated before position or snapshot persistence.
 
 ## Final Results
 
