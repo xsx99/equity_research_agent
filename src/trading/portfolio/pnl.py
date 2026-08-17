@@ -147,19 +147,20 @@ def replay_stock_fills(
     if through < started_at:
         raise PortfolioPnlValidationError("through_before_started_at")
 
-    normalized = tuple(_validate_fill(fill) for fill in fills)
+    active_candidates = []
+    for fill in fills:
+        if fill.executed_at.tzinfo is None:
+            raise PortfolioPnlValidationError(
+                f"executed_at_timezone:{fill.execution_id}"
+            )
+        if started_at <= fill.executed_at <= through:
+            active_candidates.append(fill)
+    normalized = tuple(_validate_fill(fill) for fill in active_candidates)
     execution_ids = [fill.execution_id for fill in normalized]
     if len(set(execution_ids)) != len(execution_ids):
         raise PortfolioPnlValidationError("duplicate_execution_id")
 
-    active = sorted(
-        (
-            fill
-            for fill in normalized
-            if started_at <= fill.executed_at <= through
-        ),
-        key=lambda fill: (fill.executed_at, fill.execution_id),
-    )
+    active = sorted(normalized, key=lambda fill: (fill.executed_at, fill.execution_id))
     open_cost_basis: dict[str, OpenCostBasis] = {}
     realized_pnl = 0.0
     for fill in active:

@@ -236,6 +236,32 @@ def _run_historical_replay_fixture() -> dict[str, Any]:
 def _run_paper_trade_dry_run() -> dict[str, Any]:
     from scripts.run_trading_paper_execution import run_execution
 
+    repository = InMemoryTradingRepository()
+    decision_time = _fixed_now()
+    repository.save_portfolio_snapshot(
+        PortfolioSnapshot(
+            as_of=decision_time - timedelta(minutes=30),
+            cash_balance=1_000_000,
+            account_equity=1_000_000,
+            net_liquidation_value=1_000_000,
+            buying_power=4_000_000,
+            excess_liquidity=1_000_000,
+            stock_market_value=0,
+            option_market_value=0,
+            stock_margin_requirement=0,
+            option_margin_requirement=0,
+            total_margin_requirement=0,
+            initial_margin_requirement=0,
+            maintenance_margin_requirement=0,
+            margin_model_profile="fixture",
+            margin_model_version="v1",
+            margin_requirement_source="fixture",
+            day_pnl=0,
+            realized_pnl=0,
+            unrealized_pnl=0,
+            metadata_json={},
+        )
+    )
     result = run_execution(
         ticker="AAPL",
         strategy_id="relative_strength_rotation_v1",
@@ -243,7 +269,8 @@ def _run_paper_trade_dry_run() -> dict[str, Any]:
         decision="enter_long",
         quantity=0.01,
         broker=_FakePaperStockBroker(),
-        as_of=_fixed_now(),
+        repository=repository,
+        as_of=decision_time,
     )
     return {
         "status": result["status"],

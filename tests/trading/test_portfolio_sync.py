@@ -133,6 +133,24 @@ class _LateFilledOrderClient:
         raise AssertionError(f"unexpected_get:{url}")
 
 
+class _MismatchedLateFilledOrderClient(_LateFilledOrderClient):
+    def get(self, url: str, *, params: dict[str, Any] | None = None, headers: dict[str, str]):
+        if url.endswith("/v2/positions"):
+            return _ResponseStub(
+                [
+                    {
+                        "symbol": "AAPL",
+                        "qty": "0.02",
+                        "avg_entry_price": "227.15",
+                        "current_price": "227.27",
+                        "market_value": "4.55",
+                        "side": "long",
+                    }
+                ]
+            )
+        return super().get(url, params=params, headers=headers)
+
+
 class _ResponseStub:
     def __init__(self, payload: Any) -> None:
         self._payload = payload
@@ -229,6 +247,57 @@ def test_broker_portfolio_sync_workflow_reconciles_late_filled_stock_orders():
     assert len(repository.paper_executions) == 1
     assert repository.paper_executions[0].paper_order_id == "paper-order-1"
     assert repository.paper_positions[0].strategy_id == "relative_strength_rotation_v1"
+
+
+def test_late_filled_stock_execution_is_checkpointed_before_snapshot_validation() -> None:
+    submitted_at = datetime(2026, 6, 2, 16, 31, tzinfo=timezone.utc)
+
+    class _CheckpointRepository(InMemoryTradingRepository):
+        def __init__(self) -> None:
+            super().__init__()
+            self.checkpointed_execution_ids: tuple[str, ...] = ()
+
+        def commit_irreversible_stock_fill(self) -> None:
+            self.checkpointed_execution_ids = tuple(
+                execution.paper_execution_id
+                for execution in self.paper_executions
+            )
+
+    repository = _CheckpointRepository()
+    _seed_clean_reset(repository)
+    repository.save_paper_order(
+        PaperOrderRecord(
+            paper_order_id="paper-order-1",
+            broker_order_id="broker-order-1",
+            client_order_id="2026-06-02:AAPL:relative_strength_rotation_v1:enter_long",
+            trading_decision_id="11111111-1111-4111-8111-111111111111",
+            risk_decision_id="22222222-2222-4222-8222-222222222222",
+            ticker="AAPL",
+            strategy_id="relative_strength_rotation_v1",
+            action="enter_long",
+            trade_date=submitted_at.date(),
+            quantity=0.01,
+            limit_price=None,
+            status="accepted",
+            rejection_reason=None,
+            created_at=submitted_at,
+        )
+    )
+
+    with pytest.raises(PortfolioPnlValidationError, match="quantity_mismatch"):
+        BrokerPortfolioSyncWorkflow(
+            repository=repository,
+            broker=PaperStockBroker(
+                api_key="key",
+                secret_key="secret",
+                client=_MismatchedLateFilledOrderClient(),
+            ),
+        ).run(as_of=datetime(2026, 6, 2, 16, 33, tzinfo=timezone.utc))
+
+    assert len(repository.paper_executions) == 1
+    assert repository.checkpointed_execution_ids == (
+        repository.paper_executions[0].paper_execution_id,
+    )
 
 
 def test_broker_portfolio_sync_workflow_uses_broker_option_positions_without_local_overlay():

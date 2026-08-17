@@ -14,6 +14,7 @@ from src.trading.brokers.paper_option import (
 )
 from src.trading.brokers.paper_stock import PaperOrderRequest, PaperStockBroker
 from src.trading.portfolio.state import PortfolioSnapshot
+from src.trading.portfolio.pnl import PortfolioPnlValidationError
 from src.trading.repositories.in_memory import InMemoryTradingRepository
 from src.trading.risk import OptionRiskAssessment, RiskDecisionRecord
 from src.trading.workflows.paper_execution import PaperExecutionWorkflow
@@ -835,6 +836,49 @@ def test_paper_execution_workflow_persists_broker_sourced_order_account_and_posi
     assert repository.paper_positions[0].quantity == 0.01
     assert result.portfolio_snapshots[-1].cash_balance == 999997.73
     assert result.portfolio_snapshots[-1].buying_power == 1999995.46
+
+
+def test_filled_stock_execution_is_checkpointed_before_snapshot_validation() -> None:
+    now = datetime(2026, 6, 2, 16, 31, tzinfo=timezone.utc)
+
+    class _CheckpointRepository(InMemoryTradingRepository):
+        def __init__(self) -> None:
+            super().__init__()
+            self.checkpointed_execution_ids: tuple[str, ...] = ()
+
+        def commit_irreversible_stock_fill(self) -> None:
+            self.checkpointed_execution_ids = tuple(
+                execution.paper_execution_id
+                for execution in self.paper_executions
+            )
+
+    class _FailingPortfolioSync:
+        def run(self, **_kwargs):
+            raise PortfolioPnlValidationError("quantity_mismatch:AAPL:0.0!=0.01")
+
+    repository = _CheckpointRepository()
+    workflow = PaperExecutionWorkflow(
+        repository=repository,
+        broker=PaperStockBroker(
+            api_key="key",
+            secret_key="secret",
+            client=_CapturingClient(),
+        ),
+        manual_request_service=ManualTickerRequestService(now=lambda: now),
+    )
+    workflow.portfolio_sync = _FailingPortfolioSync()
+
+    with pytest.raises(PortfolioPnlValidationError, match="quantity_mismatch"):
+        workflow.run(
+            trading_decisions=(_trading_decision(),),
+            risk_decisions=(_risk_decision(),),
+            trade_date=now,
+        )
+
+    assert len(repository.paper_executions) == 1
+    assert repository.checkpointed_execution_ids == (
+        repository.paper_executions[0].paper_execution_id,
+    )
 
 
 def test_paper_execution_workflow_reconciles_delayed_stock_fill_before_returning_no_fill():

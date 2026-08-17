@@ -1,6 +1,8 @@
 from datetime import datetime, timezone
 
 from scripts.run_trading_paper_execution import run_execution
+from src.trading.portfolio.state import PortfolioSnapshot
+from src.trading.repositories.in_memory import InMemoryTradingRepository
 
 
 class _FakeBroker:
@@ -63,6 +65,31 @@ class _FakeBroker:
 
 
 def test_run_trading_paper_execution_uses_workflow_and_returns_persisted_artifacts():
+    repository = InMemoryTradingRepository()
+    repository.save_portfolio_snapshot(
+        PortfolioSnapshot(
+            as_of=datetime(2026, 6, 2, 13, 0, tzinfo=timezone.utc),
+            cash_balance=1_000_000,
+            account_equity=1_000_000,
+            net_liquidation_value=1_000_000,
+            buying_power=4_000_000,
+            excess_liquidity=1_000_000,
+            stock_market_value=0,
+            option_market_value=0,
+            stock_margin_requirement=0,
+            option_margin_requirement=0,
+            total_margin_requirement=0,
+            initial_margin_requirement=0,
+            maintenance_margin_requirement=0,
+            margin_model_profile="fixture",
+            margin_model_version="v1",
+            margin_requirement_source="fixture",
+            day_pnl=0,
+            realized_pnl=0,
+            unrealized_pnl=0,
+            metadata_json={},
+        )
+    )
     result = run_execution(
         ticker="aapl",
         strategy_id="relative_strength_rotation_v1",
@@ -70,6 +97,7 @@ def test_run_trading_paper_execution_uses_workflow_and_returns_persisted_artifac
         decision="enter_long",
         quantity=0.01,
         broker=_FakeBroker(),
+        repository=repository,
         as_of=datetime(2026, 6, 2, 16, 31, tzinfo=timezone.utc),
     )
 

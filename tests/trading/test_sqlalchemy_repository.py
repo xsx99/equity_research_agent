@@ -112,6 +112,7 @@ class _FakeSession:
     def __init__(self) -> None:
         self.rows_by_type: dict[type, list[object]] = {}
         self.flush_calls = 0
+        self.commit_calls = 0
 
     def add(self, row: object) -> None:
         self.rows_by_type.setdefault(type(row), []).append(row)
@@ -121,6 +122,9 @@ class _FakeSession:
 
     def flush(self) -> None:
         self.flush_calls += 1
+
+    def commit(self) -> None:
+        self.commit_calls += 1
 
 
 class _AutoflushFakeSession(_FakeSession):
@@ -1957,6 +1961,15 @@ def test_sqlalchemy_repository_preserves_null_option_strategy_decision_for_broke
     loaded_position = repository.load_paper_option_positions()[0]
 
     assert loaded_position.option_strategy_decision_id is None
+
+
+def test_sqlalchemy_repository_commits_irreversible_stock_fill_checkpoint():
+    session = _FakeSession()
+    repository = SqlAlchemyTradingRepository(session)
+
+    repository.commit_irreversible_stock_fill()
+
+    assert session.commit_calls == 1
 
 
 class _BrokerStub:

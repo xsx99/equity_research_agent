@@ -112,6 +112,9 @@ def test_dry_run_reports_changes_without_mutating_rows(repair_case):
     assert report["status"] == "dry_run"
     assert report["snapshot_repair_count"] == 3
     assert report["cash_effect_repair_count"] == 1
+    assert report["earliest_snapshot_to_update"] == "2026-06-02T13:00:00+00:00"
+    assert report["latest_snapshot_to_update"] == "2026-06-02T15:00:00+00:00"
+    assert report["validation_errors"] == []
     assert report["latest_realized_pnl"] == pytest.approx(100)
     assert report["latest_unrealized_pnl"] == pytest.approx(100)
     assert latest.realized_pnl == Decimal("0")
@@ -199,6 +202,85 @@ def test_latest_position_mismatch_blocks_all_writes(repair_case, field, value, m
     assert repair_case.rows[PortfolioSnapshot][-1].realized_pnl == Decimal("0")
     assert repair_case.commit_count == 0
     assert repair_case.rollback_count == 1
+
+
+def test_dry_run_returns_structured_position_mismatch(repair_case):
+    repair_case.rows[PaperPosition][0].quantity = Decimal("4")
+
+    report = repair_portfolio_pnl.run_repair(
+        session=repair_case,
+        apply=False,
+        starting_equity=1_000_000,
+    )
+
+    assert report["status"] == "blocked"
+    assert report["validation_errors"] == ["quantity_mismatch:AAPL:4.0!=5.0"]
+    assert report["position_mismatches"] == [
+        {
+            "kind": "quantity",
+            "ticker": "AAPL",
+            "mirrored": 4.0,
+            "replayed": 5.0,
+        }
+    ]
+    assert repair_case.rollback_count == 1
+
+
+def test_historical_inventory_without_fill_blocks_even_when_latest_account_is_flat():
+    reset_at = datetime(2026, 6, 2, 13, 0, tzinfo=timezone.utc)
+    reset = _snapshot(reset_at, equity=1_000_000, stock_value=0)
+    unexplained_inventory = _snapshot(
+        reset_at + timedelta(hours=1),
+        equity=1_000_010,
+        stock_value=100,
+    )
+    later_flat = _snapshot(
+        reset_at + timedelta(hours=2),
+        equity=999_900,
+        stock_value=0,
+    )
+    session = _FakeSession(
+        snapshots=[reset, unexplained_inventory, later_flat],
+        orders=[],
+        executions=[],
+        positions=[],
+    )
+
+    report = repair_portfolio_pnl.run_repair(
+        session=session,
+        apply=False,
+        starting_equity=1_000_000,
+    )
+
+    assert report["status"] == "blocked"
+    assert report["validation_errors"] == [
+        "historical_inventory_mismatch:2026-06-02T14:00:00+00:00:snapshot=True:replay=False"
+    ]
+    assert unexplained_inventory.unrealized_pnl == Decimal("0")
+
+
+def test_apply_rejects_historical_inventory_without_fill():
+    reset_at = datetime(2026, 6, 2, 13, 0, tzinfo=timezone.utc)
+    session = _FakeSession(
+        snapshots=[
+            _snapshot(reset_at, equity=1_000_000, stock_value=0),
+            _snapshot(reset_at + timedelta(hours=1), equity=1_000_010, stock_value=100),
+            _snapshot(reset_at + timedelta(hours=2), equity=999_900, stock_value=0),
+        ],
+        orders=[],
+        executions=[],
+        positions=[],
+    )
+
+    with pytest.raises(PortfolioPnlValidationError, match="historical_inventory_mismatch"):
+        repair_portfolio_pnl.run_repair(
+            session=session,
+            apply=True,
+            starting_equity=1_000_000,
+        )
+
+    assert session.commit_count == 0
+    assert session.rollback_count == 1
 
 
 def test_replay_validation_failure_rolls_back_everything(repair_case):

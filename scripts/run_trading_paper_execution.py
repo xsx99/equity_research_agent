@@ -17,8 +17,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.core import config as app_config  # noqa: F401
 from src.trading.manual_review.requests import ManualTickerRequestService
 from src.trading.brokers.paper_stock import PaperStockBroker
-from src.trading.portfolio.state import PortfolioSnapshot
-from src.trading.repositories.in_memory import InMemoryTradingRepository
+from src.db.connection import get_session
+from src.trading.repositories.sqlalchemy import SqlAlchemyTradingRepository
 from src.trading.risk import RiskDecisionRecord
 from src.trading.workflows.paper_execution import PaperExecutionWorkflow
 from src.trading.workflows.trading_decision import TradingDecisionRecord
@@ -32,34 +32,10 @@ def run_execution(
     decision: str,
     quantity: float,
     broker: Any,
+    repository: Any,
     as_of: datetime | None = None,
 ) -> dict[str, Any]:
     now = as_of or datetime.now(timezone.utc)
-    repository = InMemoryTradingRepository()
-    repository.save_portfolio_snapshot(
-        PortfolioSnapshot(
-            as_of=now.replace(hour=0, minute=0, second=0, microsecond=0),
-            cash_balance=app_config.PAPER_ACCOUNT_STARTING_EQUITY,
-            account_equity=app_config.PAPER_ACCOUNT_STARTING_EQUITY,
-            net_liquidation_value=app_config.PAPER_ACCOUNT_STARTING_EQUITY,
-            buying_power=app_config.PAPER_ACCOUNT_STARTING_EQUITY * 4,
-            excess_liquidity=app_config.PAPER_ACCOUNT_STARTING_EQUITY,
-            stock_market_value=0,
-            option_market_value=0,
-            stock_margin_requirement=0,
-            option_margin_requirement=0,
-            total_margin_requirement=0,
-            initial_margin_requirement=0,
-            maintenance_margin_requirement=0,
-            margin_model_profile="standalone_execution",
-            margin_model_version="v1",
-            margin_requirement_source="standalone_seed",
-            day_pnl=0,
-            realized_pnl=0,
-            unrealized_pnl=0,
-            metadata_json={},
-        )
-    )
     workflow = PaperExecutionWorkflow(
         repository=repository,
         broker=broker,
@@ -109,14 +85,16 @@ def main() -> int:
 
     broker = PaperStockBroker()
     try:
-        result = run_execution(
-            ticker=args.ticker,
-            strategy_id=args.strategy_id,
-            trade_identity=args.trade_identity,
-            decision=args.decision,
-            quantity=args.quantity,
-            broker=broker,
-        )
+        with get_session() as session:
+            result = run_execution(
+                ticker=args.ticker,
+                strategy_id=args.strategy_id,
+                trade_identity=args.trade_identity,
+                decision=args.decision,
+                quantity=args.quantity,
+                broker=broker,
+                repository=SqlAlchemyTradingRepository(session),
+            )
     finally:
         if hasattr(broker, "close"):
             broker.close()

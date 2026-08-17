@@ -158,6 +158,35 @@ def test_replay_stock_fills_rejects_oversell() -> None:
         )
 
 
+def test_replay_stock_fills_ignores_unsupported_pre_boundary_fill() -> None:
+    boundary = START + timedelta(days=2)
+    replay = replay_stock_fills(
+        (
+            _fill(
+                "old-short",
+                "AAPL",
+                "enter_short",
+                10,
+                100,
+                executed_at=START + timedelta(days=1),
+            ),
+            _fill(
+                "active-buy",
+                "AAPL",
+                "enter_long",
+                2,
+                110,
+                executed_at=START + timedelta(days=3),
+            ),
+        ),
+        started_at=boundary,
+        through=START + timedelta(days=4),
+    )
+
+    assert replay.fill_count == 1
+    assert replay.open_cost_basis["AAPL"].quantity == pytest.approx(2)
+
+
 def test_select_active_lifecycle_boundary_uses_latest_clean_reset() -> None:
     first_reset = START
     second_reset = START + timedelta(days=10)

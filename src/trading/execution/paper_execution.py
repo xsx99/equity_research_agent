@@ -570,6 +570,22 @@ class PaperExecutionWorkflow:
             )
             return
         self.repository.save_paper_execution(execution)
+        self._save_execution_attempt(
+            submitted(
+                trading_decision=trading_decision,
+                phase=phase,
+                paper_order_id=order.paper_order_id,
+                risk_decision_id=risk_decision.risk_decision_id,
+            ),
+            attempts=attempts,
+        )
+        checkpoint_fill = getattr(
+            self.repository,
+            "commit_irreversible_stock_fill",
+            None,
+        )
+        if callable(checkpoint_fill):
+            checkpoint_fill()
         sync_result = self.portfolio_sync.run(
             as_of=execution.executed_at,
             extra_position_metadata={
@@ -580,15 +596,6 @@ class PaperExecutionWorkflow:
             },
         )
         snapshots.append(sync_result.snapshot)
-        self._save_execution_attempt(
-            submitted(
-                trading_decision=trading_decision,
-                phase=phase,
-                paper_order_id=order.paper_order_id,
-                risk_decision_id=risk_decision.risk_decision_id,
-            ),
-            attempts=attempts,
-        )
 
     def _refresh_stock_order(self, order: PaperOrderRecord) -> PaperOrderRecord:
         refresh_order = getattr(self.broker, "refresh_order", None)

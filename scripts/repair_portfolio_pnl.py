@@ -82,6 +82,17 @@ def run_repair(*, session: Any, apply: bool, starting_equity: float) -> dict[str
                 started_at=boundary,
                 through=row.snapshot_time,
             )
+            snapshot_has_inventory = abs(float(row.stock_market_value)) > CURRENCY_TOLERANCE
+            replay_has_inventory = any(
+                basis.quantity > QUANTITY_TOLERANCE
+                for basis in replay.open_cost_basis.values()
+            )
+            if snapshot_has_inventory != replay_has_inventory:
+                raise PortfolioPnlValidationError(
+                    "historical_inventory_mismatch:"
+                    f"{row.snapshot_time.isoformat()}:"
+                    f"snapshot={snapshot_has_inventory}:replay={replay_has_inventory}"
+                )
             open_cost = sum(
                 basis.quantity * basis.average_cost
                 for basis in replay.open_cost_basis.values()
@@ -155,6 +166,16 @@ def run_repair(*, session: Any, apply: bool, starting_equity: float) -> dict[str
             "active_fill_count": latest_replay.fill_count,
             "snapshot_repair_count": len(snapshot_repairs),
             "cash_effect_repair_count": len(cash_repairs),
+            "earliest_snapshot_to_update": (
+                snapshot_repairs[0][0].snapshot_time.isoformat()
+                if snapshot_repairs
+                else None
+            ),
+            "latest_snapshot_to_update": (
+                snapshot_repairs[-1][0].snapshot_time.isoformat()
+                if snapshot_repairs
+                else None
+            ),
             "latest_realized_pnl": latest_realized,
             "latest_unrealized_pnl": latest_unrealized,
             "latest_reconciliation_residual": latest_residual,
@@ -162,6 +183,18 @@ def run_repair(*, session: Any, apply: bool, starting_equity: float) -> dict[str
             "tolerances": _tolerances(),
             "position_mismatches": [],
             "cost_basis_diagnostics": cost_diagnostics,
+            "validation_errors": [],
+        }
+    except PortfolioPnlValidationError as exc:
+        session.rollback()
+        if apply:
+            raise
+        return {
+            "status": "blocked",
+            "applied": False,
+            "data_directory": _safe_read_postgres_data_directory(session),
+            "validation_errors": [str(exc)],
+            "position_mismatches": _structured_position_mismatches(exc),
         }
     except Exception:
         session.rollback()
@@ -317,6 +350,32 @@ def _cash_effect_repairs(
 def _read_postgres_data_directory(session: Any) -> str:
     value = session.execute(text("SHOW data_directory")).scalar_one()
     return str(value)
+
+
+def _safe_read_postgres_data_directory(session: Any) -> str | None:
+    try:
+        return _read_postgres_data_directory(session)
+    except Exception:
+        return None
+
+
+def _structured_position_mismatches(
+    error: PortfolioPnlValidationError,
+) -> list[dict[str, object]]:
+    parts = str(error).split(":")
+    if len(parts) != 3 or parts[0] not in {"quantity_mismatch", "average_cost_mismatch"}:
+        return []
+    values = parts[2].split("!=", maxsplit=1)
+    if len(values) != 2:
+        return []
+    return [
+        {
+            "kind": "quantity" if parts[0] == "quantity_mismatch" else "average_cost",
+            "ticker": parts[1],
+            "mirrored": float(values[0]),
+            "replayed": float(values[1]),
+        }
+    ]
 
 
 def _tolerances() -> dict[str, float]:

@@ -76,6 +76,9 @@ class ExecutionRepositoryMixin:
         row.executed_at = execution.executed_at
         row.net_cash_effect = Decimal(str(execution.net_cash_effect))
         self.session.flush()
+    def commit_irreversible_stock_fill(self) -> None:
+        """Checkpoint broker fill evidence before fallible portfolio reconciliation."""
+        self.session.commit()
     def has_paper_execution(self, paper_execution_id: str) -> bool:
         return self.session.query(PaperExecution).filter_by(
             paper_execution_id=_to_uuid(paper_execution_id)
