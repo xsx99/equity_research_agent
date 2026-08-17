@@ -2,12 +2,12 @@
 
 **Design:** `plan/design/2026-08-14-cumulative-portfolio-pnl-reconciliation.md`  
 **Implementation plan:** `plan/implementation/2026-08-14-cumulative-portfolio-pnl-reconciliation.md`  
-**Status:** Plan approved; implementation not started  
+**Status:** Implementation in progress
 **Production data:** Unchanged; backfill not run
 
 ## Tasks
 
-- [ ] Task 1: Build the pure weighted-average P&L ledger.
+- [x] Task 1: Build the pure weighted-average P&L ledger.
 - [ ] Task 2: Add active-lifecycle boundary selection and snapshot enrichment.
 - [ ] Task 3: Add normalized repository P&L inputs.
 - [ ] Task 4: Correct future stock execution cash effects.
@@ -41,6 +41,7 @@
 - 2026-08-13: Independent replay of 41 closed stock reductions produced approximately `-$11,065.49` cumulative realized P&L; screenshot-time account identity implied approximately `-$11,071.94`, leaving a small reconciliation difference to preserve rather than hide.
 - 2026-08-14: Design finalized and approved at `plan/design/2026-08-14-cumulative-portfolio-pnl-reconciliation.md`.
 - 2026-08-14: Detailed TDD implementation plan finalized and approved at `plan/implementation/2026-08-14-cumulative-portfolio-pnl-reconciliation.md`.
+- 2026-08-17: Task 1 RED failed during collection because `src.trading.portfolio.pnl` did not exist; GREEN passed `tests/trading/test_portfolio_pnl.py` (`10 passed`). The pure ledger now covers weighted-average buys, partial/full reductions, gains/losses, deterministic equal-time ordering, cutoff filtering, duplicate ids, invalid values, and oversells.
 
 ## Final Results
 
