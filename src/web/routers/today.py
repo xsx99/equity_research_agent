@@ -365,7 +365,6 @@ def load_today_dashboard(
         trade_rows,
         latest_reflection,
         latest_macro_snapshot=latest_macro_snapshot,
-        positions=positions,
     )
 
     risk_macro = (

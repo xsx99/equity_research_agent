@@ -879,7 +879,7 @@ def test_build_header_converts_notional_gross_exposure_to_ratio():
     assert header["gross_exposure"] == pytest.approx(0.0491706164)
 
 
-def test_build_header_uses_open_position_unrealized_pnl_when_available():
+def test_build_header_uses_reconciled_snapshot_unrealized_pnl():
     from src.web.routers.today import _build_header
 
     latest_portfolio = SimpleNamespace(
@@ -889,27 +889,94 @@ def test_build_header_uses_open_position_unrealized_pnl_when_available():
         cash_balance=Decimal("50000"),
         day_pnl=Decimal("0"),
         realized_pnl=Decimal("0"),
-        unrealized_pnl=Decimal("0"),
+        unrealized_pnl=Decimal("820.25"),
         buying_power=Decimal("100000"),
         stock_market_value=Decimal("3025"),
         option_market_value=Decimal("0"),
         total_margin_requirement=Decimal("0"),
     )
-    positions = (
-        {"ticker": "CRDO", "unrealized_pnl": Decimal("25.25")},
-        {"ticker": "LITE", "unrealized_pnl": Decimal("-5.00")},
-    )
-
     header = _build_header(
         latest_portfolio=latest_portfolio,
         latest_risk=None,
         trade_rows=[],
         latest_reflection=None,
         latest_macro_snapshot=None,
-        positions=positions,
     )
 
-    assert header["unrealized_pnl"] == Decimal("20.25")
+    assert header["unrealized_pnl"] == Decimal("820.25")
+
+
+def test_today_dashboard_keeps_snapshot_pnl_consistent_across_tabs():
+    from src.db.models.trading import PortfolioSnapshot
+    from src.web.routers import today
+
+    snapshot = SimpleNamespace(
+        snapshot_time=datetime(2026, 7, 6, 16, 0, tzinfo=timezone.utc),
+        net_liquidation_value=Decimal("988482.96"),
+        account_equity=Decimal("988482.96"),
+        cash_balance=Decimal("922000"),
+        day_pnl=Decimal("-553.39"),
+        realized_pnl=Decimal("-11065.49"),
+        unrealized_pnl=Decimal("-2452.55"),
+        buying_power=Decimal("3876155.67"),
+        stock_market_value=Decimal("66482.96"),
+        option_market_value=Decimal("0"),
+        total_margin_requirement=Decimal("32800"),
+    )
+
+    class _SnapshotSession:
+        def query(self, model, *_args, **_kwargs):
+            return _ListQuery([snapshot]) if model is PortfolioSnapshot else _QueryStub()
+
+    positions = (
+        {"ticker": "CRDO", "unrealized_pnl": Decimal("25.25")},
+        {"ticker": "LITE", "unrealized_pnl": Decimal("-5.00")},
+    )
+    loader_values = {
+        "_load_positions": positions,
+        "_load_option_positions": (),
+        "_load_recent_closed_positions": (),
+        "_load_trade_rows": [],
+        "_load_candidate_rows": (),
+        "_load_manual_requests": (),
+        "_load_latest_macro_snapshot_for_today": None,
+        "_load_today_risk_macro": {},
+        "_load_latest_preopen_runtime_run_for_today": None,
+        "_load_live_alerts": (),
+        "_load_material_changes": (),
+        "_load_portfolio_intents": (),
+        "_load_relationships": (),
+        "_load_peer_baskets": (),
+        "_load_themes": (),
+        "_load_latest_intraday_scan_at": None,
+        "_load_news_by_ticker": {},
+        "_load_portfolio_history": (),
+        "_load_hedge_overlays": (),
+        "_load_strategy_performance": (),
+        "_load_learning_factors": (),
+        "_load_strategy_proposals": (),
+        "_load_strategy_definitions": (),
+        "_load_strategy_evaluation_results": (),
+        "_load_llm_usage": (),
+        "_load_llm_usage_aggregates": {"daily": (), "monthly": ()},
+    }
+
+    with ExitStack() as stack:
+        for name, value in loader_values.items():
+            stack.enter_context(patch.object(today, name, return_value=value))
+        headers = tuple(
+            today.load_today_dashboard(
+                _SnapshotSession(),
+                selected_tab=tab,
+                decision_id=None,
+                selected_ticker=None,
+            )["header"]
+            for tab in ("overview", "portfolio", "trades", "candidates", "risk-macro", "system")
+        )
+
+    assert {(header["realized_pnl"], header["unrealized_pnl"]) for header in headers} == {
+        (Decimal("-11065.49"), Decimal("-2452.55"))
+    }
 
 
 class TestTodayDashboard:

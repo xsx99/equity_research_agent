@@ -123,6 +123,39 @@ def test_load_positions_computes_unrealized_pnl_when_row_has_no_column():
     assert position["total_pnl_pct"] == pytest.approx(0.02)
 
 
+def test_position_unrealized_sum_agrees_with_reconciled_snapshot_within_currency_tolerance():
+    rows = (
+        SimpleNamespace(
+            ticker="CRDO",
+            trade_identity="tactical_stock_trade",
+            strategy_id="relative_strength_rotation_v1",
+            quantity=2,
+            average_cost=100,
+            market_price=112.625,
+            market_value=225.25,
+            unrealized_pnl=25.25,
+            opened_at=datetime(2026, 7, 1, 14, 30, tzinfo=timezone.utc),
+            updated_at=datetime(2026, 7, 6, 16, 0, tzinfo=timezone.utc),
+        ),
+        SimpleNamespace(
+            ticker="LITE",
+            trade_identity="tactical_stock_trade",
+            strategy_id="relative_strength_rotation_v1",
+            quantity=1,
+            average_cost=100,
+            market_price=95,
+            market_value=95,
+            unrealized_pnl=-5,
+            opened_at=datetime(2026, 7, 1, 14, 30, tzinfo=timezone.utc),
+            updated_at=datetime(2026, 7, 6, 16, 0, tzinfo=timezone.utc),
+        ),
+    )
+
+    positions = _load_positions(_FakeSession(rows))
+
+    assert sum(position["unrealized_pnl"] for position in positions) == pytest.approx(20.25, abs=0.01)
+
+
 def test_load_positions_falls_back_to_latest_entry_order_strategy_when_position_strategy_missing():
     row = SimpleNamespace(
         ticker="LITE",

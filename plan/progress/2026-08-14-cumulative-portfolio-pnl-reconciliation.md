@@ -12,7 +12,7 @@
 - [x] Task 3: Add normalized repository P&L inputs.
 - [x] Task 4: Correct future stock execution cash effects.
 - [x] Task 5: Enrich every live broker snapshot before persistence.
-- [ ] Task 6: Make Today header P&L snapshot-consistent across tabs.
+- [x] Task 6: Make Today header P&L snapshot-consistent across tabs.
 - [ ] Task 7: Add the safe historical repair command.
 - [ ] Task 8: Document operations and update trackers.
 - [ ] Task 9: Verify, dry-run, obtain explicit apply approval, apply, and render.
@@ -46,6 +46,7 @@
 - 2026-08-17: Task 3 RED produced two missing-loader failures; GREEN passed the two focused SQLAlchemy/in-memory repository tests and `tests/trading/test_portfolio_sync.py` (`5 passed`). Both repositories now emit deterministically ordered filled-stock events joined to order action plus ascending portfolio P&L points, and reject orphan executions.
 - 2026-08-17: Task 4 RED showed both `reduce` and `exit` fills persisted `-2.2715` instead of `+2.2715`; GREEN passed the focused cases and the full `tests/trading/test_paper_stock_broker.py` module (`20 passed`). Future long buys remain cash outflows while reductions/exits are cash inflows.
 - 2026-08-17: Task 5 RED showed live sync still persisted `realized_pnl=0.0` and accepted a fill/broker quantity mismatch; GREEN passed `tests/trading/test_portfolio_sync.py` (`7 passed`) plus live runtime regression (`52 passed`). Every broker snapshot is now enriched from the active-lifecycle ledger and validated before position or snapshot persistence.
+- 2026-08-17: Task 6 RED showed position-loading tabs using `20.25` while snapshot-only tabs used `-2452.55`; GREEN passed Today/portfolio loader tests (`89 passed`) and the full web suite (`179 passed`). The header now reads realized and unrealized P&L exclusively from the reconciled portfolio snapshot across all six tabs, while position rows retain their independently tested unrealized totals.
 
 ## Final Results
 
