@@ -13,7 +13,7 @@
 - [x] Task 4: Correct future stock execution cash effects.
 - [x] Task 5: Enrich every live broker snapshot before persistence.
 - [x] Task 6: Make Today header P&L snapshot-consistent across tabs.
-- [ ] Task 7: Add the safe historical repair command.
+- [x] Task 7: Add the safe historical repair command.
 - [ ] Task 8: Document operations and update trackers.
 - [ ] Task 9: Verify, dry-run, obtain explicit apply approval, apply, and render.
 
@@ -47,6 +47,7 @@
 - 2026-08-17: Task 4 RED showed both `reduce` and `exit` fills persisted `-2.2715` instead of `+2.2715`; GREEN passed the focused cases and the full `tests/trading/test_paper_stock_broker.py` module (`20 passed`). Future long buys remain cash outflows while reductions/exits are cash inflows.
 - 2026-08-17: Task 5 RED showed live sync still persisted `realized_pnl=0.0` and accepted a fill/broker quantity mismatch; GREEN passed `tests/trading/test_portfolio_sync.py` (`7 passed`) plus live runtime regression (`52 passed`). Every broker snapshot is now enriched from the active-lifecycle ledger and validated before position or snapshot persistence.
 - 2026-08-17: Task 6 RED showed position-loading tabs using `20.25` while snapshot-only tabs used `-2452.55`; GREEN passed Today/portfolio loader tests (`89 passed`) and the full web suite (`179 passed`). The header now reads realized and unrealized P&L exclusively from the reconciled portfolio snapshot across all six tabs, while position rows retain their independently tested unrealized totals.
+- 2026-08-17: Task 7 RED failed import because the historical repair module did not exist; GREEN passed all repair command tests (`15 passed`) and the combined ledger/repository/repair regression (`68 passed`). The CLI defaults to rollback-only dry-run, locks rows only for apply, validates the latest mirrored position and persistent PostgreSQL storage before writes, repairs only the active lifecycle, commits once, and is idempotent.
 
 ## Final Results
 

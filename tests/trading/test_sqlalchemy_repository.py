@@ -2024,6 +2024,30 @@ def test_paper_execution_workflow_persists_into_sqlalchemy_repository():
     now = datetime(2026, 6, 2, 16, 31, tzinfo=timezone.utc)
     session = _FakeSession()
     repository = SqlAlchemyTradingRepository(session)
+    repository.save_portfolio_snapshot(
+        PortfolioSnapshot(
+            as_of=datetime(2026, 6, 2, 13, 0, tzinfo=timezone.utc),
+            cash_balance=1_000_000,
+            account_equity=1_000_000,
+            net_liquidation_value=1_000_000,
+            buying_power=4_000_000,
+            excess_liquidity=1_000_000,
+            stock_market_value=0,
+            option_market_value=0,
+            stock_margin_requirement=0,
+            option_margin_requirement=0,
+            total_margin_requirement=0,
+            initial_margin_requirement=0,
+            maintenance_margin_requirement=0,
+            margin_model_profile="alpaca_paper_account",
+            margin_model_version="broker",
+            margin_requirement_source="broker_reported",
+            day_pnl=0,
+            realized_pnl=0,
+            unrealized_pnl=0,
+            metadata_json={},
+        )
+    )
     workflow = PaperExecutionWorkflow(
         repository=repository,
         broker=_BrokerStub(),
