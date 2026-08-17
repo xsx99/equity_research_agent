@@ -86,6 +86,23 @@ class ExecutionRepositoryMixin:
         attempt: Any | None = None,
     ) -> None:
         """Persist broker fill evidence in an isolated transaction."""
+        self._persist_irreversible_stock_audit(
+            order=order,
+            execution=execution,
+            attempt=attempt,
+        )
+
+    def persist_irreversible_stock_order(self, *, order: PaperOrderRecord) -> None:
+        """Persist a submitted broker order before it can become a late fill."""
+        self._persist_irreversible_stock_audit(order=order)
+
+    def _persist_irreversible_stock_audit(
+        self,
+        *,
+        order: PaperOrderRecord,
+        execution: PaperExecutionRecord | None = None,
+        attempt: Any | None = None,
+    ) -> None:
         if self.irreversible_fill_session_factory is None:
             from src.db.connection import SessionLocal
 
@@ -127,7 +144,8 @@ class ExecutionRepositoryMixin:
                     created_at=order.created_at,
                 )
             )
-            checkpoint_repository.save_paper_execution(execution)
+            if execution is not None:
+                checkpoint_repository.save_paper_execution(execution)
             if attempt is not None:
                 checkpoint_repository.save_execution_attempt(
                     replace(attempt, trading_decision_id=None, risk_decision_id=None)

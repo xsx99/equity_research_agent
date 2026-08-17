@@ -546,6 +546,13 @@ class PaperExecutionWorkflow:
                 orders[-1] = order
                 execution = self.broker.find_execution_by_order_id(order.paper_order_id)
         if execution is None:
+            persist_order = getattr(
+                self.repository,
+                "persist_irreversible_stock_order",
+                None,
+            )
+            if callable(persist_order):
+                persist_order(order=order)
             self.repository.save_paper_order(order)
             self._save_execution_attempt(
                 skipped(

@@ -75,20 +75,6 @@ def run_repair(*, session: Any, apply: bool, starting_equity: float) -> dict[str
         if not active_snapshots:
             raise PortfolioPnlValidationError("missing_active_snapshots")
 
-        latest_snapshot = active_snapshots[-1]
-        latest_replay = replay_stock_fills(
-            fills,
-            started_at=boundary,
-            through=latest_snapshot.snapshot_time,
-        )
-        cost_diagnostics, position_mismatches = _collect_position_validation(
-            positions=_stock_positions(
-                [row for row in positions if str(row.status).lower() == "open"],
-                as_of=latest_snapshot.snapshot_time,
-            ),
-            open_cost_basis=latest_replay.open_cost_basis,
-        )
-
         excluded_fill_count = sum(fill.executed_at < boundary for fill in fills)
         excluded_snapshot_count = sum(point.snapshot_time < boundary for point in points)
         cash_repairs = _cash_effect_repairs(
@@ -102,21 +88,23 @@ def run_repair(*, session: Any, apply: bool, starting_equity: float) -> dict[str
                 "excluded_pre_boundary_snapshot_count": excluded_snapshot_count,
                 "excluded_pre_boundary_fill_count": excluded_fill_count,
                 "active_snapshot_count": len(active_snapshots),
-                "active_fill_count": latest_replay.fill_count,
                 "cash_effect_repair_count": len(cash_repairs),
             }
         )
-        if position_mismatches:
-            validation_errors = [_position_mismatch_message(item) for item in position_mismatches]
-            if apply:
-                raise PortfolioPnlValidationError(";".join(validation_errors))
-            session.rollback()
-            return _blocked_report(
-                session=session,
-                report_context=report_context,
-                validation_errors=validation_errors,
-                position_mismatches=position_mismatches,
-            )
+        latest_snapshot = active_snapshots[-1]
+        latest_replay = replay_stock_fills(
+            fills,
+            started_at=boundary,
+            through=latest_snapshot.snapshot_time,
+        )
+        cost_diagnostics, position_mismatches = _collect_position_validation(
+            positions=_stock_positions(
+                [row for row in positions if str(row.status).lower() == "open"],
+                as_of=latest_snapshot.snapshot_time,
+            ),
+            open_cost_basis=latest_replay.open_cost_basis,
+        )
+        report_context["active_fill_count"] = latest_replay.fill_count
 
         proposed_snapshots: list[tuple[Any, Decimal, Decimal, dict[str, object]]] = []
         residuals: list[float] = []
@@ -213,15 +201,19 @@ def run_repair(*, session: Any, apply: bool, starting_equity: float) -> dict[str
                 ),
             }
         )
-        if historical_validation_errors:
+        validation_errors = [
+            *[_position_mismatch_message(item) for item in position_mismatches],
+            *historical_validation_errors,
+        ]
+        if validation_errors:
             if apply:
-                raise PortfolioPnlValidationError(";".join(historical_validation_errors))
+                raise PortfolioPnlValidationError(";".join(validation_errors))
             session.rollback()
             return _blocked_report(
                 session=session,
                 report_context=report_context,
-                validation_errors=historical_validation_errors,
-                position_mismatches=[],
+                validation_errors=validation_errors,
+                position_mismatches=position_mismatches,
             )
         data_directory = _read_postgres_data_directory(session)
         if apply:

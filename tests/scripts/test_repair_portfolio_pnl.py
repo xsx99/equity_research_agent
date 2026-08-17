@@ -258,6 +258,12 @@ def test_dry_run_reports_all_position_mismatches_and_complete_scope(repair_case)
     assert report["boundary"] == "2026-06-02T13:00:00+00:00"
     assert report["active_snapshot_count"] == 3
     assert report["tolerances"]["quantity"] > 0
+    assert report["snapshot_repair_count"] == 2
+    assert report["earliest_snapshot_to_update"] == "2026-06-02T13:00:00+00:00"
+    assert report["latest_snapshot_to_update"] == "2026-06-02T15:00:00+00:00"
+    assert report["unverified_historical_snapshot_count"] == 1
+    assert report["earliest_unverified_historical_snapshot"] == "2026-06-02T14:00:00+00:00"
+    assert report["latest_unverified_historical_snapshot"] == "2026-06-02T14:00:00+00:00"
     assert report["position_mismatches"] == [
         {"kind": "quantity", "ticker": "AAPL", "mirrored": 4.0, "replayed": 5.0},
         {"kind": "quantity", "ticker": "MSFT", "mirrored": 2.0, "replayed": 0.0},

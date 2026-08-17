@@ -627,6 +627,9 @@ class InMemoryTradingRepository:
         if attempt is not None:
             self.save_execution_attempt(attempt)
 
+    def persist_irreversible_stock_order(self, *, order) -> None:
+        self.save_paper_order(order)
+
     def has_paper_execution(self, paper_execution_id: str) -> bool:
         return any(item.paper_execution_id == paper_execution_id for item in self.paper_executions)
 

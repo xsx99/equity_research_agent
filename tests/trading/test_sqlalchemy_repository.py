@@ -2017,6 +2017,40 @@ def test_sqlalchemy_repository_persists_fill_in_isolated_session_without_committ
     assert len(checkpoint_session.rows_by_type[PaperExecution]) == 1
 
 
+def test_sqlalchemy_repository_persists_unfilled_order_in_isolated_session():
+    shared_session = _FakeSession()
+    checkpoint_session = _FakeSession()
+    repository = SqlAlchemyTradingRepository(
+        shared_session,
+        irreversible_fill_session_factory=lambda: checkpoint_session,
+    )
+    now = datetime(2026, 6, 2, 16, 31, tzinfo=timezone.utc)
+    order = PaperOrderRecord(
+        paper_order_id="55555555-5555-4555-8555-555555555555",
+        broker_order_id="broker-order-pending",
+        client_order_id="client-order-pending",
+        trading_decision_id="66666666-6666-4666-8666-666666666666",
+        risk_decision_id="77777777-7777-4777-8777-777777777777",
+        ticker="MSFT",
+        strategy_id="strategy-v1",
+        action="enter_long",
+        trade_date=now.date(),
+        quantity=1,
+        limit_price=None,
+        status="accepted",
+        rejection_reason=None,
+        created_at=now,
+    )
+
+    repository.persist_irreversible_stock_order(order=order)
+
+    assert shared_session.commit_calls == 0
+    assert checkpoint_session.commit_calls == 1
+    assert len(checkpoint_session.rows_by_type[PaperOrder]) == 1
+    assert checkpoint_session.rows_by_type[PaperOrder][0].status == "accepted"
+    assert PaperExecution not in checkpoint_session.rows_by_type
+
+
 class _BrokerStub:
     def submit_order(self, request: Any) -> Any:
         return type(

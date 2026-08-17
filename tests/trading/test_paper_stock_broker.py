@@ -12,7 +12,7 @@ from src.trading.brokers.paper_option import (
     PaperOptionPosition,
     PaperOptionOrderRequest,
 )
-from src.trading.brokers.paper_stock import PaperOrderRequest, PaperStockBroker
+from src.trading.brokers.paper_stock import PaperOrderRecord, PaperOrderRequest, PaperStockBroker
 from src.trading.portfolio.state import PortfolioSnapshot
 from src.trading.portfolio.pnl import PortfolioPnlValidationError
 from src.trading.repositories.in_memory import InMemoryTradingRepository
@@ -881,6 +881,57 @@ def test_filled_stock_execution_is_checkpointed_before_snapshot_validation() -> 
     assert repository.checkpointed_execution_ids == (
         repository.paper_executions[0].paper_execution_id,
     )
+
+
+def test_unfilled_stock_order_is_checkpointed_before_shared_transaction_can_find_late_fill() -> None:
+    now = datetime(2026, 6, 2, 16, 31, tzinfo=timezone.utc)
+
+    class _OrderCheckpointRepository(InMemoryTradingRepository):
+        def __init__(self) -> None:
+            super().__init__()
+            self.checkpointed_order_ids: tuple[str, ...] = ()
+
+        def persist_irreversible_stock_order(self, *, order) -> None:
+            self.checkpointed_order_ids = (order.paper_order_id,)
+            super().persist_irreversible_stock_order(order=order)
+
+    class _NoFillBroker:
+        def submit_order(self, request):
+            return PaperOrderRecord(
+                paper_order_id="pending-order-1",
+                broker_order_id="broker-order-1",
+                client_order_id="pending-client-order-1",
+                trading_decision_id=request.trading_decision_id,
+                risk_decision_id=request.risk_decision_id,
+                ticker=request.ticker,
+                strategy_id=request.strategy_id,
+                action=request.action,
+                trade_date=request.trade_date,
+                quantity=request.quantity,
+                limit_price=None,
+                status="accepted",
+                rejection_reason=None,
+                created_at=now,
+            )
+
+        def find_execution_by_order_id(self, _paper_order_id):
+            return None
+
+    repository = _OrderCheckpointRepository()
+    workflow = PaperExecutionWorkflow(
+        repository=repository,
+        broker=_NoFillBroker(),
+        manual_request_service=ManualTickerRequestService(now=lambda: now),
+    )
+
+    workflow.run(
+        trading_decisions=(_trading_decision(),),
+        risk_decisions=(_risk_decision(),),
+        trade_date=now,
+    )
+
+    assert repository.checkpointed_order_ids == ("pending-order-1",)
+    assert repository.paper_orders[0].status == "accepted"
 
 
 def test_paper_execution_workflow_reconciles_delayed_stock_fill_before_returning_no_fill():
