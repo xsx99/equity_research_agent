@@ -3,7 +3,7 @@
 **Design:** `plan/design/2026-08-14-cumulative-portfolio-pnl-reconciliation.md`  
 **Implementation plan:** `plan/implementation/2026-08-14-cumulative-portfolio-pnl-reconciliation.md`  
 **Status:** Implementation in progress
-**Production data:** Unchanged; backfill not run
+**Production data:** Approved repair applied atomically; post-apply dry-run is idempotent
 
 ## Tasks
 
@@ -26,14 +26,14 @@
 - [x] User approved the written spec.
 - [x] Implementation plan review approved after two iterations.
 - [x] Isolated implementation worktree created and baseline verified.
-- [ ] Every production behavior has a witnessed RED test before implementation.
-- [ ] Persistent Postgres data directory and host mount verified.
-- [ ] Production dry-run report reviewed.
-- [ ] User explicitly approves the exact dry-run report.
-- [ ] Production `--apply` completed atomically.
-- [ ] Second dry-run proves idempotency.
+- [x] Every production behavior has a witnessed RED test before implementation.
+- [x] Persistent Postgres data directory and host mount verified.
+- [x] Production dry-run report reviewed.
+- [x] User explicitly approves the exact dry-run report.
+- [x] Production `--apply` completed atomically.
+- [x] Second dry-run proves idempotency.
 - [ ] Overview, Risk & Macro, and System rendered and visually checked.
-- [ ] Final code review approved.
+- [x] Final code review approved.
 
 ## Evidence Log
 
@@ -55,6 +55,7 @@
 - 2026-08-17: Second final review found that aggregate historical market value still could not prove mixed per-ticker inventory and that a shared-session fill checkpoint committed unrelated phase writes. The repair now leaves every non-flat historical snapshot untouched, reports its exact unverified range, repairs only flat history plus the latest snapshot after complete per-ticker quantity/cost validation, and accumulates all current position mismatches in a complete blocked report. Irreversible orders, fills, and submitted attempts now use an isolated SQL session with nullable decision links, while the caller's transaction remains uncommitted; normal and late-fill paths share this contract. The standalone CLI now loads positions through the repository API. Review-fix regression passed (`139 passed`); production has not been changed.
 - 2026-08-17: Third review approved rollback-only production dry-run but found a same-transaction delayed-order self-lock risk and incomplete blocked-report scope. Every broker-submitted stock order is now independently committed before it can become a late fill; a later isolated fill update therefore sees the committed order instead of contending with an uncommitted duplicate unique key. Position mismatch reporting now completes the read-only snapshot proposal/unverified scan before returning, so blocked reports contain the real mutation and unverified ranges. Targeted regression passed (`89 passed`); apply remains blocked pending renewed review and dry-run.
 - 2026-08-17: Final review found no Critical/Important issues and approved rollback-only dry-run plus apply only after exact-report user authorization. Final focused regression passed (`256 passed`); full regression reached `1161 passed, 12 failed`, with the same accepted three local-Postgres, eight option/hedge, and one macro-smoke baseline failures. Persistent production storage revalidated as `/var/lib/postgresql/data` backed by `/data/postgres_data`. The final rollback-only dry-run used boundary `2026-06-26T12:50:00.197377+00:00`, replayed 94 fills over 247 active snapshots, proposed 2 safe snapshot repairs and 43 sell cash-effect repairs, and left 245 non-flat historical snapshots untouched as unverified (`2026-06-26T14:00:00.188936+00:00` through `2026-08-17T16:00:00.152012+00:00`). The latest update target is `2026-08-17T17:00:00.200831+00:00`; calculated latest P&L is realized `-$14,265.4442`, unrealized `+$2,759.7933`, residual `-$6.4591`. Position mismatches and validation errors are empty; the sole cost diagnostic is FPS average cost difference `0.0000001062`, far below the `$0.01` tolerance. Production remains unchanged pending explicit user approval of this exact report.
+- 2026-08-17: User explicitly approved the exact final report. The immediately preceding dry-run matched it field-for-field, then production `--apply` atomically repaired 2 safe snapshots and 43 sell cash effects. The immediate post-apply dry-run reported `snapshot_repair_count=0`, `cash_effect_repair_count=0`, no position mismatches, and no validation errors, proving idempotency. Production latest values remain realized `-$14,265.4442`, unrealized `+$2,759.7933`, residual `-$6.4591`. Code deployment and rendered Today verification remain pending.
 
 ## Final Results
 
