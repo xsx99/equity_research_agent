@@ -186,6 +186,56 @@ def test_fetch_daily_bars_for_symbols_batches_multi_symbol_requests():
     assert [call["params"]["limit"] for call in client.calls] == [10, 5]
 
 
+def test_fetch_daily_bars_for_symbols_range_uses_explicit_historical_boundaries():
+    client = _CapturingClient(
+        {"bars": {"AAPL": [{"t": "2026-03-24T04:00:00Z", "c": 201.25}]}}
+    )
+    provider = AlpacaMarketDataProvider(
+        api_key="test-key", secret_key="test-secret", client=client
+    )
+    start = datetime(2026, 3, 23, 13, 30, tzinfo=timezone.utc)
+    end = datetime(2026, 3, 24, 20, 0, tzinfo=timezone.utc)
+
+    bars = provider.fetch_daily_bars_for_symbols_range(
+        ["aapl"], start=start, end=end
+    )
+
+    assert bars["AAPL"][0]["close"] == 201.25
+    assert client.calls[0]["params"] == {
+        "symbols": "AAPL",
+        "timeframe": "1Day",
+        "start": start.isoformat(),
+        "end": end.isoformat(),
+        "sort": "asc",
+        "adjustment": "split",
+        "feed": "iex",
+    }
+
+
+def test_fetch_minute_bars_for_symbols_range_uses_explicit_historical_boundaries():
+    client = _CapturingClient(
+        {
+            "bars": {
+                "AAPL": [
+                    {"t": "2026-03-23T13:31:00Z", "o": 200, "h": 202, "l": 199, "c": 201}
+                ]
+            }
+        }
+    )
+    provider = AlpacaMarketDataProvider(
+        api_key="test-key", secret_key="test-secret", client=client
+    )
+    start = datetime(2026, 3, 23, 13, 30, 30, tzinfo=timezone.utc)
+    end = datetime(2026, 3, 23, 20, 0, tzinfo=timezone.utc)
+
+    bars = provider.fetch_minute_bars_for_symbols_range(["aapl"], start=start, end=end)
+
+    assert bars["AAPL"][0]["timestamp"] == datetime(2026, 3, 23, 13, 31, tzinfo=timezone.utc)
+    assert client.calls[0]["params"]["start"] == start.isoformat()
+    assert client.calls[0]["params"]["end"] == end.isoformat()
+    assert client.calls[0]["params"]["timeframe"] == "1Min"
+
+
 def test_fetch_option_chain_requests_alpaca_chain_endpoint_and_normalizes_contracts():
     client = _CapturingClient(
         {
