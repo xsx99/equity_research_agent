@@ -8,6 +8,7 @@ from src.trading.repositories.in_memory import InMemoryTradingRepository
 from src.trading.replay.outcomes import CandidateOutcomeEvaluationRecord
 from src.trading.strategies.matching import StrategyDefinitionRecord
 from src.trading.post_close.strategy_evolution import StrategyEvolutionPipeline, StrategyEvolutionRequest
+from src.trading.phases.strategy_evolution.pipeline import _learning_factor_payload
 
 
 def _write_prompt(tmp_path) -> PromptRegistry:
@@ -143,6 +144,14 @@ def _request(
             _outcome("outcome-3", ticker="MSFT", decision_time=now, alpha=-0.01),
         ),
     )
+
+
+def test_learning_factor_payload_preserves_status_for_bounded_evidence():
+    factor = _request().learning_factors[0]
+
+    payload = _learning_factor_payload(factor)
+
+    assert payload["status"] == "candidate"
 
 
 def test_strategy_evolution_pipeline_creates_shadow_strategy_from_unique_proposal(tmp_path):

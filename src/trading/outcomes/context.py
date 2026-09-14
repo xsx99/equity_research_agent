@@ -24,6 +24,7 @@ class PersistedCandidateOutcomeContext:
     complete_close_at: datetime | None
     watch_candidate: Any | None = None
     primary_comparator_key: str = "QQQ"
+    primary_comparator_explicit: bool = False
     comparator_members: dict[str, tuple[str, ...]] | None = None
     comparator_weights: dict[str, dict[str, float]] | None = None
     selected_orders: tuple[Any, ...] = ()
@@ -43,7 +44,8 @@ def comparator_context(
 ) -> dict[str, Any]:
     """Read only explicit comparator identities/members persisted at decision time."""
     context = dict(benchmark_context or {})
-    primary = _symbol(context.get("primary_benchmark")) or "QQQ"
+    persisted_primary = _symbol(context.get("primary_benchmark"))
+    primary = persisted_primary or "QQQ"
     sector_symbols = _symbols(context.get("sector_theme_symbols") or context.get("sector_theme_etfs") or ())
 
     persisted_peer_id = str(context.get("peer_basket_id") or peer_basket_id or "") or None
@@ -67,6 +69,7 @@ def comparator_context(
             weights[opportunity_key] = opportunity_weights
     return {
         "primary_comparator_key": primary,
+        "primary_comparator_explicit": bool(persisted_primary),
         "peer_basket_id": persisted_peer_id,
         "sector_theme_symbols": sector_symbols,
         "peer_symbols": peer_symbols,
@@ -176,4 +179,3 @@ def _same_checkpoint(actual: datetime | None, expected: datetime) -> bool:
     if actual is None:
         return False
     return actual == expected
-

@@ -162,6 +162,7 @@ def test_pipeline_persists_all_available_comparators_without_reweighting_missing
         has_complete_close=False,
         complete_close_at=None,
         primary_comparator_key="IWM",
+        primary_comparator_explicit=False,
         comparator_members={
             "peer:basket-1": ("MSFT", "GOOG"),
             "ranked:top2": ("NVDA", "MISSING"),
@@ -209,6 +210,87 @@ def test_pipeline_persists_all_available_comparators_without_reweighting_missing
     assert set(final.metadata_json["comparator_alphas"]) == {
         "QQQ", "SPY", "XLK", "peer:basket-1"
     }
+
+
+def test_persisted_primary_comparator_missing_price_keeps_checkpoint_pending():
+    decision_time = datetime(2026, 7, 2, 13, 0, tzinfo=timezone.utc)
+    candidate = SimpleNamespace(
+        candidate_score_id="candidate-explicit-primary",
+        ticker="AAPL",
+        strategy_id="relative_strength_rotation_v1",
+        strategy_version="v1",
+        direction="bullish",
+        decision_time=decision_time,
+        typical_horizon="intraday-2d",
+        benchmark_context={"primary_benchmark": "IWM"},
+    )
+    context = PersistedCandidateOutcomeContext(
+        candidate=candidate,
+        snapshot_type="pre_open",
+        trade_classification=None,
+        peer_basket_id=None,
+        sector_theme_symbols=(),
+        peer_symbols=(),
+        opportunity_symbols=(),
+        has_complete_close=False,
+        complete_close_at=None,
+        primary_comparator_key="IWM",
+        primary_comparator_explicit=True,
+        due_evaluation_statuses=("final",),
+    )
+    repository = _Repository((context,))
+
+    result = OutcomeEvaluationPipeline(
+        repository=repository,
+        price_loader=_PriceLoader(),
+    ).run(evaluation_as_of_session=date(2026, 7, 7))
+
+    assert result.pending_count == 1
+    assert repository.outcomes == []
+
+
+def test_missing_exact_checkpoint_session_bar_keeps_final_pending():
+    decision_time = datetime(2026, 7, 2, 13, 0, tzinfo=timezone.utc)
+    candidate = SimpleNamespace(
+        candidate_score_id="candidate-truncated-range",
+        ticker="AAPL",
+        strategy_id="relative_strength_rotation_v1",
+        strategy_version="v1",
+        direction="bullish",
+        decision_time=decision_time,
+        typical_horizon="intraday-2d",
+        benchmark_context={"primary_benchmark": "QQQ"},
+    )
+    context = PersistedCandidateOutcomeContext(
+        candidate=candidate,
+        snapshot_type="pre_open",
+        trade_classification=None,
+        peer_basket_id=None,
+        sector_theme_symbols=(),
+        peer_symbols=(),
+        opportunity_symbols=(),
+        has_complete_close=False,
+        complete_close_at=None,
+        primary_comparator_key="QQQ",
+        primary_comparator_explicit=True,
+        due_evaluation_statuses=("final",),
+    )
+    repository = _Repository((context,))
+    price_loader = _PriceLoader()
+    payload = price_loader.load(None)
+    truncated = {
+        symbol: tuple(bar for bar in bars if bar.session_date != date(2026, 7, 7))
+        for symbol, bars in payload.bars_by_symbol.items()
+    }
+    price_loader.load = lambda request: replace(payload, bars_by_symbol=truncated)
+
+    result = OutcomeEvaluationPipeline(
+        repository=repository,
+        price_loader=price_loader,
+    ).run(evaluation_as_of_session=date(2026, 7, 7))
+
+    assert result.pending_count == 1
+    assert repository.outcomes == []
 
 
 def test_intraday_candidate_without_minute_start_price_stays_pending():

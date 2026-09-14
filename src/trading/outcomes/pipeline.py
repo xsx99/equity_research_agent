@@ -95,6 +95,7 @@ class OutcomeEvaluationPipeline:
                     peer_symbols=context.peer_symbols,
                     opportunity_symbols=context.opportunity_symbols,
                     actual_close_at=(context.complete_close_at if context.has_complete_close else None),
+                    primary_comparator_symbol=context.primary_comparator_key,
                 )
             )
             provider_error_count += len(price_result.provider_errors)
@@ -209,7 +210,7 @@ class OutcomeEvaluationPipeline:
             else checkpoint_session
         )
         candidate_bars = _bars_through(price_result.bars_by_symbol.get(candidate.ticker.upper(), ()), effective_session)
-        if len(candidate_bars) < 2:
+        if not candidate_bars:
             return None
         start_price = _start_price(
             context.snapshot_type,
@@ -218,10 +219,9 @@ class OutcomeEvaluationPipeline:
             price_result,
         )
         use_actual_close = evaluation_status == "final" and finalization.reason == "trade_closed"
-        end_price = (
-            price_result.actual_close_prices_by_symbol.get(candidate.ticker.upper())
-            if use_actual_close
-            else candidate_bars[-1].close
+        endpoint_bar = _bar_on_session(candidate_bars, effective_session)
+        end_price = price_result.actual_close_prices_by_symbol.get(candidate.ticker.upper()) if use_actual_close else (
+            endpoint_bar.close if endpoint_bar is not None else None
         )
         if None in {start_price, end_price}:
             return None
@@ -231,14 +231,12 @@ class OutcomeEvaluationPipeline:
             effective_session=effective_session,
             use_actual_close=use_actual_close,
         )
-        primary = next(
-            (
-                key
-                for key in (context.primary_comparator_key, "QQQ", "SPY")
-                if key in simple_returns
-            ),
-            None,
+        primary_candidates = (
+            (context.primary_comparator_key,)
+            if context.primary_comparator_explicit
+            else tuple(dict.fromkeys((context.primary_comparator_key, "QQQ", "SPY")))
         )
+        primary = next((key for key in primary_candidates if key in simple_returns), None)
         if primary is None:
             return None
         benchmark_return = simple_returns[primary]
@@ -322,6 +320,10 @@ def _bars_through(bars: Iterable[Any], checkpoint: date) -> tuple[Any, ...]:
     return tuple(bar for bar in bars if bar.session_date <= checkpoint)
 
 
+def _bar_on_session(bars: Iterable[Any], session: date) -> Any | None:
+    return next((bar for bar in bars if bar.session_date == session), None)
+
+
 def _active_returns(candidate_bars: tuple[Any, ...], benchmark_bars: tuple[Any, ...]) -> tuple[float, ...]:
     by_date = {bar.session_date: bar for bar in benchmark_bars if bar.close is not None}
     values = []
@@ -338,10 +340,13 @@ def _simple_comparator_returns(*, context: PersistedCandidateOutcomeContext, pri
     returns: dict[str, float] = {}
     for key in sorted(keys):
         bars = _bars_through(price_result.bars_by_symbol.get(key, ()), effective_session)
-        if len(bars) < 2:
+        if not bars:
             continue
         start = _start_price(context.snapshot_type, key, bars, price_result)
-        end = price_result.actual_close_prices_by_symbol.get(key) if use_actual_close else bars[-1].close
+        endpoint_bar = _bar_on_session(bars, effective_session)
+        end = price_result.actual_close_prices_by_symbol.get(key) if use_actual_close else (
+            endpoint_bar.close if endpoint_bar is not None else None
+        )
         if start is None or end is None or start == 0:
             continue
         returns[key] = (end - start) / start
@@ -355,10 +360,13 @@ def _composite_comparator_returns(*, context: PersistedCandidateOutcomeContext, 
         member_returns: dict[str, float] = {}
         for symbol in members:
             bars = _bars_through(price_result.bars_by_symbol.get(symbol, ()), effective_session)
-            if len(bars) < 2:
+            if not bars:
                 break
             start = _start_price(context.snapshot_type, symbol, bars, price_result)
-            end = price_result.actual_close_prices_by_symbol.get(symbol) if use_actual_close else bars[-1].close
+            endpoint_bar = _bar_on_session(bars, effective_session)
+            end = price_result.actual_close_prices_by_symbol.get(symbol) if use_actual_close else (
+                endpoint_bar.close if endpoint_bar is not None else None
+            )
             if start is None or end is None or start == 0:
                 break
             member_returns[symbol] = (end - start) / start
@@ -387,7 +395,9 @@ def _start_price(
     price_result: Any,
 ) -> float | None:
     if snapshot_type == "pre_open":
-        return bars[0].open if bars else None
+        decision_session = price_result.start_boundary.date()
+        decision_bar = _bar_on_session(bars, decision_session)
+        return decision_bar.open if decision_bar is not None else None
     return price_result.start_prices_by_symbol.get(symbol)
 
 

@@ -62,6 +62,22 @@ def test_get_job_phase_handler_filters_unsupported_execution_kwargs(monkeypatch)
     assert calls == [{}]
 
 
+def test_outcome_evaluation_phase_dispatches_to_live_runtime(monkeypatch):
+    calls = []
+
+    monkeypatch.setitem(
+        dispatch.JOB_PHASE_HANDLERS,
+        "outcome_evaluation",
+        lambda: calls.append("outcome_evaluation")
+        or {"status": "passed", "phase": "outcome_evaluation"},
+    )
+
+    result = runtime.run_job_phase("outcome_evaluation")
+
+    assert result["phase"] == "outcome_evaluation"
+    assert calls == ["outcome_evaluation"]
+
+
 def test_run_smoke_mode_delegates_through_runtime_dispatch(monkeypatch):
     expected = {"status": "passed", "mode": "manual_review_fixture"}
 

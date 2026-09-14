@@ -92,27 +92,43 @@
 
       <div class="sys-section">
         <div class="surface-block-head">
-          <div class="section-label">Strategy Performance</div>
+          <div class="section-label">Current Strategies</div>
+          <span class="surface-block-count">{{ system.learning_strategies.strategy_definitions | length }}</span>
+        </div>
+        {% if system.learning_strategies.strategy_definitions %}
+        <div class="surface-table-wrap">
+          <table class="compact-table">
+            <thead><tr><th>Strategy</th><th>Status</th><th>Horizon</th><th>Source</th></tr></thead>
+            <tbody>{% for row in system.learning_strategies.strategy_definitions %}<tr><td><strong>{{ row.display_name or row.strategy_id }}</strong><br><span class="detail-muted">{{ row.strategy_id }}</span></td><td>{{ row.lifecycle_status_label or row.lifecycle_status }}</td><td>{{ row.typical_horizon_label or row.typical_horizon or "—" }}</td><td>{{ row.source_label or row.source or "—" }}</td></tr>{% endfor %}</tbody>
+          </table>
+        </div>
+        {% else %}<p class="detail-muted quiet-empty">No strategy definitions are stored.</p>{% endif %}
+      </div>
+
+      <div class="sys-section">
+        <div class="surface-block-head">
+          <div class="section-label">Strategy Edge</div>
           <span class="surface-block-count">{{ system.learning_strategies.strategy_performance | length }}</span>
         </div>
         <p class="detail-muted">{{ system.learning_strategies.learning_summary_text or "No strategy learning summary available." }}</p>
         {% if system.learning_strategies.strategy_performance %}
         <div class="surface-table-wrap">
           <table class="compact-table">
-            <thead><tr><th>Strategy</th><th>Status</th><th>Win Rate</th><th>Total P&amp;L</th><th>Learning Summary</th></tr></thead>
-            <tbody>{% for row in system.learning_strategies.strategy_performance %}<tr><td>{{ row.strategy_id }}</td><td>{{ row.lifecycle_status_label or row.lifecycle_status }}</td><td>{% if row.win_rate is not none %}{{ fmt_number(row.win_rate) }}%{% else %}—{% endif %}</td><td>{{ fmt_currency(row.total_pnl) }}</td><td>{{ row.learning_summary }}</td></tr>{% endfor %}</tbody>
+            <thead><tr><th>Strategy</th><th>Status</th><th>Outcomes</th><th>Win Rate</th><th>Mean Alpha</th><th>Learning Summary</th></tr></thead>
+            <tbody>{% for row in system.learning_strategies.strategy_performance %}<tr><td>{{ row.strategy_id }}</td><td>{{ row.lifecycle_status_label or row.lifecycle_status }}</td><td>{{ row.outcome_count if row.outcome_count is defined else 0 }}</td><td>{% if row.win_rate is not none %}{{ fmt_number(row.win_rate) }}%{% else %}—{% endif %}</td><td>{% if row.mean_alpha is defined and row.mean_alpha is not none %}{{ fmt_number(row.mean_alpha * 100) }}%{% else %}—{% endif %}</td><td>{{ row.learning_summary }}</td></tr>{% endfor %}</tbody>
           </table>
         </div>
-        {% else %}<p class="detail-muted quiet-empty">No strategy performance records.</p>{% endif %}
+        {% else %}<p class="detail-muted quiet-empty">No matured outcome records yet. Current strategies remain listed above.</p>{% endif %}
       </div>
 
       <div class="sys-two-col">
         <div class="sys-section">
           <div class="surface-block-head">
-            <div class="section-label">Strategy Proposals</div>
+            <div class="section-label">Proposal History &amp; Runtime State</div>
             <span class="surface-block-count">{{ system.learning_strategies.strategy_proposals | length }}</span>
           </div>
           {% if system.learning_strategies.strategy_proposals %}
+          {% if system.learning_strategies.proposal_state is defined and system.learning_strategies.proposal_state.showing_history %}<p class="detail-muted">No proposals in the last 10 days. Showing retained history; latest proposal: {{ system.learning_strategies.proposal_state.latest_retained_date }}.</p>{% endif %}
           <div class="strategy-proposal-scroll">
             <div class="strategy-proposal-list">
               {% for row in system.learning_strategies.strategy_proposals %}
@@ -123,6 +139,7 @@
                     <span class="detail-muted">{{ row.proposed_strategy_id }}</span>
                   </div>
                   <span class="tag">{{ row.proposal_status_label or row.proposal_status }}{% if row.proposal_count is defined and row.proposal_count > 1 %} · ×{{ row.proposal_count }}{% endif %}</span>
+                  {% if row.outside_recent_window %}<span class="tag">Historical</span>{% endif %}
                 </div>
                 {% if row.core_thesis %}<p>{{ row.core_thesis }}</p>{% endif %}
                 {% if row.evidence_summary %}<p class="detail-muted">{{ row.evidence_summary }}</p>{% endif %}

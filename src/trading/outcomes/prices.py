@@ -18,6 +18,7 @@ class OutcomePriceRequest:
     peer_symbols: tuple[str, ...] = ()
     opportunity_symbols: tuple[str, ...] = ()
     actual_close_at: datetime | None = None
+    primary_comparator_symbol: str | None = None
 
 
 @dataclass(frozen=True)
@@ -83,12 +84,17 @@ class OutcomePriceLoader:
         }
         start_prices: dict[str, float] = {}
         actual_close_prices: dict[str, float] = {}
+        provider_errors: dict[str, str] = {}
         if request.snapshot_type in {"intraday", "manual"}:
-            minute_payload = self.provider.fetch_minute_bars_for_symbols_range(
-                requested_symbols,
-                start=request.decision_time,
-                end=_session_close(self.calendar, request.decision_time.date()),
-            )
+            try:
+                minute_payload = self.provider.fetch_minute_bars_for_symbols_range(
+                    requested_symbols,
+                    start=request.decision_time,
+                    end=_session_close(self.calendar, request.decision_time.date()),
+                )
+            except Exception as exc:
+                minute_payload = {}
+                provider_errors["minute_start"] = f"{type(exc).__name__}: {exc}"
             for symbol in requested_symbols:
                 first = next(
                     (
@@ -106,11 +112,15 @@ class OutcomePriceLoader:
                 if price is not None:
                     start_prices[symbol] = price
         if request.actual_close_at is not None:
-            close_payload = self.provider.fetch_minute_bars_for_symbols_range(
-                requested_symbols,
-                start=_session_open(self.calendar, request.actual_close_at.date()),
-                end=request.actual_close_at,
-            )
+            try:
+                close_payload = self.provider.fetch_minute_bars_for_symbols_range(
+                    requested_symbols,
+                    start=_session_open(self.calendar, request.actual_close_at.date()),
+                    end=request.actual_close_at,
+                )
+            except Exception as exc:
+                close_payload = {}
+                provider_errors["minute_close"] = f"{type(exc).__name__}: {exc}"
             for symbol in requested_symbols:
                 eligible = [
                     bar
@@ -127,7 +137,7 @@ class OutcomePriceLoader:
             requested_symbols=requested_symbols,
             bars_by_symbol=bars_by_symbol,
             missing_symbols=missing_symbols,
-            provider_errors={},
+            provider_errors=provider_errors,
             start_boundary=start_boundary,
             end_boundary=end_boundary,
             metadata_json=_metadata(self.provider),
@@ -139,13 +149,22 @@ class OutcomePriceLoader:
 def _symbols_for(request: OutcomePriceRequest) -> tuple[str, ...]:
     values = (
         request.candidate_symbol,
+        request.primary_comparator_symbol,
         "QQQ",
         "SPY",
         *request.sector_theme_symbols,
         *request.peer_symbols,
         *request.opportunity_symbols,
     )
-    return tuple(sorted({str(symbol).strip().upper() for symbol in values if str(symbol).strip()}))
+    return tuple(
+        sorted(
+            {
+                str(symbol).strip().upper()
+                for symbol in values
+                if symbol is not None and str(symbol).strip()
+            }
+        )
+    )
 
 
 def _normalize_bars(raw_bars: Iterable[dict[str, Any]], start: date, end: date) -> tuple[OutcomePriceBar, ...]:

@@ -451,6 +451,7 @@ def _learning_factor_payload(factor: LearningFactorRecord) -> dict[str, Any]:
         "factor_key": factor.factor_key,
         "title": factor.title,
         "factor_type": factor.factor_type,
+        "status": factor.status,
         "condition": factor.condition,
         "recommendation": factor.recommendation,
         "confidence": factor.confidence,

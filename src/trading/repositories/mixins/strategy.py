@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import Date, and_, cast, exists, or_
+from sqlalchemy import Date, and_, cast, exists, func, or_
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 
 from src.core import config as app_config
@@ -152,16 +152,11 @@ class StrategyRepositoryMixin:
         source_decision_date: date | None = None,
     ) -> tuple[PersistedCandidateOutcomeContext, ...]:
         """Load persisted candidates whose interim or final checkpoint is due."""
-        upper_date = (source_decision_date or evaluation_as_of_session) + timedelta(days=1)
-        next_day = datetime.combine(
-            upper_date,
-            time.min,
-            tzinfo=timezone.utc,
-        )
         if source_decision_date is not None:
-            first_day = datetime.combine(source_decision_date, time.min, tzinfo=timezone.utc)
+            first_day, next_day = _trade_day_window(source_decision_date)
         else:
             first_day = None
+            _, next_day = _trade_day_window(evaluation_as_of_session)
         missing_interim = ~exists().where(
             and_(
                 CandidateOutcomeEvaluation.candidate_score_id == CandidateScore.candidate_score_id,
@@ -310,15 +305,11 @@ class StrategyRepositoryMixin:
         evaluation_as_of_session: date,
     ) -> tuple[date, ...]:
         """Return bounded source dates that still lack an outcome checkpoint."""
-        start_at = datetime.combine(
-            evaluation_as_of_session - timedelta(days=270),
-            time.min,
-            tzinfo=timezone.utc,
-        )
-        end_at = datetime.combine(
-            evaluation_as_of_session + timedelta(days=1),
-            time.min,
-            tzinfo=timezone.utc,
+        start_at, _ = _trade_day_window(evaluation_as_of_session - timedelta(days=270))
+        _, end_at = _trade_day_window(evaluation_as_of_session)
+        local_decision_date = cast(
+            func.timezone(app_config.SCHEDULER_TIMEZONE, CandidateScore.decision_time),
+            Date,
         )
         missing_interim = ~exists().where(
             and_(
@@ -335,14 +326,14 @@ class StrategyRepositoryMixin:
             )
         )
         rows = (
-            self.session.query(cast(CandidateScore.decision_time, Date))
+            self.session.query(local_decision_date)
             .filter(
                 CandidateScore.decision_time >= start_at,
                 CandidateScore.decision_time < end_at,
                 or_(missing_interim, missing_final),
             )
             .distinct()
-            .order_by(cast(CandidateScore.decision_time, Date))
+            .order_by(local_decision_date)
             .all()
         )
         return tuple(row[0] for row in rows if row[0] is not None)

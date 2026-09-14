@@ -77,7 +77,8 @@
               <div class="label">Most Effective Strategy</div>
               <div class="value strategy-name">{{ strategy_label(eff.most.strategy_id) or eff.most.strategy_id }}</div>
               {% if eff.most.win_rate is not none %}<div class="note">{{ eff.most.win_rate }}% win</div>{% endif %}
-              <div class="note">{{ fmt_currency(eff.most.total_pnl) if eff.most.total_pnl is not none else "—" }} alpha</div>
+              {% set most_alpha = eff.most.total_alpha if eff.most.total_alpha is defined else eff.most.total_pnl %}
+              <div class="note">{{ fmt_number(most_alpha * 100) ~ "%" if most_alpha is not none else "—" }} cumulative alpha</div>
             </article>
             {% endif %}
             {% if eff and eff.least %}
@@ -85,7 +86,8 @@
               <div class="label">Least Effective Strategy</div>
               <div class="value strategy-name">{{ strategy_label(eff.least.strategy_id) or eff.least.strategy_id }}</div>
               {% if eff.least.win_rate is not none %}<div class="note">{{ eff.least.win_rate }}% win</div>{% endif %}
-              <div class="note">{{ fmt_currency(eff.least.total_pnl) if eff.least.total_pnl is not none else "—" }} alpha</div>
+              {% set least_alpha = eff.least.total_alpha if eff.least.total_alpha is defined else eff.least.total_pnl %}
+              <div class="note">{{ fmt_number(least_alpha * 100) ~ "%" if least_alpha is not none else "—" }} cumulative alpha</div>
             </article>
             {% endif %}
           </div>

@@ -68,6 +68,13 @@ def build_today_learning_strategies(
     )
     learning_factors_display = _dedupe_learning_factors(learning_factors_enriched)
     strategy_proposals_display = _dedupe_strategy_proposals(strategy_proposals)
+    recent_proposal_count = sum(
+        1 for row in strategy_proposals_display if not row.get("outside_recent_window")
+    )
+    latest_proposal_date = max(
+        (row.get("trade_date") for row in strategy_proposals_display if row.get("trade_date") is not None),
+        default=None,
+    )
     return {
         "reflection": reflection_display,
         "learning_factors": learning_factors_display,
@@ -75,6 +82,11 @@ def build_today_learning_strategies(
         "strategy_proposals": strategy_proposals_display,
         "strategy_definitions": strategy_definitions,
         "strategy_evaluation_results": strategy_evaluation_results,
+        "proposal_state": {
+            "recent_count": recent_proposal_count,
+            "latest_retained_date": latest_proposal_date,
+            "showing_history": bool(strategy_proposals_display) and recent_proposal_count == 0,
+        },
         "learning_summary_text": _synthesize_learning_overview(
             strategy_performance_with_summary=strategy_performance_with_summary,
             learning_factors=learning_factors,
@@ -270,9 +282,11 @@ def _synthesize_strategy_summary(
     if win_rate is not None:
         performance_bits.append(f"{win_rate} win rate")
 
-    total_pnl = _format_currency(perf_row.get("total_pnl"))
-    if total_pnl is not None:
-        performance_bits.append(f"{total_pnl} total P&L")
+    total_alpha = _format_percent_value(
+        perf_row.get("total_alpha", perf_row.get("total_pnl"))
+    )
+    if total_alpha is not None:
+        performance_bits.append(f"{total_alpha} cumulative alpha")
 
     sentence = ", ".join(performance_bits[:2])
     if len(performance_bits) > 2:
@@ -312,11 +326,13 @@ def _synthesize_learning_overview(
     )
     top_performer = max(
         strategy_performance_with_summary,
-        key=lambda row: _decimal_or_default(row.get("total_pnl"), Decimal("-Infinity")),
+        key=lambda row: _decimal_or_default(
+            row.get("total_alpha", row.get("total_pnl")), Decimal("-Infinity")
+        ),
     )
     parts = [
         f"{active_count} active strateg{'y' if active_count == 1 else 'ies'} tracked today",
-        f"top performer: {top_performer.get('strategy_id') or 'unknown'} ({_format_currency(top_performer.get('total_pnl')) or '—'} total P&L)",
+        f"top performer: {top_performer.get('strategy_id') or 'unknown'} ({_format_percent_value(top_performer.get('total_alpha', top_performer.get('total_pnl'))) or '—'} cumulative alpha)",
     ]
     key_learning = _highest_confidence_learning_factor(None, learning_factors)
     if key_learning is not None:
@@ -367,6 +383,14 @@ def _format_win_rate(value: Any) -> str | None:
     if number is None:
         return None
     return f"{number:.1f}%"
+
+
+def _format_percent_value(value: Any) -> str | None:
+    number = _decimal_or_none(value)
+    if number is None:
+        return None
+    sign = "+" if number > 0 else ""
+    return f"{sign}{number * Decimal('100'):.2f}%"
 
 
 def _format_confidence(value: Any) -> str | None:

@@ -166,9 +166,10 @@ class AlpacaMarketDataProvider:
         )
         bars_by_symbol: dict[str, list[DailyBar]] = {}
         for chunk in _chunks(normalized_symbols, max(batch_size, 1)):
-            response = self._client.get(
-                f"{self.data_base_url}/v2/stocks/bars",
-                params={
+            raw_pages: dict[str, list[dict[str, Any]]] = {symbol: [] for symbol in chunk}
+            page_token: str | None = None
+            while True:
+                params = {
                     "symbols": ",".join(chunk),
                     "timeframe": "1Day",
                     "start": _normalized_now(start).isoformat(),
@@ -176,16 +177,26 @@ class AlpacaMarketDataProvider:
                     "sort": "asc",
                     "adjustment": "split",
                     "feed": "iex",
-                },
-                headers=self._auth_headers(),
-            )
-            response.raise_for_status()
-            payload = response.json()
-            bars_payload = payload.get("bars", {}) if isinstance(payload, dict) else {}
-            if not isinstance(bars_payload, dict):
-                continue
+                }
+                if page_token:
+                    params["page_token"] = page_token
+                response = self._client.get(
+                    f"{self.data_base_url}/v2/stocks/bars",
+                    params=params,
+                    headers=self._auth_headers(),
+                )
+                response.raise_for_status()
+                payload = response.json()
+                bars_payload = payload.get("bars", {}) if isinstance(payload, dict) else {}
+                if isinstance(bars_payload, dict):
+                    for symbol in chunk:
+                        raw_pages[symbol].extend(bars_payload.get(symbol, ()))
+                next_page_token = payload.get("next_page_token") if isinstance(payload, dict) else None
+                if not next_page_token or next_page_token == page_token:
+                    break
+                page_token = str(next_page_token)
             for symbol in chunk:
-                daily_bars = _normalize_daily_bars(bars_payload.get(symbol, []))
+                daily_bars = _normalize_daily_bars(raw_pages[symbol])
                 if daily_bars:
                     bars_by_symbol[symbol] = daily_bars
         return bars_by_symbol
@@ -204,9 +215,10 @@ class AlpacaMarketDataProvider:
         )
         bars_by_symbol: dict[str, list[IntradayBar]] = {}
         for chunk in _chunks(normalized_symbols, max(batch_size, 1)):
-            response = self._client.get(
-                f"{self.data_base_url}/v2/stocks/bars",
-                params={
+            raw_pages: dict[str, list[dict[str, Any]]] = {symbol: [] for symbol in chunk}
+            page_token: str | None = None
+            while True:
+                params = {
                     "symbols": ",".join(chunk),
                     "timeframe": "1Min",
                     "start": _normalized_now(start).isoformat(),
@@ -214,17 +226,27 @@ class AlpacaMarketDataProvider:
                     "sort": "asc",
                     "adjustment": "split",
                     "feed": "iex",
-                },
-                headers=self._auth_headers(),
-            )
-            response.raise_for_status()
-            payload = response.json()
-            raw_by_symbol = payload.get("bars", {}) if isinstance(payload, dict) else {}
-            if not isinstance(raw_by_symbol, dict):
-                continue
+                }
+                if page_token:
+                    params["page_token"] = page_token
+                response = self._client.get(
+                    f"{self.data_base_url}/v2/stocks/bars",
+                    params=params,
+                    headers=self._auth_headers(),
+                )
+                response.raise_for_status()
+                payload = response.json()
+                raw_by_symbol = payload.get("bars", {}) if isinstance(payload, dict) else {}
+                if isinstance(raw_by_symbol, dict):
+                    for symbol in chunk:
+                        raw_pages[symbol].extend(raw_by_symbol.get(symbol, ()))
+                next_page_token = payload.get("next_page_token") if isinstance(payload, dict) else None
+                if not next_page_token or next_page_token == page_token:
+                    break
+                page_token = str(next_page_token)
             for symbol in chunk:
                 normalized: list[IntradayBar] = []
-                for item in sorted(raw_by_symbol.get(symbol, ()), key=lambda value: str(value.get("t", ""))):
+                for item in sorted(raw_pages[symbol], key=lambda value: str(value.get("t", ""))):
                     timestamp = _parse_bar_timestamp(item.get("t"))
                     close = _to_float_or_none(item.get("c"))
                     if timestamp is None or close is None:

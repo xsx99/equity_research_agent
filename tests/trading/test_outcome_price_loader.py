@@ -19,7 +19,6 @@ class _Provider:
             for symbol in symbols
             if symbol != "MISSING"
         }
-
     def fetch_minute_bars_for_symbols_range(self, symbols, *, start, end):
         self.calls.append(("minute", tuple(symbols), start, end))
         return {
@@ -34,6 +33,11 @@ class _Provider:
             ]
             for symbol in symbols
         }
+
+
+class _FailingMinuteProvider(_Provider):
+    def fetch_minute_bars_for_symbols_range(self, symbols, *, start, end):
+        raise RuntimeError("minute feed unavailable")
 
 
 def test_loader_batches_candidate_and_persisted_comparator_symbol_union():
@@ -109,3 +113,25 @@ def test_intraday_loader_uses_first_minute_at_or_after_decision_time():
         datetime(2026, 7, 2, 20, 0, tzinfo=timezone.utc),
     )
     assert result.start_prices_by_symbol["AAPL"] == 101
+
+
+def test_minute_failure_is_degraded_without_discarding_daily_bars():
+    loader = OutcomePriceLoader(provider=_FailingMinuteProvider())
+
+    result = loader.load(
+        OutcomePriceRequest(
+            candidate_symbol="AAPL",
+            snapshot_type="intraday",
+            decision_time=datetime(2026, 7, 2, 15, 0, 30, tzinfo=timezone.utc),
+            horizon_end_at=datetime(2026, 7, 7, 20, 0, tzinfo=timezone.utc),
+            actual_close_at=datetime(2026, 7, 2, 19, 0, tzinfo=timezone.utc),
+        )
+    )
+
+    assert "AAPL" in result.bars_by_symbol
+    assert result.start_prices_by_symbol == {}
+    assert result.actual_close_prices_by_symbol == {}
+    assert result.provider_errors == {
+        "minute_start": "RuntimeError: minute feed unavailable",
+        "minute_close": "RuntimeError: minute feed unavailable",
+    }

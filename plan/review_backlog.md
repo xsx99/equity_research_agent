@@ -115,14 +115,11 @@ catalogs:
 **Next:** write `plan/implementation/pr_NN_today_ui_information_design.md` translating design 14
 into file-level tasks, then implement.
 
-### 6. Historical replay not wired to production
-`src/trading/replay/historical.py` is in-memory / smoke only — `save_historical_replay_run` and
-`save_candidate_outcome_evaluations` exist only on `InMemoryTradingRepository`, not on the
-production `SQLAlchemyTradingRepository`; nothing triggers it, so the table stays empty and the FK
-NULL. The ORM/schema anchor (`historical_replay_runs`,
-`candidate_outcome_evaluations.historical_replay_run_id`) is kept for this. **To wire up (feature
-work):** implement the two `save_*` methods on the SQLAlchemy repo, add a trigger (scheduled or
-on-demand), surface replay outcomes in the UI.
+### 6. Historical replay not wired to production — resolved 2026-09-13
+Production now matures persisted candidates through `src/trading/phases/outcomes/`, with
+SQLAlchemy persistence, idempotent checkpoint keys, a 16:10 ET scheduler job, and an explicit
+dry-run-by-default backfill command. Offline historical reconstruction remains intentionally
+separate. The System tab shows current definitions independently of matured outcome coverage.
 
 ---
 
