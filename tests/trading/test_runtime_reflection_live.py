@@ -49,6 +49,12 @@ def test_live_reflection_request_loader_assembles_same_day_option_and_hedge_arti
         "risk_factor_exposures": ({"factor_type": "sector", "factor_value": "technology"},),
         "portfolio_snapshots": ({"account_equity": 100250.0},),
         "candidate_outcome_evaluations": ({"ticker": "AAPL", "alpha": 0.03},),
+        "historical_outcome_context": (
+            {"ticker": "AAPL", "evaluation_status": "final", "alpha": 0.05},
+        ),
+        "prior_reflection_context": (
+            {"trade_date": "2026-06-03", "what_failed": ["single-day chase"]},
+        ),
         "benchmark_peer_returns": {"QQQ": 0.01},
         "paper_option_decisions": ({"ticker": "AAPL", "option_strategy_type": "long_call"},),
         "paper_option_positions": ({"ticker": "AAPL", "quantity": 1},),
@@ -85,6 +91,8 @@ def test_live_reflection_request_loader_assembles_same_day_option_and_hedge_arti
     assert result.request.trading_decisions[0]["ticker"] == "AAPL"
     assert result.request.intraday_news_alerts[0]["severity"] == "high"
     assert result.request.candidate_outcome_evaluations[0]["alpha"] == 0.03
+    assert result.request.historical_outcome_context[0]["ticker"] == "AAPL"
+    assert result.request.prior_reflection_context[0]["trade_date"] == "2026-06-03"
     assert result.request.risk_hedge_overlays[0]["ticker"] == "QQQ"
     assert result.request.hedge_effectiveness["protected_notional"] == 15000.0
     assert result.request.learning_factors_used[0]["factor_key"] == "lf_2026_06_03_01"

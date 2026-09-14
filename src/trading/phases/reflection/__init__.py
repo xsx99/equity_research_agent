@@ -59,6 +59,8 @@ class LiveReflectionRequestLoader:
             risk_factor_exposures=tuple(payload.get("risk_factor_exposures") or ()),
             portfolio_snapshots=portfolio_snapshots,
             candidate_outcome_evaluations=tuple(payload.get("candidate_outcome_evaluations") or ()),
+            historical_outcome_context=tuple(payload.get("historical_outcome_context") or ()),
+            prior_reflection_context=tuple(payload.get("prior_reflection_context") or ()),
             benchmark_peer_returns=dict(payload.get("benchmark_peer_returns") or {}),
             paper_option_decisions=tuple(payload.get("paper_option_decisions") or ()),
             paper_option_positions=tuple(payload.get("paper_option_positions") or ()),
