@@ -3,7 +3,7 @@ from datetime import date, datetime, timezone
 from src.agents.prompt_registry import PromptRegistry
 from src.trading.manual_review.requests import ManualTickerRequestService
 from src.trading.repositories.in_memory import InMemoryTradingRepository
-from src.trading.risk import RiskDecisionRecord
+from src.trading.risk import PortfolioContext, PortfolioPosition, RiskDecisionRecord
 from src.trading.signals import SignalSnapshotResult, build_signal_snapshot
 from src.trading.signals.insider import REQUIRED_INSIDER_FIELDS
 from src.trading.signals.sources import EventNewsItemRecord, InMemorySignalSourceRepository, SourceRecord
@@ -164,6 +164,39 @@ def test_trading_decision_pipeline_persists_decisions_and_manual_request_status(
         decision_time=now,
         metadata_json={},
     )
+    portfolio_context = PortfolioContext(
+        as_of=now,
+        account_equity=100_000.0,
+        cash_balance=98_200.0,
+        buying_power=98_200.0,
+        excess_liquidity=98_200.0,
+        positions=(
+            PortfolioPosition(
+                ticker="nvda",
+                quantity=12.0,
+                market_value=1_800.0,
+                notional_exposure=1_800.0,
+                trade_identity="tactical_stock_trade",
+                direction="long",
+                sector=None,
+                strategy_id="relative_strength_rotation_v1",
+                intended_horizon="2w-3m",
+                beta_bucket=None,
+                volatility_bucket=None,
+                liquidity_bucket=None,
+                event_type=None,
+                macro_sensitivity=None,
+                margin_requirement=1_800.0,
+            ),
+        ),
+        open_strategy_exposure={},
+        current_factor_exposure=(),
+        stock_margin_requirement=1_800.0,
+        option_margin_requirement=0.0,
+        total_margin_requirement=1_800.0,
+        initial_margin_requirement=1_800.0,
+        maintenance_margin_requirement=1_800.0,
+    )
 
     def runner(prompt: str, model_name: str):
         return {
@@ -217,6 +250,7 @@ def test_trading_decision_pipeline_persists_decisions_and_manual_request_status(
         classifications=(classification,),
         risk_decisions=(risk,),
         decision_time=now,
+        portfolio_context=portfolio_context,
     )
 
     assert len(result.decisions) == 1
@@ -228,9 +262,73 @@ def test_trading_decision_pipeline_persists_decisions_and_manual_request_status(
     assert result.decisions[0].metadata_json["paper_trade_authorized"] is False
     assert result.decisions[0].metadata_json["entry_plan"] == "market_open"
     assert result.decisions[0].metadata_json["exit_plan"] == "close_or_invalidator"
-    assert repository.trading_decisions == list(result.decisions)
-    assert len(repository.llm_prompt_runs) == 1
-    assert len(repository.llm_usage_events) == 1
+    position_context = result.decisions[0].context_snapshot_json["position_context"]
+    assert position_context["has_existing_position"] is True
+    assert position_context["positions"] == [
+        {
+            "ticker": "NVDA",
+            "quantity": 12.0,
+            "market_value": 1_800.0,
+            "notional_exposure": 1_800.0,
+            "direction": "long",
+            "trade_identity": "tactical_stock_trade",
+            "strategy_id": "relative_strength_rotation_v1",
+            "instrument_type": "stock",
+        }
+    ]
+    assert position_context["total_market_value"] == 1_800.0
+    assert position_context["current_weight"] == 0.018
+    no_match_context = PortfolioContext(
+        as_of=now,
+        account_equity=100_000.0,
+        cash_balance=100_000.0,
+        buying_power=100_000.0,
+        excess_liquidity=100_000.0,
+        positions=(
+            PortfolioPosition(
+                ticker="AAPL",
+                quantity=12.0,
+                market_value=1_800.0,
+                notional_exposure=1_800.0,
+                trade_identity="tactical_stock_trade",
+                direction="long",
+                sector=None,
+                strategy_id="relative_strength_rotation_v1",
+                intended_horizon="2w-3m",
+                beta_bucket=None,
+                volatility_bucket=None,
+                liquidity_bucket=None,
+                event_type=None,
+                macro_sensitivity=None,
+                margin_requirement=1_800.0,
+            ),
+        ),
+        open_strategy_exposure={},
+        current_factor_exposure=(),
+        stock_margin_requirement=1_800.0,
+        option_margin_requirement=0.0,
+        total_margin_requirement=1_800.0,
+        initial_margin_requirement=1_800.0,
+        maintenance_margin_requirement=1_800.0,
+    )
+    no_match_result = pipeline.run(
+        candidates=(candidate,),
+        classifications=(classification,),
+        risk_decisions=(risk,),
+        decision_time=now,
+        portfolio_context=no_match_context,
+    )
+    no_match_position_context = no_match_result.decisions[0].context_snapshot_json["position_context"]
+    assert no_match_position_context == {
+        "has_existing_position": False,
+        "positions": [],
+        "total_market_value": 0.0,
+        "current_weight": 0.0,
+    }
+    assert len(repository.trading_decisions) == 2
+    assert repository.trading_decisions == [result.decisions[0], no_match_result.decisions[0]]
+    assert len(repository.llm_prompt_runs) == 2
+    assert len(repository.llm_usage_events) == 2
     assert manual_service.load_active()[0].latest_result_status == "actionable_trade"
 
 
@@ -2866,6 +2964,39 @@ def test_trading_decision_pipeline_skips_llm_and_falls_back_when_signal_snapshot
         decision_time=now,
         metadata_json={},
     )
+    portfolio_context = PortfolioContext(
+        as_of=now,
+        account_equity=100_000.0,
+        cash_balance=98_200.0,
+        buying_power=98_200.0,
+        excess_liquidity=98_200.0,
+        positions=(
+            PortfolioPosition(
+                ticker="NVDA",
+                quantity=12.0,
+                market_value=1_800.0,
+                notional_exposure=1_800.0,
+                trade_identity="tactical_stock_trade",
+                direction="long",
+                sector=None,
+                strategy_id="relative_strength_rotation_v1",
+                intended_horizon="2w-3m",
+                beta_bucket=None,
+                volatility_bucket=None,
+                liquidity_bucket=None,
+                event_type=None,
+                macro_sensitivity=None,
+                margin_requirement=1_800.0,
+            ),
+        ),
+        open_strategy_exposure={},
+        current_factor_exposure=(),
+        stock_margin_requirement=1_800.0,
+        option_margin_requirement=0.0,
+        total_margin_requirement=1_800.0,
+        initial_margin_requirement=1_800.0,
+        maintenance_margin_requirement=1_800.0,
+    )
 
     def runner(prompt: str, model_name: str):
         raise AssertionError("LLM should not run when signal snapshot context is missing")
@@ -2883,9 +3014,13 @@ def test_trading_decision_pipeline_skips_llm_and_falls_back_when_signal_snapshot
         classifications=(classification,),
         risk_decisions=(risk,),
         decision_time=now,
+        portfolio_context=portfolio_context,
     )
 
     assert len(result.decisions) == 1
-    assert result.decisions[0].decision == "no_trade"
-    assert result.decisions[0].metadata_json["fallback_action"] == "no_trade"
+    assert result.decisions[0].decision == "hold"
+    assert result.decisions[0].metadata_json["fallback_action"] == "hold"
     assert result.decisions[0].metadata_json["fallback_reason"] == "missing_signal_snapshot_context"
+    assert result.decisions[0].context_snapshot_json["has_existing_position"] is True
+    assert result.decisions[0].context_snapshot_json["position_context"]["positions"][0]["quantity"] == 12.0
+    assert result.decisions[0].context_snapshot_json["position_context"]["positions"][0]["market_value"] == 1_800.0

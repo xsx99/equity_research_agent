@@ -49,6 +49,7 @@ def _context_manager(session: object):
 class _CallRecorder:
     def __init__(self) -> None:
         self.calls: list[str] = []
+        self.trading_decision_portfolio_context: object | None = None
 
     def record(self, name: str) -> None:
         self.calls.append(name)
@@ -155,11 +156,13 @@ class _TradingDecisionPipeline:
         classifications: tuple[object, ...],
         risk_decisions: tuple[object, ...],
         decision_time: datetime,
+        portfolio_context: object | None = None,
     ) -> object:
         assert candidates
         assert classifications
         assert risk_decisions
         assert decision_time.tzinfo is not None
+        self.recorder.trading_decision_portfolio_context = portfolio_context
         self.recorder.record("trading_decision")
         return self.result
 
@@ -205,6 +208,7 @@ def _build_runtime(
         classifications=(SimpleNamespace(ticker="AAPL"),),
     )
     portfolio_result = SimpleNamespace(portfolio_context=SimpleNamespace(account_equity=100000.0))
+    recorder.portfolio_context = portfolio_result.portfolio_context
     risk_result = SimpleNamespace(risk_decisions=(SimpleNamespace(ticker="AAPL"),))
     decision_result = SimpleNamespace(decisions=(SimpleNamespace(ticker="AAPL", decision="enter_long"),))
     execution_result = execution_result or SimpleNamespace(paper_orders=(SimpleNamespace(ticker="AAPL"),))
@@ -250,6 +254,7 @@ def test_live_preopen_runtime_runs_morning_chain_without_execution_by_default():
     assert result["phase"] == "preopen"
     assert result["execution"]["mode"] == "dry_run"
     assert result["execution"]["orders_submitted"] == 0
+    assert recorder.trading_decision_portfolio_context is recorder.portfolio_context
 
 
 def test_live_preopen_runtime_executes_paper_orders_only_when_enabled():

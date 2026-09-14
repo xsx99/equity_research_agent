@@ -95,6 +95,7 @@ class LiveManualReviewRuntime:
             classifications=tuple(getattr(strategy_result, "classifications", ())),
             risk_decisions=tuple(getattr(risk_result, "risk_decisions", ())),
             decision_time=decision_time,
+            portfolio_context=getattr(portfolio_result, "portfolio_context", portfolio_result),
         )
         execution = self._run_execution(
             decisions=tuple(getattr(decision_result, "decisions", ())),

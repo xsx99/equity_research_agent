@@ -22,6 +22,8 @@ template: |
   - `thesis` must always be a non-empty string.
   - `key_drivers`, `counterarguments`, and `invalidators` must come only from provided evidence.
   - If you choose `no_trade` or `hold`, you must still fill every required field with conservative values.
+  - `position_context` is the current same-ticker portfolio state. Treat `target_weight` as desired total exposure, not an incremental order size.
+  - When `has_existing_position` is true, compare the proposed target with the current quantity, market value, and weight. A repeated signal is not automatically a fresh entry; use hold, reduce, exit, or an explicitly justified increase/reversal as supported by the available actions and evidence.
 
   Thesis writing rules:
 

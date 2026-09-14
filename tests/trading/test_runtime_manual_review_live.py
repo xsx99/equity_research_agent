@@ -124,10 +124,12 @@ class _TradingDecisionPipeline:
         classifications: tuple[object, ...],
         risk_decisions: tuple[object, ...],
         decision_time: datetime,
+        portfolio_context: object | None = None,
     ) -> object:
         assert len(candidates) == len(classifications)
         assert len(risk_decisions) == len(classifications)
         assert decision_time.tzinfo is not None
+        assert portfolio_context is not None
         self.recorder.record("trading_decision")
         return self.result
 

@@ -16,7 +16,7 @@ from src.trading.options.strategy import (
     OptionStrategyDecisionRecord,
     OptionsStrategyLayer,
 )
-from src.trading.risk import RiskDecisionRecord
+from src.trading.risk import PortfolioContext, RiskDecisionRecord
 from src.trading.signals import SignalSnapshotResult
 from src.trading.signals.event_news import build_event_news_signals
 from src.trading.signals.insider import REQUIRED_INSIDER_FIELDS
@@ -116,6 +116,7 @@ class TradingDecisionPipeline:
         classifications: tuple[TradeClassificationRecord, ...],
         risk_decisions: tuple[RiskDecisionRecord, ...],
         decision_time: datetime,
+        portfolio_context: PortfolioContext | None = None,
     ) -> TradingDecisionPipelineResult:
         candidate_by_id = {candidate.candidate_score_id: candidate for candidate in candidates}
         risk_by_classification_id = {
@@ -139,6 +140,10 @@ class TradingDecisionPipeline:
         for classification in classifications:
             candidate = candidate_by_id[classification.candidate_score_id]
             risk = risk_by_classification_id.get(classification.trade_classification_id)
+            position_context = _build_position_context(
+                ticker=candidate.ticker,
+                portfolio_context=portfolio_context,
+            )
             signal_snapshot = signal_snapshot_by_id.get(candidate.signal_snapshot_id)
             if signal_snapshot is None:
                 decision = self._build_missing_signal_snapshot_decision(
@@ -147,6 +152,7 @@ class TradingDecisionPipeline:
                     risk=risk,
                     decision_time=decision_time,
                     expression_definitions=expression_definitions,
+                    position_context=position_context,
                 )
                 self.repository.save_trading_decision(decision)
                 self._record_manual_result(candidate, classification, risk)
@@ -158,6 +164,7 @@ class TradingDecisionPipeline:
                 risk,
                 signal_snapshot,
                 expression_definitions,
+                position_context,
             )
             result = self.agent.run(payload, context=None)  # ToolContext is unused here.
             prompt_template = result.metadata["prompt_template"]
@@ -295,6 +302,7 @@ class TradingDecisionPipeline:
         risk: RiskDecisionRecord | None,
         signal_snapshot: SignalSnapshotResult,
         expression_definitions: dict[str, StrategyDefinitionRecord],
+        position_context: dict[str, Any],
     ) -> dict[str, Any]:
         previous_snapshot = self._load_previous_signal_snapshot(signal_snapshot)
         windowed_news_items = self._load_windowed_news_items(signal_snapshot, previous_snapshot)
@@ -307,7 +315,8 @@ class TradingDecisionPipeline:
             ticker=candidate.ticker,
             decision_time=candidate.decision_time,
             available_for_decision_at=candidate.available_for_decision_at,
-            has_existing_position=False,
+            has_existing_position=bool(position_context["has_existing_position"]),
+            position_context=position_context,
             signal_snapshot={
                 "signal_snapshot_id": signal_snapshot.signal_snapshot_id,
                 "snapshot_type": signal_snapshot.snapshot_type,
@@ -476,8 +485,9 @@ class TradingDecisionPipeline:
         risk: RiskDecisionRecord | None,
         decision_time: datetime,
         expression_definitions: dict[str, StrategyDefinitionRecord],
+        position_context: dict[str, Any],
     ) -> TradingDecisionRecord:
-        fallback_action = "no_trade"
+        fallback_action = "hold" if position_context["has_existing_position"] else "no_trade"
         manual_request_mode = self._manual_request_mode(candidate.manual_request_id)
         expression_fallback_plan = _resolve_expression_fallback_plan(
             candidate,
@@ -488,7 +498,8 @@ class TradingDecisionPipeline:
             "ticker": candidate.ticker,
             "decision_time": decision_time.isoformat(),
             "available_for_decision_at": candidate.available_for_decision_at.isoformat(),
-            "has_existing_position": False,
+            "has_existing_position": bool(position_context["has_existing_position"]),
+            "position_context": position_context,
             "signal_snapshot": {
                 "signal_snapshot_id": candidate.signal_snapshot_id,
                 "missing": True,
@@ -628,6 +639,53 @@ class TradingDecisionPipeline:
             if request.request_id == request_id:
                 return request.mode
         return None
+
+
+def _build_position_context(
+    *,
+    ticker: str,
+    portfolio_context: PortfolioContext | None,
+) -> dict[str, Any]:
+    """Build the decision-facing state for all open exposure in one ticker."""
+    normalized_ticker = str(ticker).strip().upper()
+    matching_positions = tuple(
+        position
+        for position in (portfolio_context.positions if portfolio_context is not None else ())
+        if str(getattr(position, "ticker", "")).strip().upper() == normalized_ticker
+    )
+    position_rows = [
+        {
+            "ticker": normalized_ticker,
+            "quantity": float(getattr(position, "quantity", 0.0) or 0.0),
+            "market_value": float(getattr(position, "market_value", 0.0) or 0.0),
+            "notional_exposure": float(getattr(position, "notional_exposure", 0.0) or 0.0),
+            "direction": str(getattr(position, "direction", "long") or "long"),
+            "trade_identity": str(getattr(position, "trade_identity", "") or ""),
+            "strategy_id": getattr(position, "strategy_id", None),
+            "instrument_type": _position_instrument_type(position),
+        }
+        for position in matching_positions
+    ]
+    total_market_value = sum(abs(row["market_value"]) for row in position_rows)
+    account_equity = float(getattr(portfolio_context, "account_equity", 0.0) or 0.0)
+    return _round_nested_floats(
+        {
+            "has_existing_position": bool(position_rows),
+            "positions": position_rows,
+            "total_market_value": total_market_value,
+            "current_weight": total_market_value / account_equity if account_equity > 0 else 0.0,
+        }
+    )
+
+
+def _position_instrument_type(position: Any) -> str:
+    if (
+        float(getattr(position, "option_margin_requirement", 0.0) or 0.0) > 0
+        or float(getattr(position, "assignment_notional", 0.0) or 0.0) > 0
+        or getattr(position, "event_type", None) == "earnings_through_expiry"
+    ):
+        return "option"
+    return "stock"
 
 
 def _collapse_missing_signals_for_llm(missing_signals: list[str]) -> list[str]:

@@ -68,6 +68,7 @@ class LiveTradingDecisionPipeline(Protocol):
         classifications: tuple[object, ...],
         risk_decisions: tuple[object, ...],
         decision_time: datetime,
+        portfolio_context: object | None = None,
     ) -> object:
         """Generate persisted trading decisions."""
 

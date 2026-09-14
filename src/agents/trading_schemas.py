@@ -52,6 +52,7 @@ class TradingDecisionInput(BaseModel):
     decision_time: datetime
     available_for_decision_at: datetime
     has_existing_position: bool = False
+    position_context: dict[str, Any] = Field(default_factory=dict)
     signal_snapshot: dict[str, Any]
     candidate_context: dict[str, Any]
     classification_context: dict[str, Any]
