@@ -189,6 +189,29 @@ python scripts/run_trading_universe_batch_enrichment_smoke.py --tickers TSM --js
 
 This verifies the Alpaca multi-symbol daily-bars path used by live preopen universe enrichment without scanning the full universe. Keep `--tickers` small to preserve provider rate limit budget.
 
+## Candidate outcome maturation
+
+The scheduler matures persisted candidate scores at 16:10 ET, before reflection at
+16:20 and strategy evolution at 16:50. Missing exact decision/checkpoint prices remain
+pending, and provider failures are reported as degraded rather than fabricated.
+
+Before any historical apply, verify PostgreSQL is on persistent storage:
+
+```bash
+docker exec postgres_db psql -U postgres -d mono_db -c "SHOW data_directory;"
+```
+
+Preview an explicit 60-day source-date range (dry-run is the default):
+
+```bash
+source ~/.venv/bin/activate
+python scripts/run_outcome_backfill.py --start-date 2026-07-16 --end-date 2026-09-13 --dry-run --json
+```
+
+Only after reviewing that report and receiving explicit operator approval, apply or
+resume it with `--apply --resume`. Each source date commits independently; failed dates
+roll back and remain resumable.
+
 This fixture-backed smoke seeds one ticker with deterministic `technical`, `fundamental`, `events_news`, `insider`, and `social_macro` rows, builds the resulting preopen snapshot, and prints the top candidate evidence for `insider_accumulation_momentum_v1`.
 
 Live social-macro persistence-only smoke:

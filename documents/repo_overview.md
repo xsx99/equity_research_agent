@@ -53,8 +53,9 @@ Scheduler orchestration now lives under `src/trading/phases/`.
   pipeline/learning-factor records.
 - `src/trading/phases/strategy_evolution/` owns the live post-close strategy-evolution runtime and
   proposal/lifecycle pipeline records.
-- `src/trading/phases/replay/` owns historical replay and outcome evaluation. It is smoke-only
-  today, not wired as a scheduler phase.
+- `src/trading/phases/outcomes/` owns live persisted-candidate outcome maturation. The scheduler
+  runs it at 16:10 ET before reflection (16:20) and strategy evolution (16:50); historical replay
+  remains under `src/trading/phases/replay/` for offline reconstruction and smoke use.
 - `src/trading/phases/_shell/` owns the cross-phase scheduler facade, dispatch table, runtime
   support helpers, and smoke entrypoints/modes.
 - Old `src/trading/runtime/preopen*`, `runtime/manual_review.py`, `runtime/intraday_refresh*`,

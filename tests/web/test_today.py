@@ -1744,7 +1744,8 @@ class TestTodayDashboard:
         assert "System Issues" in response.text
         assert "Reflection Snapshot" in response.text
         assert "Strategy Pipeline" in response.text
-        assert "Strategy Performance" in response.text
+        assert "Current Strategies" in response.text
+        assert "Strategy Edge" in response.text
         assert "LLM Spend" in response.text
         assert "Usage Ledger" in response.text
         assert "All provider telemetry" in response.text
@@ -1755,7 +1756,7 @@ class TestTodayDashboard:
         assert "Bullish catalyst continuation respected" in response.text
         assert "strategy-proposal-scroll" in response.text
         assert "strategy-proposal-list" in response.text
-        assert "Strategy Performance" in response.text
+        assert "Proposal History &amp; Runtime State" in response.text
         assert "$4,200" in response.text
         assert "1 active strategy tracked today." in response.text
         assert "Latest learning: Tighten low-volume gap entries" in response.text
@@ -4143,16 +4144,55 @@ def test_load_strategy_performance_computes_win_rate_percentage():
             "lifecycle_status": "observed",
             "lifecycle_status_label": "Observed",
             "win_rate": Decimal("50.0"),
-            "total_pnl": Decimal("0.9"),
+            "total_alpha": Decimal("0.9"),
+            "mean_alpha": Decimal("0.45"),
+            "outcome_count": 2,
         },
         {
             "strategy_id": "gap_reclaim_v1",
             "lifecycle_status": "observed",
             "lifecycle_status_label": "Observed",
             "win_rate": Decimal("100.0"),
-            "total_pnl": Decimal("1.2"),
+            "total_alpha": Decimal("1.2"),
+            "mean_alpha": Decimal("0.6"),
+            "outcome_count": 2,
         },
     )
+
+
+def test_load_strategy_definitions_includes_seed_and_manual_strategies():
+    from src.web.routers.today import _load_strategy_definitions
+
+    rows = [
+        SimpleNamespace(
+            strategy_id="seed_strategy_v1",
+            display_name="Seed Strategy",
+            lifecycle_status="active",
+            typical_horizon="swing-5d",
+            source="seed",
+            is_active=True,
+        ),
+        SimpleNamespace(
+            strategy_id="manual_strategy_v1",
+            display_name="Manual Strategy",
+            lifecycle_status="candidate",
+            typical_horizon="intraday-2d",
+            source="manual",
+            is_active=False,
+        ),
+    ]
+    session = MagicMock()
+    session.query.return_value.order_by.return_value.limit.return_value.all.return_value = rows
+
+    definitions = _load_strategy_definitions(session)
+
+    assert not session.query.return_value.filter.called
+    assert [row["strategy_id"] for row in definitions] == [
+        "seed_strategy_v1",
+        "manual_strategy_v1",
+    ]
+    assert definitions[0]["display_name"] == "Seed Strategy"
+    assert definitions[0]["source_label"] == "Seed"
 
 
 def test_today_styles_define_attention_feed_row_variants():

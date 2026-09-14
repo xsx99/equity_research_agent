@@ -7,6 +7,7 @@ from typing import Any
 
 from src.trading.phases.intraday import run_live_intraday_refresh_once
 from src.trading.phases.manual_review import run_live_manual_review_once
+from src.trading.phases.outcomes import run_live_outcomes_once
 from src.trading.phases.preopen import run_live_preopen_once
 from src.trading.phases.reflection import run_live_reflection_once
 from .smoke import (
@@ -30,6 +31,7 @@ JOB_PHASE_HANDLERS: dict[str, RuntimeHandler] = {
     "preopen": run_live_preopen_once,
     "manual_review": run_live_manual_review_once,
     "intraday_refresh": run_live_intraday_refresh_once,
+    "outcome_evaluation": run_live_outcomes_once,
     "reflection": run_live_reflection_once,
     "strategy_evolution": run_live_strategy_evolution_once,
 }

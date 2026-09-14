@@ -110,22 +110,39 @@ def _load_strategy_performance(session: Any) -> tuple[dict[str, Any], ...]:
                 "lifecycle_status": "observed",
                 "lifecycle_status_label": generic_status_label("observed"),
                 "win_rate": win_rate,
-                "total_pnl": sum(alpha_values, Decimal("0")) if alpha_values else None,
+                "total_alpha": sum(alpha_values, Decimal("0")) if alpha_values else None,
+                "mean_alpha": (
+                    sum(alpha_values, Decimal("0")) / Decimal(len(alpha_values))
+                    if alpha_values
+                    else None
+                ),
+                "outcome_count": len(alpha_values),
             }
         )
     return tuple(performance[:20])
 
 
 def _load_strategy_proposals(session: Any) -> tuple[dict[str, Any], ...]:
+    cutoff = _strategy_proposal_recent_cutoff()
     rows = (
         session.query(StrategyProposal)
-        .filter(StrategyProposal.trade_date >= _strategy_proposal_recent_cutoff())
+        .filter(StrategyProposal.trade_date >= cutoff)
         .order_by(StrategyProposal.trade_date.desc(), StrategyProposal.created_at.desc())
         .limit(100)
         .all()
     )
+    if not rows:
+        rows = (
+            session.query(StrategyProposal)
+            .order_by(StrategyProposal.trade_date.desc(), StrategyProposal.created_at.desc())
+            .limit(20)
+            .all()
+        )
     return tuple(
-        _serialize_strategy_proposal(row)
+        {
+            **_serialize_strategy_proposal(row),
+            "outside_recent_window": row.trade_date < cutoff,
+        }
         for row in rows
     )
 
@@ -158,17 +175,21 @@ def _serialize_strategy_proposal(row: StrategyProposal) -> dict[str, Any]:
 def _load_strategy_definitions(session: Any) -> tuple[dict[str, Any], ...]:
     rows = (
         session.query(StrategyDefinition)
-        .filter(StrategyDefinition.source == "reflection_learning")
         .order_by(StrategyDefinition.created_at.desc())
-        .limit(20)
+        .limit(100)
         .all()
     )
     return tuple(
         {
             "strategy_id": row.strategy_id,
+            "display_name": row.display_name,
             "lifecycle_status": row.lifecycle_status,
             "lifecycle_status_label": generic_status_label(row.lifecycle_status),
             "source": row.source,
+            "source_label": generic_status_label(row.source),
+            "typical_horizon": row.typical_horizon,
+            "typical_horizon_label": generic_status_label(row.typical_horizon),
+            "is_active": row.is_active,
         }
         for row in rows
     )

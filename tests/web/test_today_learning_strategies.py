@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 from decimal import Decimal
 
 from src.web.presenters.today_learning_strategies import build_today_learning_strategies, _proposal_status_rank
@@ -123,6 +124,29 @@ def test_build_today_learning_strategies_adds_learning_summary_text():
     assert payload["learning_summary_text"]
     assert "1 active strategy" in payload["learning_summary_text"]
     assert "earnings_drift_v1" in payload["learning_summary_text"]
+
+
+def test_build_today_learning_strategies_explains_historical_proposal_fallback():
+    payload = build_today_learning_strategies(
+        reflection=None,
+        learning_factors=(),
+        strategy_performance=(),
+        strategy_proposals=(
+            {
+                "trade_date": date(2026, 7, 16),
+                "proposed_strategy_id": "old-proposal",
+                "outside_recent_window": True,
+            },
+        ),
+        strategy_definitions=({"strategy_id": "seed-v1"},),
+        strategy_evaluation_results=(),
+    )
+
+    assert payload["proposal_state"] == {
+        "recent_count": 0,
+        "latest_retained_date": date(2026, 7, 16),
+        "showing_history": True,
+    }
 
 
 def test_build_today_learning_strategies_dedupes_strategy_proposals_and_learning_factors():

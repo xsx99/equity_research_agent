@@ -4,6 +4,9 @@ from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
 
+from sqlalchemy import Date, and_, cast, exists, func, or_
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+
 from src.core import config as app_config
 from src.db.models.trading import (
     CandidateOutcomeEvaluation,
@@ -16,7 +19,17 @@ from src.db.models.trading import (
     StrategyProposal,
     StrategyRun,
     TradeClassification,
+    TradingDecision,
     WatchCandidate,
+    PaperOrder,
+    PaperExecution,
+    PeerBasket,
+)
+from src.trading.outcomes.context import (
+    PersistedCandidateOutcomeContext,
+    comparator_context,
+    complete_close_from_lineage,
+    due_evaluation_statuses,
 )
 from src.trading.strategies.classifier import TradeClassificationRecord
 from src.trading.strategies.matching import (
@@ -76,14 +89,35 @@ class StrategyRepositoryMixin:
                 "trade_identity",
             )
             _require_choice(outcome.evaluation_status, {"interim", "final"}, "evaluation_status")
-            row = self.session.query(CandidateOutcomeEvaluation).filter_by(
-                candidate_outcome_evaluation_id=_to_uuid(outcome.candidate_outcome_evaluation_id)
-            ).one_or_none()
+            values = _candidate_outcome_values(outcome)
+            bind = self.session.get_bind() if hasattr(self.session, "get_bind") else None
+            if outcome.candidate_score_id is not None and getattr(getattr(bind, "dialect", None), "name", None) == "postgresql":
+                statement = (
+                    postgresql_insert(CandidateOutcomeEvaluation)
+                    .values(**values)
+                    .on_conflict_do_nothing(
+                        constraint="uq_candidate_outcomes_maturation_checkpoint"
+                    )
+                )
+                self.session.execute(statement)
+                continue
+            if outcome.candidate_score_id is None:
+                row = self.session.query(CandidateOutcomeEvaluation).filter_by(
+                    candidate_outcome_evaluation_id=_to_uuid(outcome.candidate_outcome_evaluation_id)
+                ).one_or_none()
+            else:
+                row = self.session.query(CandidateOutcomeEvaluation).filter_by(
+                    candidate_score_id=_to_uuid(outcome.candidate_score_id),
+                    evaluation_status=outcome.evaluation_status,
+                    horizon_end_at=outcome.horizon_end_at,
+                ).one_or_none()
             if row is None:
                 row = CandidateOutcomeEvaluation(
                     candidate_outcome_evaluation_id=_to_uuid(outcome.candidate_outcome_evaluation_id)
                 )
                 self.session.add(row)
+            elif outcome.candidate_score_id is not None:
+                continue
             row.historical_replay_run_id = _to_uuid_or_none(outcome.historical_replay_run_id)
             row.candidate_score_id = _to_uuid_or_none(outcome.candidate_score_id)
             row.trade_classification_id = _to_uuid_or_none(outcome.trade_classification_id)
@@ -110,6 +144,199 @@ class StrategyRepositoryMixin:
             row.sector_theme = outcome.sector_theme
             row.metadata_json = dict(outcome.metadata_json)
         self.session.flush()
+
+    def load_due_candidate_outcome_contexts(
+        self,
+        *,
+        evaluation_as_of_session: date,
+        source_decision_date: date | None = None,
+    ) -> tuple[PersistedCandidateOutcomeContext, ...]:
+        """Load persisted candidates whose interim or final checkpoint is due."""
+        if source_decision_date is not None:
+            first_day, next_day = _trade_day_window(source_decision_date)
+        else:
+            first_day = None
+            _, next_day = _trade_day_window(evaluation_as_of_session)
+        missing_interim = ~exists().where(
+            and_(
+                CandidateOutcomeEvaluation.candidate_score_id == CandidateScore.candidate_score_id,
+                CandidateOutcomeEvaluation.evaluation_status == "interim",
+            )
+        )
+        missing_final = ~exists().where(
+            and_(
+                CandidateOutcomeEvaluation.candidate_score_id == CandidateScore.candidate_score_id,
+                CandidateOutcomeEvaluation.evaluation_status == "final",
+            )
+        )
+        candidate_query = self.session.query(CandidateScore).filter(
+            CandidateScore.decision_time < next_day,
+            or_(missing_interim, missing_final),
+        )
+        if first_day is not None:
+            candidate_query = candidate_query.filter(CandidateScore.decision_time >= first_day)
+        candidate_rows = candidate_query.all()
+        if not candidate_rows:
+            return ()
+
+        candidate_ids = {row.candidate_score_id for row in candidate_rows}
+        run_ids = {row.strategy_run_id for row in candidate_rows}
+        runs = {
+            row.strategy_run_id: row
+            for row in self.session.query(StrategyRun)
+            .filter(StrategyRun.strategy_run_id.in_(run_ids))
+            .all()
+        }
+        classification_rows = self.session.query(TradeClassification).filter(
+            TradeClassification.candidate_score_id.in_(candidate_ids)
+        ).all()
+        watch_rows = self.session.query(WatchCandidate).filter(
+            WatchCandidate.candidate_score_id.in_(candidate_ids)
+        ).all()
+        outcome_rows = self.session.query(CandidateOutcomeEvaluation).filter(
+            CandidateOutcomeEvaluation.candidate_score_id.in_(candidate_ids)
+        ).all()
+        decisions = self.session.query(TradingDecision).filter(
+            TradingDecision.candidate_score_id.in_(candidate_ids)
+        ).all()
+        decision_ids = {row.trading_decision_id for row in decisions}
+        orders = (
+            self.session.query(PaperOrder)
+            .filter(PaperOrder.trading_decision_id.in_(decision_ids))
+            .all()
+            if decision_ids
+            else []
+        )
+        order_ids = {row.paper_order_id for row in orders}
+        fills = (
+            self.session.query(PaperExecution)
+            .filter(PaperExecution.paper_order_id.in_(order_ids))
+            .all()
+            if order_ids
+            else []
+        )
+
+        peer_ids = {
+            _to_uuid(value)
+            for row in candidate_rows
+            if (value := dict(row.benchmark_context_json or {}).get("peer_basket_id"))
+        }
+        peer_baskets = {
+            str(row.peer_basket_id): row
+            for row in (
+                self.session.query(PeerBasket)
+                .filter(PeerBasket.peer_basket_id.in_(peer_ids))
+                .all()
+                if peer_ids
+                else []
+            )
+        }
+
+        contexts: list[PersistedCandidateOutcomeContext] = []
+        for row in sorted(candidate_rows, key=lambda item: (item.decision_time, str(item.candidate_score_id))):
+            run = runs.get(row.strategy_run_id)
+            if run is None:
+                continue
+            candidate = _candidate_score_record(row)
+            classification_row = next(
+                (item for item in classification_rows if item.candidate_score_id == row.candidate_score_id),
+                None,
+            )
+            classification = _trade_classification_record(classification_row) if classification_row else None
+            watch_row = next(
+                (item for item in watch_rows if item.candidate_score_id == row.candidate_score_id),
+                None,
+            )
+            watch = _watch_candidate_record(watch_row, candidate) if watch_row else None
+            candidate_decision_ids = {
+                item.trading_decision_id
+                for item in decisions
+                if item.candidate_score_id == row.candidate_score_id
+            }
+            candidate_orders = tuple(
+                item for item in orders if item.trading_decision_id in candidate_decision_ids
+            )
+            candidate_order_ids = {item.paper_order_id for item in candidate_orders}
+            candidate_fills = tuple(
+                item for item in fills if item.paper_order_id in candidate_order_ids
+            )
+            has_complete_close, complete_close_at = complete_close_from_lineage(
+                candidate_orders,
+                candidate_fills,
+                trade_identity=getattr(classification, "trade_identity", None),
+            )
+            benchmark_context = dict(row.benchmark_context_json or {})
+            persisted_peer_id = str(benchmark_context.get("peer_basket_id") or "") or None
+            peer_row = peer_baskets.get(persisted_peer_id or "")
+            comparator = comparator_context(
+                benchmark_context,
+                peer_basket_id=persisted_peer_id,
+                peer_members=tuple(getattr(peer_row, "members_json", ()) or ()),
+            )
+            context = PersistedCandidateOutcomeContext(
+                candidate=candidate,
+                snapshot_type=str(run.snapshot_type),
+                trade_classification=classification,
+                watch_candidate=watch,
+                selected_orders=candidate_orders,
+                selected_fills=candidate_fills,
+                has_complete_close=has_complete_close,
+                complete_close_at=complete_close_at,
+                **comparator,
+            )
+            due = due_evaluation_statuses(
+                context,
+                evaluation_as_of_session=evaluation_as_of_session,
+                existing_outcomes=outcome_rows,
+            )
+            if due:
+                contexts.append(
+                    PersistedCandidateOutcomeContext(
+                        **{
+                            **context.__dict__,
+                            "due_evaluation_statuses": due,
+                        }
+                    )
+                )
+        return tuple(contexts)
+
+    def load_due_candidate_outcome_source_dates(
+        self,
+        evaluation_as_of_session: date,
+    ) -> tuple[date, ...]:
+        """Return bounded source dates that still lack an outcome checkpoint."""
+        start_at, _ = _trade_day_window(evaluation_as_of_session - timedelta(days=270))
+        _, end_at = _trade_day_window(evaluation_as_of_session)
+        local_decision_date = cast(
+            func.timezone(app_config.SCHEDULER_TIMEZONE, CandidateScore.decision_time),
+            Date,
+        )
+        missing_interim = ~exists().where(
+            and_(
+                CandidateOutcomeEvaluation.candidate_score_id
+                == CandidateScore.candidate_score_id,
+                CandidateOutcomeEvaluation.evaluation_status == "interim",
+            )
+        )
+        missing_final = ~exists().where(
+            and_(
+                CandidateOutcomeEvaluation.candidate_score_id
+                == CandidateScore.candidate_score_id,
+                CandidateOutcomeEvaluation.evaluation_status == "final",
+            )
+        )
+        rows = (
+            self.session.query(local_decision_date)
+            .filter(
+                CandidateScore.decision_time >= start_at,
+                CandidateScore.decision_time < end_at,
+                or_(missing_interim, missing_final),
+            )
+            .distinct()
+            .order_by(local_decision_date)
+            .all()
+        )
+        return tuple(row[0] for row in rows if row[0] is not None)
 
     def save_strategy_definition(self, definition: StrategyDefinitionRecord) -> None:
         row = self.session.query(StrategyDefinition).filter_by(
@@ -382,6 +609,109 @@ class StrategyRepositoryMixin:
 
 def _decimal_or_none(value: object) -> Decimal | None:
     return Decimal(str(value)) if value is not None else None
+
+
+def _candidate_outcome_values(outcome: CandidateOutcomeEvaluationRecord) -> dict[str, Any]:
+    return {
+        "candidate_outcome_evaluation_id": _to_uuid(outcome.candidate_outcome_evaluation_id),
+        "historical_replay_run_id": _to_uuid_or_none(outcome.historical_replay_run_id),
+        "candidate_score_id": _to_uuid_or_none(outcome.candidate_score_id),
+        "trade_classification_id": _to_uuid_or_none(outcome.trade_classification_id),
+        "ticker": outcome.ticker,
+        "strategy_id": outcome.strategy_id,
+        "strategy_version": outcome.strategy_version,
+        "expression_bucket_id": outcome.expression_bucket_id,
+        "trade_identity": outcome.trade_identity,
+        "direction": outcome.direction,
+        "catalyst_type": outcome.catalyst_type,
+        "confidence_bucket": outcome.confidence_bucket,
+        "decision_time": outcome.decision_time,
+        "horizon_start_at": outcome.horizon_start_at,
+        "horizon_end_at": outcome.horizon_end_at,
+        "evaluation_status": outcome.evaluation_status,
+        "candidate_return": _decimal_or_none(outcome.candidate_return),
+        "benchmark_returns_json": dict(outcome.benchmark_returns),
+        "peer_basket_id": _to_uuid_or_none(outcome.peer_basket_id),
+        "peer_basket_return": _decimal_or_none(outcome.peer_basket_return),
+        "alpha": _decimal_or_none(outcome.alpha),
+        "max_favorable_excursion": _decimal_or_none(outcome.max_favorable_excursion),
+        "max_adverse_excursion": _decimal_or_none(outcome.max_adverse_excursion),
+        "regime": outcome.regime,
+        "sector_theme": outcome.sector_theme,
+        "metadata_json": dict(outcome.metadata_json),
+    }
+
+
+def _candidate_score_record(row: Any) -> CandidateScoreRecord:
+    return CandidateScoreRecord(
+        candidate_score_id=str(row.candidate_score_id),
+        strategy_run_id=str(row.strategy_run_id),
+        signal_snapshot_id=str(row.signal_snapshot_id) if row.signal_snapshot_id else "",
+        universe_ranking_run_id=(
+            str(row.universe_ranking_run_id) if getattr(row, "universe_ranking_run_id", None) else None
+        ),
+        universe_ranking_id=(
+            str(row.universe_ranking_id) if getattr(row, "universe_ranking_id", None) else None
+        ),
+        ticker=row.ticker,
+        strategy_id=row.strategy_id,
+        strategy_version=row.strategy_version,
+        strategy_definition_id=str(row.strategy_definition_id) if row.strategy_definition_id else "",
+        candidate_score=float(row.candidate_score),
+        candidate_status=row.candidate_status,
+        direction=row.direction,
+        action=row.action,
+        typical_horizon=row.typical_horizon,
+        core_signal_evidence=dict(row.core_signal_evidence_json or {}),
+        missing_required_signals=list(row.missing_required_signals_json or ()),
+        unsupported_missing_signal_families=list(row.unsupported_missing_signal_families_json or ()),
+        invalidators=list(row.invalidators_json or ()),
+        risk_tags=list(row.risk_tags_json or ()),
+        macro_compatibility=row.macro_compatibility,
+        selection_source=row.selection_source,
+        manual_request_id=str(row.manual_request_id) if row.manual_request_id else None,
+        selection_reason=row.selection_reason,
+        rejection_reason=row.rejection_reason,
+        benchmark_context=dict(row.benchmark_context_json or {}),
+        decision_time=row.decision_time,
+        available_for_decision_at=row.available_for_decision_at,
+        source_record_refs_json=list(row.source_record_refs_json or ()),
+    )
+
+
+def _trade_classification_record(row: Any) -> TradeClassificationRecord:
+    return TradeClassificationRecord(
+        trade_classification_id=str(row.trade_classification_id),
+        candidate_score_id=str(row.candidate_score_id),
+        strategy_run_id=str(row.strategy_run_id),
+        ticker=row.ticker,
+        selected_strategy_id=row.selected_strategy_id,
+        selected_strategy_version=row.selected_strategy_version,
+        expression_bucket_id=row.expression_bucket_id,
+        expression_bucket_version=row.expression_bucket_version,
+        trade_identity=row.trade_identity,
+        watch_type=row.watch_type,
+        direction=row.direction,
+        intended_horizon=row.intended_horizon,
+        exit_policy=row.exit_policy,
+        result_status=row.result_status,
+        classification_reason=row.classification_reason,
+        selected_strategy_context_json=dict(row.selected_strategy_context_json or {}),
+        decision_time=row.decision_time,
+    )
+
+
+def _watch_candidate_record(row: Any, candidate: CandidateScoreRecord) -> WatchCandidateRecord:
+    return WatchCandidateRecord(
+        watch_candidate_id=str(row.watch_candidate_id),
+        candidate=candidate,
+        watch_strategy_id=row.watch_strategy_id,
+        watch_strategy_version=row.watch_strategy_version,
+        watch_type=row.watch_type,
+        result_status=row.result_status,
+        watch_reason=row.watch_reason,
+        selection_context=dict(row.selection_context_json or {}),
+    )
 
 
 def _require_choice(value: str, allowed: set[str], name: str) -> None:

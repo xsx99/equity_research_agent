@@ -38,6 +38,16 @@ class _CapturingClient:
         return _StubResponse(self.payload)
 
 
+class _PagedClient:
+    def __init__(self, payloads: list[dict[str, Any]]) -> None:
+        self.payloads = list(payloads)
+        self.calls: list[dict[str, Any]] = []
+
+    def get(self, url: str, *, params: dict[str, Any], headers: dict[str, str]) -> _StubResponse:
+        self.calls.append({"url": url, "params": params, "headers": headers})
+        return _StubResponse(self.payloads.pop(0))
+
+
 class _RoutingClient:
     def __init__(self, routes: dict[str, dict[str, Any]]) -> None:
         self.routes = routes
@@ -184,6 +194,83 @@ def test_fetch_daily_bars_for_symbols_batches_multi_symbol_requests():
     assert bars["TSM"][0]["volume"] == 3_000_000
     assert [call["params"]["symbols"] for call in client.calls] == ["AAPL,MSFT", "TSM"]
     assert [call["params"]["limit"] for call in client.calls] == [10, 5]
+
+
+def test_fetch_daily_bars_for_symbols_range_uses_explicit_historical_boundaries():
+    client = _CapturingClient(
+        {"bars": {"AAPL": [{"t": "2026-03-24T04:00:00Z", "c": 201.25}]}}
+    )
+    provider = AlpacaMarketDataProvider(
+        api_key="test-key", secret_key="test-secret", client=client
+    )
+    start = datetime(2026, 3, 23, 13, 30, tzinfo=timezone.utc)
+    end = datetime(2026, 3, 24, 20, 0, tzinfo=timezone.utc)
+
+    bars = provider.fetch_daily_bars_for_symbols_range(
+        ["aapl"], start=start, end=end
+    )
+
+    assert bars["AAPL"][0]["close"] == 201.25
+    assert client.calls[0]["params"] == {
+        "symbols": "AAPL",
+        "timeframe": "1Day",
+        "start": start.isoformat(),
+        "end": end.isoformat(),
+        "sort": "asc",
+        "adjustment": "split",
+        "feed": "iex",
+    }
+
+
+def test_fetch_minute_bars_for_symbols_range_uses_explicit_historical_boundaries():
+    client = _CapturingClient(
+        {
+            "bars": {
+                "AAPL": [
+                    {"t": "2026-03-23T13:31:00Z", "o": 200, "h": 202, "l": 199, "c": 201}
+                ]
+            }
+        }
+    )
+    provider = AlpacaMarketDataProvider(
+        api_key="test-key", secret_key="test-secret", client=client
+    )
+    start = datetime(2026, 3, 23, 13, 30, 30, tzinfo=timezone.utc)
+    end = datetime(2026, 3, 23, 20, 0, tzinfo=timezone.utc)
+
+    bars = provider.fetch_minute_bars_for_symbols_range(["aapl"], start=start, end=end)
+
+    assert bars["AAPL"][0]["timestamp"] == datetime(2026, 3, 23, 13, 31, tzinfo=timezone.utc)
+    assert client.calls[0]["params"]["start"] == start.isoformat()
+    assert client.calls[0]["params"]["end"] == end.isoformat()
+    assert client.calls[0]["params"]["timeframe"] == "1Min"
+
+
+@pytest.mark.parametrize("timeframe", ["1Day", "1Min"])
+def test_explicit_range_fetches_all_alpaca_pages(timeframe):
+    first_bar = {"t": "2026-03-23T13:31:00Z", "o": 200, "h": 202, "l": 199, "c": 201}
+    second_bar = {"t": "2026-03-24T13:31:00Z", "o": 201, "h": 203, "l": 200, "c": 202}
+    client = _PagedClient(
+        [
+            {"bars": {"AAPL": [first_bar]}, "next_page_token": "page-2"},
+            {"bars": {"AAPL": [second_bar]}, "next_page_token": None},
+        ]
+    )
+    provider = AlpacaMarketDataProvider(
+        api_key="test-key", secret_key="test-secret", client=client
+    )
+    start = datetime(2026, 3, 23, 13, 30, tzinfo=timezone.utc)
+    end = datetime(2026, 3, 24, 20, 0, tzinfo=timezone.utc)
+
+    if timeframe == "1Day":
+        bars = provider.fetch_daily_bars_for_symbols_range(["aapl"], start=start, end=end)
+        assert [bar["date"] for bar in bars["AAPL"]] == [date(2026, 3, 23), date(2026, 3, 24)]
+    else:
+        bars = provider.fetch_minute_bars_for_symbols_range(["aapl"], start=start, end=end)
+        assert len(bars["AAPL"]) == 2
+
+    assert "page_token" not in client.calls[0]["params"]
+    assert client.calls[1]["params"]["page_token"] == "page-2"
 
 
 def test_fetch_option_chain_requests_alpaca_chain_endpoint_and_normalizes_contracts():
