@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 
@@ -81,3 +81,12 @@ class OutcomeHorizonPolicy:
             interim_session=session_dates[index + offsets.interim_session_offset],
             final_session=session_dates[index + offsets.final_session_offset],
         )
+
+    def session_close(self, session_date: date) -> datetime:
+        """Return the exchange-calendar close in UTC, including DST changes."""
+        value = self._calendar.session_close(session_date)
+        if hasattr(value, "to_pydatetime"):
+            value = value.to_pydatetime()
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)

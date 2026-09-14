@@ -21,6 +21,12 @@ from src.trading.execution.attempts import ExecutionAttemptRecord
 from src.trading.risk.hedges import RiskHedgeDecisionRecord
 from src.trading.risk.options import OptionRiskSnapshotRecord
 from src.trading.options.strategy import OptionStrategyDecisionRecord, OptionStrategyLegRecord
+from src.trading.outcomes.context import (
+    PersistedCandidateOutcomeContext,
+    comparator_context,
+    complete_close_from_lineage,
+    due_evaluation_statuses,
+)
 from src.trading.portfolio.state import PortfolioSnapshot, StockPosition
 from src.trading.portfolio.pnl import (
     PortfolioPnlPoint,
@@ -536,13 +542,106 @@ class InMemoryTradingRepository:
         self,
         outcomes: list[CandidateOutcomeEvaluationRecord] | tuple[CandidateOutcomeEvaluationRecord, ...],
     ) -> None:
-        by_id = {
-            item.candidate_outcome_evaluation_id: item
-            for item in self.candidate_outcome_evaluations
-        }
+        by_key = {_candidate_outcome_storage_key(item): item for item in self.candidate_outcome_evaluations}
         for outcome in outcomes:
-            by_id[outcome.candidate_outcome_evaluation_id] = outcome
-        self.candidate_outcome_evaluations = list(by_id.values())
+            key = _candidate_outcome_storage_key(outcome)
+            if outcome.candidate_score_id is None:
+                by_key[key] = outcome
+            else:
+                by_key.setdefault(key, outcome)
+        self.candidate_outcome_evaluations = list(by_key.values())
+
+    def load_due_candidate_outcome_contexts(
+        self,
+        *,
+        evaluation_as_of_session: date,
+        source_decision_date: date | None = None,
+    ) -> tuple[PersistedCandidateOutcomeContext, ...]:
+        """Mirror the SQL repository's persisted-only maturity context."""
+        contexts: list[PersistedCandidateOutcomeContext] = []
+        for candidate in sorted(
+            self.candidate_scores,
+            key=lambda item: (item.decision_time, item.candidate_score_id),
+        ):
+            if candidate.decision_time.date() > evaluation_as_of_session:
+                continue
+            if source_decision_date is not None and candidate.decision_time.date() != source_decision_date:
+                continue
+            run = next(
+                (item for item in self.strategy_runs if item.strategy_run_id == candidate.strategy_run_id),
+                None,
+            )
+            if run is None:
+                continue
+            classification = next(
+                (
+                    item
+                    for item in self.trade_classifications
+                    if item.candidate_score_id == candidate.candidate_score_id
+                ),
+                None,
+            )
+            watch = next(
+                (
+                    item
+                    for item in self.watch_candidates
+                    if item.candidate.candidate_score_id == candidate.candidate_score_id
+                ),
+                None,
+            )
+            decisions = tuple(
+                item
+                for item in self.trading_decisions
+                if item.candidate_score_id == candidate.candidate_score_id
+            )
+            decision_ids = {item.trading_decision_id for item in decisions}
+            orders = tuple(
+                item for item in self.paper_orders if item.trading_decision_id in decision_ids
+            )
+            order_ids = {item.paper_order_id for item in orders}
+            fills = tuple(
+                item for item in self.paper_executions if item.paper_order_id in order_ids
+            )
+            has_complete_close, complete_close_at = complete_close_from_lineage(
+                orders,
+                fills,
+                trade_identity=getattr(classification, "trade_identity", None),
+            )
+            comparator = comparator_context(dict(candidate.benchmark_context or {}))
+            context = PersistedCandidateOutcomeContext(
+                candidate=candidate,
+                snapshot_type=run.snapshot_type,
+                trade_classification=classification,
+                watch_candidate=watch,
+                selected_orders=orders,
+                selected_fills=fills,
+                has_complete_close=has_complete_close,
+                complete_close_at=complete_close_at,
+                **comparator,
+            )
+            due = due_evaluation_statuses(
+                context,
+                evaluation_as_of_session=evaluation_as_of_session,
+                existing_outcomes=self.candidate_outcome_evaluations,
+            )
+            if due:
+                contexts.append(
+                    PersistedCandidateOutcomeContext(
+                        **{**context.__dict__, "due_evaluation_statuses": due}
+                    )
+                )
+        return tuple(contexts)
+
+    def load_due_candidate_outcome_source_dates(
+        self,
+        evaluation_as_of_session: date,
+    ) -> tuple[date, ...]:
+        contexts = self.load_due_candidate_outcome_contexts(
+            evaluation_as_of_session=evaluation_as_of_session
+        )
+        return tuple(
+            sorted({context.candidate.decision_time.date() for context in contexts})
+        )
 
     def save_position_sizing_decision(self, decision: PositionSizingDecisionRecord) -> None:
         self.position_sizing_decisions.append(decision)
@@ -749,6 +848,17 @@ class InMemoryTradingRepository:
 
     def save_strategy_evaluation_result(self, result: "StrategyEvaluationResultRecord") -> None:
         self.strategy_evaluation_results.append(result)
+
+
+def _candidate_outcome_storage_key(outcome: CandidateOutcomeEvaluationRecord) -> tuple[object, ...]:
+    if outcome.candidate_score_id is None:
+        return ("offline", outcome.candidate_outcome_evaluation_id)
+    return (
+        "maturation",
+        outcome.candidate_score_id,
+        outcome.evaluation_status,
+        outcome.horizon_end_at,
+    )
 
 
 def _portfolio_event_risk_assessment_key(assessment: PortfolioEventRiskAssessmentRecord) -> str:

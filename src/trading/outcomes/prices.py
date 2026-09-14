@@ -1,8 +1,8 @@
 """Bounded, auditable market-data loading for candidate outcome evaluation."""
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from dataclasses import dataclass, field
+from datetime import date, datetime, timezone
 from typing import Any, Iterable
 
 
@@ -17,6 +17,8 @@ class OutcomePriceRequest:
     sector_theme_symbols: tuple[str, ...] = ()
     peer_symbols: tuple[str, ...] = ()
     opportunity_symbols: tuple[str, ...] = ()
+    actual_close_at: datetime | None = None
+    primary_comparator_symbol: str | None = None
 
 
 @dataclass(frozen=True)
@@ -39,6 +41,8 @@ class OutcomePriceLoadResult:
     start_boundary: datetime
     end_boundary: datetime
     metadata_json: dict[str, str]
+    start_prices_by_symbol: dict[str, float] = field(default_factory=dict)
+    actual_close_prices_by_symbol: dict[str, float] = field(default_factory=dict)
 
 
 class OutcomePriceLoader:
@@ -57,11 +61,11 @@ class OutcomePriceLoader:
         requested_symbols = _symbols_for(request)
         start_boundary = _session_open(self.calendar, request.decision_time.date())
         end_boundary = _session_close(self.calendar, request.horizon_end_at.date())
-        lookback_days = max(30, (end_boundary.date() - start_boundary.date()).days + 7)
         try:
-            payload = self.provider.fetch_daily_bars_for_symbols(
+            payload = self.provider.fetch_daily_bars_for_symbols_range(
                 requested_symbols,
-                lookback_days=lookback_days,
+                start=start_boundary,
+                end=end_boundary,
             )
         except Exception as exc:
             return OutcomePriceLoadResult(
@@ -78,28 +82,89 @@ class OutcomePriceLoader:
             for symbol in requested_symbols
             if _normalize_bars(payload.get(symbol, ()), start_boundary.date(), end_boundary.date())
         }
+        start_prices: dict[str, float] = {}
+        actual_close_prices: dict[str, float] = {}
+        provider_errors: dict[str, str] = {}
+        if request.snapshot_type in {"intraday", "manual"}:
+            try:
+                minute_payload = self.provider.fetch_minute_bars_for_symbols_range(
+                    requested_symbols,
+                    start=request.decision_time,
+                    end=_session_close(self.calendar, request.decision_time.date()),
+                )
+            except Exception as exc:
+                minute_payload = {}
+                provider_errors["minute_start"] = f"{type(exc).__name__}: {exc}"
+            for symbol in requested_symbols:
+                first = next(
+                    (
+                        bar
+                        for bar in sorted(
+                            minute_payload.get(symbol, ()),
+                            key=lambda item: item.get("timestamp") or datetime.min.replace(tzinfo=timezone.utc),
+                        )
+                        if _bar_timestamp(bar.get("timestamp")) is not None
+                        and _bar_timestamp(bar.get("timestamp")) >= request.decision_time
+                    ),
+                    None,
+                )
+                price = _as_float(first.get("open")) if first else None
+                if price is not None:
+                    start_prices[symbol] = price
+        if request.actual_close_at is not None:
+            try:
+                close_payload = self.provider.fetch_minute_bars_for_symbols_range(
+                    requested_symbols,
+                    start=_session_open(self.calendar, request.actual_close_at.date()),
+                    end=request.actual_close_at,
+                )
+            except Exception as exc:
+                close_payload = {}
+                provider_errors["minute_close"] = f"{type(exc).__name__}: {exc}"
+            for symbol in requested_symbols:
+                eligible = [
+                    bar
+                    for bar in close_payload.get(symbol, ())
+                    if _bar_timestamp(bar.get("timestamp")) is not None
+                    and _bar_timestamp(bar.get("timestamp")) <= request.actual_close_at
+                ]
+                last = max(eligible, key=lambda item: _bar_timestamp(item.get("timestamp"))) if eligible else None
+                price = _as_float(last.get("close")) if last else None
+                if price is not None:
+                    actual_close_prices[symbol] = price
         missing_symbols = tuple(symbol for symbol in requested_symbols if symbol not in bars_by_symbol)
         return OutcomePriceLoadResult(
             requested_symbols=requested_symbols,
             bars_by_symbol=bars_by_symbol,
             missing_symbols=missing_symbols,
-            provider_errors={},
+            provider_errors=provider_errors,
             start_boundary=start_boundary,
             end_boundary=end_boundary,
             metadata_json=_metadata(self.provider),
+            start_prices_by_symbol=start_prices,
+            actual_close_prices_by_symbol=actual_close_prices,
         )
 
 
 def _symbols_for(request: OutcomePriceRequest) -> tuple[str, ...]:
     values = (
         request.candidate_symbol,
+        request.primary_comparator_symbol,
         "QQQ",
         "SPY",
         *request.sector_theme_symbols,
         *request.peer_symbols,
         *request.opportunity_symbols,
     )
-    return tuple(sorted({str(symbol).strip().upper() for symbol in values if str(symbol).strip()}))
+    return tuple(
+        sorted(
+            {
+                str(symbol).strip().upper()
+                for symbol in values
+                if symbol is not None and str(symbol).strip()
+            }
+        )
+    )
 
 
 def _normalize_bars(raw_bars: Iterable[dict[str, Any]], start: date, end: date) -> tuple[OutcomePriceBar, ...]:
@@ -129,6 +194,16 @@ def _bar_date(value: Any) -> date | None:
         return date.fromisoformat(str(value)[:10])
     except (TypeError, ValueError):
         return None
+
+
+def _bar_timestamp(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return _utc(value)
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    return _utc(parsed)
 
 
 def _as_float(value: Any) -> float | None:

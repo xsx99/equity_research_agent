@@ -14,6 +14,7 @@ TRADING_JOB_PHASES = (
     "preopen",
     "manual_review",
     "intraday_refresh",
+    "outcome_evaluation",
     "reflection",
     "strategy_evolution",
 )

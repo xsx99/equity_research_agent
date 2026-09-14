@@ -574,15 +574,15 @@ def load_today_dashboard(
         _metrics = _analytics.get("metrics") if isinstance(_analytics, dict) else None
         if isinstance(_metrics, dict):
             header["total_return"] = _metrics.get("total_return")
-    # Most / least effective strategy for the Portfolio analytics cards
-    # (ranked by cumulative alpha = total_pnl in strategy performance).
+    # Most / least effective strategy for the Portfolio analytics cards,
+    # ranked by cumulative outcome alpha.
     if selected_tab in {"portfolio", "system"}:
         strategy_perf = _load_strategy_performance(session)
-    _ranked = [p for p in strategy_perf if p.get("total_pnl") is not None]
+    _ranked = [p for p in strategy_perf if p.get("total_alpha") is not None]
     if needs_portfolio and isinstance(portfolio, dict):
         portfolio["strategy_effectiveness"] = {
-            "most": max(_ranked, key=lambda p: p["total_pnl"]) if _ranked else None,
-            "least": min(_ranked, key=lambda p: p["total_pnl"]) if len(_ranked) > 1 else None,
+            "most": max(_ranked, key=lambda p: p["total_alpha"]) if _ranked else None,
+            "least": min(_ranked, key=lambda p: p["total_alpha"]) if len(_ranked) > 1 else None,
         }
     learning_strategies = (
         build_today_learning_strategies(

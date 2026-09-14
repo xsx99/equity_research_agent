@@ -12,6 +12,7 @@ from src.core.timezones import resolve_timezone
 from src.scheduler.jobs.eval_job import EvalJob
 from src.scheduler.jobs.intraday_signal_refresh_job import IntradaySignalRefreshJob
 from src.scheduler.jobs.manual_ticker_review_job import ManualTickerReviewJob
+from src.scheduler.jobs.outcome_evaluation_job import OutcomeEvaluationJob
 from src.scheduler.jobs.research_job import ResearchJob
 from src.scheduler.jobs.sec_edgar_job import SECEdgarJob
 from src.scheduler.jobs.strategy_evolution_job import StrategyEvolutionJob
@@ -26,6 +27,7 @@ from src.scheduler.service import build_scheduler_jobs
         ("src.scheduler.jobs.trading_preopen_job", TradingPreopenJob, "preopen"),
         ("src.scheduler.jobs.manual_ticker_review_job", ManualTickerReviewJob, "manual_review"),
         ("src.scheduler.jobs.intraday_signal_refresh_job", IntradaySignalRefreshJob, "intraday_refresh"),
+        ("src.scheduler.jobs.outcome_evaluation_job", OutcomeEvaluationJob, "outcome_evaluation"),
         ("src.scheduler.jobs.trading_reflection_job", TradingReflectionJob, "reflection"),
         ("src.scheduler.jobs.strategy_evolution_job", StrategyEvolutionJob, "strategy_evolution"),
     ],
@@ -175,6 +177,7 @@ class TestAllJobIdsDistinct:
             TradingPreopenJob(),
             ManualTickerReviewJob(),
             IntradaySignalRefreshJob(),
+            OutcomeEvaluationJob(),
             TradingReflectionJob(),
             StrategyEvolutionJob(),
         ]
@@ -245,6 +248,18 @@ class TestTradingReflectionJob:
         }
 
 
+class TestOutcomeEvaluationJob:
+    def test_trigger_is_first_post_close_learning_job(self):
+        cfg = OutcomeEvaluationJob().config
+
+        assert cfg.job_id == "outcome_evaluation"
+        assert cfg.trigger_kwargs == {
+            "hour": 16,
+            "minute": 10,
+            "day_of_week": "mon-fri",
+        }
+
+
 class TestStrategyEvolutionJob:
     def test_trigger_is_after_reflection_weekday(self):
         cfg = StrategyEvolutionJob().config
@@ -269,6 +284,7 @@ class TestBuildSchedulerJobs:
             "trading_preopen",
             "manual_ticker_review",
             "intraday_signal_refresh",
+            "outcome_evaluation",
             "trading_reflection",
             "strategy_evolution",
         ]
