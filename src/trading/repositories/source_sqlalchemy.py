@@ -2,15 +2,24 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterable, Mapping
 from datetime import datetime
 from typing import Any
 
 from src.db.models.insider_trades import InsiderTrade
-from src.db.models.trading import EventNewsItem, FundamentalSnapshot, ProviderRequestRun, SocialMacroItem, SourceIngestionRun
+from src.db.models.trading import (
+    EventNewsItem,
+    FundamentalSnapshot,
+    MarketDailyBar,
+    ProviderRequestRun,
+    SocialMacroItem,
+    SourceIngestionRun,
+)
 from src.trading.data_sources.provider_resilience import ProviderRequestRunRecord
 from src.trading.signals.sources import (
     EventNewsItemRecord,
     FundamentalSnapshotRecord,
+    MarketDailyBarRecord,
     SocialMacroItemRecord,
     SourceIngestionRunRecord,
     SourceRecord,
@@ -107,6 +116,105 @@ class SQLAlchemySignalSourceRepository:
         row.raw_payload_ref = snapshot.raw_payload_ref
         row.normalized_metrics_json = dict(snapshot.normalized_metrics_json)
         self.session.flush()
+
+    def save_market_daily_bars(
+        self,
+        bars: Iterable[MarketDailyBarRecord | Mapping[str, Any]]
+        | MarketDailyBarRecord
+        | Mapping[str, Any],
+    ) -> None:
+        """Insert or update daily bars by their ticker/date/provider natural key."""
+        if isinstance(bars, (MarketDailyBarRecord, Mapping)):
+            bars = (bars,)
+
+        for value in bars:
+            bar = _market_daily_bar_record(value)
+            row = self.session.query(MarketDailyBar).filter_by(
+                ticker=bar.ticker,
+                trade_date=bar.trade_date,
+                provider=bar.provider,
+            ).one_or_none()
+            if row is None:
+                row = MarketDailyBar()
+                self.session.add(row)
+            row.ticker = bar.ticker
+            row.trade_date = bar.trade_date
+            row.open_raw = bar.open_raw
+            row.high_raw = bar.high_raw
+            row.low_raw = bar.low_raw
+            row.close_raw = bar.close_raw
+            row.adj_close = bar.adj_close
+            row.volume_raw = bar.volume_raw
+            row.dividend = bar.dividend
+            row.stock_split = bar.stock_split
+            row.provider = bar.provider
+            row.ingested_at = bar.ingested_at
+            row.available_for_decision_at = bar.available_for_decision_at
+            row.quality_flags_json = bar.quality_flags_json
+            if bar.created_at is not None:
+                row.created_at = bar.created_at
+        self.session.flush()
+
+    def load_market_daily_bars(
+        self,
+        ticker: str,
+        decision_time: datetime,
+        limit: int,
+    ) -> tuple[MarketDailyBarRecord, ...]:
+        """Load the latest decision-visible bars in chronological order."""
+        if limit <= 0:
+            return ()
+        symbol = ticker.strip().upper()
+        rows = self.session.query(MarketDailyBar).filter(
+            MarketDailyBar.ticker == symbol,
+            MarketDailyBar.available_for_decision_at <= decision_time,
+        ).all()
+        eligible = [
+            row
+            for row in rows
+            if row.ticker == symbol and row.available_for_decision_at <= decision_time
+        ]
+        eligible.sort(key=lambda row: row.trade_date, reverse=True)
+        return tuple(
+            self._to_market_daily_bar_record(row)
+            for row in reversed(eligible[:limit])
+        )
+
+    def load_market_daily_bars_for_symbols(
+        self,
+        tickers: Iterable[str],
+        decision_time: datetime,
+        limit_per_ticker: int,
+    ) -> dict[str, tuple[MarketDailyBarRecord, ...]]:
+        """Load the latest decision-visible bars independently for each ticker."""
+        if limit_per_ticker <= 0:
+            return {}
+        symbols = tuple(dict.fromkeys(ticker.strip().upper() for ticker in tickers))
+        if not symbols:
+            return {}
+        symbol_set = set(symbols)
+        rows = self.session.query(MarketDailyBar).filter(
+            MarketDailyBar.ticker.in_(symbol_set),
+            MarketDailyBar.available_for_decision_at <= decision_time,
+        ).all()
+        grouped: dict[str, list[MarketDailyBar]] = {symbol: [] for symbol in symbols}
+        for row in rows:
+            if (
+                row.ticker in symbol_set
+                and row.available_for_decision_at <= decision_time
+            ):
+                grouped[row.ticker].append(row)
+
+        result: dict[str, tuple[MarketDailyBarRecord, ...]] = {}
+        for symbol, symbol_rows in grouped.items():
+            symbol_rows.sort(key=lambda row: row.trade_date, reverse=True)
+            selected = symbol_rows[:limit_per_ticker]
+            if selected:
+                result[symbol] = tuple(
+                    self._to_market_daily_bar_record(row)
+                    for row in reversed(selected)
+                )
+        return result
 
     def save_event_news_item(self, item: EventNewsItemRecord) -> None:
         row = self.session.query(EventNewsItem).filter_by(
@@ -244,6 +352,25 @@ class SQLAlchemySignalSourceRepository:
             normalized_metrics_json=dict(row.normalized_metrics_json or {}),
         )
 
+    def _to_market_daily_bar_record(self, row: MarketDailyBar) -> MarketDailyBarRecord:
+        return MarketDailyBarRecord(
+            ticker=row.ticker,
+            trade_date=row.trade_date,
+            open_raw=float(row.open_raw) if row.open_raw is not None else None,
+            high_raw=float(row.high_raw) if row.high_raw is not None else None,
+            low_raw=float(row.low_raw) if row.low_raw is not None else None,
+            close_raw=float(row.close_raw),
+            adj_close=float(row.adj_close) if row.adj_close is not None else None,
+            volume_raw=int(row.volume_raw) if row.volume_raw is not None else None,
+            dividend=float(row.dividend or 0),
+            stock_split=float(row.stock_split or 0),
+            provider=row.provider,
+            ingested_at=row.ingested_at,
+            available_for_decision_at=row.available_for_decision_at,
+            quality_flags_json=row.quality_flags_json or {},
+            created_at=row.created_at,
+        )
+
     def _to_event_news_record(self, row: EventNewsItem) -> EventNewsItemRecord:
         return EventNewsItemRecord(
             event_news_item_id=str(row.event_news_item_id),
@@ -310,3 +437,27 @@ def _to_uuid_or_none(value: str | None) -> uuid.UUID | None:
     if value is None:
         return None
     return _to_uuid(value)
+
+
+def _market_daily_bar_record(
+    value: MarketDailyBarRecord | Mapping[str, Any],
+) -> MarketDailyBarRecord:
+    if isinstance(value, MarketDailyBarRecord):
+        return value
+    return MarketDailyBarRecord(
+        ticker=str(value["ticker"]),
+        trade_date=value["trade_date"],
+        open_raw=value.get("open_raw"),
+        high_raw=value.get("high_raw"),
+        low_raw=value.get("low_raw"),
+        close_raw=value["close_raw"],
+        adj_close=value.get("adj_close"),
+        volume_raw=value.get("volume_raw"),
+        dividend=value.get("dividend", 0.0),
+        stock_split=value.get("stock_split", 0.0),
+        provider=str(value["provider"]),
+        ingested_at=value["ingested_at"],
+        available_for_decision_at=value["available_for_decision_at"],
+        quality_flags_json=value.get("quality_flags_json", {}),
+        created_at=value.get("created_at"),
+    )

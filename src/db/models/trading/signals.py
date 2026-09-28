@@ -5,6 +5,7 @@ import uuid
 
 from sqlalchemy import (
     Boolean,
+    BigInteger,
     CheckConstraint,
     Column,
     Date,
@@ -95,6 +96,39 @@ class ProviderRequestRun(Base):
         CheckConstraint("backoff_ms >= 0", name="ck_provider_request_runs_backoff_ms"),
         CheckConstraint("latency_ms >= 0", name="ck_provider_request_runs_latency_ms"),
         Index("ix_provider_request_runs_provider_endpoint_status", "provider", "endpoint", "status"),
+    )
+
+
+class MarketDailyBar(Base):
+    """Provider-normalized daily OHLCV bar with decision-time availability."""
+
+    __tablename__ = "market_daily_bars"
+
+    market_daily_bar_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    ticker = Column(String(16), nullable=False, index=True)
+    trade_date = Column(Date, nullable=False)
+    open_raw = Column(Numeric, nullable=True)
+    high_raw = Column(Numeric, nullable=True)
+    low_raw = Column(Numeric, nullable=True)
+    close_raw = Column(Numeric, nullable=False)
+    adj_close = Column(Numeric, nullable=True)
+    volume_raw = Column(BigInteger, nullable=True)
+    dividend = Column(Numeric, nullable=False, default=0, server_default="0")
+    stock_split = Column(Numeric, nullable=False, default=0, server_default="0")
+    provider = Column(String(64), nullable=False)
+    ingested_at = Column(DateTime(timezone=True), nullable=False)
+    available_for_decision_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    quality_flags_json = Column(JSONB, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint(
+            "ticker",
+            "trade_date",
+            "provider",
+            name="uq_market_daily_bars_ticker_trade_date_provider",
+        ),
+        Index("ix_market_daily_bars_ticker_trade_date", "ticker", "trade_date"),
     )
 
 class FundamentalSnapshot(Base):

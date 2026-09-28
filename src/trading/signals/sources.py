@@ -77,6 +77,30 @@ class FundamentalSnapshotRecord:
 
 
 @dataclass(frozen=True)
+class MarketDailyBarRecord:
+    """Repository-level shape matching the ``market_daily_bars`` table."""
+
+    ticker: str
+    trade_date: date
+    open_raw: float | None
+    high_raw: float | None
+    low_raw: float | None
+    close_raw: float
+    adj_close: float | None
+    volume_raw: int | None
+    dividend: float
+    stock_split: float
+    provider: str
+    ingested_at: datetime
+    available_for_decision_at: datetime
+    quality_flags_json: Any = field(default_factory=dict)
+    created_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "ticker", self.ticker.strip().upper())
+
+
+@dataclass(frozen=True)
 class EventNewsItemRecord:
     """Repository-level shape matching the `event_news_items` table."""
 
