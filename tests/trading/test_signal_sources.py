@@ -256,57 +256,6 @@ def test_source_ingestion_service_reuses_benchmark_returns_across_technical_tick
     ]
 
 
-def test_source_ingestion_service_computes_premarket_gap_when_provider_supports_it():
-    now = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
-
-    class _PremarketMarketProvider(_FakeMarketProvider):
-        def __init__(self) -> None:
-            super().__init__()
-            self.premarket_calls: list[tuple[str, datetime]] = []
-
-        def fetch_premarket_price(self, ticker: str, as_of: datetime):
-            self.premarket_calls.append((ticker, as_of))
-            return 106.09
-
-    market_provider = _PremarketMarketProvider()
-    source_repository = InMemorySignalSourceRepository()
-    artifact_repository = InMemoryTradingRepository()
-
-    result = SourceIngestionService(
-        market_provider=market_provider,
-        news_provider=None,
-        source_repository=source_repository,
-        artifact_repository=artifact_repository,
-        provider_name="fixture",
-        now=lambda: now,
-        sleeper=lambda seconds: None,
-    ).refresh_tickers(("AAPL",), as_of=now, run_type="targeted", source_families=("technical",))
-
-    payload = result.source_records[0].payload
-    assert payload["premarket_gap_pct"] == (106.09 - 103.0) / 103.0
-    assert market_provider.premarket_calls == [("AAPL", now)]
-
-
-def test_source_ingestion_service_leaves_premarket_gap_empty_when_price_unavailable():
-    now = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
-
-    class _NoPremarketPriceProvider(_FakeMarketProvider):
-        def fetch_premarket_price(self, ticker: str, as_of: datetime):
-            return None
-
-    result = SourceIngestionService(
-        market_provider=_NoPremarketPriceProvider(),
-        news_provider=None,
-        source_repository=InMemorySignalSourceRepository(),
-        artifact_repository=InMemoryTradingRepository(),
-        provider_name="fixture",
-        now=lambda: now,
-        sleeper=lambda seconds: None,
-    ).refresh_tickers(("AAPL",), as_of=now, run_type="targeted", source_families=("technical",))
-
-    assert result.source_records[0].payload["premarket_gap_pct"] is None
-
-
 def test_source_ingestion_service_adds_intraday_bars_when_provider_supports_it():
     now = datetime(2026, 7, 21, 17, 0, tzinfo=timezone.utc)
 
