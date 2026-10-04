@@ -120,6 +120,8 @@ class SourceIngestionService:
         self.sleeper = sleeper or (lambda seconds: None)
         self._benchmark_returns_cache: dict[str, dict[str, float]] = {}
         self._daily_bars_by_ticker: dict[str, tuple[MarketDailyBarRecord, ...]] = {}
+        self._premarket_prices: dict[str, float] = {}
+        self._premarket_batch_available = False
         self._daily_bar_reader_available = False
         self._current_run_type = ""
 
@@ -137,6 +139,8 @@ class SourceIngestionService:
         self._current_run_type = run_type
         self._benchmark_returns_cache = {}
         self._daily_bars_by_ticker = {}
+        self._premarket_prices = {}
+        self._premarket_batch_available = False
         self._daily_bar_reader_available = False
         ingestion_run_id = str(uuid.uuid4())
         started_at = self.now()
@@ -167,6 +171,7 @@ class SourceIngestionService:
             source_ingestion_run_id=ingestion_run_id,
         )
         bars_policy = self._policy("market_bars", "technical", recorder)
+        premarket_policy = self._policy("market_premarket_prices", "technical", recorder)
         context_policy = self._policy("market_context", "fundamental", recorder)
         news_policy = self._policy("news", "events_news", recorder)
         social_macro_policy = self._policy("global_context", "social_macro", recorder)
@@ -193,6 +198,28 @@ class SourceIngestionService:
             except Exception as exc:
                 errors.append(exc)
 
+            premarket_fetch = getattr(
+                self.market_provider,
+                "fetch_premarket_prices_for_symbols",
+                None,
+            )
+            if callable(premarket_fetch):
+                self._premarket_batch_available = True
+                try:
+                    premarket_prices = premarket_policy.execute(
+                        "symbols",
+                        lambda: premarket_fetch(normalized_tickers, as_of),
+                    )
+                    if not isinstance(premarket_prices, dict):
+                        raise TypeError("premarket_prices_must_be_mapping")
+                    self._premarket_prices = {
+                        normalize_ticker(symbol): float(price)
+                        for symbol, price in premarket_prices.items()
+                        if isinstance(symbol, str) and isinstance(price, (int, float))
+                    }
+                except Exception as exc:
+                    errors.append(exc)
+
         if "social_macro" in families:
             try:
                 social_macro_items.extend(
@@ -208,7 +235,12 @@ class SourceIngestionService:
             company_name: str | None = None
             if "technical" in families:
                 try:
-                    record = self._refresh_technical(ticker, as_of, bars_policy)
+                    record = self._refresh_technical(
+                        ticker,
+                        as_of,
+                        bars_policy,
+                        premarket_policy,
+                    )
                     if record is not None:
                         source_records.append(record)
                 except Exception as exc:
@@ -315,8 +347,10 @@ class SourceIngestionService:
         ticker: str,
         as_of: datetime,
         policy: ProviderResiliencePolicy,
+        premarket_policy: ProviderResiliencePolicy,
     ) -> SourceRecord | None:
         stored_bars = self._daily_bars_by_ticker.get(ticker)
+        previous_close_raw = stored_bars[-1].close_raw if stored_bars else None
         if stored_bars:
             normalized_bars = [_market_daily_bar_payload(bar) for bar in stored_bars]
             source = stored_bars[-1].provider
@@ -337,7 +371,13 @@ class SourceIngestionService:
             return None
         event_time = _latest_bar_event_time(normalized_bars, fallback=as_of)
         benchmark_returns = self._benchmark_returns_1d(as_of, policy)
-        premarket_gap_pct = self._premarket_gap_pct(ticker, as_of, normalized_bars, policy)
+        premarket_gap_pct = self._premarket_gap_pct(
+            ticker,
+            as_of,
+            normalized_bars,
+            premarket_policy,
+            previous_close_raw=previous_close_raw,
+        )
         intraday_bars = self._intraday_bars(ticker, as_of, policy)
         payload: dict[str, Any] = {
             "bars": normalized_bars,
@@ -428,22 +468,28 @@ class SourceIngestionService:
         ticker: str,
         as_of: datetime,
         bars: list[dict[str, Any]],
-        policy: ProviderResiliencePolicy,
+        premarket_policy: ProviderResiliencePolicy,
+        *,
+        previous_close_raw: float | None,
     ) -> float | None:
-        prior_close = None
-        last_bar = bars[-1] if bars else None
-        if isinstance(last_bar, dict) and isinstance(last_bar.get("close"), (int, float)):
-            prior_close = float(last_bar["close"])
+        prior_close = previous_close_raw if self._premarket_batch_available else None
+        if not self._premarket_batch_available:
+            last_bar = bars[-1] if bars else None
+            if isinstance(last_bar, dict) and isinstance(last_bar.get("close"), (int, float)):
+                prior_close = float(last_bar["close"])
         if prior_close in (None, 0):
             return None
 
-        premarket_fetch = getattr(self.market_provider, "fetch_premarket_price", None)
-        if premarket_fetch is None:
-            return None
-        premarket_price = policy.execute(
-            f"{ticker}:premarket_price",
-            lambda: premarket_fetch(ticker, as_of),
-        )
+        if self._premarket_batch_available:
+            premarket_price = self._premarket_prices.get(ticker)
+        else:
+            premarket_fetch = getattr(self.market_provider, "fetch_premarket_price", None)
+            if premarket_fetch is None:
+                return None
+            premarket_price = premarket_policy.execute(
+                f"{ticker}:premarket_price",
+                lambda: premarket_fetch(ticker, as_of),
+            )
         if not isinstance(premarket_price, (int, float)):
             return None
         return (float(premarket_price) - prior_close) / prior_close

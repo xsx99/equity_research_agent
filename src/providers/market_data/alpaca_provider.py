@@ -422,6 +422,44 @@ class AlpacaMarketDataProvider:
             latest_price = float(close_raw)
         return latest_price
 
+    def fetch_premarket_prices_for_symbols(
+        self,
+        symbols: tuple[str, ...] | list[str],
+        as_of: datetime,
+    ) -> dict[str, float]:
+        """Return latest extended-hours premarket closes for multiple symbols."""
+        normalized_symbols = tuple(
+            dict.fromkeys(symbol.upper().strip() for symbol in symbols if symbol.strip())
+        )
+        if not normalized_symbols:
+            return {}
+
+        cutoff = _normalized_now(as_of)
+        session_day = cutoff.astimezone(MARKET_TIMEZONE).date()
+        premarket_open = datetime.combine(
+            session_day,
+            time(4, 0),
+            tzinfo=MARKET_TIMEZONE,
+        ).astimezone(timezone.utc)
+        if cutoff <= premarket_open:
+            return {}
+
+        bars_by_symbol = self.fetch_minute_bars_for_symbols_range(
+            normalized_symbols,
+            start=premarket_open,
+            end=cutoff,
+        )
+        prices: dict[str, float] = {}
+        for symbol, bars in bars_by_symbol.items():
+            valid_bars = [
+                bar
+                for bar in bars
+                if premarket_open <= bar["timestamp"] <= cutoff
+            ]
+            if valid_bars:
+                prices[symbol] = float(valid_bars[-1]["close"])
+        return prices
+
     def fetch_intraday_bars(self, ticker: str, as_of: datetime) -> list[IntradayBar]:
         """Return regular-session 1-minute bars through *as_of* in ascending order."""
         symbol = ticker.upper()

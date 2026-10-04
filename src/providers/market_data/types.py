@@ -103,6 +103,13 @@ class MarketDataProvider(Protocol):
     def fetch_premarket_price(self, ticker: str, as_of: datetime) -> Optional[float]:
         """Return the latest premarket price at or before *as_of* when available."""
 
+    def fetch_premarket_prices_for_symbols(
+        self,
+        symbols: tuple[str, ...] | list[str],
+        as_of: datetime,
+    ) -> dict[str, float]:
+        """Return latest premarket prices for symbols at or before *as_of*."""
+
     def fetch_intraday_bars(self, ticker: str, as_of: datetime) -> list[IntradayBar]:
         """Return regular-session intraday bars in ascending time order."""
 
