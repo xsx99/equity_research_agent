@@ -1,5 +1,6 @@
 """Trading workflow entrypoints."""
 from src.trading.workflows.paper_execution import PaperExecutionWorkflow, PaperExecutionWorkflowResult
+from src.trading.workflows.market_daily_bars import MarketDailyBarsBatch, MarketDailyBarsBatchResult
 from src.trading.workflows.portfolio_sync import BrokerPortfolioSyncResult, BrokerPortfolioSyncWorkflow
 from src.trading.workflows.signal_snapshot import SignalPipeline, SourceIngestionServiceProtocol
 from src.trading.workflows.strategy_scoring import StrategyPipeline, StrategyPipelineResult
@@ -9,6 +10,8 @@ from src.trading.workflows.universe_scan import UniverseScanPipeline
 __all__ = [
     "PaperExecutionWorkflow",
     "PaperExecutionWorkflowResult",
+    "MarketDailyBarsBatch",
+    "MarketDailyBarsBatchResult",
     "BrokerPortfolioSyncResult",
     "BrokerPortfolioSyncWorkflow",
     "SignalPipeline",

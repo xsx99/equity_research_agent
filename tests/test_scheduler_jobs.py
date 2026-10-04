@@ -284,6 +284,7 @@ class TestBuildSchedulerJobs:
             "trading_preopen",
             "manual_ticker_review",
             "intraday_signal_refresh",
+            "market_daily_bars",
             "outcome_evaluation",
             "trading_reflection",
             "strategy_evolution",

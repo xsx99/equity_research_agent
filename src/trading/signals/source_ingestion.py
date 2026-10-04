@@ -24,6 +24,7 @@ from src.trading.data_sources.provider_resilience import (
 from src.trading.signals.sources import (
     EventNewsItemRecord,
     FundamentalSnapshotRecord,
+    MarketDailyBarRecord,
     SocialMacroItemRecord,
     SourceIngestionRunRecord,
     SourceRecord,
@@ -118,6 +119,9 @@ class SourceIngestionService:
         self.now = now or (lambda: datetime.now(timezone.utc))
         self.sleeper = sleeper or (lambda seconds: None)
         self._benchmark_returns_cache: dict[str, dict[str, float]] = {}
+        self._daily_bars_by_ticker: dict[str, tuple[MarketDailyBarRecord, ...]] = {}
+        self._daily_bar_reader_available = False
+        self._current_run_type = ""
 
     def refresh_tickers(
         self,
@@ -130,6 +134,10 @@ class SourceIngestionService:
         """Refresh source rows for tickers through provider resilience guardrails."""
         normalized_tickers = _normalize_tickers(tickers)
         families = tuple(dict.fromkeys(source_families))
+        self._current_run_type = run_type
+        self._benchmark_returns_cache = {}
+        self._daily_bars_by_ticker = {}
+        self._daily_bar_reader_available = False
         ingestion_run_id = str(uuid.uuid4())
         started_at = self.now()
         provisional_ingestion_run = SourceIngestionRunRecord(
@@ -175,6 +183,15 @@ class SourceIngestionService:
             "dropped_irrelevant_count": 0,
         }
         errors: list[Exception] = []
+
+        if "technical" in families:
+            try:
+                self._daily_bars_by_ticker = self._load_daily_bars(
+                    (*normalized_tickers, *self._BENCHMARK_SYMBOLS),
+                    as_of,
+                )
+            except Exception as exc:
+                errors.append(exc)
 
         if "social_macro" in families:
             try:
@@ -299,13 +316,23 @@ class SourceIngestionService:
         as_of: datetime,
         policy: ProviderResiliencePolicy,
     ) -> SourceRecord | None:
-        bars = policy.execute(
-            ticker,
-            lambda: self.market_provider.fetch_daily_bars(ticker, lookback_days=self.lookback_days),
-        )
-        if not isinstance(bars, list):
+        stored_bars = self._daily_bars_by_ticker.get(ticker)
+        if stored_bars:
+            normalized_bars = [_market_daily_bar_payload(bar) for bar in stored_bars]
+            source = stored_bars[-1].provider
+            source_table = "market_daily_bars"
+        elif self._daily_bar_reader_available or self._current_run_type == "pre_open":
             return None
-        normalized_bars = [dict(bar) for bar in bars if isinstance(bar, dict)]
+        else:
+            bars = policy.execute(
+                ticker,
+                lambda: self.market_provider.fetch_daily_bars(ticker, lookback_days=self.lookback_days),
+            )
+            if not isinstance(bars, list):
+                return None
+            normalized_bars = [dict(bar) for bar in bars if isinstance(bar, dict)]
+            source = self.provider_name
+            source_table = "market_bars"
         if not normalized_bars:
             return None
         event_time = _latest_bar_event_time(normalized_bars, fallback=as_of)
@@ -322,9 +349,9 @@ class SourceIngestionService:
         return SourceRecord(
             ticker=ticker,
             source_family="technical",
-            source=self.provider_name,
-            source_table="market_bars",
-            source_record_id=f"market_bars:{ticker}:{event_time.isoformat()}",
+            source=source,
+            source_table=source_table,
+            source_record_id=f"{source_table}:{ticker}:{event_time.isoformat()}",
             event_time=event_time,
             published_at=as_of,
             ingested_at=as_of,
@@ -344,14 +371,20 @@ class SourceIngestionService:
 
         returns: dict[str, float] = {}
         for symbol in self._BENCHMARK_SYMBOLS:
-            bars = policy.execute(
-                f"benchmark:{symbol}:1d",
-                lambda symbol=symbol: self.market_provider.fetch_daily_bars(symbol, lookback_days=5),
-            )
+            stored_bars = self._daily_bars_by_ticker.get(symbol)
+            if stored_bars:
+                bars = [_market_daily_bar_payload(bar) for bar in stored_bars]
+            elif self._daily_bar_reader_available or self._current_run_type == "pre_open":
+                bars = []
+            else:
+                bars = policy.execute(
+                    f"benchmark:{symbol}:1d",
+                    lambda symbol=symbol: self.market_provider.fetch_daily_bars(symbol, lookback_days=5),
+                )
             if not isinstance(bars, list):
                 continue
             closes = [
-                float(bar["close"])
+                float(bar.get("close"))
                 for bar in bars
                 if isinstance(bar, dict) and isinstance(bar.get("close"), (int, float))
             ]
@@ -359,6 +392,36 @@ class SourceIngestionService:
                 returns[symbol] = (closes[-1] - closes[-2]) / closes[-2]
         self._benchmark_returns_cache[cache_key] = returns
         return returns
+
+    def _load_daily_bars(
+        self,
+        tickers: Iterable[str],
+        decision_time: datetime,
+    ) -> dict[str, tuple[MarketDailyBarRecord, ...]]:
+        reader = getattr(self.source_repository, "load_market_daily_bars_for_symbols", None)
+        if reader is None:
+            reader = getattr(self.artifact_repository, "load_market_daily_bars_for_symbols", None)
+        if reader is None:
+            return {}
+        self._daily_bar_reader_available = True
+        rows_by_ticker = reader(
+            _normalize_tickers(tickers),
+            decision_time,
+            self.lookback_days,
+        )
+        if not isinstance(rows_by_ticker, dict):
+            return {}
+        normalized: dict[str, tuple[MarketDailyBarRecord, ...]] = {}
+        for raw_ticker, rows in rows_by_ticker.items():
+            ticker = normalize_ticker(raw_ticker)
+            converted = tuple(
+                row if isinstance(row, MarketDailyBarRecord) else _market_daily_bar_record_from_mapping(row)
+                for row in rows
+                if isinstance(row, (MarketDailyBarRecord, dict))
+            )
+            if converted:
+                normalized[ticker] = converted
+        return normalized
 
     def _premarket_gap_pct(
         self,
@@ -830,6 +893,38 @@ def _latest_bar_event_time(bars: list[DailyBar], *, fallback: datetime) -> datet
     if isinstance(raw_date, date):
         return datetime.combine(raw_date, time.min, tzinfo=timezone.utc)
     return parse_news_datetime(raw_date, fallback=fallback)
+
+
+def _market_daily_bar_payload(bar: MarketDailyBarRecord) -> dict[str, Any]:
+    """Convert persisted bars into the legacy technical payload shape."""
+    return {
+        "date": bar.trade_date,
+        "open": bar.open_raw,
+        "high": bar.high_raw,
+        "low": bar.low_raw,
+        "close": bar.close_raw,
+        "volume": bar.volume_raw,
+    }
+
+
+def _market_daily_bar_record_from_mapping(value: dict[str, Any]) -> MarketDailyBarRecord:
+    return MarketDailyBarRecord(
+        ticker=str(value["ticker"]),
+        trade_date=value["trade_date"],
+        open_raw=value.get("open_raw"),
+        high_raw=value.get("high_raw"),
+        low_raw=value.get("low_raw"),
+        close_raw=float(value["close_raw"]),
+        adj_close=value.get("adj_close"),
+        volume_raw=value.get("volume_raw"),
+        dividend=value.get("dividend", 0.0),
+        stock_split=value.get("stock_split", 0.0),
+        provider=str(value["provider"]),
+        ingested_at=value["ingested_at"],
+        available_for_decision_at=value["available_for_decision_at"],
+        quality_flags_json=value.get("quality_flags_json", {}),
+        created_at=value.get("created_at"),
+    )
 
 
 def _infer_social_macro_sentiment(combined_text: str) -> str | None:

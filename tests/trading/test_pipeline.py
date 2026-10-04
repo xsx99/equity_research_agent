@@ -5,7 +5,7 @@ from src.trading.repositories.in_memory import InMemoryTradingRepository
 from src.trading.workflows.signal_snapshot import SignalPipeline
 from src.trading.workflows.strategy_scoring import StrategyPipeline
 from src.trading.workflows.universe_scan import UniverseScanPipeline
-from src.trading.signals.sources import InMemorySignalSourceRepository, SourceRecord
+from src.trading.signals.sources import InMemorySignalSourceRepository, MarketDailyBarRecord, SourceRecord
 from src.trading.signals.source_ingestion import SourceIngestionService
 from src.trading.data_sources.universe import UniverseAsset, UniverseFilterConfig
 from src.trading.strategies.classifier import TradeClassificationRecord
@@ -172,6 +172,41 @@ def test_signal_pipeline_can_refresh_source_records_before_building_snapshots():
         now=lambda: now,
     ).run()
     source_repository = InMemorySignalSourceRepository()
+    source_repository.load_market_daily_bars_for_symbols = lambda tickers, decision_time, limit: {
+        ticker: (
+            MarketDailyBarRecord(
+                ticker=ticker,
+                trade_date=date(2026, 5, 29),
+                open_raw=100.0,
+                high_raw=102.0,
+                low_raw=99.0,
+                close_raw=100.0,
+                adj_close=100.0,
+                volume_raw=1_000_000,
+                dividend=0.0,
+                stock_split=0.0,
+                provider="fixture",
+                ingested_at=now,
+                available_for_decision_at=now,
+            ),
+            MarketDailyBarRecord(
+                ticker=ticker,
+                trade_date=date(2026, 5, 30),
+                open_raw=100.0,
+                high_raw=104.0,
+                low_raw=99.0,
+                close_raw=103.0,
+                adj_close=103.0,
+                volume_raw=2_000_000,
+                dividend=0.0,
+                stock_split=0.0,
+                provider="fixture",
+                ingested_at=now,
+                available_for_decision_at=now,
+            ),
+        )
+        for ticker in (*tickers, "SPY", "QQQ")
+    }
     artifact_repository = InMemoryTradingRepository()
     ingestion_service = SourceIngestionService(
         market_provider=_FakeMarketProvider(),
