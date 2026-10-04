@@ -500,6 +500,8 @@ class SourceIngestionService:
         as_of: datetime,
         policy: ProviderResiliencePolicy,
     ) -> list[dict[str, Any]]:
+        if self._current_run_type == "pre_open":
+            return []
         intraday_fetch = getattr(self.market_provider, "fetch_intraday_bars", None)
         if intraday_fetch is None:
             return []

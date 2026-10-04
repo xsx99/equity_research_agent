@@ -273,7 +273,7 @@ def test_signal_pipeline_threads_global_insider_coverage_into_snapshots():
     assert not any(item.startswith("insider.") for item in snapshots[0].missing_signals_json)
 
 
-def test_signal_pipeline_requests_option_chain_during_preopen_refresh():
+def test_signal_pipeline_excludes_option_chain_from_preopen_refresh():
     now = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
     universe = UniverseScanPipeline(
         provider=_FakeUniverseProvider(),
@@ -312,7 +312,6 @@ def test_signal_pipeline_requests_option_chain_during_preopen_refresh():
         "fundamental",
         "events_news",
         "social_macro",
-        "option_chain",
     )
 
 

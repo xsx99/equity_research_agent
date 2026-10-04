@@ -75,6 +75,8 @@ class _BatchPremarketProvider(_NoHistoricalProvider):
         self.prices = prices or {}
         self.error = error
         self.premarket_calls = []
+        self.intraday_calls = []
+        self.option_chain_calls = []
 
     def fetch_premarket_prices_for_symbols(self, symbols, as_of):
         self.premarket_calls.append((tuple(symbols), as_of))
@@ -86,6 +88,14 @@ class _BatchPremarketProvider(_NoHistoricalProvider):
         del ticker, as_of
         raise AssertionError("batch premarket path must not call single-symbol fallback")
 
+    def fetch_intraday_bars(self, ticker, as_of):
+        self.intraday_calls.append((ticker, as_of))
+        return []
+
+    def fetch_option_chain(self, ticker):
+        self.option_chain_calls.append(ticker)
+        return []
+
 
 def test_technical_ingestion_bulk_loads_db_bars_for_178_tickers_and_benchmarks():
     tickers = tuple(f"TICKER{index:03d}" for index in range(178))
@@ -96,7 +106,7 @@ def test_technical_ingestion_bulk_loads_db_bars_for_178_tickers_and_benchmarks()
     bars_by_ticker["SPY"] = _bars("SPY", 400.0, 404.0)
     bars_by_ticker["QQQ"] = _bars("QQQ", 350.0, 357.0)
     source_repository = _DailyBarRepository(bars_by_ticker)
-    market_provider = _NoHistoricalProvider()
+    market_provider = _BatchPremarketProvider()
 
     result = SourceIngestionService(
         market_provider=market_provider,
@@ -115,6 +125,9 @@ def test_technical_ingestion_bulk_loads_db_bars_for_178_tickers_and_benchmarks()
     technical = [record for record in result.source_records if record.source_family == "technical"]
     assert len(technical) == 178
     assert market_provider.daily_bar_calls == []
+    assert market_provider.premarket_calls == [(tickers, AS_OF)]
+    assert market_provider.intraday_calls == []
+    assert market_provider.option_chain_calls == []
     assert source_repository.load_calls[0][0] == tickers + ("SPY", "QQQ")
     last = next(record for record in technical if record.ticker == tickers[-1])
     assert last.payload["bars"][-1]["close"] == 103.0

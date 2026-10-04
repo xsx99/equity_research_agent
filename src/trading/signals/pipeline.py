@@ -78,7 +78,7 @@ class SignalPipeline:
                 tuple(tickers),
                 as_of=decision_time,
                 run_type="pre_open",
-                source_families=("technical", "fundamental", "events_news", "social_macro", "option_chain"),
+                source_families=("technical", "fundamental", "events_news", "social_macro"),
             )
         insider_data_covered = _insider_data_covered(
             self.source_repository,
