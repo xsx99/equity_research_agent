@@ -57,6 +57,7 @@ def _bar(
     *,
     available_for_decision_at: datetime,
     close_raw: float,
+    provider: str = "fixture",
 ) -> MarketDailyBarRecord:
     return MarketDailyBarRecord(
         ticker=ticker,
@@ -69,7 +70,7 @@ def _bar(
         volume_raw=1_000_000,
         dividend=0.0,
         stock_split=0.0,
-        provider="fixture",
+        provider=provider,
         ingested_at=available_for_decision_at,
         available_for_decision_at=available_for_decision_at,
         quality_flags_json=["fixture"],
@@ -150,7 +151,7 @@ def test_market_daily_bar_repository_upserts_and_reads_only_decision_available_r
     rows = repository.load_market_daily_bars("aapl", decision_time, limit=10)
 
     assert [row.trade_date for row in rows] == [date(2026, 9, 24), date(2026, 9, 25)]
-    assert [row.close_raw for row in rows] == [100.0, 102.0]
+    assert [row.close_raw for row in rows] == [100.0, 101.0]
     assert rows[-1].quality_flags_json == ["fixture"]
     assert len(session.rows_by_type[MarketDailyBar]) == 3
     assert session.flush_calls == 2
@@ -184,3 +185,80 @@ def test_market_daily_bar_repository_loads_symbol_batches_with_independent_limit
     assert set(rows_by_ticker) == {"AAPL", "MSFT"}
     assert [row.close_raw for row in rows_by_ticker["AAPL"]] == [101.0]
     assert [row.close_raw for row in rows_by_ticker["MSFT"]] == [201.0]
+
+
+def test_market_daily_bar_repository_preserves_pit_timestamps_on_reingestion():
+    session = _FakeSession()
+    repository = SQLAlchemySignalSourceRepository(session)
+    first_ingested = datetime(2026, 10, 1, 20, 5, tzinfo=timezone.utc)
+    new_ingested = datetime(2026, 10, 2, 20, 5, tzinfo=timezone.utc)
+    rerun_ingested = datetime(2026, 10, 4, 20, 5, tzinfo=timezone.utc)
+
+    repository.save_market_daily_bars(
+        _bar(
+            "AAPL",
+            date(2026, 10, 1),
+            available_for_decision_at=first_ingested,
+            close_raw=100.0,
+        )
+    )
+    repository.save_market_daily_bars(
+        [
+            _bar(
+                "AAPL",
+                date(2026, 10, 1),
+                available_for_decision_at=rerun_ingested,
+                close_raw=999.0,
+            ),
+            _bar(
+                "AAPL",
+                date(2026, 10, 2),
+                available_for_decision_at=new_ingested,
+                close_raw=101.0,
+            ),
+        ]
+    )
+
+    rows = repository.load_market_daily_bars(
+        "AAPL",
+        datetime(2026, 10, 2, 23, 0, tzinfo=timezone.utc),
+        limit=10,
+    )
+
+    assert [row.trade_date for row in rows] == [date(2026, 10, 1), date(2026, 10, 2)]
+    assert [row.close_raw for row in rows] == [100.0, 101.0]
+    assert rows[0].ingested_at == first_ingested
+    assert rows[0].available_for_decision_at == first_ingested
+    assert rows[1].ingested_at == new_ingested
+    assert rows[1].available_for_decision_at == new_ingested
+
+
+def test_market_daily_bar_repository_prefers_yahoo_over_legacy_alpaca_for_same_date():
+    session = _FakeSession()
+    repository = SQLAlchemySignalSourceRepository(session)
+    decision_time = datetime(2026, 10, 4, 23, 0, tzinfo=timezone.utc)
+
+    repository.save_market_daily_bars(
+        [
+            _bar(
+                "AAPL",
+                date(2026, 10, 1),
+                available_for_decision_at=decision_time,
+                close_raw=90.0,
+                provider="alpaca",
+            ),
+            _bar(
+                "AAPL",
+                date(2026, 10, 1),
+                available_for_decision_at=decision_time,
+                close_raw=100.0,
+                provider="yahoo",
+            ),
+        ]
+    )
+
+    rows = repository.load_market_daily_bars("AAPL", decision_time, limit=10)
+
+    assert len(rows) == 1
+    assert rows[0].provider == "yahoo"
+    assert rows[0].close_raw == 100.0

@@ -9,6 +9,7 @@ from typing import Any, Callable, Iterable, Mapping, Protocol
 from src.db.models.trading import UniverseSnapshot, UniverseSymbol
 from src.research.repositories.research_repository import get_active_tickers
 from src.trading.data_sources.universe import normalize_ticker
+from src.trading.ranking.calendar import RankingSessionCalendar
 from src.trading.signals.sources import MarketDailyBarRecord, SourceIngestionRunRecord
 
 
@@ -26,12 +27,11 @@ class MarketDailyBarsBatchResult:
     tickers_requested: int
     tickers_succeeded: int
     tickers_missing: tuple[str, ...]
-    fallback_used: bool
     bars_saved: int
 
 
 class MarketDailyBarsBatch:
-    """Fetch active-symbol daily bars from Yahoo with narrow Alpaca recovery."""
+    """Fetch active-symbol daily bars from Yahoo in an incremental batch."""
 
     _SUPPORT_SYMBOLS = ("SPY", "QQQ", "GLD")
 
@@ -40,23 +40,34 @@ class MarketDailyBarsBatch:
         *,
         active_ticker_loader: Callable[[], Iterable[str]],
         yahoo_fetcher: Callable[..., Mapping[str, Iterable[Mapping[str, Any]]]],
-        alpaca_provider: Any,
         repository: MarketDailyBarsRepository,
         lookback_days: int = 400,
+        recent_window_days: int = 10,
+        session_calendar: RankingSessionCalendar | None = None,
         now: Callable[[], datetime] | None = None,
     ) -> None:
         self.active_ticker_loader = active_ticker_loader
         self.yahoo_fetcher = yahoo_fetcher
-        self.alpaca_provider = alpaca_provider
         self.repository = repository
         self.lookback_days = lookback_days
+        self.recent_window_days = recent_window_days
+        self.session_calendar = session_calendar or RankingSessionCalendar()
         self.now = now or (lambda: datetime.now(timezone.utc))
 
-    def run(self, *, as_of: datetime | None = None) -> MarketDailyBarsBatchResult:
+    def run(
+        self,
+        *,
+        as_of: datetime | None = None,
+        backfill: bool = False,
+    ) -> MarketDailyBarsBatchResult:
         decision_time = as_of or self.now()
         symbols = _normalize_symbols((*self.active_ticker_loader(), *self._SUPPORT_SYMBOLS))
-        start = decision_time.date() - timedelta(days=max(self.lookback_days * 2, 10))
-        end = decision_time.date() + timedelta(days=1)
+        expected_trade_date = self.session_calendar.latest_completed_session(
+            decision_time
+        ).session_date
+        window_days = self.lookback_days if backfill else self.recent_window_days
+        start = expected_trade_date - timedelta(days=max(window_days - 1, 0))
+        end = expected_trade_date + timedelta(days=1)
         started_at = self.now()
         yahoo_error: Exception | None = None
 
@@ -70,66 +81,51 @@ class MarketDailyBarsBatch:
             provider="yahoo",
             ingested_at=decision_time,
         )
-        missing = tuple(symbol for symbol in symbols if symbol not in yahoo_bars)
-        fallback_used = bool(missing)
-        alpaca_error: Exception | None = None
-        if missing:
-            try:
-                alpaca_result = self.alpaca_provider.fetch_daily_bars_for_symbols(
-                    missing,
-                    lookback_days=self.lookback_days,
-                )
-            except Exception as exc:
-                alpaca_result = {}
-                alpaca_error = exc
-            alpaca_bars = _normalize_provider_result(
-                alpaca_result,
-                provider="alpaca",
-                ingested_at=decision_time,
+        covered_symbols: set[str] = set()
+        for symbol, bars in yahoo_bars.items():
+            latest_trade_date = max(
+                (bar.trade_date for bar in bars),
+                default=None,
             )
-        else:
-            alpaca_bars = {}
-
-        merged_bars = dict(yahoo_bars)
-        merged_bars.update({symbol: bars for symbol, bars in alpaca_bars.items() if symbol in missing})
-        final_missing = tuple(symbol for symbol in symbols if symbol not in merged_bars)
-        rows = [bar for symbol in symbols for bar in merged_bars.get(symbol, ())]
+            if latest_trade_date is not None and latest_trade_date >= expected_trade_date:
+                covered_symbols.add(symbol)
+        final_missing = tuple(symbol for symbol in symbols if symbol not in covered_symbols)
+        rows = [bar for symbol in symbols for bar in yahoo_bars.get(symbol, ())]
         if rows:
             self.repository.save_market_daily_bars(rows)
 
-        errors = [error for error in (yahoo_error, alpaca_error) if error is not None]
+        errors = [error for error in (yahoo_error,) if error is not None]
         status = "succeeded" if not final_missing and not errors else "degraded"
         ingestion_run = SourceIngestionRunRecord(
             source_ingestion_run_id=str(uuid.uuid4()),
             source_family="market_daily_bars",
             run_type="post_close",
             scope_json={"tickers": list(symbols)},
-            provider="yahoo+alpaca",
+            provider="yahoo",
             as_of=decision_time,
             started_at=started_at,
             completed_at=self.now(),
             status=status,
             coverage_json={
                 "tickers_requested": len(symbols),
-                "tickers_succeeded": len(merged_bars),
+                "tickers_succeeded": len(covered_symbols),
                 "tickers_missing": list(final_missing),
-                "fallback_used": fallback_used,
             },
             error_code=errors[0].__class__.__name__ if errors else None,
             error_message=str(errors[0]) if errors else None,
             metadata_json={
                 "yahoo_tickers_succeeded": len(yahoo_bars),
-                "alpaca_tickers_succeeded": len(alpaca_bars),
                 "lookback_days": self.lookback_days,
+                "fetch_window_days": window_days,
+                "backfill": backfill,
             },
         )
         self.repository.record_source_ingestion_run(ingestion_run)
         return MarketDailyBarsBatchResult(
             ingestion_run=ingestion_run,
             tickers_requested=len(symbols),
-            tickers_succeeded=len(merged_bars),
+            tickers_succeeded=len(covered_symbols),
             tickers_missing=final_missing,
-            fallback_used=fallback_used,
             bars_saved=len(rows),
         )
 

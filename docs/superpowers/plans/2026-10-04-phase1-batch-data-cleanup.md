@@ -25,6 +25,8 @@
 - Modify `tests/trading/test_market_daily_bar_repository.py` — PIT timestamp immutability and insert behavior.
 - Modify `tests/trading/test_source_ingestion_daily_bars.py` — split-safe payload, missing batch capability, and last-good DB regression.
 - Modify `tests/trading/test_pipeline.py` only if the changed source contract requires a fixture update.
+- Create `scripts/run_market_daily_bars_smoke.py` — standalone fixture-mode smoke for Yahoo-only coverage/degraded preservation without API calls or database writes.
+- Create `tests/scripts/test_run_market_daily_bars_smoke.py` — smoke-script contract.
 - Modify `plan/progress_tracker.md` — record completion after verification.
 - Modify `documents/repo_overview.md` only if the existing overview tracks this architecture area and the cleanup meets its major-refactor threshold.
 
@@ -56,10 +58,11 @@ Expected before implementation: failures for the new no-fallback/no-fan-out cont
 - [ ] Remove the per-symbol retry loop from `fetch_daily_bars_for_symbols`; return valid results from successful chunks and skip failed chunks.
 - [ ] Remove `alpaca_provider`, fallback merging, fallback result fields, and Alpaca metadata from `MarketDailyBarsBatch`.
 - [ ] Keep `provider="yahoo"` in the ingestion run and retain only requested/succeeded/missing coverage fields.
-- [ ] Add a normal recent fetch window (10 calendar days by default) and an explicit optional backfill mode that can use the configured long lookback without changing the normal scheduler path.
+- [ ] Add a normal recent fetch window of ten inclusive calendar dates (`expected_session - 9 days` through `expected_session`, with Yahoo `end=expected_session + 1 day`) and an explicit optional backfill mode that can use the configured long lookback without changing the normal scheduler path.
 - [ ] Reuse `RankingSessionCalendar` to resolve the latest completed XNYS session for `as_of`.
 - [ ] Classify each ticker as covered only when its normalized Yahoo rows reach the expected session; mark stale/missing tickers as missing and keep all existing DB rows.
 - [ ] Preserve degraded status for any missing/stale ticker or Yahoo exception, while saving valid returned rows.
+- [ ] Add normal-day, weekend, and holiday tests for expected-session resolution, plus explicit assertions that `run(backfill=True)` uses the long window while default scheduler-style runs use the recent window.
 - [ ] Remove the Alpaca provider import/construction from the scheduler and update completion logging.
 - [ ] Run the focused provider/workflow/scheduler tests.
 
@@ -69,9 +72,12 @@ Expected before implementation: failures for the new no-fallback/no-fan-out cont
 
 - [ ] Change `save_market_daily_bars` so an existing `(ticker, trade_date, provider)` row is skipped entirely.
 - [ ] Keep insertion behavior unchanged for new rows, including all timestamps and quality metadata.
+- [ ] Assert new rows receive the batch `as_of` timestamp for both `ingested_at` and `available_for_decision_at`.
+- [ ] Deduplicate decision-visible rows by `(ticker, trade_date)` on repository reads, preferring Yahoo over legacy Alpaca rows while retaining legacy rows as last-good fallback when Yahoo is absent.
 - [ ] Update the existing upsert test to assert the original close and availability timestamp remain unchanged.
 - [ ] Add a regression that inserts an Oct 1 bar, re-ingests the same key on Oct 4, and confirms a decision-time Oct 2 read still sees the original row.
 - [ ] Add a regression that a new Oct 2 bar is inserted with its new ingestion timestamp while the Oct 1 row remains original.
+- [ ] Add a regression covering overlapping Yahoo/legacy-Alpaca rows for one trade date.
 - [ ] Run the repository tests.
 
 ## Task 4: Enforce split-safe technical payloads and pre-open batch capability
@@ -83,6 +89,7 @@ Expected before implementation: failures for the new no-fallback/no-fan-out cont
 - [ ] Keep `stored_bars[-1].close_raw` as the previous raw close passed to premarket-gap computation.
 - [ ] Add a 2:1 split regression proving technical return does not show an approximately -50% move and the raw premarket baseline remains the post-split raw close.
 - [ ] In `run_type="pre_open"`, record a degradation error when the batched premarket method is unavailable and prevent `_premarket_gap_pct` from invoking the single-symbol method.
+- [ ] Treat batch exceptions and partial/invalid mappings as degraded, use only finite positive prices, and persist requested/succeeded/missing premarket coverage metadata.
 - [ ] Preserve single-symbol premarket behavior for non-pre-open targeted workflows.
 - [ ] Add a provider-without-batch test asserting zero single-symbol calls and degraded status.
 - [ ] Run source-ingestion and pipeline tests.
@@ -93,6 +100,7 @@ Expected before implementation: failures for the new no-fallback/no-fan-out cont
 
 - [ ] Keep a fake live provider exposing only batched premarket prices and no historical Alpaca method.
 - [ ] Assert 178 technical records, zero historical daily calls, zero intraday calls, zero whole-universe option-chain calls, zero single-symbol premarket calls, and one logical batched premarket request.
+- [ ] Assert the daily-bar batch scope is 181 symbols when the 178 research tickers are combined with `SPY`, `QQQ`, and `GLD`, while only 178 technical records are produced.
 - [ ] Simulate a failed nightly Yahoo batch with existing DB bars and verify no existing rows are removed.
 - [ ] Run the next pre-open against those last-good DB bars and assert technical records are still produced with the live premarket overlay available.
 - [ ] Assert degraded/stale telemetry is visible where the batch failure is recorded.
@@ -104,6 +112,8 @@ Expected before implementation: failures for the new no-fallback/no-fan-out cont
 - [ ] Record the completed Phase 1 cleanup and deferred Task 8 boundary in the project tracker.
 - [ ] Update the repository overview only with the consolidated architecture change, not a file-by-file changelog.
 - [ ] Run the complete required test set.
+- [ ] Run the standalone fixture-mode smoke test and verify it reports both a successful Yahoo run and a degraded Yahoo-failure run without network or database access.
+- [ ] Inspect Compose/deployment configuration for the PostgreSQL data directory and confirm the configured volume is a persistent disk path rather than `/tmp`, tmpfs, or an anonymous volume; report this check without changing deployment architecture.
 - [ ] Run `python -m compileall -q src` after activating the project virtual environment.
 - [ ] Run `git diff --check`.
 - [ ] Review the final diff for any Alpaca historical call or single-symbol retry that remains inside the scoped workflow.
@@ -118,7 +128,8 @@ pytest tests/tools/test_yfinance_prices.py \
        tests/trading/test_source_ingestion_daily_bars.py \
        tests/scheduler/test_market_daily_bars_job.py \
        tests/trading/test_pipeline.py -q
+pytest tests/scripts/test_run_market_daily_bars_smoke.py -q
+python scripts/run_market_daily_bars_smoke.py --json
 python -m compileall -q src
 git diff --check
 ```
-

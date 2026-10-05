@@ -67,3 +67,15 @@ Scheduler orchestration now lives under `src/trading/phases/`.
   the shared trade-day and lookahead-risk utilities; old `runtime.*` paths remain shims.
 - `src/trading/strategies/policy.py` is the canonical home for shared strategy policy helpers such
   as `experimental_strategy_weight_cap`; `post_close/strategy_policy.py` remains a shim.
+
+## Batch-First Market Data
+
+Phase 1 daily-bar ingestion is Yahoo-only and incremental. The scheduled batch
+fetches a recent completed-session window, validates per-ticker latest-session
+coverage against the XNYS calendar, inserts only new `(ticker, trade_date, provider)`
+rows, and preserves last-good rows and their point-in-time timestamps on provider
+failure or routine re-ingestion. Decision-visible reads prefer Yahoo over legacy
+Alpaca rows for duplicate dates. Pre-open technical ingestion reads this database
+baseline, applies split-safe in-memory technical prices, and uses only a batched
+Alpaca premarket overlay; it never falls back to per-symbol premarket or historical
+daily requests. Task 8 and later non-live data migrations remain deferred.
