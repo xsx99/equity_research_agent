@@ -134,9 +134,10 @@ class SQLAlchemySignalSourceRepository:
                 trade_date=bar.trade_date,
                 provider=bar.provider,
             ).one_or_none()
-            if row is None:
-                row = MarketDailyBar()
-                self.session.add(row)
+            if row is not None:
+                continue
+            row = MarketDailyBar()
+            self.session.add(row)
             row.ticker = bar.ticker
             row.trade_date = bar.trade_date
             row.open_raw = bar.open_raw
@@ -174,6 +175,7 @@ class SQLAlchemySignalSourceRepository:
             for row in rows
             if row.ticker == symbol and row.available_for_decision_at <= decision_time
         ]
+        eligible = _deduplicate_market_daily_rows(eligible)
         eligible.sort(key=lambda row: row.trade_date, reverse=True)
         return tuple(
             self._to_market_daily_bar_record(row)
@@ -207,6 +209,7 @@ class SQLAlchemySignalSourceRepository:
 
         result: dict[str, tuple[MarketDailyBarRecord, ...]] = {}
         for symbol, symbol_rows in grouped.items():
+            symbol_rows = _deduplicate_market_daily_rows(symbol_rows)
             symbol_rows.sort(key=lambda row: row.trade_date, reverse=True)
             selected = symbol_rows[:limit_per_ticker]
             if selected:
@@ -461,3 +464,21 @@ def _market_daily_bar_record(
         quality_flags_json=value.get("quality_flags_json", {}),
         created_at=value.get("created_at"),
     )
+
+
+def _deduplicate_market_daily_rows(rows: Iterable[MarketDailyBar]) -> list[MarketDailyBar]:
+    """Return one decision-visible row per date, preferring Yahoo over legacy rows."""
+    by_trade_date: dict[Any, MarketDailyBar] = {}
+    for row in rows:
+        existing = by_trade_date.get(row.trade_date)
+        if (
+            existing is None
+            or _market_daily_bar_provider_priority(row.provider)
+            > _market_daily_bar_provider_priority(existing.provider)
+        ):
+            by_trade_date[row.trade_date] = row
+    return list(by_trade_date.values())
+
+
+def _market_daily_bar_provider_priority(provider: str) -> int:
+    return 2 if provider.strip().lower() == "yahoo" else 1

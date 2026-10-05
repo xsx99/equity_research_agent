@@ -46,17 +46,9 @@ def fetch_daily_bars_for_symbols(
         try:
             frame = downloader(**_download_kwargs(chunk, start, end))
         except Exception:
-            # A provider exception for one ticker should not discard the rest of
-            # the chunk. Retry the symbols independently only on this degraded
-            # path; normal successful batches still make exactly one call.
-            for symbol in chunk:
-                try:
-                    single_frame = downloader(**_download_kwargs((symbol,), start, end))
-                except Exception:
-                    continue
-                bars = _normalize_symbol_frame(single_frame, symbol, allow_flat_columns=True)
-                if bars:
-                    bars_by_symbol[symbol] = bars
+            # A failed batch is a failed batch. The caller records the missing
+            # symbols and keeps any last-good database rows; do not fan out into
+            # one request per ticker on the degraded path.
             continue
 
         for symbol in chunk:

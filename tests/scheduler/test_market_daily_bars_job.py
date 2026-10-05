@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from src.scheduler.jobs.market_daily_bars_job import MarketDailyBarsJob
 from src.scheduler.service import build_scheduler_jobs
 
@@ -16,3 +18,10 @@ def test_market_daily_bars_job_runs_once_after_close_on_weekdays():
 
 def test_default_scheduler_registers_market_daily_bars_job():
     assert any(isinstance(job, MarketDailyBarsJob) for job in build_scheduler_jobs())
+
+
+def test_daily_bars_job_source_has_no_alpaca_historical_provider_dependency():
+    source = Path("src/scheduler/jobs/market_daily_bars_job.py").read_text()
+
+    assert "AlpacaMarketDataProvider" not in source
+    assert "alpaca_provider" not in source

@@ -253,3 +253,24 @@ def test_fetch_daily_bars_batches_81_symbols_into_three_download_calls():
     assert calls[0]["tickers"] == symbols[:40]
     assert calls[1]["tickers"] == symbols[40:80]
     assert calls[2]["tickers"] == symbols[80:]
+
+
+def test_fetch_daily_bars_does_not_fan_out_when_a_batch_download_raises():
+    calls: list[dict[str, object]] = []
+    symbols = [f"TICKER{index:02d}" for index in range(40)]
+
+    def failing_download(**kwargs: object) -> pd.DataFrame:
+        calls.append(kwargs)
+        raise RuntimeError("batch unavailable")
+
+    result = fetch_daily_bars_for_symbols(
+        symbols,
+        "2026-09-01",
+        "2026-10-01",
+        batch_size=40,
+        download_fn=failing_download,
+    )
+
+    assert result == {}
+    assert len(calls) == 1
+    assert calls[0]["tickers"] == symbols

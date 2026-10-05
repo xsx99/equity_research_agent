@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from src.core.logging import get_logger
 from src.db.connection import get_session
-from src.providers.market_data.alpaca_provider import AlpacaMarketDataProvider
 from src.providers.market_data.yfinance_prices import fetch_daily_bars_for_symbols
 from src.scheduler.base import BaseJob, JobConfig
 from src.trading.repositories.source_sqlalchemy import SQLAlchemySignalSourceRepository
@@ -34,7 +33,6 @@ class MarketDailyBarsJob(BaseJob):
                 result = MarketDailyBarsBatch(
                     active_ticker_loader=lambda: load_active_daily_bar_tickers(session),
                     yahoo_fetcher=fetch_daily_bars_for_symbols,
-                    alpaca_provider=AlpacaMarketDataProvider(),
                     repository=repository,
                 ).run()
             logger.info(
@@ -42,7 +40,6 @@ class MarketDailyBarsJob(BaseJob):
                 tickers_requested=result.tickers_requested,
                 tickers_succeeded=result.tickers_succeeded,
                 tickers_missing=list(result.tickers_missing),
-                fallback_used=result.fallback_used,
             )
         except Exception as exc:
             logger.error("market_daily_bars_job_failed", error=str(exc), exc_info=True)

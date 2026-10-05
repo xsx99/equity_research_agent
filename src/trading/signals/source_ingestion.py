@@ -5,6 +5,7 @@ import os
 import uuid
 from dataclasses import dataclass, replace
 from datetime import date, datetime, time, timezone
+from math import isfinite
 from typing import Any, Callable, Iterable, Protocol
 
 from src.providers.market_data.types import DailyBar, MarketDataProvider
@@ -187,6 +188,7 @@ class SourceIngestionService:
             "dropped_duplicate_count": 0,
             "dropped_irrelevant_count": 0,
         }
+        premarket_coverage: dict[str, Any] | None = None
         errors: list[Exception] = []
 
         if "technical" in families:
@@ -212,13 +214,52 @@ class SourceIngestionService:
                     )
                     if not isinstance(premarket_prices, dict):
                         raise TypeError("premarket_prices_must_be_mapping")
-                    self._premarket_prices = {
+                    normalized_prices = {
                         normalize_ticker(symbol): float(price)
                         for symbol, price in premarket_prices.items()
-                        if isinstance(symbol, str) and isinstance(price, (int, float))
+                        if (
+                            isinstance(symbol, str)
+                            and isinstance(price, (int, float))
+                            and not isinstance(price, bool)
+                            and isfinite(float(price))
+                            and float(price) > 0
+                        )
                     }
+                    self._premarket_prices = {
+                        ticker: price
+                        for ticker, price in normalized_prices.items()
+                        if ticker in normalized_tickers
+                    }
+                    missing_premarket = tuple(
+                        ticker
+                        for ticker in normalized_tickers
+                        if ticker not in self._premarket_prices
+                    )
+                    premarket_coverage = {
+                        "tickers_requested": len(normalized_tickers),
+                        "tickers_succeeded": len(self._premarket_prices),
+                        "tickers_missing": list(missing_premarket),
+                    }
+                    if missing_premarket:
+                        errors.append(
+                            RuntimeError(
+                                "premarket_prices_missing:" + ",".join(missing_premarket)
+                            )
+                        )
                 except Exception as exc:
+                    premarket_coverage = {
+                        "tickers_requested": len(normalized_tickers),
+                        "tickers_succeeded": 0,
+                        "tickers_missing": list(normalized_tickers),
+                    }
                     errors.append(exc)
+            elif run_type == "pre_open":
+                premarket_coverage = {
+                    "tickers_requested": len(normalized_tickers),
+                    "tickers_succeeded": 0,
+                    "tickers_missing": list(normalized_tickers),
+                }
+                errors.append(RuntimeError("premarket_batch_unavailable"))
 
         if "social_macro" in families:
             try:
@@ -315,6 +356,11 @@ class SourceIngestionService:
             metadata_json={
                 "error_count": len(errors),
                 "news_condensation": news_condensation_summary,
+                **(
+                    {"premarket_prices": premarket_coverage}
+                    if premarket_coverage is not None
+                    else {}
+                ),
             },
         )
         self.artifact_repository.record_source_ingestion_run(ingestion_run)
@@ -352,7 +398,7 @@ class SourceIngestionService:
         stored_bars = self._daily_bars_by_ticker.get(ticker)
         previous_close_raw = stored_bars[-1].close_raw if stored_bars else None
         if stored_bars:
-            normalized_bars = [_market_daily_bar_payload(bar) for bar in stored_bars]
+            normalized_bars = _split_adjusted_market_daily_bar_payloads(stored_bars)
             source = stored_bars[-1].provider
             source_table = "market_daily_bars"
         elif self._daily_bar_reader_available or self._current_run_type == "pre_open":
@@ -413,7 +459,7 @@ class SourceIngestionService:
         for symbol in self._BENCHMARK_SYMBOLS:
             stored_bars = self._daily_bars_by_ticker.get(symbol)
             if stored_bars:
-                bars = [_market_daily_bar_payload(bar) for bar in stored_bars]
+                bars = _split_adjusted_market_daily_bar_payloads(stored_bars)
             elif self._daily_bar_reader_available or self._current_run_type == "pre_open":
                 bars = []
             else:
@@ -472,6 +518,8 @@ class SourceIngestionService:
         *,
         previous_close_raw: float | None,
     ) -> float | None:
+        if self._current_run_type == "pre_open" and not self._premarket_batch_available:
+            return None
         prior_close = previous_close_raw if self._premarket_batch_available else None
         if not self._premarket_batch_available:
             last_bar = bars[-1] if bars else None
@@ -945,13 +993,51 @@ def _latest_bar_event_time(bars: list[DailyBar], *, fallback: datetime) -> datet
 
 def _market_daily_bar_payload(bar: MarketDailyBarRecord) -> dict[str, Any]:
     """Convert persisted bars into the legacy technical payload shape."""
+    return _market_daily_bar_payload_with_factor(bar, split_adjustment_factor=1.0)
+
+
+def _split_adjusted_market_daily_bar_payloads(
+    bars: Iterable[MarketDailyBarRecord],
+) -> list[dict[str, Any]]:
+    """Project decision-visible raw bars onto the latest split-adjusted basis."""
+    ordered_bars = sorted(bars, key=lambda bar: bar.trade_date)
+    adjustment_factor = 1.0
+    projected_reversed: list[dict[str, Any]] = []
+    for bar in reversed(ordered_bars):
+        projected_reversed.append(
+            _market_daily_bar_payload_with_factor(
+                bar,
+                split_adjustment_factor=adjustment_factor,
+            )
+        )
+        split = bar.stock_split
+        if isinstance(split, (int, float)) and not isinstance(split, bool):
+            split_value = float(split)
+            if isfinite(split_value) and split_value > 0 and split_value != 1:
+                adjustment_factor *= split_value
+    return list(reversed(projected_reversed))
+
+
+def _market_daily_bar_payload_with_factor(
+    bar: MarketDailyBarRecord,
+    *,
+    split_adjustment_factor: float,
+) -> dict[str, Any]:
+    factor = split_adjustment_factor or 1.0
+
+    def adjusted_price(value: float | None) -> float | None:
+        return value / factor if value is not None else None
+
+    def adjusted_volume(value: int | None) -> int | None:
+        return int(value * factor) if value is not None else None
+
     return {
         "date": bar.trade_date,
-        "open": bar.open_raw,
-        "high": bar.high_raw,
-        "low": bar.low_raw,
-        "close": bar.close_raw,
-        "volume": bar.volume_raw,
+        "open": adjusted_price(bar.open_raw),
+        "high": adjusted_price(bar.high_raw),
+        "low": adjusted_price(bar.low_raw),
+        "close": adjusted_price(bar.close_raw),
+        "volume": adjusted_volume(bar.volume_raw),
     }
 
 
